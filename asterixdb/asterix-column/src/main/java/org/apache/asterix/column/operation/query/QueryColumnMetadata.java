@@ -83,12 +83,13 @@ public class QueryColumnMetadata extends AbstractColumnImmutableReadMetadata {
             throws HyracksDataException {
         super(datasetType, metaType, primaryKeyReaders.length, serializedMetadata, -1);
         this.fieldNamesDictionary = fieldNamesDictionary;
-        this.assembler = new ColumnAssembler(root, datasetType, this, readerFactory, valueGetterFactory);
         this.primaryKeyReaders = primaryKeyReaders;
         this.normalizedFilterEvaluator = normalizedFilterEvaluator;
         this.filterValueAccessors = filterValueAccessors;
         this.columnFilterEvaluator = columnFilterEvaluator;
         this.filterColumnReaders = filterColumnReaders;
+        // Must be the last value to set as it depends on 'QueryColumnMetadata.this'
+        this.assembler = new ColumnAssembler(root, datasetType, this, readerFactory, valueGetterFactory);
     }
 
     public final ColumnAssembler getAssembler() {
@@ -218,20 +219,17 @@ public class QueryColumnMetadata extends AbstractColumnImmutableReadMetadata {
             filterAccessorProvider.reset();
             columnFilterEvaluator = columnFilterEvaluatorFactory.create(filterAccessorProvider, evaluatorContext);
             filterColumnReaders = filterAccessorProvider.getFilterColumnReaders();
+
         }
+
+        // log normalized filter
+        logFilter(normalizedFilterEvaluator, normalizedEvaluatorFactory.toString());
+        // log requested schema
+        logSchema(clippedRoot, SchemaStringBuilderVisitor.RECORD_SCHEMA, fieldNamesDictionary);
 
         // Primary key readers
         PrimitiveColumnValuesReader[] primaryKeyReaders =
                 createPrimaryKeyReaders(input, readerFactory, numberOfPrimaryKeys);
-
-        if (LOGGER.isInfoEnabled() && normalizedFilterEvaluator != TrueColumnFilterEvaluator.INSTANCE) {
-            String filterString = normalizedFilterEvaluator == FalseColumnFilterEvaluator.INSTANCE ? "SKIP_ALL"
-                    : LogRedactionUtil.userData(normalizedEvaluatorFactory.toString());
-            LOGGER.info("Filter: {}", filterString);
-        }
-
-        // log requested schema
-        logSchema(clippedRoot, SchemaStringBuilderVisitor.RECORD_SCHEMA, fieldNamesDictionary);
 
         return new QueryColumnMetadata(datasetType, null, primaryKeyReaders, serializedMetadata, fieldNamesDictionary,
                 clippedRoot, readerFactory, valueGetterFactory, normalizedFilterEvaluator, filterValueAccessors,
@@ -259,6 +257,14 @@ public class QueryColumnMetadata extends AbstractColumnImmutableReadMetadata {
             primaryKeyReaders[i] = (PrimitiveColumnValuesReader) readerFactory.createValueReader(input);
         }
         return primaryKeyReaders;
+    }
+
+    protected static void logFilter(IColumnFilterEvaluator normalizedFilterEvaluator, String filterExpression) {
+        if (LOGGER.isInfoEnabled() && normalizedFilterEvaluator != TrueColumnFilterEvaluator.INSTANCE) {
+            String filterString = normalizedFilterEvaluator == FalseColumnFilterEvaluator.INSTANCE ? "SKIP_ALL"
+                    : LogRedactionUtil.userData(filterExpression);
+            LOGGER.info("Filter: {}", filterString);
+        }
     }
 
     protected static void logSchema(ObjectSchemaNode root, String schemaSource,

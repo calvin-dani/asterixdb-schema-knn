@@ -19,15 +19,21 @@
 
 package org.apache.hyracks.storage.am.lsm.common.impls;
 
+import java.io.Serializable;
+
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentId;
 
-public class LSMComponentId implements ILSMComponentId {
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public class LSMComponentId implements ILSMComponentId, Serializable {
 
     public static final long NOT_FOUND = -1;
     public static final long MIN_VALID_COMPONENT_ID = 0;
 
     // Used to represent an empty index with no components
     public static final LSMComponentId EMPTY_INDEX_LAST_COMPONENT_ID = new LSMComponentId(NOT_FOUND, NOT_FOUND);
+    private static final long serialVersionUID = 7421441042232168639L;
 
     // A default component id used for bulk loaded component
     public static final LSMComponentId DEFAULT_COMPONENT_ID =
@@ -37,7 +43,8 @@ public class LSMComponentId implements ILSMComponentId {
 
     private long maxId;
 
-    public LSMComponentId(long minId, long maxId) {
+    @JsonCreator
+    public LSMComponentId(@JsonProperty("minId") long minId, @JsonProperty("maxId") long maxId) {
         assert minId <= maxId;
         this.minId = minId;
         this.maxId = maxId;

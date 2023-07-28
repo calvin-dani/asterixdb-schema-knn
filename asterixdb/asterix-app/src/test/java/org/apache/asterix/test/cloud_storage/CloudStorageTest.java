@@ -20,13 +20,13 @@ package org.apache.asterix.test.cloud_storage;
 
 import java.util.Collection;
 
-import org.apache.asterix.api.common.CloudUtils;
+import org.apache.asterix.api.common.LocalCloudUtil;
 import org.apache.asterix.common.config.GlobalConfig;
 import org.apache.asterix.test.common.TestExecutor;
 import org.apache.asterix.test.runtime.LangExecutionUtil;
 import org.apache.asterix.testframework.context.TestCaseContext;
 import org.junit.AfterClass;
-import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.FixMethodOrder;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -45,15 +45,15 @@ public class CloudStorageTest {
     private static final TestExecutor testExecutor = new TestExecutor();
     private static final String SUITE_TESTS = "testsuite_cloud_storage.xml";
     private static final String ONLY_TESTS = "testsuite_cloud_storage_only.xml";
-    private static final String CONFIG_FILE_NAME = "src/main/resources/cc-cloud-storage.conf";
+    private static final String CONFIG_FILE_NAME = "src/test/resources/cc-cloud-storage.conf";
 
     public CloudStorageTest(TestCaseContext tcCtx) {
         this.tcCtx = tcCtx;
     }
 
-    @Before
-    public void setUp() throws Exception {
-        CloudUtils.startS3CloudEnvironment();
+    @BeforeClass
+    public static void setUp() throws Exception {
+        LocalCloudUtil.startS3CloudEnvironment(true);
         LangExecutionUtil.setUp(CONFIG_FILE_NAME, testExecutor);
         System.setProperty(GlobalConfig.CONFIG_FILE_PROPERTY, CONFIG_FILE_NAME);
     }

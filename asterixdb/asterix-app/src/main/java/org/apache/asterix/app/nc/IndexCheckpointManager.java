@@ -31,6 +31,7 @@ import org.apache.asterix.common.storage.IndexCheckpoint;
 import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.IIOBulkOperation;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.util.IoUtil;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexFileManager;
@@ -154,7 +155,7 @@ public class IndexCheckpointManager implements IIndexCheckpointManager {
         }
         if (checkpoints.isEmpty()) {
             LOGGER.warn("Couldn't find any checkpoint file for index {}. Content of dir are {}.", indexPath,
-                    ioManager.getMatchingFiles(indexPath, IoUtil.NO_OP_FILTER).toString());
+                    ioManager.list(indexPath, IoUtil.NO_OP_FILTER).toString());
             throw new IllegalStateException("Couldn't find any checkpoints for resource: " + indexPath);
         }
         checkpoints.sort(Comparator.comparingLong(IndexCheckpoint::getId).reversed());
@@ -182,7 +183,7 @@ public class IndexCheckpointManager implements IIndexCheckpointManager {
 
     private List<IndexCheckpoint> getCheckpoints() throws ClosedByInterruptException, HyracksDataException {
         List<IndexCheckpoint> checkpoints = new ArrayList<>();
-        final Collection<FileReference> checkpointFiles = ioManager.getMatchingFiles(indexPath, CHECKPOINT_FILE_FILTER);
+        final Collection<FileReference> checkpointFiles = ioManager.list(indexPath, CHECKPOINT_FILE_FILTER);
         if (!checkpointFiles.isEmpty()) {
             for (FileReference checkpointFile : checkpointFiles) {
                 try {
@@ -201,10 +202,7 @@ public class IndexCheckpointManager implements IIndexCheckpointManager {
         final FileReference checkpointPath = getCheckpointPath(checkpoint);
         for (int i = 1; i <= MAX_CHECKPOINT_WRITE_ATTEMPTS; i++) {
             try {
-                // clean up from previous write failure
-                if (ioManager.exists(checkpointPath)) {
-                    ioManager.delete(checkpointPath);
-                }
+                // Overwrite will clean up from previous write failure (if any)
                 ioManager.overwrite(checkpointPath, checkpoint.asJson().getBytes());
                 // ensure it was written correctly by reading it
                 read(checkpointPath);
@@ -227,16 +225,33 @@ public class IndexCheckpointManager implements IIndexCheckpointManager {
         return IndexCheckpoint.fromJson(new String(ioManager.readAllBytes(checkpointPath)));
     }
 
-    private void deleteHistory(long latestId, int historyToKeep) {
+    @Override
+    public void deleteLatest(long latestId, int historyToDelete) {
         try {
-            final Collection<FileReference> checkpointFiles =
-                    ioManager.getMatchingFiles(indexPath, CHECKPOINT_FILE_FILTER);
+            final Collection<FileReference> checkpointFiles = ioManager.list(indexPath, CHECKPOINT_FILE_FILTER);
             if (!checkpointFiles.isEmpty()) {
                 for (FileReference checkpointFile : checkpointFiles) {
-                    if (getCheckpointIdFromFileName(checkpointFile) < (latestId - historyToKeep)) {
+                    if (getCheckpointIdFromFileName(checkpointFile) > (latestId - historyToDelete)) {
                         ioManager.delete(checkpointFile);
                     }
                 }
+            }
+        } catch (Exception e) {
+            LOGGER.warn(() -> "Couldn't delete history checkpoints at " + indexPath, e);
+        }
+    }
+
+    private void deleteHistory(long latestId, int historyToKeep) {
+        try {
+            final Collection<FileReference> checkpointFiles = ioManager.list(indexPath, CHECKPOINT_FILE_FILTER);
+            if (!checkpointFiles.isEmpty()) {
+                IIOBulkOperation deleteBulk = ioManager.createDeleteBulkOperation();
+                for (FileReference checkpointFile : checkpointFiles) {
+                    if (getCheckpointIdFromFileName(checkpointFile) < (latestId - historyToKeep)) {
+                        deleteBulk.add(checkpointFile);
+                    }
+                }
+                ioManager.performBulkOperation(deleteBulk);
             }
         } catch (Exception e) {
             LOGGER.warn(() -> "Couldn't delete history checkpoints at " + indexPath, e);

@@ -871,7 +871,7 @@ public class AccessMethodUtils {
             IOptimizationContext context, boolean isLeftOuterJoin, boolean isLeftOuterJoinWithSpecialGroupBy,
             IAlgebricksConstantValue leftOuterMissingValue, ILogicalOperator indexSearchOp,
             LogicalVariable newMissingNullPlaceHolderVar, Mutable<ILogicalExpression> conditionRef, Dataset dataset,
-            Index chosenIndex) throws AlgebricksException {
+            Index chosenIndex, AbstractFunctionCallExpression funcExpr) throws AlgebricksException {
         boolean isIndexOnlyPlan = analysisCtx.getIndexOnlyPlanInfo().getFirst();
         List<LogicalVariable> probePKVars = null;
         ILogicalOperator finalIndexSearchOp = indexSearchOp;
@@ -922,6 +922,9 @@ public class AccessMethodUtils {
                     }
                 }
                 if (probePKVars == null || probePKVars.isEmpty()) {
+                    if (funcExpr != null) {
+                        conditionRef.setValue(funcExpr);
+                    }
                     return false;
                 }
                 if (isIndexOnlyPlan) {
@@ -1654,7 +1657,7 @@ public class AccessMethodUtils {
         // false positive results in the right path.
         // (e.g., where $a.authors /*+ indexnl */ = $b.authors and $a.id = $b.id   <- authors:SK, id:PK)
         if (((idxType == IndexType.RTREE || uniqueUsedVarsInTopOp.size() > 1) && requireVerificationAfterSIdxSearch)
-                || anyRealTypeConvertedToIntegerType) {
+                || anyRealTypeConvertedToIntegerType || IndexUtil.includesUnknowns(secondaryIndex)) {
             // Creates a new SELECT operator by deep-copying the SELECT operator in the left path
             // since we need to change the variable reference in the SELECT operator.
             // For the index-nested-loop join case, we copy the condition of the join operator.
@@ -2149,8 +2152,7 @@ public class AccessMethodUtils {
         // an inverted index contains a part of a field value, not all of it.
         if (noIndexOnlyPlanOption || dataset.getDatasetType() == DatasetType.EXTERNAL || chosenIndex.isPrimaryIndex()
                 || chosenIndex.getIndexDetails().isOverridingKeyFieldTypes() || chosenIndex.isEnforced()
-                || isInvertedIndex(chosenIndex) || chosenIndex.getIndexType() == IndexType.ARRAY
-                || IndexUtil.includesUnknowns(chosenIndex)) {
+                || isInvertedIndex(chosenIndex) || chosenIndex.getIndexType() == IndexType.ARRAY) {
             indexOnlyPlanInfo.setFirst(false);
             return;
         }

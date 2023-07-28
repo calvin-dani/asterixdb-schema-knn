@@ -29,8 +29,10 @@ public interface IColumnKeyValueReader {
      * Reset the reader at the given index
      *
      * @param startIndex start index
+     * @param skipCount  number of values should be skipped
+     * @return return the number of encountered anti-matters
      */
-    void reset(int startIndex, int skipCount) throws HyracksDataException;
+    int reset(int startIndex, int skipCount) throws HyracksDataException;
 
     /**
      * Returns the value of the key at the given index

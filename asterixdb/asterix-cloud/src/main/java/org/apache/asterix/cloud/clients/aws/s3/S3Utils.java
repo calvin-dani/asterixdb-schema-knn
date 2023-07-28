@@ -18,6 +18,11 @@
  */
 package org.apache.asterix.cloud.clients.aws.s3;
 
+import java.io.File;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URLDecoder;
+import java.nio.charset.Charset;
 import java.util.List;
 
 import software.amazon.awssdk.services.s3.S3Client;
@@ -33,11 +38,9 @@ public class S3Utils {
 
     public static List<S3Object> listS3Objects(S3Client s3Client, String bucket, String path) {
         String newMarker = null;
-
         ListObjectsV2Response listObjectsResponse;
         ListObjectsV2Request.Builder listObjectsBuilder = ListObjectsV2Request.builder().bucket(bucket);
-        listObjectsBuilder.prefix(path);
-
+        listObjectsBuilder.prefix(toCloudPrefix(path));
         while (true) {
             // List the objects from the start, or from the last marker in case of truncated result
             if (newMarker == null) {
@@ -54,5 +57,24 @@ public class S3Utils {
             }
         }
         return listObjectsResponse.contents();
+    }
+
+    public static String encodeURI(String path) {
+        if (path.isEmpty()) {
+            return path;
+        }
+        try {
+            return new URI("s3", "//", path).getRawFragment();
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(e);
+        }
+    }
+
+    public static String decodeURI(String path) {
+        return URLDecoder.decode(path, Charset.defaultCharset());
+    }
+
+    public static String toCloudPrefix(String path) {
+        return path.startsWith(File.separator) ? path.substring(1) : path;
     }
 }

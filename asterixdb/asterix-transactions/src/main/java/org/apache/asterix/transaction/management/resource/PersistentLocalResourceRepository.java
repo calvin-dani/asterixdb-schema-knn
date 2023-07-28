@@ -57,12 +57,14 @@ import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.asterix.common.utils.StoragePathUtil;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.IIOBulkOperation;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.io.IODeviceHandle;
 import org.apache.hyracks.api.io.IPersistedResourceRegistry;
 import org.apache.hyracks.api.replication.IReplicationJob.ReplicationExecutionType;
 import org.apache.hyracks.api.replication.IReplicationJob.ReplicationJobType;
 import org.apache.hyracks.api.replication.IReplicationJob.ReplicationOperation;
+import org.apache.hyracks.api.util.IoUtil;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.lsm.common.impls.IndexComponentFileReference;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
@@ -240,7 +242,7 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
             List<FileReference> roots) throws HyracksDataException {
         Map<Long, LocalResource> resourcesMap = new HashMap<>();
         for (FileReference root : roots) {
-            final Collection<FileReference> files = ioManager.getMatchingFiles(root, METADATA_FILES_FILTER);
+            final Collection<FileReference> files = ioManager.list(root, METADATA_FILES_FILTER);
             try {
                 for (FileReference file : files) {
                     final LocalResource localResource = readLocalResource(file);
@@ -273,21 +275,23 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
     }
 
     public synchronized void deleteInvalidIndexes(Predicate<LocalResource> filter) throws HyracksDataException {
+        IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
         for (FileReference root : storageRoots) {
-            final Collection<FileReference> files = ioManager.getMatchingFiles(root, METADATA_FILES_FILTER);
+            final Collection<FileReference> files = ioManager.list(root, METADATA_FILES_FILTER);
             try {
                 for (FileReference file : files) {
                     final LocalResource localResource = readLocalResource(file);
                     if (localResource != null && filter.test(localResource)) {
                         FileReference parent = file.getParent();
                         LOGGER.warn("deleting invalid metadata index {}", parent);
-                        ioManager.delete(parent);
+                        bulkDelete.add(parent);
                     }
                 }
             } catch (IOException e) {
                 throw HyracksDataException.create(e);
             }
         }
+        ioManager.performBulkOperation(bulkDelete);
         resourceCache.invalidateAll();
     }
 
@@ -360,9 +364,11 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
      * Deletes physical files of all data verses.
      */
     public synchronized void deleteStorageData() throws HyracksDataException {
+        IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
         for (FileReference root : storageRoots) {
-            ioManager.deleteDirectory(root);
+            bulkDelete.add(root);
         }
+        ioManager.performBulkOperation(bulkDelete);
         createStorageRoots();
     }
 
@@ -452,7 +458,7 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
 
     private List<String> getIndexFiles(FileReference indexDir) throws HyracksDataException {
         final List<String> indexFiles = new ArrayList<>();
-        Collection<FileReference> indexFilteredFiles = ioManager.getMatchingFiles(indexDir, LSM_INDEX_FILES_FILTER);
+        Collection<FileReference> indexFilteredFiles = ioManager.list(indexDir, LSM_INDEX_FILES_FILTER);
         indexFilteredFiles.stream().map(FileReference::getAbsolutePath).forEach(indexFiles::add);
         return indexFiles;
     }
@@ -491,24 +497,27 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
     }
 
     public synchronized void deleteCorruptedResources() throws HyracksDataException {
+        IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
         for (FileReference root : storageRoots) {
-            final Collection<FileReference> metadataMaskFiles =
-                    ioManager.getMatchingFiles(root, METADATA_MASK_FILES_FILTER);
+            final Collection<FileReference> metadataMaskFiles = ioManager.list(root, METADATA_MASK_FILES_FILTER);
             for (FileReference metadataMaskFile : metadataMaskFiles) {
                 final FileReference resourceFile = metadataMaskFile.getParent().getChild(METADATA_FILE_NAME);
-                ioManager.delete(resourceFile);
-                ioManager.delete(metadataMaskFile);
+                bulkDelete.add(resourceFile);
+                bulkDelete.add(metadataMaskFile);
             }
         }
+        ioManager.performBulkOperation(bulkDelete);
     }
 
     private void deleteIndexMaskedFiles(FileReference index) throws IOException {
-        Collection<FileReference> masks = ioManager.getMatchingFiles(index, MASK_FILES_FILTER);
+        IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
+        Collection<FileReference> masks = ioManager.list(index, MASK_FILES_FILTER);
         for (FileReference mask : masks) {
             deleteIndexMaskedFiles(index, mask);
             // delete the mask itself
-            ioManager.delete(mask);
+            bulkDelete.add(mask);
         }
+        ioManager.performBulkOperation(bulkDelete);
     }
 
     private boolean isValidIndex(FileReference index) throws IOException {
@@ -520,10 +529,11 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
     }
 
     private void deleteIndexInvalidComponents(FileReference index) throws IOException, ParseException {
-        final Collection<FileReference> indexComponentFiles = ioManager.getMatchingFiles(index, COMPONENT_FILES_FILTER);
+        final Collection<FileReference> indexComponentFiles = ioManager.list(index, COMPONENT_FILES_FILTER);
         if (indexComponentFiles == null) {
             throw new IOException(index + " doesn't exist or an IO error occurred");
         }
+        IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
         final long validComponentSequence = getIndexCheckpointManager(index).getValidComponentSequence();
         for (FileReference componentFileRef : indexComponentFiles) {
             // delete any file with start or end sequence > valid component sequence
@@ -532,9 +542,10 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
             if (fileStart > validComponentSequence || fileEnd > validComponentSequence) {
                 LOGGER.warn(() -> "Deleting invalid component file " + componentFileRef.getAbsolutePath()
                         + " based on valid sequence " + validComponentSequence);
-                ioManager.delete(componentFileRef);
+                bulkDelete.add(componentFileRef);
             }
         }
+        ioManager.performBulkOperation(bulkDelete);
     }
 
     private IIndexCheckpointManager getIndexCheckpointManager(FileReference index) throws HyracksDataException {
@@ -550,16 +561,18 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
         Collection<FileReference> maskedFiles;
         if (isComponentMask(mask)) {
             final String componentId = mask.getName().substring(StorageConstants.COMPONENT_MASK_FILE_PREFIX.length());
-            maskedFiles = ioManager.getMatchingFiles(index, (dir, name) -> name.startsWith(componentId));
+            maskedFiles = ioManager.list(index, (dir, name) -> name.startsWith(componentId));
         } else {
             final String maskedFileName = mask.getName().substring(StorageConstants.MASK_FILE_PREFIX.length());
-            maskedFiles = ioManager.getMatchingFiles(index, (dir, name) -> name.equals(maskedFileName));
+            maskedFiles = ioManager.list(index, (dir, name) -> name.equals(maskedFileName));
         }
         if (maskedFiles != null) {
+            IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
             for (FileReference maskedFile : maskedFiles) {
                 LOGGER.info(() -> "deleting masked file: " + maskedFile.getAbsolutePath());
-                ioManager.delete(maskedFile);
+                bulkDelete.add(maskedFile);
             }
+            ioManager.performBulkOperation(bulkDelete);
         }
     }
 
@@ -631,26 +644,11 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
         return COMPONENT_FILES_FILTER.accept(indexDir.getFile(), fileName);
     }
 
-    public synchronized void keepPartitions(Set<Integer> keepPartitions) throws HyracksDataException {
-        List<FileReference> onDiskPartitions = getOnDiskPartitions();
-        for (FileReference onDiskPartition : onDiskPartitions) {
-            int partitionNum = StoragePathUtil.getPartitionNumFromRelativePath(onDiskPartition.getAbsolutePath());
-            if (!keepPartitions.contains(partitionNum)) {
-                LOGGER.warn("deleting partition {} since it is not on partitions to keep {}", partitionNum,
-                        keepPartitions);
-                ioManager.delete(onDiskPartition);
-            }
-        }
-    }
-
-    public synchronized List<FileReference> getOnDiskPartitions() throws HyracksDataException {
+    public synchronized List<FileReference> getOnDiskPartitions() {
         List<FileReference> onDiskPartitions = new ArrayList<>();
         for (FileReference root : storageRoots) {
-            Collection<FileReference> partitions = ioManager.list(root, (dir, name) -> dir != null && dir.isDirectory()
-                    && name.startsWith(StorageConstants.PARTITION_DIR_PREFIX));
-            if (partitions != null) {
-                onDiskPartitions.addAll(partitions);
-            }
+            onDiskPartitions.addAll(IoUtil.getMatchingChildren(root, (dir, name) -> dir != null && dir.isDirectory()
+                    && name.startsWith(StorageConstants.PARTITION_DIR_PREFIX)));
         }
         return onDiskPartitions;
     }
@@ -663,13 +661,15 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
 
     public void deletePartition(int partitionId) throws HyracksDataException {
         Collection<FileReference> onDiskPartitions = getOnDiskPartitions();
+        IIOBulkOperation bulkDelete = ioManager.createDeleteBulkOperation();
         for (FileReference onDiskPartition : onDiskPartitions) {
             int partitionNum = StoragePathUtil.getPartitionNumFromRelativePath(onDiskPartition.getAbsolutePath());
             if (partitionNum == partitionId) {
                 LOGGER.warn("deleting partition {}", partitionNum);
-                ioManager.delete(onDiskPartition);
-                return;
+                bulkDelete.add(onDiskPartition);
+                break;
             }
         }
+        ioManager.performBulkOperation(bulkDelete);
     }
 }
