@@ -33,8 +33,10 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 public class SqlSchemaAggregateDescriptor extends AbstractAggregateFunctionDynamicDescriptor {
 
     private static final long serialVersionUID = 1L;
-    public static final IFunctionDescriptorFactory FACTORY = AbstractAggregateFunctionDynamicDescriptor.createFactory(SqlSchemaAggregateDescriptor::new);
+    public static final IFunctionDescriptorFactory FACTORY =
+            AbstractAggregateFunctionDynamicDescriptor.createFactory(SqlSchemaAggregateDescriptor::new);
     IAType aggFieldState;
+
     @Override
     public FunctionIdentifier getIdentifier() {
         return BuiltinFunctions.SQL_SCHEMA;
@@ -48,7 +50,7 @@ public class SqlSchemaAggregateDescriptor extends AbstractAggregateFunctionDynam
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new SqlSchemaAggregateFunction(args, ctx, sourceLoc,aggFieldState);
+                return new SqlSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
             }
         };
     }

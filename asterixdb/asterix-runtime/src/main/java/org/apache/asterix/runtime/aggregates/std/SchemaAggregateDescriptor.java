@@ -33,7 +33,8 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 public class SchemaAggregateDescriptor extends AbstractAggregateFunctionDynamicDescriptor {
 
     private static final long serialVersionUID = 1L;
-    public static final IFunctionDescriptorFactory FACTORY = AbstractAggregateFunctionDynamicDescriptor.createFactory(SchemaAggregateDescriptor::new);
+    public static final IFunctionDescriptorFactory FACTORY =
+            AbstractAggregateFunctionDynamicDescriptor.createFactory(SchemaAggregateDescriptor::new);
     IAType aggFieldState;
 
     @Override
@@ -49,7 +50,7 @@ public class SchemaAggregateDescriptor extends AbstractAggregateFunctionDynamicD
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new SchemaAggregateFunction(args, ctx, sourceLoc,aggFieldState);
+                return new SchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
             }
         };
     }

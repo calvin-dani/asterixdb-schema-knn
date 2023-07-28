@@ -791,6 +791,8 @@ public class BuiltinFunctions {
             new FunctionIdentifier(FunctionConstants.ASTERIX_NS, "agg-sql-schema", 1);
     public static final FunctionIdentifier INTERMEDIATE_SQL_AVG =
             new FunctionIdentifier(FunctionConstants.ASTERIX_NS, "intermediate-agg-sql-avg", 1);
+    public static final FunctionIdentifier INTERMEDIATE_SQL_SCHEMA =
+            new FunctionIdentifier(FunctionConstants.ASTERIX_NS, "intermediate-agg-sql-schema", 1);
     public static final FunctionIdentifier SQL_COUNT =
             new FunctionIdentifier(FunctionConstants.ASTERIX_NS, "agg-sql-count", 1);
     public static final FunctionIdentifier SQL_SUM =
@@ -2948,7 +2950,25 @@ public class BuiltinFunctions {
         addAgg(SQL_SCHEMA);
         addAgg(LOCAL_SQL_SCHEMA);
         addAgg(GLOBAL_SQL_SCHEMA);
+
+        addLocalAgg(SQL_SCHEMA, LOCAL_SQL_SCHEMA);
+        addIntermediateAgg(SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
+        addIntermediateAgg(LOCAL_SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
+        addIntermediateAgg(GLOBAL_SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
+        addGlobalAgg(SQL_SCHEMA, GLOBAL_SQL_SCHEMA);
         addScalarAgg(SQL_SCHEMA, SCALAR_SQL_SCHEMA);
+
+//        addSerialAgg(SQL_SCHEMA, SERIAL_SQL_SCHEMA);
+//        addSerialAgg(LOCAL_SQL_SCHEMA, SERIAL_LOCAL_SQL_SCHEMA);
+//        addSerialAgg(GLOBAL_SQL_SCHEMA, SERIAL_GLOBAL_SQL_SCHEMA);
+//        addAgg(SERIAL_SQL_SCHEMA);
+//        addAgg(SERIAL_LOCAL_SQL_SCHEMA);
+//        addAgg(SERIAL_GLOBAL_SQL_SCHEMA);
+//        addLocalAgg(SERIAL_SQL_SCHEMA, SERIAL_LOCAL_SQL_SCHEMA);
+//        addIntermediateAgg(SERIAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
+//        addIntermediateAgg(SERIAL_LOCAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
+//        addIntermediateAgg(SERIAL_GLOBAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
+//        addGlobalAgg(SERIAL_SQL_SCHEMA, SERIAL_GLOBAL_SQL_SCHEMA);
 
         // SQL STDDEV_SAMP
 

@@ -36,7 +36,7 @@ public class IntermediateSqlSchemaAggregateDescriptor extends AbstractAggregateF
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.INTERMEDIATE_SQL_AVG;
+        return BuiltinFunctions.INTERMEDIATE_SQL_SCHEMA;
     }
 
     @Override
