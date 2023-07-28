@@ -38,6 +38,10 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
     private AbstractRowSchemaNestedNode currentParent;
     private int primaryKeysLength;
 
+    public ObjectRowSchemaNode getRoot() {
+        return root;
+    }
+
     public RowTransformer(RowMetadata columnMetadata, ObjectRowSchemaNode root) {
         this.columnMetadata = columnMetadata;
         this.root = root;

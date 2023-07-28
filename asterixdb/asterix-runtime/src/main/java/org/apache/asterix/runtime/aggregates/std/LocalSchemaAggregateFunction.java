@@ -31,8 +31,8 @@ import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 public class LocalSchemaAggregateFunction extends AbstractSchemaAggregateFunction {
 
     public LocalSchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context,
-                                        SourceLocation sourceLoc, IAType aggFieldState) throws HyracksDataException {
-        super(args, context, sourceLoc,aggFieldState);
+            SourceLocation sourceLoc, IAType aggFieldState) throws HyracksDataException {
+        super(args, context, sourceLoc, aggFieldState);
     }
 
     @Override

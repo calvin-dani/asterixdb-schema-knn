@@ -31,9 +31,9 @@ import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
 public class SchemaAggregateFunction extends AbstractSchemaAggregateFunction {
 
-    public SchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context, SourceLocation sourceLoc, IAType aggFieldState)
-            throws HyracksDataException {
-        super(args, context, sourceLoc,aggFieldState);
+    public SchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context, SourceLocation sourceLoc,
+            IAType aggFieldState) throws HyracksDataException {
+        super(args, context, sourceLoc, aggFieldState);
     }
 
     @Override
@@ -60,6 +60,5 @@ public class SchemaAggregateFunction extends AbstractSchemaAggregateFunction {
     protected boolean skipStep() {
         return aggType == ATypeTag.NULL;
     }
-
 
 }

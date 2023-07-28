@@ -29,6 +29,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private ArrayBackedValueStorage fieldName;
+
     public MultisetRowSchemaNode(ArrayBackedValueStorage fieldName) {
         super();
         this.fieldName = fieldName;

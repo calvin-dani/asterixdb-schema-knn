@@ -34,8 +34,10 @@ public class GlobalSchemaAggregateDescriptor extends AbstractAggregateFunctionDy
 
     private static final long serialVersionUID = 1L;
 
-    public static final IFunctionDescriptorFactory FACTORY = AbstractAggregateFunctionDynamicDescriptor.createFactory(GlobalSchemaAggregateDescriptor::new);
+    public static final IFunctionDescriptorFactory FACTORY =
+            AbstractAggregateFunctionDynamicDescriptor.createFactory(GlobalSchemaAggregateDescriptor::new);
     IAType aggFieldState;
+
     @Override
     public FunctionIdentifier getIdentifier() {
         return BuiltinFunctions.GLOBAL_SCHEMA;
@@ -49,7 +51,7 @@ public class GlobalSchemaAggregateDescriptor extends AbstractAggregateFunctionDy
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new GlobalSchemaAggregateFunction(args, ctx, sourceLoc,aggFieldState);
+                return new GlobalSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
             }
         };
     }

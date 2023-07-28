@@ -33,8 +33,9 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 public class LocalSqlSchemaAggregateDescriptor extends AbstractAggregateFunctionDynamicDescriptor {
 
     private static final long serialVersionUID = 1L;
-    public static final IFunctionDescriptorFactory FACTORY = LocalSqlAvgAggregateDescriptor::new;
+    public static final IFunctionDescriptorFactory FACTORY = AbstractAggregateFunctionDynamicDescriptor.createFactory(LocalSqlSchemaAggregateDescriptor::new);
     IAType aggFieldState;
+
     @Override
     public FunctionIdentifier getIdentifier() {
         return BuiltinFunctions.LOCAL_SQL_SCHEMA;
@@ -48,7 +49,7 @@ public class LocalSqlSchemaAggregateDescriptor extends AbstractAggregateFunction
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new LocalSqlSchemaAggregateFunction(args, ctx, sourceLoc,aggFieldState);
+                return new LocalSqlSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
             }
         };
     }

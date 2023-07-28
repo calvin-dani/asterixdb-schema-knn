@@ -19,6 +19,8 @@
 
 package org.apache.asterix.runtime.aggregates.std;
 
+import java.util.Arrays;
+
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.functions.IFunctionDescriptorFactory;
 import org.apache.asterix.runtime.aggregates.base.AbstractAggregateFunctionDynamicDescriptor;
@@ -28,8 +30,6 @@ import org.apache.hyracks.algebricks.runtime.base.IAggregateEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.base.IEvaluatorContext;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-
-import java.util.Arrays;
 
 public class LocalAvgAggregateDescriptor extends AbstractAggregateFunctionDynamicDescriptor {
 

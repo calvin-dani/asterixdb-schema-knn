@@ -19,9 +19,10 @@
  */
 package org.apache.asterix.runtime.aggregates.std;
 
-import java.io.*;
+import java.io.DataOutput;
+import java.io.DataOutputStream;
+import java.io.IOException;
 
-import org.apache.asterix.common.transactions.PrimaryKeyTupleReference;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
@@ -32,28 +33,29 @@ import org.apache.asterix.dataflow.data.nontagged.serde.ARecordSerializerDeseria
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
-import org.apache.asterix.om.base.*;
+import org.apache.asterix.om.base.ADouble;
+import org.apache.asterix.om.base.AInt64;
+import org.apache.asterix.om.base.AMutableDouble;
+import org.apache.asterix.om.base.AMutableInt64;
+import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.exceptions.ExceptionUtil;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
 import org.apache.asterix.om.lazy.RowTransformer;
 import org.apache.asterix.om.lazy.TypedRecordLazyVisitablePointable;
-import org.apache.asterix.om.pointables.ARecordVisitablePointable;
+import org.apache.asterix.om.lazy.metadata.schema.ObjectRowSchemaNode;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
-import org.apache.asterix.om.types.runtime.RuntimeRecordTypeInfo;
-import org.apache.asterix.om.values.IRowValuesWriterFactory;
 import org.apache.asterix.runtime.evaluators.common.AccessibleByteArrayEval;
 import org.apache.asterix.runtime.evaluators.common.ClosedRecordConstructorEvalFactory.ClosedRecordConstructorEval;
 import org.apache.asterix.runtime.exceptions.UnsupportedItemTypeException;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableObject;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
-import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
 import org.apache.hyracks.algebricks.runtime.base.IEvaluatorContext;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -67,8 +69,6 @@ import org.apache.hyracks.data.std.util.ByteArrayAccessibleOutputStream;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
-import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
     private static final int SUM_FIELD_ID = 0;
@@ -82,9 +82,9 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
     private final ARecordType recType;
 
     private ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
-//    private IPointable inputVal = new VoidPointable();
+    //    private IPointable inputVal = new VoidPointable();
     private RecordLazyVisitablePointable inputVal = new RecordLazyVisitablePointable(true); //TODO : CALVIN_DANI to be tagged
-//    private TypedRecordLazyVisitablePointable inputVal = new TypedRecordLazyVisitablePointable(null);
+    //    private TypedRecordLazyVisitablePointable inputVal = new TypedRecordLazyVisitablePointable(null);
 
     private IScalarEvaluator eval;
     protected ATypeTag aggType;
@@ -104,7 +104,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
 
     private RowTransformer transformer;
     RowMetadata rowMetaData;
-//    private int recordFieldId = 0;
+    //    private int recordFieldId = 0;
 
     @SuppressWarnings("unchecked")
     private ISerializerDeserializer<ADouble> doubleSerde =
@@ -117,15 +117,15 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ANULL);
 
     public AbstractSchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context,
-            SourceLocation sourceLoc,IAType aggFieldState) throws HyracksDataException {
+            SourceLocation sourceLoc, IAType aggFieldState) throws HyracksDataException {
         super(sourceLoc);
         this.context = context;
         eval = args[0].createScalarEvaluator(context);
-//        recType = new ARecordType(null, new String[] { "sum", "count" },//TODO CALVIN_DANI REMOVE
-//                new IAType[] { BuiltinType.ADOUBLE, BuiltinType.AINT64 }, false);
+        //        recType = new ARecordType(null, new String[] { "sum", "count" },//TODO CALVIN_DANI REMOVE
+        //                new IAType[] { BuiltinType.ADOUBLE, BuiltinType.AINT64 }, false);
         recType = (ARecordType) aggFieldState;
         inputVal = new TypedRecordLazyVisitablePointable(recType);
-//        recordEval = new ClosedRecordConstructorEval(recType, new IScalarEvaluator[] { evalSum, evalCount });
+        //        recordEval = new ClosedRecordConstructorEval(recType, new IScalarEvaluator[] { evalSum, evalCount });
     }
 
     @Override
@@ -138,7 +138,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         // Schema
         Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
         rowMetaData = new RowMetadata(multiPageOpRef);
-        transformer = new RowTransformer(rowMetaData,rowMetaData.getRoot());
+        transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
 
         //TODO CALVIN_DANI ADD TYPED RECORD DESC
     }
@@ -164,33 +164,33 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         //  RowMetadata rowMetaData = new RowMetadata(multiPageOpRef);
         //  int recordFieldId = rowMetaData.getRecordFieldIndex();
         //  RowTransformer transformer = new RowTransformer(rowMetaData,rowMetaData.getRoot());
-        FrameTupleReference FTR =  (FrameTupleReference) tuple;
+        FrameTupleReference FTR = (FrameTupleReference) tuple;
         FrameTupleAccessor FTA = (FrameTupleAccessor) tuple.getFrameTupleAccessor();
         //TODO CALVIN_DANI EXPERIMENTAL CODE STARTS HERE
-//        ISerializerDeserializer[] fields = FTA.getRecordDescriptor().getFields();
-//        ARecordType type = null;
-//        int numPrintFields = Math.min(tuple.getFieldCount(), fields.length);
-//
-//        PrimaryKeyTupleReference pk = new PrimaryKeyTupleReference();
-//        pk.reset(tuple.getFieldData(0), tuple.getFieldStart(0), tuple.getFieldLength(0));
-////
-//        for (int i = 0; i < numPrintFields; i++) {
-//            ByteArrayInputStream inStream =
-//                    new ByteArrayInputStream(tuple.getFieldData(i), tuple.getFieldStart(i), tuple.getFieldLength(i));
-//            DataInput dataIn = new DataInputStream(inStream);
-//            Object o = fields[i].deserialize(dataIn);
-//            type = ((ARecord) o).getType();
-////        }
-//
-//        ARecordVisitablePointable t = new ARecordVisitablePointable(type);
-////        inputVal = new ARre(type);
+        //        ISerializerDeserializer[] fields = FTA.getRecordDescriptor().getFields();
+        //        ARecordType type = null;
+        //        int numPrintFields = Math.min(tuple.getFieldCount(), fields.length);
+        //
+        //        PrimaryKeyTupleReference pk = new PrimaryKeyTupleReference();
+        //        pk.reset(tuple.getFieldData(0), tuple.getFieldStart(0), tuple.getFieldLength(0));
+        ////
+        //        for (int i = 0; i < numPrintFields; i++) {
+        //            ByteArrayInputStream inStream =
+        //                    new ByteArrayInputStream(tuple.getFieldData(i), tuple.getFieldStart(i), tuple.getFieldLength(i));
+        //            DataInput dataIn = new DataInputStream(inStream);
+        //            Object o = fields[i].deserialize(dataIn);
+        //            type = ((ARecord) o).getType();
+        ////        }
+        //
+        //        ARecordVisitablePointable t = new ARecordVisitablePointable(type);
+        ////        inputVal = new ARre(type);
         //TODO CALVIN_DANI EXPERIMENTAL CODE ENDS HERE
-//        System.out.println(TupleUtils.printTuple(FTR,FTA.getRecordDescriptor().getFields()));
+        //        System.out.println(TupleUtils.printTuple(FTR,FTA.getRecordDescriptor().getFields()));
         int recordFieldId = rowMetaData.getRecordFieldIndex();
         inputVal.set(tuple.getFieldData(recordFieldId), tuple.getFieldStart(recordFieldId),
                 tuple.getFieldLength(recordFieldId));
         transformer.transform(inputVal);
-//        (FrameTupleAccessor)(tuple.getFrameTupleAccessor())
+        //        (FrameTupleAccessor)(tuple.getFrameTupleAccessor())
         eval.evaluate(tuple, inputVal);
         byte[] data = inputVal.getByteArray();
         int offset = inputVal.getStartOffset();
@@ -322,6 +322,11 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
     protected void finishFinalResults(IPointable result) throws HyracksDataException {
         resultStorage.reset();
         try {
+            ObjectRowSchemaNode root = transformer.getRoot();
+            if (root == null) {
+                throw new HyracksDataException("Cannot compute Schema on empty root.");
+            }
+
             if (count == 0 || aggType == ATypeTag.NULL) {
                 nullSerde.serialize(ANull.NULL, resultStorage.getDataOutput());
             } else {

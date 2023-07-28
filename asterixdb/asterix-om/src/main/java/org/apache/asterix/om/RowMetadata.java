@@ -22,7 +22,6 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,14 +38,12 @@ import org.apache.asterix.om.lazy.metadata.schema.collection.AbstractRowCollecti
 import org.apache.asterix.om.lazy.metadata.schema.collection.ArrayRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.collection.MultisetRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.primitive.PrimitiveRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.visitor.SchemaRowBuilderFromIATypeVisitor;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RowSchemaStringBuilderVisitor;
 import org.apache.asterix.om.utils.RowValuesUtil;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.asterix.om.values.IRowValuesWriter;
-import org.apache.asterix.om.values.IRowValuesWriterFactory;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
@@ -72,27 +69,26 @@ public final class RowMetadata extends AbstractRowMetadata {
     private final RowFieldNamesDictionary fieldNamesDictionary;
     private final ObjectRowSchemaNode root;
     private final ObjectRowSchemaNode metaRoot;
-//    private final IRowValuesWriterFactory columnWriterFactory;
-//    private final List<IRowValuesWriter> columnWriters;
+    //    private final IRowValuesWriterFactory columnWriterFactory;
+    //    private final List<IRowValuesWriter> columnWriters;
 
     private int sizeOfWriters = 0;
     private final ArrayBackedValueStorage serializedMetadata;
     private final PathRowInfoSerializer pathInfoSerializer;
     private final IntArrayList nullWriterIndexes;
-//    private final boolean metaContainsKeys;
+    //    private final boolean metaContainsKeys;
     private boolean changed;
     private int level;
     private int repeated;
 
-    public RowMetadata(
-            Mutable<IRowWriteMultiPageOp> multiPageOpRef) throws HyracksDataException {
+    public RowMetadata(Mutable<IRowWriteMultiPageOp> multiPageOpRef) throws HyracksDataException {
         //    public RowMetadata(ARecordType datasetType, ARecordType metaType, List<List<String>> primaryKeys,
         //            List<Integer> keySourceIndicator, Mutable<IRowWriteMultiPageOp> multiPageOpRef) throws HyracksDataException {
         super();
         this.multiPageOpRef = multiPageOpRef;
-//        this.columnWriterFactory = columnWriterFactory;
+        //        this.columnWriterFactory = columnWriterFactory;
         definitionLevels = new HashMap<>();
-//        columnWriters = new ArrayList<>();
+        //        columnWriters = new ArrayList<>();
         level = -1;
         repeated = 0;
         fieldNamesDictionary = new RowFieldNamesDictionary();
@@ -103,20 +99,20 @@ public final class RowMetadata extends AbstractRowMetadata {
         nullWriterIndexes = new IntArrayList();
         //Add definition levels for the root
         addDefinitionLevelsAndGet(root);
-//        SchemaRowBuilderFromIATypeVisitor builder = new SchemaRowBuilderFromIATypeVisitor(this, primaryKeys);
+        //        SchemaRowBuilderFromIATypeVisitor builder = new SchemaRowBuilderFromIATypeVisitor(this, primaryKeys);
         //Ensure all primary keys take the first column indexes
-//        metaContainsKeys = metaType != null && keySourceIndicator.get(0) == 1;
-//        if (metaContainsKeys) {
-//            addDefinitionLevelsAndGet(metaRoot);
-//            metaType.accept(builder, metaRoot);
-//            datasetType.accept(builder, root);
-//        } else {
-//            datasetType.accept(builder, root);
-//            if (metaRoot != null) {
-//                addDefinitionLevelsAndGet(metaRoot);
-//                metaType.accept(builder, metaRoot);
-//            }
-//        }
+        //        metaContainsKeys = metaType != null && keySourceIndicator.get(0) == 1;
+        //        if (metaContainsKeys) {
+        //            addDefinitionLevelsAndGet(metaRoot);
+        //            metaType.accept(builder, metaRoot);
+        //            datasetType.accept(builder, root);
+        //        } else {
+        //            datasetType.accept(builder, root);
+        //            if (metaRoot != null) {
+        //                addDefinitionLevelsAndGet(metaRoot);
+        //                metaType.accept(builder, metaRoot);
+        //            }
+        //        }
 
         serializedMetadata = new ArrayBackedValueStorage();
         changed = true;
@@ -124,24 +120,23 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     private RowMetadata(ARecordType datasetType, ARecordType metaType, List<List<String>> primaryKeys,
-            boolean metaContainsKeys,
-            Mutable<IRowWriteMultiPageOp> multiPageOpRef,
+            boolean metaContainsKeys, Mutable<IRowWriteMultiPageOp> multiPageOpRef,
             RowFieldNamesDictionary fieldNamesDictionary, ObjectRowSchemaNode root, ObjectRowSchemaNode metaRoot,
             Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels,
             ArrayBackedValueStorage serializedMetadata) {
         super();
         this.multiPageOpRef = multiPageOpRef;
-//        this.columnWriterFactory = columnWriterFactory;
+        //        this.columnWriterFactory = columnWriterFactory;
         this.definitionLevels = definitionLevels;
-//        this.columnWriters = columnWriters;
+        //        this.columnWriters = columnWriters;
         this.sizeOfWriters = 0;
-//        this.sizeOfWriters = columnWriters.size();
+        //        this.sizeOfWriters = columnWriters.size();
         level = -1;
         repeated = 0;
         this.fieldNamesDictionary = fieldNamesDictionary;
         this.root = root;
         this.metaRoot = metaRoot;
-//        this.metaContainsKeys = metaContainsKeys;
+        //        this.metaContainsKeys = metaContainsKeys;
         pathInfoSerializer = new PathRowInfoSerializer();
         nullWriterIndexes = new IntArrayList();
         //Add definition levels for the root
@@ -356,15 +351,14 @@ public final class RowMetadata extends AbstractRowMetadata {
         return currentChild;
     }
 
-
-    public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag,ArrayBackedValueStorage fieldName)
-            throws HyracksDataException {
+    public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag,
+            ArrayBackedValueStorage fieldName) throws HyracksDataException {
         AbstractRowSchemaNode currentChild = child;
         ATypeTag normalizedTypeTag = getNormalizedTypeTag(childTypeTag);
         if (currentChild == null || normalizedTypeTag != ATypeTag.MISSING && normalizedTypeTag != ATypeTag.NULL
                 && currentChild.getTypeTag() != ATypeTag.UNION && currentChild.getTypeTag() != normalizedTypeTag) {
             //Create a new child or union type if required type is different from the current child type
-            currentChild = createChild(child, normalizedTypeTag,fieldName);
+            currentChild = createChild(child, normalizedTypeTag, fieldName);
             //Flag that the schema has changed
             changed = true;
         }
@@ -387,7 +381,7 @@ public final class RowMetadata extends AbstractRowMetadata {
 
     public void enterNode(AbstractRowSchemaNestedNode parent, AbstractRowSchemaNode node) throws HyracksDataException {
         //Flush all definition levels from parent to child
-//        flushDefinitionLevels(level, parent, node);
+        //        flushDefinitionLevels(level, parent, node);
         if (node.isObjectOrCollection()) {
             //Enter one more level for object, array, and multiset
             level++;
@@ -433,31 +427,31 @@ public final class RowMetadata extends AbstractRowMetadata {
         definitionLevels.get(nestedNode).reset();
     }
 
-//    public void flushDefinitionLevels(int level, AbstractRowSchemaNestedNode parent, AbstractRowSchemaNode node)
-//            throws HyracksDataException {
-//        if (parent != null) {
-//            RunRowLengthIntArray parentDefLevels = definitionLevels.get(parent);
-//            if (node.getCounter() < parentDefLevels.getSize()) {
-//                int parentMask = RowValuesUtil.getNullMask(level);
-//                int childMask = RowValuesUtil.getNullMask(level + 1);
-//                flushDefinitionLevels(parentMask, childMask, parentDefLevels, node);
-//            }
-//        }
-//    }
+    //    public void flushDefinitionLevels(int level, AbstractRowSchemaNestedNode parent, AbstractRowSchemaNode node)
+    //            throws HyracksDataException {
+    //        if (parent != null) {
+    //            RunRowLengthIntArray parentDefLevels = definitionLevels.get(parent);
+    //            if (node.getCounter() < parentDefLevels.getSize()) {
+    //                int parentMask = RowValuesUtil.getNullMask(level);
+    //                int childMask = RowValuesUtil.getNullMask(level + 1);
+    //                flushDefinitionLevels(parentMask, childMask, parentDefLevels, node);
+    //            }
+    //        }
+    //    }
 
-//    private void flushDefinitionLevels(int parentMask, int childMask, RunRowLengthIntArray parentDefLevels,
-//            AbstractRowSchemaNode node) throws HyracksDataException {
-//        int startIndex = node.getCounter();
-//        if (node.isNested()) {
-//            RunRowLengthIntArray childDefLevels = definitionLevels.get((AbstractRowSchemaNestedNode) node);
-//            flushNestedDefinitionLevel(parentMask, childMask, startIndex, parentDefLevels, childDefLevels);
-//        } else {
-//            IRowValuesWriter writer = columnWriters.get(((PrimitiveRowSchemaNode) node).getColumnIndex());
-//            flushWriterDefinitionLevels(parentMask, childMask, startIndex, parentDefLevels, writer);
-//            //            flushWriterDefinitionLevels(parentMask, childMask, startIndex, parentDefLevels);
-//        }
-//        node.setCounter(parentDefLevels.getSize());
-//    }
+    //    private void flushDefinitionLevels(int parentMask, int childMask, RunRowLengthIntArray parentDefLevels,
+    //            AbstractRowSchemaNode node) throws HyracksDataException {
+    //        int startIndex = node.getCounter();
+    //        if (node.isNested()) {
+    //            RunRowLengthIntArray childDefLevels = definitionLevels.get((AbstractRowSchemaNestedNode) node);
+    //            flushNestedDefinitionLevel(parentMask, childMask, startIndex, parentDefLevels, childDefLevels);
+    //        } else {
+    //            IRowValuesWriter writer = columnWriters.get(((PrimitiveRowSchemaNode) node).getColumnIndex());
+    //            flushWriterDefinitionLevels(parentMask, childMask, startIndex, parentDefLevels, writer);
+    //            //            flushWriterDefinitionLevels(parentMask, childMask, startIndex, parentDefLevels);
+    //        }
+    //        node.setCounter(parentDefLevels.getSize());
+    //    }
 
     private void flushNestedDefinitionLevel(int parentMask, int childMask, int startIndex,
             RunRowLengthIntArray parentDefLevels, RunRowLengthIntArray childDefLevels) {
@@ -506,26 +500,27 @@ public final class RowMetadata extends AbstractRowMetadata {
         }
     }
 
-    private AbstractRowSchemaNode createChild(AbstractRowSchemaNode child, ATypeTag normalizedTypeTag,ArrayBackedValueStorage fieldName)
-            throws HyracksDataException {
+    private AbstractRowSchemaNode createChild(AbstractRowSchemaNode child, ATypeTag normalizedTypeTag,
+            ArrayBackedValueStorage fieldName) throws HyracksDataException {
         AbstractRowSchemaNode createdChild;
         if (child != null) {
             if (child.getTypeTag() == ATypeTag.NULL) {
                 //The previous child was a NULL. The new child needs to inherit the NULL definition levels
-//                int columnIndex = ((PrimitiveRowSchemaNode) child).getColumnIndex();
-//                RunRowLengthIntArray defLevels = columnWriters.get(columnIndex).getDefinitionLevelsIntArray();
-//                //Add the column index to be garbage collected
-//                nullWriterIndexes.add(columnIndex);
-                createdChild = createChild(normalizedTypeTag,fieldName);
-//                int mask = RowValuesUtil.getNullMask(level);
-//                flushDefinitionLevels(mask, mask, defLevels, createdChild);
+                //                int columnIndex = ((PrimitiveRowSchemaNode) child).getColumnIndex();
+                //                RunRowLengthIntArray defLevels = columnWriters.get(columnIndex).getDefinitionLevelsIntArray();
+                //                //Add the column index to be garbage collected
+                //                nullWriterIndexes.add(columnIndex);
+                createdChild = createChild(normalizedTypeTag, fieldName);
+                //                int mask = RowValuesUtil.getNullMask(level);
+                //                flushDefinitionLevels(mask, mask, defLevels, createdChild);
                 System.out.println("TO BE REIMPLEMENTED WITH THIS CASE : CALVIN DANI");
             } else {
                 //Different type. Make union
-                createdChild = addDefinitionLevelsAndGet(new UnionRowSchemaNode(child, createChild(normalizedTypeTag,fieldName)));
+                createdChild = addDefinitionLevelsAndGet(
+                        new UnionRowSchemaNode(child, createChild(normalizedTypeTag, fieldName)));
             }
         } else {
-            createdChild = createChild(normalizedTypeTag,fieldName);
+            createdChild = createChild(normalizedTypeTag, fieldName);
         }
         return createdChild;
     }
@@ -537,27 +532,28 @@ public final class RowMetadata extends AbstractRowMetadata {
         if (child != null) {
             if (child.getTypeTag() == ATypeTag.NULL) {
                 //The previous child was a NULL. The new child needs to inherit the NULL definition levels
-//                int columnIndex = ((PrimitiveRowSchemaNode) child).getColumnIndex();
-//                RunRowLengthIntArray defLevels = columnWriters.get(columnIndex).getDefinitionLevelsIntArray();
-//                //Add the column index to be garbage collected
-//                nullWriterIndexes.add(columnIndex);
+                //                int columnIndex = ((PrimitiveRowSchemaNode) child).getColumnIndex();
+                //                RunRowLengthIntArray defLevels = columnWriters.get(columnIndex).getDefinitionLevelsIntArray();
+                //                //Add the column index to be garbage collected
+                //                nullWriterIndexes.add(columnIndex);
 
-                createdChild = createChild(normalizedTypeTag,initFieldName);
-//                int mask = RowValuesUtil.getNullMask(level);
-//                flushDefinitionLevels(mask, mask, defLevels, createdChild);
+                createdChild = createChild(normalizedTypeTag, initFieldName);
+                //                int mask = RowValuesUtil.getNullMask(level);
+                //                flushDefinitionLevels(mask, mask, defLevels, createdChild);
                 System.out.println("TO BE REIMPLEMENTED WITH THIS CASE : CALVIN DANI");
             } else {
                 //Different type. Make union
-                createdChild = addDefinitionLevelsAndGet(new UnionRowSchemaNode(child, createChild(normalizedTypeTag,initFieldName)));
+                createdChild = addDefinitionLevelsAndGet(
+                        new UnionRowSchemaNode(child, createChild(normalizedTypeTag, initFieldName)));
             }
         } else {
-            createdChild = createChild(normalizedTypeTag,initFieldName);
+            createdChild = createChild(normalizedTypeTag, initFieldName);
         }
         return createdChild;
     }
 
-
-    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag, ArrayBackedValueStorage fieldName) throws HyracksDataException {
+    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag, ArrayBackedValueStorage fieldName)
+            throws HyracksDataException {
         switch (normalizedTypeTag) {
             case OBJECT:
                 return addDefinitionLevelsAndGet(new ObjectRowSchemaNode(fieldName));
@@ -574,15 +570,15 @@ public final class RowMetadata extends AbstractRowMetadata {
             case UUID:
                 int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
                 //                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
-//                boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
-//                boolean writeAlways = primaryKey || repeated > 0;
-//                boolean filtered = !primaryKey;
-//                int maxLevel = primaryKey ? 1 : level + 1;
-//                IRowValuesWriter writer = columnWriterFactory.createValueWriter(normalizedTypeTag, columnIndex,
-//                        maxLevel, writeAlways, filtered);
-//                if (multiPageOpRef.getValue() != null) {
-//                    writer.reset();
-//                }
+                //                boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
+                //                boolean writeAlways = primaryKey || repeated > 0;
+                //                boolean filtered = !primaryKey;
+                //                int maxLevel = primaryKey ? 1 : level + 1;
+                //                IRowValuesWriter writer = columnWriterFactory.createValueWriter(normalizedTypeTag, columnIndex,
+                //                        maxLevel, writeAlways, filtered);
+                //                if (multiPageOpRef.getValue() != null) {
+                //                    writer.reset();
+                //                }
                 if (columnIndex == this.sizeOfWriters) {
                     this.sizeOfWriters += 1;
 
@@ -596,44 +592,44 @@ public final class RowMetadata extends AbstractRowMetadata {
         }
     }
 
-//    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag) throws HyracksDataException {
-//        switch (normalizedTypeTag) {
-//            case OBJECT:
-//                return addDefinitionLevelsAndGet(new ObjectRowSchemaNode());
-//            case ARRAY:
-//                return addDefinitionLevelsAndGet(new ArrayRowSchemaNode());
-//            case MULTISET:
-////                return addDefinitionLevelsAndGet(new MultisetRowSchemaNode());
-//            case NULL:
-//            case MISSING:
-//            case BOOLEAN:
-//            case DOUBLE:
-//            case BIGINT:
-//            case STRING:
-//            case UUID:
-//                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
-//                //                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
-////                boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
-////                boolean writeAlways = primaryKey || repeated > 0;
-////                boolean filtered = !primaryKey;
-////                int maxLevel = primaryKey ? 1 : level + 1;
-////                IRowValuesWriter writer = columnWriterFactory.createValueWriter(normalizedTypeTag, columnIndex,
-////                        maxLevel, writeAlways, filtered);
-////                if (multiPageOpRef.getValue() != null) {
-////                    writer.reset();
-////                }
-//                if (columnIndex == this.sizeOfWriters) {
-//                    this.sizeOfWriters += 1;
-//
-//                    //            columnWriters.add(writer);
-//                }
-//                //                addColumn(columnIndex);
-//                return new PrimitiveRowSchemaNode(columnIndex, normalizedTypeTag, false);
-//            default:
-//                throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
-//
-//        }
-//    }
+    //    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag) throws HyracksDataException {
+    //        switch (normalizedTypeTag) {
+    //            case OBJECT:
+    //                return addDefinitionLevelsAndGet(new ObjectRowSchemaNode());
+    //            case ARRAY:
+    //                return addDefinitionLevelsAndGet(new ArrayRowSchemaNode());
+    //            case MULTISET:
+    ////                return addDefinitionLevelsAndGet(new MultisetRowSchemaNode());
+    //            case NULL:
+    //            case MISSING:
+    //            case BOOLEAN:
+    //            case DOUBLE:
+    //            case BIGINT:
+    //            case STRING:
+    //            case UUID:
+    //                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
+    //                //                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
+    ////                boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
+    ////                boolean writeAlways = primaryKey || repeated > 0;
+    ////                boolean filtered = !primaryKey;
+    ////                int maxLevel = primaryKey ? 1 : level + 1;
+    ////                IRowValuesWriter writer = columnWriterFactory.createValueWriter(normalizedTypeTag, columnIndex,
+    ////                        maxLevel, writeAlways, filtered);
+    ////                if (multiPageOpRef.getValue() != null) {
+    ////                    writer.reset();
+    ////                }
+    //                if (columnIndex == this.sizeOfWriters) {
+    //                    this.sizeOfWriters += 1;
+    //
+    //                    //            columnWriters.add(writer);
+    //                }
+    //                //                addColumn(columnIndex);
+    //                return new PrimitiveRowSchemaNode(columnIndex, normalizedTypeTag, false);
+    //            default:
+    //                throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
+    //
+    //        }
+    //    }
 
     //    private void addColumn(int index) {
     ////    private void addColumn(int index, IRowValuesWriter writer) {
@@ -684,17 +680,17 @@ public final class RowMetadata extends AbstractRowMetadata {
     public void close() {
         //Dereference multiPageOp
         multiPageOpRef.setValue(null);
-//        for (int i = 0; i < columnWriters.size(); i++) {
-//            columnWriters.get(i).close();
-//        }
+        //        for (int i = 0; i < columnWriters.size(); i++) {
+        //            columnWriters.get(i).close();
+        //        }
     }
 
-//    public void addNestedNull(AbstractRowSchemaNestedNode parent, AbstractRowSchemaNestedNode node)
-//            throws HyracksDataException {
-//        //Flush all definition levels from parent to the current node
-//        flushDefinitionLevels(level, parent, node);
-//        //Add null value (+2) to say that both the parent and the child are present
-//        definitionLevels.get(node).add(RowValuesUtil.getNullMask(level + 2) | level);
-//        node.incrementCounter();
-//    }
+    //    public void addNestedNull(AbstractRowSchemaNestedNode parent, AbstractRowSchemaNestedNode node)
+    //            throws HyracksDataException {
+    //        //Flush all definition levels from parent to the current node
+    //        flushDefinitionLevels(level, parent, node);
+    //        //Add null value (+2) to say that both the parent and the child are present
+    //        definitionLevels.get(node).add(RowValuesUtil.getNullMask(level + 2) | level);
+    //        node.incrementCounter();
+    //    }
 }

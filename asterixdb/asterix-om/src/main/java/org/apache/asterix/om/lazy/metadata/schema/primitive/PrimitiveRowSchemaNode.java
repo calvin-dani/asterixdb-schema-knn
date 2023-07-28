@@ -35,7 +35,8 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     private final boolean primaryKey;
     private ArrayBackedValueStorage fieldName;
 
-    public PrimitiveRowSchemaNode(int columnIndex, ATypeTag typeTag, boolean primaryKey, ArrayBackedValueStorage fieldName) {
+    public PrimitiveRowSchemaNode(int columnIndex, ATypeTag typeTag, boolean primaryKey,
+            ArrayBackedValueStorage fieldName) {
         this.columnIndex = columnIndex;
         this.typeTag = typeTag;
         this.primaryKey = primaryKey;
@@ -86,7 +87,6 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     public ArrayBackedValueStorage getFieldName() {
         return fieldName;
     }
-
 
     @Override
     public final <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {

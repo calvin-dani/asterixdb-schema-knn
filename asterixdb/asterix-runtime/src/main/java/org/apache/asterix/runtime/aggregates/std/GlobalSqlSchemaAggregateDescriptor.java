@@ -33,11 +33,11 @@ public class GlobalSqlSchemaAggregateDescriptor extends AbstractAggregateFunctio
 
     private static final long serialVersionUID = 1L;
 
-    public static final IFunctionDescriptorFactory FACTORY = GlobalSqlSchemaAggregateDescriptor::new;
+    public static final IFunctionDescriptorFactory FACTORY = AbstractAggregateFunctionDynamicDescriptor.createFactory(GlobalSqlSchemaAggregateDescriptor::new);
 
     @Override
-    public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.GLOBAL_SQL_AVG;
+        public FunctionIdentifier getIdentifier() {
+        return BuiltinFunctions.GLOBAL_SQL_SCHEMA;
     }
 
     @Override

@@ -48,6 +48,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final List<AbstractRowSchemaNode> children;
 
     private ArrayBackedValueStorage fieldName;
+
     public ObjectRowSchemaNode(ArrayBackedValueStorage fieldName) {
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
         children = new ArrayList<>();
@@ -81,7 +82,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         AbstractRowSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
         ArrayBackedValueStorage fieldNameProp = new ArrayBackedValueStorage(fieldName.getLength());
         fieldNameProp.append(fieldName);
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag,fieldNameProp);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag, fieldNameProp);
         if (currentChild == null) {
             children.add(childIndex, newChild);
             fieldNameIndexToChildIndexMap.put(fieldNameIndex, childIndex);
