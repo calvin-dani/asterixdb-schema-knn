@@ -30,7 +30,8 @@ import java.util.concurrent.ExecutorService;
 
 import org.apache.asterix.active.ActiveManager;
 import org.apache.asterix.app.result.ResultReader;
-import org.apache.asterix.cloud.CloudIOManager;
+import org.apache.asterix.cloud.CloudManagerProvider;
+import org.apache.asterix.cloud.LocalPartitionBootstrapper;
 import org.apache.asterix.common.api.IConfigValidator;
 import org.apache.asterix.common.api.IConfigValidatorFactory;
 import org.apache.asterix.common.api.ICoordinationService;
@@ -40,8 +41,10 @@ import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.api.IPropertiesFactory;
 import org.apache.asterix.common.api.IReceptionist;
 import org.apache.asterix.common.api.IReceptionistFactory;
+import org.apache.asterix.common.cloud.IPartitionBootstrapper;
 import org.apache.asterix.common.config.ActiveProperties;
 import org.apache.asterix.common.config.BuildProperties;
+import org.apache.asterix.common.config.CloudProperties;
 import org.apache.asterix.common.config.CompilerProperties;
 import org.apache.asterix.common.config.ExternalProperties;
 import org.apache.asterix.common.config.MessagingProperties;
@@ -94,7 +97,6 @@ import org.apache.hyracks.api.result.IResultSet;
 import org.apache.hyracks.client.result.ResultSet;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.control.nc.NodeControllerService;
-import org.apache.hyracks.control.nc.io.IOManager;
 import org.apache.hyracks.ipc.impl.HyracksConnection;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
@@ -164,6 +166,8 @@ public class NCAppRuntimeContext implements INcApplicationContext {
     private final ICacheManager cacheManager;
     private IConfigValidator configValidator;
     private IDiskWriteRateLimiterProvider diskWriteRateLimiterProvider;
+    private final CloudProperties cloudProperties;
+    private IPartitionBootstrapper partitionBootstrapper;
 
     public NCAppRuntimeContext(INCServiceContext ncServiceContext, NCExtensionManager extensionManager,
             IPropertiesFactory propertiesFactory) {
@@ -178,6 +182,7 @@ public class NCAppRuntimeContext implements INcApplicationContext {
         replicationProperties = propertiesFactory.newReplicationProperties();
         messagingProperties = propertiesFactory.newMessagingProperties();
         nodeProperties = propertiesFactory.newNodeProperties();
+        cloudProperties = propertiesFactory.newCloudProperties();
         ncExtensionManager = extensionManager;
         componentProvider = new StorageComponentProvider();
         resourceIdFactory = new GlobalResourceIdFactoryProvider(ncServiceContext).createResourceIdFactory();
@@ -191,9 +196,11 @@ public class NCAppRuntimeContext implements INcApplicationContext {
             boolean initialRun) throws IOException {
         ioManager = getServiceContext().getIoManager();
         if (isCloudDeployment()) {
-            persistenceIOManager = new CloudIOManager((IOManager) ioManager);
+            persistenceIOManager = CloudManagerProvider.createIOManager(cloudProperties, ioManager);
+            partitionBootstrapper = CloudManagerProvider.getCloudPartitionBootstrapper(persistenceIOManager);
         } else {
             persistenceIOManager = ioManager;
+            partitionBootstrapper = new LocalPartitionBootstrapper(ioManager);
         }
         int ioQueueLen = getServiceContext().getAppConfig().getInt(NCConfig.Option.IO_QUEUE_SIZE);
         threadExecutor =
@@ -660,5 +667,15 @@ public class NCAppRuntimeContext implements INcApplicationContext {
     @Override
     public boolean isCloudDeployment() {
         return ncServiceContext.getAppConfig().getBoolean(CLOUD_DEPLOYMENT);
+    }
+
+    @Override
+    public CloudProperties getCloudProperties() {
+        return cloudProperties;
+    }
+
+    @Override
+    public IPartitionBootstrapper getPartitionBootstrapper() {
+        return partitionBootstrapper;
     }
 }

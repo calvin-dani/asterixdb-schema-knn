@@ -214,8 +214,8 @@ public class APIFramework {
         ICcApplicationContext ccAppContext = metadataProvider.getApplicationContext();
         CompilerProperties compilerProperties = ccAppContext.getCompilerProperties();
         Map<String, Object> querySpecificConfig = validateConfig(metadataProvider.getConfig(), sourceLoc);
-        final PhysicalOptimizationConfig physOptConf =
-                OptimizationConfUtil.createPhysicalOptimizationConf(compilerProperties, querySpecificConfig, sourceLoc);
+        final PhysicalOptimizationConfig physOptConf = OptimizationConfUtil.createPhysicalOptimizationConf(
+                compilerProperties, querySpecificConfig, configurableParameterNames, sourceLoc);
         boolean cboMode = physOptConf.getCBOMode() || physOptConf.getCBOTestMode();
         HeuristicCompilerFactoryBuilder builder =
                 new HeuristicCompilerFactoryBuilder(OptimizationContextFactory.INSTANCE);
@@ -554,7 +554,7 @@ public class APIFramework {
 
     public static AlgebricksAbsolutePartitionConstraint getJobLocations(JobSpecification spec,
             INodeJobTracker jobTracker, AlgebricksAbsolutePartitionConstraint clusterLocations) {
-        final Set<String> jobParticipatingNodes = jobTracker.getJobParticipatingNodes(spec);
+        final Set<String> jobParticipatingNodes = jobTracker.getJobParticipatingNodes(spec, null);
         return new AlgebricksAbsolutePartitionConstraint(Arrays.stream(clusterLocations.getLocations())
                 .filter(jobParticipatingNodes::contains).toArray(String[]::new));
     }

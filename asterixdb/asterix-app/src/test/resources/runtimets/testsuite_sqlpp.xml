@@ -1617,6 +1617,11 @@
         <output-dir compare="Text">min_max_arrays</output-dir>
       </compilation-unit>
     </test-case>
+    <test-case FilePath="aggregate">
+      <compilation-unit name="non-pure-function">
+        <output-dir compare="Text">non-pure-function</output-dir>
+      </compilation-unit>
+    </test-case>
   </test-group>
   <test-group name="aggregate-sql">
     <test-case FilePath="aggregate-sql">
@@ -16122,6 +16127,21 @@
       </compilation-unit>
     </test-case>
     <test-case FilePath="column">
+      <compilation-unit name="delete/003">
+        <output-dir compare="Text">delete/003</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="column">
+      <compilation-unit name="delete/004">
+        <output-dir compare="Text">delete/004</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="column">
+      <compilation-unit name="delete/005">
+        <output-dir compare="Text">delete/005</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="column">
       <compilation-unit name="meta/meta_after_gby">
         <output-dir compare="Text">meta/meta_after_gby</output-dir>
       </compilation-unit>
@@ -16305,6 +16325,30 @@
     <test-case FilePath="copy">
       <compilation-unit name="copy-1">
         <output-dir compare="Text">copy-1</output-dir>
+      </compilation-unit>
+    </test-case>
+  </test-group>
+  <test-group name="atomic-statements">
+    <test-case FilePath="atomic-statements">
+      <compilation-unit name="atomic-statements-1">
+        <output-dir compare="Clean-JSON">atomic-statements-1</output-dir>
+        <expected-error>HYR0033: Inserting duplicate keys into the primary storage</expected-error>
+        <source-location>false</source-location>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="atomic-statements">
+      <compilation-unit name="atomic-statements-2">
+        <output-dir compare="Clean-JSON">atomic-statements-2</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="atomic-statements">
+      <compilation-unit name="atomic-statements-3">
+        <output-dir compare="Clean-JSON">atomic-statements-3</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="atomic-statements">
+      <compilation-unit name="atomic-statements-4">
+        <output-dir compare="Clean-JSON">atomic-statements-4</output-dir>
       </compilation-unit>
     </test-case>
   </test-group>

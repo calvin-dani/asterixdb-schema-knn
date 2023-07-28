@@ -35,8 +35,10 @@ import org.apache.asterix.common.api.IReceptionistFactory;
 import org.apache.asterix.common.api.IRequestTracker;
 import org.apache.asterix.common.cluster.IClusterStateManager;
 import org.apache.asterix.common.cluster.IGlobalRecoveryManager;
+import org.apache.asterix.common.cluster.IGlobalTxManager;
 import org.apache.asterix.common.config.ActiveProperties;
 import org.apache.asterix.common.config.BuildProperties;
+import org.apache.asterix.common.config.CloudProperties;
 import org.apache.asterix.common.config.CompilerProperties;
 import org.apache.asterix.common.config.ExtensionProperties;
 import org.apache.asterix.common.config.ExternalProperties;
@@ -73,6 +75,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IJobLifecycleListener;
 import org.apache.hyracks.api.result.IResultSet;
 import org.apache.hyracks.client.result.ResultSet;
+import org.apache.hyracks.control.nc.io.IOManager;
 import org.apache.hyracks.ipc.impl.HyracksConnection;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.util.NetworkUtil;
@@ -99,6 +102,7 @@ public class CcApplicationContext implements ICcApplicationContext {
     private ExtensionProperties extensionProperties;
     private MessagingProperties messagingProperties;
     private NodeProperties nodeProperties;
+    private final CloudProperties cloudProperties;
     private Supplier<IMetadataBootstrap> metadataBootstrapSupplier;
     private volatile HyracksConnection hcc;
     private volatile ResultSet resultSet;
@@ -117,6 +121,8 @@ public class CcApplicationContext implements ICcApplicationContext {
     private final IAdapterFactoryService adapterFactoryService;
     private final ReentrantReadWriteLock compilationLock = new ReentrantReadWriteLock(true);
     private final IDataPartitioningProvider dataPartitioningProvider;
+    private final IGlobalTxManager globalTxManager;
+    private final IOManager ioManager;
 
     public CcApplicationContext(ICCServiceContext ccServiceCtx, HyracksConnection hcc,
             Supplier<IMetadataBootstrap> metadataBootstrapSupplier, IGlobalRecoveryManager globalRecoveryManager,
@@ -124,7 +130,8 @@ public class CcApplicationContext implements ICcApplicationContext {
             IStorageComponentProvider storageComponentProvider, IMetadataLockManager mdLockManager,
             IMetadataLockUtil mdLockUtil, IReceptionistFactory receptionistFactory,
             IConfigValidatorFactory configValidatorFactory, Object extensionManager,
-            IAdapterFactoryService adapterFactoryService) throws AlgebricksException, IOException {
+            IAdapterFactoryService adapterFactoryService, IGlobalTxManager globalTxManager, IOManager ioManager,
+            CloudProperties cloudProperties) throws AlgebricksException, IOException {
         this.ccServiceCtx = ccServiceCtx;
         this.hcc = hcc;
         this.activeLifeCycleListener = activeLifeCycleListener;
@@ -140,6 +147,7 @@ public class CcApplicationContext implements ICcApplicationContext {
         activeProperties = new ActiveProperties(propertiesAccessor);
         extensionProperties = new ExtensionProperties(propertiesAccessor);
         replicationProperties = new ReplicationProperties(propertiesAccessor);
+        this.cloudProperties = cloudProperties;
         this.ftStrategy = ftStrategy;
         this.buildProperties = new BuildProperties(propertiesAccessor);
         this.messagingProperties = new MessagingProperties(propertiesAccessor);
@@ -160,6 +168,8 @@ public class CcApplicationContext implements ICcApplicationContext {
         configValidator = configValidatorFactory.create();
         this.adapterFactoryService = adapterFactoryService;
         dataPartitioningProvider = DataPartitioningProvider.create(this);
+        this.globalTxManager = globalTxManager;
+        this.ioManager = ioManager;
     }
 
     @Override
@@ -372,5 +382,20 @@ public class CcApplicationContext implements ICcApplicationContext {
     @Override
     public boolean isCloudDeployment() {
         return ccServiceCtx.getAppConfig().getBoolean(CLOUD_DEPLOYMENT);
+    }
+
+    @Override
+    public CloudProperties getCloudProperties() {
+        return cloudProperties;
+    }
+
+    @Override
+    public IGlobalTxManager getGlobalTxManager() {
+        return globalTxManager;
+    }
+
+    @Override
+    public IOManager getIoManager() {
+        return ioManager;
     }
 }

@@ -24,10 +24,14 @@ import java.nio.ByteBuffer;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.asterix.common.api.INcApplicationContext;
+import org.apache.asterix.common.context.PrimaryIndexOperationTracker;
 import org.apache.asterix.common.dataflow.LSMIndexUtil;
 import org.apache.asterix.common.exceptions.ACIDException;
+import org.apache.asterix.common.messaging.AtomicJobPreparedMessage;
 import org.apache.asterix.common.transactions.ILogMarkerCallback;
 import org.apache.asterix.common.transactions.PrimaryIndexLogMarkerCallback;
 import org.apache.asterix.om.base.AInt8;
@@ -47,6 +51,8 @@ import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.api.util.JavaSerializationUtils;
+import org.apache.hyracks.control.nc.NodeControllerService;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
@@ -68,14 +74,18 @@ import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.IFrameOperationCallback;
 import org.apache.hyracks.storage.am.lsm.common.api.IFrameOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.IFrameTupleProcessor;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentId;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LSMIndexInsertUpdateDeleteOperatorNodePushable;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
+import org.apache.hyracks.storage.am.lsm.common.impls.FlushOperation;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IModificationOperationCallback;
+import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.projection.ITupleProjector;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
@@ -119,7 +129,7 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
     private final boolean hasMeta;
     private final int filterFieldIndex;
     private final int metaFieldIndex;
-    protected final LockThenSearchOperationCallback[] searchCallbacks;
+    protected final ISearchOperationCallback[] searchCallbacks;
     protected final IFrameOperationCallback[] frameOpCallbacks;
     private final IFrameOperationCallbackFactory frameOpCallbackFactory;
     private final ISearchOperationCallbackFactory searchCallbackFactory;
@@ -142,7 +152,7 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
                 modCallbackFactory, null, tuplePartitionerFactory, partitionsMap);
         this.hasSecondaries = hasSecondaries;
         this.frameOpCallbacks = new IFrameOperationCallback[partitions.length];
-        this.searchCallbacks = new LockThenSearchOperationCallback[partitions.length];
+        this.searchCallbacks = new ISearchOperationCallback[partitions.length];
         this.cursors = new IIndexCursor[partitions.length];
         this.processors = new IFrameTupleProcessor[partitions.length];
         this.key = new PermutingFrameTupleReference();
@@ -180,7 +190,7 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
         for (int i = 0; i < partitions.length; i++) {
             ILSMIndexAccessor lsmAccessor = (ILSMIndexAccessor) indexAccessors[i];
             IIndexCursor cursor = cursors[i];
-            LockThenSearchOperationCallback searchCallback = searchCallbacks[i];
+            ISearchOperationCallback searchCallback = searchCallbacks[i];
             IModificationOperationCallback modCallback = modCallbacks[i];
             IFrameOperationCallback frameOpCallback = frameOpCallbacks[i];
             processors[i] = new IFrameTupleProcessor() {
@@ -189,8 +199,7 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
                         throws HyracksDataException {
                     try {
                         tb.reset();
-                        AbstractIndexModificationOperationCallback abstractModCallback =
-                                (AbstractIndexModificationOperationCallback) modCallback;
+                        IModificationOperationCallback abstractModCallback = modCallback;
                         boolean recordWasInserted = false;
                         boolean recordWasDeleted = false;
                         boolean isDelete = isDeleteOperation(tuple, numOfPrimaryKeys);
@@ -223,11 +232,17 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
                         if (isDelete && prevTuple != null) {
                             // Only delete if it is a delete and not upsert
                             // And previous tuple with the same key was found
-                            abstractModCallback.setOp(Operation.DELETE);
+                            if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                                ((AbstractIndexModificationOperationCallback) abstractModCallback)
+                                        .setOp(Operation.DELETE);
+                            }
                             lsmAccessor.forceDelete(tuple);
                             recordWasDeleted = true;
                         } else if (!isDelete) {
-                            abstractModCallback.setOp(Operation.UPSERT);
+                            if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                                ((AbstractIndexModificationOperationCallback) abstractModCallback)
+                                        .setOp(Operation.UPSERT);
+                            }
                             lsmAccessor.forceUpsert(tuple);
                             recordWasInserted = true;
                         }
@@ -289,6 +304,9 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
                 IIndexDataflowHelper indexHelper = indexHelpers[i];
                 indexHelper.open();
                 indexes[i] = indexHelper.getIndexInstance();
+                if (((ILSMIndex) indexes[i]).isAtomic()) {
+                    ((PrimaryIndexOperationTracker) ((ILSMIndex) indexes[i]).getOperationTracker()).clear();
+                }
                 if (ctx.getSharedObject() != null && i == 0) {
                     PrimaryIndexLogMarkerCallback callback =
                             new PrimaryIndexLogMarkerCallback((AbstractLSMIndex) indexes[0]);
@@ -296,11 +314,12 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
                 }
                 modCallbacks[i] =
                         modOpCallbackFactory.createModificationOperationCallback(indexHelper.getResource(), ctx, this);
-                searchCallbacks[i] = (LockThenSearchOperationCallback) searchCallbackFactory
+                searchCallbacks[i] = searchCallbackFactory
                         .createSearchOperationCallback(indexHelper.getResource().getId(), ctx, this);
                 IIndexAccessParameters iap = new IndexAccessParameters(modCallbacks[i], searchCallbacks[i]);
                 iap.getParameters().put(HyracksConstants.TUPLE_PROJECTOR, tupleProjector);
                 indexAccessors[i] = indexes[i].createAccessor(iap);
+                setAtomicOpContextIfAtomic(indexes[i], indexAccessors[i]);
                 cursors[i] = ((LSMTreeIndexAccessor) indexAccessors[i]).createSearchCursor(false);
                 LSMIndexUtil.checkAndSetFirstLSN((AbstractLSMIndex) indexes[i],
                         appCtx.getTransactionSubsystem().getLogManager());
@@ -353,7 +372,7 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
     }
 
     protected void writeOutput(int tupleIndex, boolean recordWasInserted, boolean recordWasDeleted,
-            LockThenSearchOperationCallback searchCallback) throws IOException {
+            ISearchOperationCallback searchCallback) throws IOException {
         if (recordWasInserted || recordWasDeleted) {
             frameTuple.reset(accessor, tupleIndex);
             for (int i = 0; i < frameTuple.getFieldCount(); i++) {
@@ -363,7 +382,9 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
             FrameUtils.appendToWriter(writer, appender, tb.getFieldEndOffsets(), tb.getByteArray(), 0, tb.getSize());
         } else {
             try {
-                searchCallback.release();
+                if (searchCallback instanceof LockThenSearchOperationCallback) {
+                    ((LockThenSearchOperationCallback) searchCallback).release();
+                }
             } catch (ACIDException e) {
                 throw HyracksDataException.create(e);
             }
@@ -506,6 +527,12 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
         failure = CleanupUtils.destroy(failure, cursors);
         failure = CleanupUtils.close(writer, failure);
         failure = CleanupUtils.close(indexHelpers, failure);
+        if (failure == null && !failed) {
+            commitAtomicUpsert();
+        } else {
+            abortAtomicUpsert();
+        }
+
         if (failure != null) {
             throw HyracksDataException.create(failure);
         }
@@ -531,11 +558,53 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
 
     @Override
     public void fail() throws HyracksDataException {
+        failed = true;
         writer.fail();
     }
 
     @Override
     public void flush() throws HyracksDataException {
         // No op since nextFrame flushes by default
+    }
+
+    // TODO: Refactor and remove duplicated code
+    private void commitAtomicUpsert() throws HyracksDataException {
+        final Map<String, ILSMComponentId> componentIdMap = new HashMap<>();
+        int datasetID = -1;
+        boolean atomic = false;
+        for (IIndex index : indexes) {
+            if (((ILSMIndex) index).isAtomic()) {
+                PrimaryIndexOperationTracker opTracker =
+                        ((PrimaryIndexOperationTracker) ((ILSMIndex) index).getOperationTracker());
+                opTracker.finishAllFlush();
+                for (Map.Entry<String, FlushOperation> entry : opTracker.getLastFlushOperation().entrySet()) {
+                    componentIdMap.put(entry.getKey(), entry.getValue().getFlushingComponent().getId());
+                }
+                datasetID = opTracker.getDatasetInfo().getDatasetID();
+                atomic = true;
+            }
+        }
+
+        if (atomic) {
+            AtomicJobPreparedMessage message = new AtomicJobPreparedMessage(ctx.getJobletContext().getJobId(),
+                    ctx.getJobletContext().getServiceContext().getNodeId(), datasetID, componentIdMap);
+            try {
+                ((NodeControllerService) ctx.getJobletContext().getServiceContext().getControllerService())
+                        .sendRealTimeApplicationMessageToCC(ctx.getJobletContext().getJobId().getCcId(),
+                                JavaSerializationUtils.serialize(message), null);
+            } catch (Exception e) {
+                throw new ACIDException(e);
+            }
+        }
+    }
+
+    private void abortAtomicUpsert() throws HyracksDataException {
+        for (IIndex index : indexes) {
+            if (((ILSMIndex) index).isAtomic()) {
+                PrimaryIndexOperationTracker opTracker =
+                        ((PrimaryIndexOperationTracker) ((ILSMIndex) index).getOperationTracker());
+                opTracker.abort();
+            }
+        }
     }
 }

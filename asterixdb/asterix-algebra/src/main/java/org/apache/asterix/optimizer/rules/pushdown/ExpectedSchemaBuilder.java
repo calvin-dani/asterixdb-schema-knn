@@ -37,6 +37,7 @@ import org.apache.asterix.optimizer.rules.pushdown.schema.IExpectedSchemaNode;
 import org.apache.asterix.optimizer.rules.pushdown.schema.ObjectExpectedSchemaNode;
 import org.apache.asterix.optimizer.rules.pushdown.schema.RootExpectedSchemaNode;
 import org.apache.asterix.optimizer.rules.pushdown.schema.UnionExpectedSchemaNode;
+import org.apache.asterix.optimizer.rules.pushdown.visitor.ExpectedSchemaNodeToIATypeTranslatorVisitor;
 import org.apache.asterix.runtime.projection.DataProjectionFiltrationInfo;
 import org.apache.asterix.runtime.projection.FunctionCallInformation;
 import org.apache.commons.lang3.mutable.Mutable;
@@ -70,7 +71,8 @@ public class ExpectedSchemaBuilder {
     }
 
     public DataProjectionFiltrationInfo createProjectionInfo(LogicalVariable recordVariable) {
-        return createProjectionInfo(recordVariable, Collections.emptyMap(), Collections.emptyMap(), null, null);
+        return createProjectionInfo(recordVariable, Collections.emptyMap(), Collections.emptyMap(), null,
+                Collections.emptyMap());
     }
 
     public DataProjectionFiltrationInfo createProjectionInfo(LogicalVariable recordVariable,

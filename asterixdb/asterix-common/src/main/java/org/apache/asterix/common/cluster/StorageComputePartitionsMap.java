@@ -21,6 +21,8 @@ package org.apache.asterix.common.cluster;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,7 +30,7 @@ import java.util.stream.Collectors;
 
 public class StorageComputePartitionsMap {
 
-    private final Map<Integer, ComputePartition> stoToComputeLocation = new HashMap<>();
+    private final Map<Integer, ComputePartition> storageComputeMap = new HashMap<>();
     private final int storagePartitionsCount;
 
     public StorageComputePartitionsMap(int storagePartitionsCount) {
@@ -36,11 +38,11 @@ public class StorageComputePartitionsMap {
     }
 
     public void addStoragePartition(int stoPart, ComputePartition compute) {
-        stoToComputeLocation.put(stoPart, compute);
+        storageComputeMap.put(stoPart, compute);
     }
 
     public int[][] getComputeToStorageMap(boolean metadataDataset) {
-        Map<Integer, List<Integer>> computeToStoragePartitions = new HashMap<>();
+        Map<Integer, List<Integer>> computeToStoragePartitions = new LinkedHashMap<>();
         if (metadataDataset) {
             final int computePartitionIdForMetadata = 0;
             computeToStoragePartitions.put(computePartitionIdForMetadata,
@@ -54,17 +56,43 @@ public class StorageComputePartitionsMap {
                 storagePartitions.add(i);
             }
         }
-        int[][] computerToStoArray = new int[computeToStoragePartitions.size()][];
+        int[][] computeToStoArray = new int[computeToStoragePartitions.size()][];
         int partitionIdx = 0;
-        for (Map.Entry<Integer, List<Integer>> integerListEntry : computeToStoragePartitions.entrySet()) {
-            computerToStoArray[partitionIdx] = integerListEntry.getValue().stream().mapToInt(i -> i).toArray();
+        for (Map.Entry<Integer, List<Integer>> computeToStoPartitions : computeToStoragePartitions.entrySet()) {
+            computeToStoArray[partitionIdx] = computeToStoPartitions.getValue().stream().mapToInt(i -> i).toArray();
             partitionIdx++;
         }
-        return computerToStoArray;
+        return computeToStoArray;
+    }
+
+    public int getStoragePartitionsCount() {
+        return storagePartitionsCount;
     }
 
     public ComputePartition getComputePartition(int storagePartition) {
-        return stoToComputeLocation.get(storagePartition);
+        return storageComputeMap.get(storagePartition);
+    }
+
+    public Set<String> getComputeNodes() {
+        return storageComputeMap.values().stream().map(ComputePartition::getNodeId).collect(Collectors.toSet());
+    }
+
+    /**
+     * For a set of compute partitions, return a set of their corresponding storage partitions
+     *
+     * @param computePartitions the current active compute partitions
+     * @return computePartitions's corresponding storage partitions
+     */
+    public Set<Integer> getStoragePartitions(Set<Integer> computePartitions) {
+        Set<Integer> storagePartitions = new HashSet<>();
+        for (Map.Entry<Integer, ComputePartition> entry : storageComputeMap.entrySet()) {
+            ComputePartition computePartition = entry.getValue();
+            if (computePartitions.contains(computePartition.getId())) {
+                storagePartitions.add(entry.getKey());
+            }
+        }
+
+        return storagePartitions;
     }
 
     public static StorageComputePartitionsMap computePartitionsMap(IClusterStateManager clusterStateManager) {
@@ -96,9 +124,5 @@ public class StorageComputePartitionsMap {
             lastComputePartition++;
         }
         return newMap;
-    }
-
-    public Set<String> getComputeNodes() {
-        return stoToComputeLocation.values().stream().map(ComputePartition::getNodeId).collect(Collectors.toSet());
     }
 }
