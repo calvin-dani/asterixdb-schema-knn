@@ -2958,17 +2958,17 @@ public class BuiltinFunctions {
         addGlobalAgg(SQL_SCHEMA, GLOBAL_SQL_SCHEMA);
         addScalarAgg(SQL_SCHEMA, SCALAR_SQL_SCHEMA);
 
-//        addSerialAgg(SQL_SCHEMA, SERIAL_SQL_SCHEMA);
-//        addSerialAgg(LOCAL_SQL_SCHEMA, SERIAL_LOCAL_SQL_SCHEMA);
-//        addSerialAgg(GLOBAL_SQL_SCHEMA, SERIAL_GLOBAL_SQL_SCHEMA);
-//        addAgg(SERIAL_SQL_SCHEMA);
-//        addAgg(SERIAL_LOCAL_SQL_SCHEMA);
-//        addAgg(SERIAL_GLOBAL_SQL_SCHEMA);
-//        addLocalAgg(SERIAL_SQL_SCHEMA, SERIAL_LOCAL_SQL_SCHEMA);
-//        addIntermediateAgg(SERIAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
-//        addIntermediateAgg(SERIAL_LOCAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
-//        addIntermediateAgg(SERIAL_GLOBAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
-//        addGlobalAgg(SERIAL_SQL_SCHEMA, SERIAL_GLOBAL_SQL_SCHEMA);
+        //        addSerialAgg(SQL_SCHEMA, SERIAL_SQL_SCHEMA);
+        //        addSerialAgg(LOCAL_SQL_SCHEMA, SERIAL_LOCAL_SQL_SCHEMA);
+        //        addSerialAgg(GLOBAL_SQL_SCHEMA, SERIAL_GLOBAL_SQL_SCHEMA);
+        //        addAgg(SERIAL_SQL_SCHEMA);
+        //        addAgg(SERIAL_LOCAL_SQL_SCHEMA);
+        //        addAgg(SERIAL_GLOBAL_SQL_SCHEMA);
+        //        addLocalAgg(SERIAL_SQL_SCHEMA, SERIAL_LOCAL_SQL_SCHEMA);
+        //        addIntermediateAgg(SERIAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
+        //        addIntermediateAgg(SERIAL_LOCAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
+        //        addIntermediateAgg(SERIAL_GLOBAL_SQL_SCHEMA, SERIAL_INTERMEDIATE_SQL_SCHEMA);
+        //        addGlobalAgg(SERIAL_SQL_SCHEMA, SERIAL_GLOBAL_SQL_SCHEMA);
 
         // SQL STDDEV_SAMP
 

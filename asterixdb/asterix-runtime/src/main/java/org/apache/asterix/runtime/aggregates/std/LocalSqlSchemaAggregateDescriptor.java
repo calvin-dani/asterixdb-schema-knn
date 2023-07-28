@@ -33,7 +33,8 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 public class LocalSqlSchemaAggregateDescriptor extends AbstractAggregateFunctionDynamicDescriptor {
 
     private static final long serialVersionUID = 1L;
-    public static final IFunctionDescriptorFactory FACTORY = AbstractAggregateFunctionDynamicDescriptor.createFactory(LocalSqlSchemaAggregateDescriptor::new);
+    public static final IFunctionDescriptorFactory FACTORY =
+            AbstractAggregateFunctionDynamicDescriptor.createFactory(LocalSqlSchemaAggregateDescriptor::new);
     IAType aggFieldState;
 
     @Override
