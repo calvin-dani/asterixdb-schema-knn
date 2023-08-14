@@ -23,14 +23,15 @@ import java.io.IOException;
 import java.util.Map;
 
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
+import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.data.std.api.IValueReference;
 
 public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
-    ArrayBackedValueStorage fieldName;
+    private IValueReference fieldName;
 
-    public ArrayRowSchemaNode(ArrayBackedValueStorage fieldName) {
+    public ArrayRowSchemaNode(IValueReference fieldName) {
         super();
         this.fieldName = fieldName;
     }
@@ -43,5 +44,20 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     @Override
     public ATypeTag getTypeTag() {
         return ATypeTag.ARRAY;
+    }
+
+    @Override
+    public IValueReference getFieldName() {
+        return fieldName;
+    }
+
+    @Override
+    public AbstractRowSchemaNode getChild(int i) {
+        return null;
+    }
+
+    @Override
+    public int getNumberOfChildren() {
+        return 0;
     }
 }

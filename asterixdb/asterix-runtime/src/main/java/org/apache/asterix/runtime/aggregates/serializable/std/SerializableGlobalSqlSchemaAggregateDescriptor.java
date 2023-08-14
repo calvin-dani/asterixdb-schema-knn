@@ -37,7 +37,7 @@ public class SerializableGlobalSqlSchemaAggregateDescriptor
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.SERIAL_GLOBAL_SQL_AVG;
+        return BuiltinFunctions.SERIAL_GLOBAL_SQL_SCHEMA;
     }
 
     @Override

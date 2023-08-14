@@ -19,6 +19,9 @@
  */
 package org.apache.asterix.runtime.aggregates.std;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInput;
+import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -33,16 +36,15 @@ import org.apache.asterix.dataflow.data.nontagged.serde.ARecordSerializerDeseria
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
-import org.apache.asterix.om.base.ADouble;
-import org.apache.asterix.om.base.AInt64;
-import org.apache.asterix.om.base.AMutableDouble;
-import org.apache.asterix.om.base.AMutableInt64;
-import org.apache.asterix.om.base.ANull;
+import org.apache.asterix.om.base.*;
 import org.apache.asterix.om.exceptions.ExceptionUtil;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
+import org.apache.asterix.om.lazy.RowSchemaTransformer;
 import org.apache.asterix.om.lazy.RowTransformer;
 import org.apache.asterix.om.lazy.TypedRecordLazyVisitablePointable;
+import org.apache.asterix.om.lazy.metadata.RowFieldNamesDictionary;
+import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.ObjectRowSchemaNode;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -50,6 +52,7 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
+import org.apache.asterix.om.utils.UnsafeUtil;
 import org.apache.asterix.runtime.evaluators.common.AccessibleByteArrayEval;
 import org.apache.asterix.runtime.evaluators.common.ClosedRecordConstructorEvalFactory.ClosedRecordConstructorEval;
 import org.apache.asterix.runtime.exceptions.UnsupportedItemTypeException;
@@ -63,11 +66,10 @@ import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.ByteArrayAccessibleOutputStream;
-import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
-import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
@@ -103,9 +105,13 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
     private ClosedRecordConstructorEval recordEval;
 
     private RowTransformer transformer;
+    private RowSchemaTransformer schemaTransformer;
     RowMetadata rowMetaData;
     //    private int recordFieldId = 0;
 
+    @SuppressWarnings("unchecked")
+    private ISerializerDeserializer<AString> stringSerde =
+            SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ASTRING);
     @SuppressWarnings("unchecked")
     private ISerializerDeserializer<ADouble> doubleSerde =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
@@ -133,12 +139,14 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         aggType = ATypeTag.SYSTEM_NULL;
         sum = 0.0;
         count = 0;
+        timesCalled = 0;
         isWarned = false;
 
         // Schema
         Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
         rowMetaData = new RowMetadata(multiPageOpRef);
         transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
+        schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
 
         //TODO CALVIN_DANI ADD TYPED RECORD DESC
     }
@@ -158,34 +166,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         if (skipStep()) {
             return;
         }
-
-        //  Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-        //  IRowValuesWriterFactory factory = new RowValuesWriterFactory(multiPageOpRef);
-        //  RowMetadata rowMetaData = new RowMetadata(multiPageOpRef);
-        //  int recordFieldId = rowMetaData.getRecordFieldIndex();
-        //  RowTransformer transformer = new RowTransformer(rowMetaData,rowMetaData.getRoot());
-        FrameTupleReference FTR = (FrameTupleReference) tuple;
-        FrameTupleAccessor FTA = (FrameTupleAccessor) tuple.getFrameTupleAccessor();
-        //TODO CALVIN_DANI EXPERIMENTAL CODE STARTS HERE
-        //        ISerializerDeserializer[] fields = FTA.getRecordDescriptor().getFields();
-        //        ARecordType type = null;
-        //        int numPrintFields = Math.min(tuple.getFieldCount(), fields.length);
-        //
-        //        PrimaryKeyTupleReference pk = new PrimaryKeyTupleReference();
-        //        pk.reset(tuple.getFieldData(0), tuple.getFieldStart(0), tuple.getFieldLength(0));
-        ////
-        //        for (int i = 0; i < numPrintFields; i++) {
-        //            ByteArrayInputStream inStream =
-        //                    new ByteArrayInputStream(tuple.getFieldData(i), tuple.getFieldStart(i), tuple.getFieldLength(i));
-        //            DataInput dataIn = new DataInputStream(inStream);
-        //            Object o = fields[i].deserialize(dataIn);
-        //            type = ((ARecord) o).getType();
-        ////        }
-        //
-        //        ARecordVisitablePointable t = new ARecordVisitablePointable(type);
-        ////        inputVal = new ARre(type);
-        //TODO CALVIN_DANI EXPERIMENTAL CODE ENDS HERE
-        //        System.out.println(TupleUtils.printTuple(FTR,FTA.getRecordDescriptor().getFields()));
+        //print thread and thread id
         int recordFieldId = rowMetaData.getRecordFieldIndex();
         inputVal.set(tuple.getFieldData(recordFieldId), tuple.getFieldStart(recordFieldId),
                 tuple.getFieldLength(recordFieldId));
@@ -261,9 +242,18 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
 
     protected void finishPartialResults(IPointable result) throws HyracksDataException {
         resultStorage.reset();
+
         try {
-            // Double check that count 0 is accounted
-            if (aggType == ATypeTag.SYSTEM_NULL) {
+
+            if (rowMetaData != null) {
+//                System.out.println("schema at local written ");
+//                System.out.println("Thread: " + Thread.currentThread().getName() + " Thread ID: "
+//                        + Thread.currentThread().getId());
+                IValueReference serSchema = rowMetaData.serializeColumnsMetadata();
+//                System.out.println("schema at local written end ");
+                result.set(serSchema);
+            } // Double check that count 0 is accounted
+            else if (aggType == ATypeTag.SYSTEM_NULL) {
                 resultStorage.getDataOutput().writeByte(ATypeTag.SERIALIZED_SYSTEM_NULL_TYPE_TAG);
                 result.set(resultStorage);
             } else if (aggType == ATypeTag.NULL) {
@@ -289,50 +279,82 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
             return;
         }
         eval.evaluate(tuple, inputVal);
-        byte[] serBytes = inputVal.getByteArray();
-        int offset = inputVal.getStartOffset();
-        ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(serBytes[offset]);
-        switch (typeTag) {
-            case NULL: {
-                processNull();
-                break;
+
+        byte[] serBytes = tuple.getFrameTupleAccessor().getBuffer().array();
+
+        int offset = 9; // TO CHANGE
+        //        int length = 732;
+
+        int fieldNamesStart = offset + UnsafeUtil.getInt(serBytes, offset + 4);
+        int metaRootStart = UnsafeUtil.getInt(serBytes, offset + 12);
+        int length = UnsafeUtil.getInt(serBytes, offset + 20);
+        int metaRootSize = metaRootStart < 0 ? 0 : UnsafeUtil.getInt(serBytes, offset + 16) - metaRootStart;
+        DataInput input = new DataInputStream(new ByteArrayInputStream(serBytes, fieldNamesStart, length));
+
+        try {
+            //FieldNames
+            RowFieldNamesDictionary fieldNamesDictionary = RowFieldNamesDictionary.deserialize(input);
+            //Schema
+            ObjectRowSchemaNode root = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input, null);
+            //            transformer.transform(root);
+            String res = rowMetaData.printRootSchema(root, fieldNamesDictionary);
+            schemaTransformer.transform(root);
+//            System.out.println(timesCalled + " Schema at GlobalAgg: ");
+//            System.out.println(
+//                    "Thread: " + Thread.currentThread().getName() + " Thread ID: " + Thread.currentThread().getId());
+
+            ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(serBytes[offset]);
+//            ATypeTag typeTag = ATypeTag.OBJECT;
+            switch (typeTag) {
+                case NULL: {
+                    processNull();
+                    break;
+                }
+                case SYSTEM_NULL: {
+                    // Ignore and return.
+                    break;
+                }
+                case OBJECT: {
+                    // Expected.
+                    aggType = ATypeTag.DOUBLE;
+                    int nullBitmapSize = 0;
+                    int offset1 = ARecordSerializerDeserializer.getFieldOffsetById(serBytes, offset, SUM_FIELD_ID,
+                            nullBitmapSize, false);
+                    sum += ADoubleSerializerDeserializer.getDouble(serBytes, offset1);
+                    int offset2 = ARecordSerializerDeserializer.getFieldOffsetById(serBytes, offset, COUNT_FIELD_ID,
+                            nullBitmapSize, false);
+                    count += AInt64SerializerDeserializer.getLong(serBytes, offset2);
+                    break;
+                }
+                default: {
+                    throw new UnsupportedItemTypeException(sourceLoc, "intermediate/global-Avg", serBytes[offset]);
+                }
             }
-            case SYSTEM_NULL: {
-                // Ignore and return.
-                break;
-            }
-            case OBJECT: {
-                // Expected.
-                aggType = ATypeTag.DOUBLE;
-                int nullBitmapSize = 0;
-                int offset1 = ARecordSerializerDeserializer.getFieldOffsetById(serBytes, offset, SUM_FIELD_ID,
-                        nullBitmapSize, false);
-                sum += ADoubleSerializerDeserializer.getDouble(serBytes, offset1);
-                int offset2 = ARecordSerializerDeserializer.getFieldOffsetById(serBytes, offset, COUNT_FIELD_ID,
-                        nullBitmapSize, false);
-                count += AInt64SerializerDeserializer.getLong(serBytes, offset2);
-                break;
-            }
-            default: {
-                throw new UnsupportedItemTypeException(sourceLoc, "intermediate/global-Avg", serBytes[offset]);
-            }
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
         }
+
     }
 
     protected void finishFinalResults(IPointable result) throws HyracksDataException {
         resultStorage.reset();
         try {
-            ObjectRowSchemaNode root = transformer.getRoot();
+            ObjectRowSchemaNode root = schemaTransformer.getRoot();
+            String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
             if (root == null) {
                 throw new HyracksDataException("Cannot compute Schema on empty root.");
             }
-
-            if (count == 0 || aggType == ATypeTag.NULL) {
-                nullSerde.serialize(ANull.NULL, resultStorage.getDataOutput());
-            } else {
-                aDouble.setValue(sum / count);
-                doubleSerde.serialize(aDouble, resultStorage.getDataOutput());
+            else{
+                stringSerde.serialize(new AString(res) , resultStorage.getDataOutput());
             }
+
+//            if (count == 0 || aggType == ATypeTag.NULL) {
+//                nullSerde.serialize(ANull.NULL, resultStorage.getDataOutput());
+//            }
+//            } else {
+//                aString.setValue();
+//                stringSerde.serialize(aString, resultStorage.getDataOutput());
+//            }
         } catch (IOException e) {
             throw HyracksDataException.create(e);
         }

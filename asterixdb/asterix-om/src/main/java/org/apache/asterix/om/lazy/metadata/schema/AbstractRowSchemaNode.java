@@ -32,11 +32,14 @@ import org.apache.asterix.om.lazy.metadata.schema.primitive.PrimitiveRowSchemaNo
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 
 public abstract class AbstractRowSchemaNode {
     private int counter;
 
     public abstract ATypeTag getTypeTag();
+
+    public abstract IValueReference getFieldName();
 
     public abstract boolean isNested();
 
@@ -86,4 +89,8 @@ public abstract class AbstractRowSchemaNode {
                 throw new UnsupportedEncodingException(typeTag + " is not supported");
         }
     }
+
+    public abstract AbstractRowSchemaNode getChild(int i);
+
+    public abstract int getNumberOfChildren();
 }

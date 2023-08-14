@@ -165,7 +165,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     public IValueReference serializeColumnsMetadata() throws HyracksDataException {
         if (changed) {
             try {
-                //                serializeChanges();
+                serializeChanges();
                 logSchema(root, metaRoot, fieldNamesDictionary);
                 changed = false;
             } catch (IOException e) {
@@ -175,15 +175,21 @@ public final class RowMetadata extends AbstractRowMetadata {
         return serializedMetadata;
     }
 
+    public String printRootSchema(ObjectRowSchemaNode rot, RowFieldNamesDictionary fieldNmDic)
+            throws HyracksDataException {
+        return logSchema(rot, metaRoot, fieldNmDic);
+    }
+
     private void serializeChanges() throws IOException {
         serializedMetadata.reset();
         DataOutput output = serializedMetadata.getDataOutput();
 
-        int writersOffsetPointer = reserveInt(output);
-        int fieldNamesOffsetPointer = reserveInt(output);
-        int schemaOffsetPointer = reserveInt(output);
+        int writersOffsetPointer = reserveInt(output);//0
+        int fieldNamesOffsetPointer = reserveInt(output);//4
+        int schemaOffsetPointer = reserveInt(output);//12
         int metaSchemaOffsetPointer = reserveInt(output);
         int pathInfoOffsetPointer = reserveInt(output);
+        int lengthDataOffsetPointer = reserveInt(output);
 
         //ColumnWriterInformation
         //        setOffset(writersOffsetPointer);
@@ -209,6 +215,8 @@ public final class RowMetadata extends AbstractRowMetadata {
         //Path info
         setOffset(pathInfoOffsetPointer);
         pathInfoSerializer.serialize(output, getNumberOfColumns());
+        // Length info
+        setOffset(lengthDataOffsetPointer);
     }
 
     private int reserveInt(DataOutput output) throws IOException {
@@ -222,51 +230,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         IntegerPointable.setInteger(serializedMetadata.getByteArray(), pointer, offset);
     }
 
-    //    public static RowMetadata create(ARecordType datasetType, ARecordType metaType, List<List<String>> primaryKeys,
-    //            List<Integer> keySourceIndicator, IRowValuesWriterFactory columnWriterFactory,
-    //            Mutable<IRowWriteMultiPageOp> multiPageOpRef, IValueReference serializedMetadata)
-    //            throws HyracksDataException {
-    //        boolean metaContainsKeys = metaType != null && keySourceIndicator.get(0) == 1;
-    //        try {
-    //            return createMutableMetadata(datasetType, metaType, primaryKeys, metaContainsKeys, columnWriterFactory,
-    //                    multiPageOpRef, serializedMetadata);
-    //        } catch (IOException e) {
-    //            throw HyracksDataException.create(e);
-    //        }
-    //    }
-
-    //    private static RowMetadata createMutableMetadata(ARecordType datasetType, ARecordType metaType,
-    //                                                     List<List<String>> primaryKeys, boolean metaContainsKeys, IRowValuesWriterFactory columnWriterFactory,
-    //                                                     Mutable<IRowWriteMultiPageOp> multiPageOpRef, IValueReference serializedMetadata) throws IOException {
-    //    private static RowMetadata createMutableMetadata(ARecordType datasetType, ARecordType metaType,
-    //            List<List<String>> primaryKeys, boolean metaContainsKeys,
-    //            Mutable<IRowWriteMultiPageOp> multiPageOpRef, IValueReference serializedMetadata) throws IOException {
-    //        DataInput input = new DataInputStream(new ByteArrayInputStream(serializedMetadata.getByteArray(),
-    //                serializedMetadata.getStartOffset(), serializedMetadata.getLength()));
-    //        //Skip offsets
-    //        input.skipBytes(OFFSETS_SIZE);
-    //
-    //        //ColumnWriter
-    //
-    //        //FieldNames
-    //        RowFieldNamesDictionary fieldNamesDictionary = RowFieldNamesDictionary.deserialize(input);
-    //
-    //        //Schema
-    //        Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels = new HashMap<>();
-    //        ObjectRowSchemaNode root = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input, definitionLevels);
-    //        ObjectRowSchemaNode metaRoot = null;
-    //        if (metaType != null) {
-    //            metaRoot = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input, definitionLevels);
-    //        }
-    //
-    //        ArrayBackedValueStorage schemaStorage = new ArrayBackedValueStorage(serializedMetadata.getLength());
-    //        schemaStorage.append(serializedMetadata);
-    //        logSchema(root, metaRoot, fieldNamesDictionary);
-    ////        return new RowMetadata(datasetType, metaType, primaryKeys, metaContainsKeys, columnWriterFactory,
-    ////                multiPageOpRef, writers, fieldNamesDictionary, root, metaRoot, definitionLevels, schemaStorage);
-    //        return new RowMetadata(datasetType, metaType, primaryKeys, metaContainsKeys,
-    //                multiPageOpRef, fieldNamesDictionary, root, metaRoot, definitionLevels, schemaStorage);
-    //    }
 
     @Override
     public void abort() throws HyracksDataException {
@@ -352,7 +315,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag,
-            ArrayBackedValueStorage fieldName) throws HyracksDataException {
+            IValueReference fieldName) throws HyracksDataException {
         AbstractRowSchemaNode currentChild = child;
         ATypeTag normalizedTypeTag = getNormalizedTypeTag(childTypeTag);
         if (currentChild == null || normalizedTypeTag != ATypeTag.MISSING && normalizedTypeTag != ATypeTag.NULL
@@ -361,6 +324,13 @@ public final class RowMetadata extends AbstractRowMetadata {
             currentChild = createChild(child, normalizedTypeTag, fieldName);
             //Flag that the schema has changed
             changed = true;
+        } else if (currentChild != null && currentChild.getTypeTag() == ATypeTag.UNION) {
+            //Check if the union type contains the required type
+            UnionRowSchemaNode unionChild = (UnionRowSchemaNode) child;
+            unionChild.putChild(createChild(normalizedTypeTag, fieldName));
+            //Flag that the schema has changed
+            changed = true;
+            //            currentChild = unionChild;
         }
         return currentChild;
     }
@@ -395,7 +365,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     public void exitNode(AbstractRowSchemaNode node) {
         if (node.isNested()) {
             //Add the nested node's level for all missing children (i.e., not entered for a record)
-            definitionLevels.get((AbstractRowSchemaNestedNode) node).add(level);
+            //            definitionLevels.get((AbstractRowSchemaNestedNode) node).add(level);
             if (node.isObjectOrCollection()) {
                 //Union nodes should not change the level as they are logical nodes
                 level--;
@@ -427,31 +397,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         definitionLevels.get(nestedNode).reset();
     }
 
-    //    public void flushDefinitionLevels(int level, AbstractRowSchemaNestedNode parent, AbstractRowSchemaNode node)
-    //            throws HyracksDataException {
-    //        if (parent != null) {
-    //            RunRowLengthIntArray parentDefLevels = definitionLevels.get(parent);
-    //            if (node.getCounter() < parentDefLevels.getSize()) {
-    //                int parentMask = RowValuesUtil.getNullMask(level);
-    //                int childMask = RowValuesUtil.getNullMask(level + 1);
-    //                flushDefinitionLevels(parentMask, childMask, parentDefLevels, node);
-    //            }
-    //        }
-    //    }
 
-    //    private void flushDefinitionLevels(int parentMask, int childMask, RunRowLengthIntArray parentDefLevels,
-    //            AbstractRowSchemaNode node) throws HyracksDataException {
-    //        int startIndex = node.getCounter();
-    //        if (node.isNested()) {
-    //            RunRowLengthIntArray childDefLevels = definitionLevels.get((AbstractRowSchemaNestedNode) node);
-    //            flushNestedDefinitionLevel(parentMask, childMask, startIndex, parentDefLevels, childDefLevels);
-    //        } else {
-    //            IRowValuesWriter writer = columnWriters.get(((PrimitiveRowSchemaNode) node).getColumnIndex());
-    //            flushWriterDefinitionLevels(parentMask, childMask, startIndex, parentDefLevels, writer);
-    //            //            flushWriterDefinitionLevels(parentMask, childMask, startIndex, parentDefLevels);
-    //        }
-    //        node.setCounter(parentDefLevels.getSize());
-    //    }
 
     private void flushNestedDefinitionLevel(int parentMask, int childMask, int startIndex,
             RunRowLengthIntArray parentDefLevels, RunRowLengthIntArray childDefLevels) {
@@ -501,9 +447,10 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     private AbstractRowSchemaNode createChild(AbstractRowSchemaNode child, ATypeTag normalizedTypeTag,
-            ArrayBackedValueStorage fieldName) throws HyracksDataException {
+            IValueReference fieldName) throws HyracksDataException {
         AbstractRowSchemaNode createdChild;
         if (child != null) {
+//            System.out.println("child tag type " + child.getTypeTag());
             if (child.getTypeTag() == ATypeTag.NULL) {
                 //The previous child was a NULL. The new child needs to inherit the NULL definition levels
                 //                int columnIndex = ((PrimitiveRowSchemaNode) child).getColumnIndex();
@@ -552,7 +499,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         return createdChild;
     }
 
-    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag, ArrayBackedValueStorage fieldName)
+    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag, IValueReference fieldName)
             throws HyracksDataException {
         switch (normalizedTypeTag) {
             case OBJECT:
@@ -592,76 +539,27 @@ public final class RowMetadata extends AbstractRowMetadata {
         }
     }
 
-    //    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag) throws HyracksDataException {
-    //        switch (normalizedTypeTag) {
-    //            case OBJECT:
-    //                return addDefinitionLevelsAndGet(new ObjectRowSchemaNode());
-    //            case ARRAY:
-    //                return addDefinitionLevelsAndGet(new ArrayRowSchemaNode());
-    //            case MULTISET:
-    ////                return addDefinitionLevelsAndGet(new MultisetRowSchemaNode());
-    //            case NULL:
-    //            case MISSING:
-    //            case BOOLEAN:
-    //            case DOUBLE:
-    //            case BIGINT:
-    //            case STRING:
-    //            case UUID:
-    //                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
-    //                //                int columnIndex = nullWriterIndexes.isEmpty() ? this.sizeOfWriters : nullWriterIndexes.removeInt(0);
-    ////                boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
-    ////                boolean writeAlways = primaryKey || repeated > 0;
-    ////                boolean filtered = !primaryKey;
-    ////                int maxLevel = primaryKey ? 1 : level + 1;
-    ////                IRowValuesWriter writer = columnWriterFactory.createValueWriter(normalizedTypeTag, columnIndex,
-    ////                        maxLevel, writeAlways, filtered);
-    ////                if (multiPageOpRef.getValue() != null) {
-    ////                    writer.reset();
-    ////                }
-    //                if (columnIndex == this.sizeOfWriters) {
-    //                    this.sizeOfWriters += 1;
-    //
-    //                    //            columnWriters.add(writer);
-    //                }
-    //                //                addColumn(columnIndex);
-    //                return new PrimitiveRowSchemaNode(columnIndex, normalizedTypeTag, false);
-    //            default:
-    //                throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
-    //
-    //        }
-    //    }
-
-    //    private void addColumn(int index) {
-    ////    private void addColumn(int index, IRowValuesWriter writer) {
-    ////        if (index == columnWriters.size()) {
-    //        if (index == this.sizeOfWriters) {
-    //            this.sizeOfWriters += 1;
-    //
-    ////            columnWriters.add(writer);
-    //        } else {
-    ////            columnWriters.set(index, writer);
-    //        }
-    //    }
-
     private AbstractRowSchemaNode addDefinitionLevelsAndGet(AbstractRowSchemaNestedNode nestedNode) {
         definitionLevels.put(nestedNode, new RunRowLengthIntArray());
         return nestedNode;
     }
 
-    private static void logSchema(ObjectRowSchemaNode root, ObjectRowSchemaNode metaRoot,
+    private static String logSchema(ObjectRowSchemaNode root, ObjectRowSchemaNode metaRoot,
             RowFieldNamesDictionary fieldNamesDictionary) throws HyracksDataException {
-        if (!LOGGER.isDebugEnabled()) {
-            return;
-        }
+        //        if (!LOGGER.isDebugEnabled()) {
+        //            return;
+        //        }
         // This should be a low frequency object creation
         RowSchemaStringBuilderVisitor schemaBuilder = new RowSchemaStringBuilderVisitor(fieldNamesDictionary);
         String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));
+        System.out.println(recordSchema + " RECORD SCHEMA");
         LOGGER.debug("Schema for {} has changed: \n {}", RowSchemaStringBuilderVisitor.RECORD_SCHEMA, recordSchema);
         if (metaRoot != null) {
             String metaRecordSchema = LogRedactionUtil.userData(schemaBuilder.build(metaRoot));
             LOGGER.debug("Schema for {} has changed: \n {}", RowSchemaStringBuilderVisitor.META_RECORD_SCHEMA,
                     metaRecordSchema);
         }
+        return recordSchema;
     }
 
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {

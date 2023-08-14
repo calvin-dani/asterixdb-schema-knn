@@ -31,6 +31,7 @@ import org.apache.asterix.om.lazy.metadata.schema.IRowSchemaNodeVisitor;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaNestedNode {
@@ -89,7 +90,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     public static AbstractRowCollectionSchemaNode create(ATypeTag typeTag) {
-        ArrayBackedValueStorage initFieldName = new ArrayBackedValueStorage();
+        IValueReference initFieldName = new ArrayBackedValueStorage();
         if (typeTag == ATypeTag.ARRAY) {
             return new ArrayRowSchemaNode(initFieldName);
         }

@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.asterix.om.RowMetadata;
+import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.primitive.MissingRowFieldSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
@@ -47,9 +48,15 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractRowSchemaNode> children;
 
-    private ArrayBackedValueStorage fieldName;
+    //    private ArrayBackedValueStorage fieldName;
 
-    public ObjectRowSchemaNode(ArrayBackedValueStorage fieldName) {
+    private IValueReference fieldName;
+
+    public IValueReference getFieldName() {
+        return fieldName;
+    }
+
+    public ObjectRowSchemaNode(IValueReference fieldName) {
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
         children = new ArrayList<>();
         this.fieldName = fieldName;
@@ -81,6 +88,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, numberOfChildren);
         AbstractRowSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
         ArrayBackedValueStorage fieldNameProp = new ArrayBackedValueStorage(fieldName.getLength());
+        String fieldNameStr = new String(fieldName.getByteArray(), fieldName.getStartOffset(), fieldName.getLength());
         fieldNameProp.append(fieldName);
         AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag, fieldNameProp);
         if (currentChild == null) {
@@ -113,6 +121,10 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     public List<AbstractRowSchemaNode> getChildren() {
         return children;
+    }
+
+    public int getNumberOfChildren() {
+        return children.size();
     }
 
     /**
@@ -189,5 +201,9 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         for (int i = 0; i < numberOfChildren; i++) {
             children.add(AbstractRowSchemaNode.deserialize(input, definitionLevels));
         }
+    }
+
+    public final <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return visitor.visit(this, arg);
     }
 }

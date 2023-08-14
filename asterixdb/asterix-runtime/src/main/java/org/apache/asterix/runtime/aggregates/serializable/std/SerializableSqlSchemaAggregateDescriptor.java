@@ -35,7 +35,7 @@ public class SerializableSqlSchemaAggregateDescriptor extends AbstractSerializab
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.SERIAL_SQL_AVG;
+        return BuiltinFunctions.SERIAL_SQL_SCHEMA;
     }
 
     @Override

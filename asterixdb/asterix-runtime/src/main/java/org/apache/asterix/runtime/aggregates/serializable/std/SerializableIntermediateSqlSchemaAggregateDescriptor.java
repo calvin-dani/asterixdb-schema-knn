@@ -37,7 +37,7 @@ public class SerializableIntermediateSqlSchemaAggregateDescriptor
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.SERIAL_INTERMEDIATE_SQL_AVG;
+        return BuiltinFunctions.SERIAL_INTERMEDIATE_SQL_SCHEMA;
     }
 
     @Override

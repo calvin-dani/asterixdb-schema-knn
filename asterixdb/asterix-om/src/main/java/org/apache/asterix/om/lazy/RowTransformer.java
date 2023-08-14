@@ -78,8 +78,32 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
                 // Writing into Columnar format               acceptActualNode(pointable.getChildVisitablePointable(), childNode);
             }
         }
-
+        columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
         columnMetadata.exitNode(arg);
+        currentParent = previousParent;
+        return null;
+    }
+
+    public AbstractRowSchemaNode visit(AbstractRowSchemaNode mainRoot, ObjectRowSchemaNode toMergeRoot)
+            throws HyracksDataException {
+        columnMetadata.enterNode(currentParent, mainRoot);
+        AbstractRowSchemaNestedNode previousParent = currentParent;
+
+        ObjectRowSchemaNode objectNode = (ObjectRowSchemaNode) mainRoot;
+        currentParent = objectNode;
+        for (int i = 0; i < toMergeRoot.getNumberOfChildren(); i++) {
+            AbstractRowSchemaNode child = toMergeRoot.getChild(i);
+            ObjectRowSchemaNode objectMergeNode = (ObjectRowSchemaNode) child;
+            IValueReference fieldName = objectMergeNode.getFieldName();
+            ATypeTag childTypeTag = objectMergeNode.getTypeTag();
+            if (childTypeTag != ATypeTag.MISSING) {
+                //Only write actual field values (including NULL) but ignore MISSING fields
+                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, columnMetadata);
+                // Writing into Columnar format               acceptActualNode(pointable.getChildVisitablePointable(), childNode);
+            }
+        }
+
+        columnMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;
     }

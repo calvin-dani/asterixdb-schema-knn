@@ -37,7 +37,7 @@ public class SerializableLocalSqlSchemaAggregateDescriptor
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.SERIAL_LOCAL_SQL_AVG;
+        return BuiltinFunctions.SERIAL_LOCAL_SQL_SCHEMA;
     }
 
     @Override
