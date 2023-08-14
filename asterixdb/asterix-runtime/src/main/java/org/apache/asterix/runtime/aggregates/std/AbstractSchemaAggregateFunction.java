@@ -139,7 +139,6 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         aggType = ATypeTag.SYSTEM_NULL;
         sum = 0.0;
         count = 0;
-        timesCalled = 0;
         isWarned = false;
 
         // Schema
