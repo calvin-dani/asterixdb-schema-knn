@@ -104,7 +104,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
     }
 
 
-
+    @Override
     public AbstractRowSchemaNode visit(MultisetRowSchemaNode toMergeRoot, AbstractRowSchemaNode mainRoot)
             throws HyracksDataException {
         columnMetadata.enterNode(currentParent, mainRoot);
@@ -157,14 +157,8 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
         AbstractRowSchemaNestedNode previousParent = currentParent;
 
         ObjectRowSchemaNode objectNode = (ObjectRowSchemaNode) mainRoot;
-//        columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
-        //        columnMetadata.printRootSchema(toMergeRoot, columnMetadata.getFieldNamesDictionary(),"MERGER SCHEMA BY SCHEMA BEFORE");
         currentParent = objectNode;
-//        IValueReference fieldName = toMergeRoot.getFieldName();
-//        ATypeTag unionChildTypeTag = toMergeRoot.getTypeTag();
-//        AbstractRowSchemaNode childNode =
-//                objectNode.getOrCreateChild(fieldName, unionChildTypeTag, columnMetadata);
-//        acceptActualNode(objectNode,childNode);
+//
         ArrayList<AbstractRowSchemaNode> unionChildren = toMergeRoot.getChildrenList();
 
         for (AbstractRowSchemaNode unionChildNode : unionChildren) {
@@ -201,7 +195,6 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, columnMetadata);
 //                acceptActualNode(childNode);
             }
-//        columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
         columnMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;
@@ -230,7 +223,11 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             } else {
                 actualNode = unionNode.getOrCreateChild(childTypeTag, columnMetadata,fieldName);
             }
-//            actualNode.accept(this, actualNode);
+            if (actualNode.getTypeTag() == ATypeTag.MULTISET) {
+                GenericListRowSchemaNode genericNode = new GenericListRowSchemaNode(nodeToAdd.getTypeTag(),nodeToAdd);
+                genericNode.accept(this,(MultisetRowSchemaNode)actualNode);
+            }
+
 
             currentParent = previousParent;
             columnMetadata.exitNode(node);
