@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Map;
 
+import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.collection.ArrayRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.collection.MultisetRowSchemaNode;
@@ -60,6 +61,8 @@ public abstract class AbstractRowSchemaNode {
     }
 
     public abstract <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
+
+    public abstract  <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
 
     public abstract void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException;
 

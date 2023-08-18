@@ -26,6 +26,7 @@ import java.util.EnumMap;
 import java.util.Map;
 
 import org.apache.asterix.om.RowMetadata;
+import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.primitive.MissingRowFieldSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
@@ -50,10 +51,23 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     UnionRowSchemaNode(DataInput input, Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels)
             throws IOException {
+
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunRowLengthIntArray());
         }
         ATypeTag originalTypeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
+
+        ArrayBackedValueStorage fieldNameSize = new ArrayBackedValueStorage(1);
+        input.readFully(fieldNameSize.getByteArray(), 0, 1);
+
+        ArrayBackedValueStorage fieldNameBuffer = new ArrayBackedValueStorage(fieldNameSize.getByteArray()[0]);
+        ArrayBackedValueStorage fieldName = new ArrayBackedValueStorage(fieldNameSize.getByteArray()[0] + 1);
+
+        input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
+        fieldName.append(fieldNameSize.getByteArray(), 0, 1);
+        fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
+        this.fieldName = fieldName;
+
         int numberOfChildren = input.readInt();
         children = new EnumMap<>(ATypeTag.class);
         for (int i = 0; i < numberOfChildren; i++) {
@@ -71,12 +85,12 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return originalType;
     }
 
-    public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata)
+    public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata, IValueReference fieldName)
             throws HyracksDataException {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag,fieldName);
         if (currentChild != newChild) {
             putChild(newChild);
         }
@@ -123,6 +137,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.UNION.serialize());
         output.writeByte(originalType.getTypeTag().serialize());
+        output.write(fieldName.getByteArray());
         output.writeInt(children.size());
         pathInfoSerializer.enter(this);
         for (AbstractRowSchemaNode child : children.values()) {
@@ -169,5 +184,9 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         }
 
         return counter;
+    }
+
+    public final <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return visitor.visit(this, arg);
     }
 }

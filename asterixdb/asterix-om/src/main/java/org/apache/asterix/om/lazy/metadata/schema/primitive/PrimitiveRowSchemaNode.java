@@ -22,6 +22,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.IRowSchemaNodeVisitor;
@@ -125,5 +126,9 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     @Override
     public int getNumberOfChildren() {
         return 0;
+    }
+
+    public final <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return visitor.visit(this, arg);
     }
 }

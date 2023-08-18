@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.Map;
 
 import org.apache.asterix.om.RowMetadata;
+import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
@@ -37,12 +38,29 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaNestedNode {
     private AbstractRowSchemaNode item;
 
-    AbstractRowCollectionSchemaNode() {
+    @Override
+    public IValueReference getFieldName() {
+        return fieldName;
+    }
+
+    private IValueReference fieldName;
+    AbstractRowCollectionSchemaNode(IValueReference fieldName) {
+        this.fieldName = fieldName;
         item = null;
     }
 
     AbstractRowCollectionSchemaNode(DataInput input,
             Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels) throws IOException {
+        ArrayBackedValueStorage fieldNameSize = new ArrayBackedValueStorage(1);
+        input.readFully(fieldNameSize.getByteArray(), 0, 1);
+
+        ArrayBackedValueStorage fieldNameBuffer = new ArrayBackedValueStorage(fieldNameSize.getByteArray()[0]);
+        ArrayBackedValueStorage fieldName = new ArrayBackedValueStorage(fieldNameSize.getByteArray()[0] + 1);
+
+        input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
+        fieldName.append(fieldNameSize.getByteArray(), 0, 1);
+        fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
+        this.fieldName = fieldName;
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunRowLengthIntArray());
         }
@@ -52,6 +70,15 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata)
             throws HyracksDataException {
         AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag);
+        if (newItem != item) {
+            item = newItem;
+        }
+        return item;
+    }
+
+    public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata,IValueReference fieldName)
+            throws HyracksDataException {
+        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag,fieldName);
         if (newItem != item) {
             item = newItem;
         }
@@ -83,7 +110,9 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
 
     @Override
     public final void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
+
         output.write(getTypeTag().serialize());
+        output.write(fieldName.getByteArray());
         pathInfoSerializer.enter(this);
         item.serialize(output, pathInfoSerializer);
         pathInfoSerializer.exit(this);
@@ -95,5 +124,9 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
             return new ArrayRowSchemaNode(initFieldName);
         }
         return new MultisetRowSchemaNode(initFieldName);
+    }
+
+    public final <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return visitor.visit(this, arg);
     }
 }

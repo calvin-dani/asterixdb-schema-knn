@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,7 +71,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     private final ObjectRowSchemaNode root;
     private final ObjectRowSchemaNode metaRoot;
     //    private final IRowValuesWriterFactory columnWriterFactory;
-    //    private final List<IRowValuesWriter> columnWriters;
+//        private final List<IRowValuesWriter> columnWriters;
 
     private int sizeOfWriters = 0;
     private final ArrayBackedValueStorage serializedMetadata;
@@ -88,7 +89,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         this.multiPageOpRef = multiPageOpRef;
         //        this.columnWriterFactory = columnWriterFactory;
         definitionLevels = new HashMap<>();
-        //        columnWriters = new ArrayList<>();
+//                columnWriters = new ArrayList<>();
         level = -1;
         repeated = 0;
         fieldNamesDictionary = new RowFieldNamesDictionary();
@@ -128,7 +129,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         this.multiPageOpRef = multiPageOpRef;
         //        this.columnWriterFactory = columnWriterFactory;
         this.definitionLevels = definitionLevels;
-        //        this.columnWriters = columnWriters;
+//                this.columnWriters = columnWriters;
         this.sizeOfWriters = 0;
         //        this.sizeOfWriters = columnWriters.size();
         level = -1;
@@ -281,9 +282,9 @@ public final class RowMetadata extends AbstractRowMetadata {
     //        }
     //    }
 
-    //    public IRowValuesWriter getWriter(int columnIndex) {
-    ////        return columnWriters.get(columnIndex);
-    //    }
+//        public IRowValuesWriter getWriter(int columnIndex) {
+//            return columnWriters.get(columnIndex);
+//        }
 
     /* ********************************************************
      * Schema related methods
@@ -324,14 +325,15 @@ public final class RowMetadata extends AbstractRowMetadata {
             currentChild = createChild(child, normalizedTypeTag, fieldName);
             //Flag that the schema has changed
             changed = true;
-        } else if (currentChild != null && currentChild.getTypeTag() == ATypeTag.UNION) {
-            //Check if the union type contains the required type
-            UnionRowSchemaNode unionChild = (UnionRowSchemaNode) child;
-            unionChild.putChild(createChild(normalizedTypeTag, fieldName));
-            //Flag that the schema has changed
-            changed = true;
-            //            currentChild = unionChild;
         }
+//        else if (currentChild != null && currentChild.getTypeTag() == ATypeTag.UNION) {
+//            //Check if the union type contains the required type
+//            UnionRowSchemaNode unionChild = (UnionRowSchemaNode) child;
+//            unionChild.putChild(createChild(normalizedTypeTag, fieldName));
+//            //Flag that the schema has changed
+//            changed = true;
+//            //            currentChild = unionChild;
+//        }
         return currentChild;
     }
 
@@ -349,7 +351,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         }
     }
 
-    public void enterNode(AbstractRowSchemaNestedNode parent, AbstractRowSchemaNode node) throws HyracksDataException {
+    public void enterNode(AbstractRowSchemaNode parent, AbstractRowSchemaNode node) throws HyracksDataException {
         //Flush all definition levels from parent to child
         //        flushDefinitionLevels(level, parent, node);
         if (node.isObjectOrCollection()) {
@@ -583,12 +585,12 @@ public final class RowMetadata extends AbstractRowMetadata {
         //        }
     }
 
-    //    public void addNestedNull(AbstractRowSchemaNestedNode parent, AbstractRowSchemaNestedNode node)
-    //            throws HyracksDataException {
-    //        //Flush all definition levels from parent to the current node
-    //        flushDefinitionLevels(level, parent, node);
-    //        //Add null value (+2) to say that both the parent and the child are present
-    //        definitionLevels.get(node).add(RowValuesUtil.getNullMask(level + 2) | level);
-    //        node.incrementCounter();
-    //    }
+//        public void addNestedNull(AbstractRowSchemaNestedNode parent, AbstractRowSchemaNestedNode node)
+//                throws HyracksDataException {
+//            //Flush all definition levels from parent to the current node
+////            flushDefinitionLevels(level, parent, node);
+//            //Add null value (+2) to say that both the parent and the child are present
+//            definitionLevels.get(node).add(RowValuesUtil.getNullMask(level + 2) | level);
+//            node.incrementCounter();
+//        }
 }

@@ -87,10 +87,8 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         int fieldNameIndex = columnMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, numberOfChildren);
         AbstractRowSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
-        ArrayBackedValueStorage fieldNameProp = new ArrayBackedValueStorage(fieldName.getLength());
-        String fieldNameStr = new String(fieldName.getByteArray(), fieldName.getStartOffset(), fieldName.getLength());
-        fieldNameProp.append(fieldName);
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag, fieldNameProp);
+
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag, fieldName);
         if (currentChild == null) {
             children.add(childIndex, newChild);
             fieldNameIndexToChildIndexMap.put(fieldNameIndex, childIndex);

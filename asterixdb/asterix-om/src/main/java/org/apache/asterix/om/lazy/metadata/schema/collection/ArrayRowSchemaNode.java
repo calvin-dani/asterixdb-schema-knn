@@ -32,7 +32,7 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
 
     public ArrayRowSchemaNode(IValueReference fieldName) {
-        super();
+        super(fieldName);
         this.fieldName = fieldName;
     }
 

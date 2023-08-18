@@ -19,6 +19,10 @@
 package org.apache.asterix.om.lazy;
 
 import org.apache.asterix.om.lazy.metadata.schema.ObjectRowSchemaNode;
+import org.apache.asterix.om.lazy.metadata.schema.UnionRowSchemaNode;
+import org.apache.asterix.om.lazy.metadata.schema.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.om.lazy.metadata.schema.collection.MultisetRowSchemaNode;
+import org.apache.asterix.om.lazy.metadata.schema.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 /**
@@ -39,6 +43,14 @@ public interface IObjectRowSchemaNodeVisitor<R, T> {
      * @return return value
      */
     R visit(ObjectRowSchemaNode toMergeRoot, T mainRoot) throws HyracksDataException;
+
+    R visit(MultisetRowSchemaNode unionNode, T mainRoot) throws HyracksDataException;
+    R visit(UnionRowSchemaNode unionNode, T mainRoot) throws HyracksDataException;
+
+    R visit(PrimitiveRowSchemaNode primitiveNode, T mainRoot) throws HyracksDataException;
+
+    R visit(AbstractRowCollectionSchemaNode collectionNode, T mainRoot) throws HyracksDataException;
+
 
     //    /**
     //     * Visit list value

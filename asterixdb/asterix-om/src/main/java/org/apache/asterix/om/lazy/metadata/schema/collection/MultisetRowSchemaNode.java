@@ -32,13 +32,14 @@ public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode
     private IValueReference fieldName;
 
     public MultisetRowSchemaNode(IValueReference fieldName) {
-        super();
+        super(fieldName);
         this.fieldName = fieldName;
     }
 
     public MultisetRowSchemaNode(DataInput input,
             Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels) throws IOException {
         super(input, definitionLevels);
+        this.fieldName = super.getFieldName();
     }
 
     @Override
@@ -53,11 +54,15 @@ public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode
 
     @Override
     public AbstractRowSchemaNode getChild(int i) {
-        return null;
+        return getItemNode().getChild(i);
     }
 
     @Override
     public int getNumberOfChildren() {
-        return 0;
+        return getItemNode().getNumberOfChildren();
+    }
+
+    public  ATypeTag getItemTypeTag() {
+        return getItemNode().getTypeTag();
     }
 }
