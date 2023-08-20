@@ -72,6 +72,17 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunRowLengthIntArray());
         }
+        ArrayBackedValueStorage fieldNameSize = new ArrayBackedValueStorage(1);
+        input.readFully(fieldNameSize.getByteArray(), 0, 1);
+
+        ArrayBackedValueStorage fieldNameBuffer = new ArrayBackedValueStorage(fieldNameSize.getByteArray()[0]);
+        ArrayBackedValueStorage fieldName = new ArrayBackedValueStorage(fieldNameSize.getByteArray()[0] + 1);
+
+        input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
+        fieldName.append(fieldNameSize.getByteArray(), 0, 1);
+        fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
+        this.fieldName = fieldName;
+
         int numberOfChildren = input.readInt();
 
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
@@ -160,6 +171,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     @Override
     public void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.OBJECT.serialize());
+        output.write(fieldName.getByteArray());
         output.writeInt(children.size());
         for (Entry fieldNameIndexChildIndex : fieldNameIndexToChildIndexMap.int2IntEntrySet()) {
             output.writeInt(fieldNameIndexChildIndex.getIntKey());

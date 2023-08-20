@@ -93,7 +93,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         level = -1;
         repeated = 0;
         fieldNamesDictionary = new RowFieldNamesDictionary();
-        ArrayBackedValueStorage initFieldName = new ArrayBackedValueStorage();
+        ArrayBackedValueStorage initFieldName = new ArrayBackedValueStorage(1);
         root = new ObjectRowSchemaNode(initFieldName);
         metaRoot = null;
         pathInfoSerializer = new PathRowInfoSerializer();

@@ -20,6 +20,7 @@ package org.apache.asterix.om.lazy;
 
 import java.util.ArrayList;
 
+import it.unimi.dsi.fastutil.ints.IntList;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
@@ -78,8 +79,10 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
         columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
         //        columnMetadata.printRootSchema(toMergeRoot, columnMetadata.getFieldNamesDictionary(),"MERGER SCHEMA BY SCHEMA BEFORE");
         currentParent = objectNode;
+        IntList fieldNameIndexes = toMergeRoot.getChildrenFieldNameIndexes();
         for (int i = 0; i < toMergeRoot.getNumberOfChildren(); i++) {
-            AbstractRowSchemaNode child = toMergeRoot.getChild(i);
+            int index = fieldNameIndexes.getInt(i);
+            AbstractRowSchemaNode child = toMergeRoot.getChild(index);
             //            ObjectRowSchemaNode objectMergeNode = (ObjectRowSchemaNode) child;
             IValueReference fieldName = child.getFieldName();
             ATypeTag childTypeTag = child.getTypeTag();
