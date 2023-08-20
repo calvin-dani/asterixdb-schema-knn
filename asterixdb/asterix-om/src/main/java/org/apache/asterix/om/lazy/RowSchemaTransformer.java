@@ -167,7 +167,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             if (unionChildTypeTag != ATypeTag.MISSING) {
                 AbstractRowSchemaNode childNode =
                         objectNode.getOrCreateChild(fieldName, unionChildTypeTag, columnMetadata);
-                acceptActualNode(unionChildNode,childNode);
+                acceptActualNode(new GenericListRowSchemaNode(unionChildTypeTag,unionChildNode),childNode);
             }
         }
 
@@ -224,8 +224,8 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 actualNode = unionNode.getOrCreateChild(childTypeTag, columnMetadata,fieldName);
             }
             if (actualNode.getTypeTag() == ATypeTag.MULTISET) {
-                GenericListRowSchemaNode genericNode = new GenericListRowSchemaNode(nodeToAdd.getTypeTag(),nodeToAdd);
-                genericNode.accept(this,(MultisetRowSchemaNode)actualNode);
+//                GenericListRowSchemaNode genericNode = new GenericListRowSchemaNode(nodeToAdd.getTypeTag(),nodeToAdd);
+                nodeToAdd.accept(this,actualNode);
             }
 
 

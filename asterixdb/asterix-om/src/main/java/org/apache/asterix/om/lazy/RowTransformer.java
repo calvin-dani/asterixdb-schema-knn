@@ -166,7 +166,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
                 currentParent = previousParent;
                 columnMetadata.exitNode(node);
             } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-//                columnMetadata.addNestedNull(currentParent, (AbstractRowSchemaNestedNode) node);
+                columnMetadata.addNestedNull(currentParent, (AbstractRowSchemaNestedNode) node);
             } else {
                 pointable.accept(this, node);
             }
