@@ -85,12 +85,12 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return originalType;
     }
 
-    public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata, IValueReference fieldName)
-            throws HyracksDataException {
+    public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata,
+            IValueReference fieldName) throws HyracksDataException {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag,fieldName);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag, fieldName);
         if (currentChild != newChild) {
             putChild(newChild);
         }

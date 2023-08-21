@@ -67,7 +67,6 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
 
-
         this.fieldName = fieldName;
 
     }

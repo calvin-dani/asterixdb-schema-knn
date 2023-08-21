@@ -54,6 +54,7 @@ public class GlobalSqlSchemaAggregateDescriptor extends AbstractAggregateFunctio
             }
         };
     }
+
     @Override
     public void setImmutableStates(Object... states) {
         aggFieldState = (IAType) states[0];

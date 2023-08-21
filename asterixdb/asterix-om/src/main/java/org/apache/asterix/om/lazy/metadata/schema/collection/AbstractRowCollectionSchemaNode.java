@@ -44,6 +44,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     private IValueReference fieldName;
+
     AbstractRowCollectionSchemaNode(IValueReference fieldName) {
         this.fieldName = fieldName;
         item = null;
@@ -76,9 +77,9 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
         return item;
     }
 
-    public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata,IValueReference fieldName)
-            throws HyracksDataException {
-        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag,fieldName);
+    public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata,
+            IValueReference fieldName) throws HyracksDataException {
+        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag, fieldName);
         if (newItem != item) {
             item = newItem;
         }

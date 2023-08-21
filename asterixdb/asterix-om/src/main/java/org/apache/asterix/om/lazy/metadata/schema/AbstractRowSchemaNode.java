@@ -62,7 +62,7 @@ public abstract class AbstractRowSchemaNode {
 
     public abstract <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
 
-    public abstract  <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
+    public abstract <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
 
     public abstract void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException;
 

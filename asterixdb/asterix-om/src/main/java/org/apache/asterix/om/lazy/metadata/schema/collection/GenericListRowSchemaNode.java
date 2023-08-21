@@ -1,4 +1,4 @@
-package org.apache.asterix.om.lazy.metadata.schema.collection;
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -18,7 +18,11 @@ package org.apache.asterix.om.lazy.metadata.schema.collection;
  * under the License.
  */
 
-import org.apache.asterix.om.lazy.ILazyVisitablePointableVisitor;
+package org.apache.asterix.om.lazy.metadata.schema.collection;
+
+import java.io.DataOutput;
+import java.io.IOException;
+
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
@@ -30,10 +34,7 @@ import org.apache.asterix.om.types.ATypeTag;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 
-import java.io.DataOutput;
-import java.io.IOException;
-
-public class GenericListRowSchemaNode  extends AbstractRowSchemaNestedNode {
+public class GenericListRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     ObjectRowSchemaNode objectRowSchemaNode;
     MultisetRowSchemaNode multisetRowSchemaNode;
@@ -41,7 +42,7 @@ public class GenericListRowSchemaNode  extends AbstractRowSchemaNestedNode {
     PrimitiveRowSchemaNode flat;
     ATypeTag current;
 
-    public GenericListRowSchemaNode(ATypeTag type , AbstractRowSchemaNode objectRowSchemaNode) {
+    public GenericListRowSchemaNode(ATypeTag type, AbstractRowSchemaNode objectRowSchemaNode) {
         if (type == ATypeTag.OBJECT) {
             this.objectRowSchemaNode = (ObjectRowSchemaNode) objectRowSchemaNode;
         } else if (type == ATypeTag.MULTISET) {
@@ -53,7 +54,6 @@ public class GenericListRowSchemaNode  extends AbstractRowSchemaNestedNode {
         }
         current = type;
     }
-
 
     @Override
     public ATypeTag getTypeTag() {
@@ -108,6 +108,4 @@ public class GenericListRowSchemaNode  extends AbstractRowSchemaNestedNode {
         return 0;
     }
 
-
 }
-

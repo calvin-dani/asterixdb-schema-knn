@@ -56,13 +56,13 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     public AbstractRowSchemaNode getChild(int i) {
         return getItemNode().getChild(i);
     }
-    
+
     @Override
     public int getNumberOfChildren() {
         return getItemNode().getNumberOfChildren();
     }
 
-    public  ATypeTag getItemTypeTag() {
+    public ATypeTag getItemTypeTag() {
         return getItemNode().getTypeTag();
     }
 }

@@ -62,7 +62,7 @@ public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode
         return getItemNode().getNumberOfChildren();
     }
 
-    public  ATypeTag getItemTypeTag() {
+    public ATypeTag getItemTypeTag() {
         return getItemNode().getTypeTag();
     }
 }

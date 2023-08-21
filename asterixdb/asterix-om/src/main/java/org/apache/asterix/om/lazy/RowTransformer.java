@@ -24,11 +24,8 @@ import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.ObjectRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.UnionRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.primitive.PrimitiveRowSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
-// import org.apache.asterix.om.values.IRowValuesWriter;
-import org.apache.asterix.om.values.IRowValuesWriter;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
@@ -80,8 +77,9 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             ATypeTag childTypeTag = pointable.getChildTypeTag();
             if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
-                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldNameProp, childTypeTag, columnMetadata);
-                acceptActualNode(pointable.getChildVisitablePointable(), childNode,fieldNameProp);
+                AbstractRowSchemaNode childNode =
+                        objectNode.getOrCreateChild(fieldNameProp, childTypeTag, columnMetadata);
+                acceptActualNode(pointable.getChildVisitablePointable(), childNode, fieldNameProp);
             }
         }
         columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
@@ -107,8 +105,8 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             pointable.nextChild();
             ATypeTag childTypeTag = pointable.getChildTypeTag();
             IValueReference fieldName = collectionNode.getFieldName(); //TODO CALVIN_DANI add correct fieldName
-            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, columnMetadata,fieldName);
-            acceptActualNode(pointable.getChildVisitablePointable(), childNode,fieldName);
+            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, columnMetadata, fieldName);
+            acceptActualNode(pointable.getChildVisitablePointable(), childNode, fieldName);
             /*
              * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
              */
@@ -123,52 +121,52 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
     @Override
     public AbstractRowSchemaNode visit(FlatLazyVisitablePointable pointable, AbstractRowSchemaNode arg)
             throws HyracksDataException {
-//        columnMetadata.enterNode(currentParent, arg);
-//                ATypeTag valueTypeTag = pointable.getTypeTag();
-//                PrimitiveRowSchemaNode node = (PrimitiveRowSchemaNode) arg;
-//                IRowValuesWriter writer = columnMetadata.getWriter(node.getColumnIndex()); //TODO CALVIN_DANI : Writer issue to be debugged
-//                if (valueTypeTag == ATypeTag.MISSING) {
-//                    writer.writeLevel(columnMetadata.getLevel());
-//                } else if (valueTypeTag == ATypeTag.NULL) {
-//                    writer.writeNull(columnMetadata.getLevel());
-//                } else if (pointable.isTagged()) {
-//                    //Remove type tag
-//                    nonTaggedValue.set(pointable.getByteArray(), pointable.getStartOffset() + 1, pointable.getLength() - 1);
-//                    writer.writeValue(pointable.getTypeTag(), nonTaggedValue);
-//                } else {
-//                    writer.writeValue(pointable.getTypeTag(), pointable);
-//                }
-//                if (node.isPrimaryKey()) {
-//                    primaryKeysLength += writer.getEstimatedSize();
-//                }
-//        columnMetadata.exitNode(arg);
+        //        columnMetadata.enterNode(currentParent, arg);
+        //                ATypeTag valueTypeTag = pointable.getTypeTag();
+        //                PrimitiveRowSchemaNode node = (PrimitiveRowSchemaNode) arg;
+        //                IRowValuesWriter writer = columnMetadata.getWriter(node.getColumnIndex()); //TODO CALVIN_DANI : Writer issue to be debugged
+        //                if (valueTypeTag == ATypeTag.MISSING) {
+        //                    writer.writeLevel(columnMetadata.getLevel());
+        //                } else if (valueTypeTag == ATypeTag.NULL) {
+        //                    writer.writeNull(columnMetadata.getLevel());
+        //                } else if (pointable.isTagged()) {
+        //                    //Remove type tag
+        //                    nonTaggedValue.set(pointable.getByteArray(), pointable.getStartOffset() + 1, pointable.getLength() - 1);
+        //                    writer.writeValue(pointable.getTypeTag(), nonTaggedValue);
+        //                } else {
+        //                    writer.writeValue(pointable.getTypeTag(), pointable);
+        //                }
+        //                if (node.isPrimaryKey()) {
+        //                    primaryKeysLength += writer.getEstimatedSize();
+        //                }
+        //        columnMetadata.exitNode(arg);
         return null;
     }
 
-        private void acceptActualNode(AbstractLazyVisitablePointable pointable, AbstractRowSchemaNode node, IValueReference fieldName)
-                throws HyracksDataException {
-            if (node.getTypeTag() == ATypeTag.UNION) {
-                columnMetadata.enterNode(currentParent, node);
-                AbstractRowSchemaNestedNode previousParent = currentParent;
+    private void acceptActualNode(AbstractLazyVisitablePointable pointable, AbstractRowSchemaNode node,
+            IValueReference fieldName) throws HyracksDataException {
+        if (node.getTypeTag() == ATypeTag.UNION) {
+            columnMetadata.enterNode(currentParent, node);
+            AbstractRowSchemaNestedNode previousParent = currentParent;
 
-                UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
-                currentParent = unionNode;
+            UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
+            currentParent = unionNode;
 
-                ATypeTag childTypeTag = pointable.getTypeTag();
-                AbstractRowSchemaNode actualNode;
-                if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
-                    actualNode = unionNode.getOriginalType();
-                } else {
-                    actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), columnMetadata,fieldName);
-                }
-                pointable.accept(this, actualNode);
-
-                currentParent = previousParent;
-                columnMetadata.exitNode(node);
-            } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-                columnMetadata.addNestedNull(currentParent, (AbstractRowSchemaNestedNode) node);
+            ATypeTag childTypeTag = pointable.getTypeTag();
+            AbstractRowSchemaNode actualNode;
+            if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
+                actualNode = unionNode.getOriginalType();
             } else {
-                pointable.accept(this, node);
+                actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), columnMetadata, fieldName);
             }
+            pointable.accept(this, actualNode);
+
+            currentParent = previousParent;
+            columnMetadata.exitNode(node);
+        } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
+            columnMetadata.addNestedNull(currentParent, (AbstractRowSchemaNestedNode) node);
+        } else {
+            pointable.accept(this, node);
         }
+    }
 }
