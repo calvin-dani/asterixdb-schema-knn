@@ -18,8 +18,10 @@
  */
 package org.apache.asterix.om.lazy.metadata.schema;
 
-public abstract class AbstractRowSchemaNestedNode extends AbstractRowSchemaNode {
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
+public abstract class AbstractRowSchemaNestedNode extends AbstractRowSchemaNode {
+    @JsonIgnore
     @Override
     public final boolean isNested() {
         return true;

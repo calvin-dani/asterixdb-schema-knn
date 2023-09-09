@@ -99,21 +99,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         nullWriterIndexes = new IntArrayList();
         //Add definition levels for the root
         addDefinitionLevelsAndGet(root);
-        //        SchemaRowBuilderFromIATypeVisitor builder = new SchemaRowBuilderFromIATypeVisitor(this, primaryKeys);
-        //Ensure all primary keys take the first column indexes
-        //        metaContainsKeys = metaType != null && keySourceIndicator.get(0) == 1;
-        //        if (metaContainsKeys) {
-        //            addDefinitionLevelsAndGet(metaRoot);
-        //            metaType.accept(builder, metaRoot);
-        //            datasetType.accept(builder, root);
-        //        } else {
-        //            datasetType.accept(builder, root);
-        //            if (metaRoot != null) {
-        //                addDefinitionLevelsAndGet(metaRoot);
-        //                metaType.accept(builder, metaRoot);
-        //            }
-        //        }
-
         serializedMetadata = new ArrayBackedValueStorage();
         changed = true;
         serializeColumnsMetadata();

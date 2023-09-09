@@ -35,6 +35,8 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaNestedNode {
     private AbstractRowSchemaNode item;
 
@@ -99,11 +101,13 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
         return visitor.visit(this, arg);
     }
 
+    @JsonIgnore
     @Override
     public final boolean isObjectOrCollection() {
         return true;
     }
 
+    @JsonIgnore
     @Override
     public final boolean isCollection() {
         return true;

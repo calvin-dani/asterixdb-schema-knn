@@ -24,6 +24,8 @@ import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import org.apache.asterix.formats.nontagged.LosslessADMJSONPrinterFactoryProvider;
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
@@ -57,7 +59,11 @@ import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
 
@@ -108,7 +114,6 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
         schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
 
-        //TODO CALVIN_DANI ADD TYPED RECORD DESC
     }
 
     @Override
@@ -212,13 +217,19 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
 
     protected void finishFinalResults(IPointable result) throws HyracksDataException {
         resultStorage.reset();
+//        IRecordDataParser<LosslessADMJSONPrinterFactoryProvider> dataParser;
         try {
             ObjectRowSchemaNode root = schemaTransformer.getRoot();
             String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
             if (root == null) {
                 throw new HyracksDataException("Cannot compute Schema on empty root.");
             } else {
-                stringSerde.serialize(new AString(res), resultStorage.getDataOutput());
+                ObjectMapper mapper = new ObjectMapper();
+                mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+                String jsonString = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+//                mapper.writeValue(resultStorage.getDataOutput(),root);
+                System.out.println(jsonString);
+                stringSerde.serialize(new AString(jsonString), resultStorage.getDataOutput());
             }
 
         } catch (IOException e) {

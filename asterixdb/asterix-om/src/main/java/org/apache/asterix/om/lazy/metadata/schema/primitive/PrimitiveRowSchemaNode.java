@@ -26,12 +26,17 @@ import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.IRowSchemaNodeVisitor;
+import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
 public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
+    @JsonIgnore
     private final int columnIndex;
     private final ATypeTag typeTag;
     private final boolean primaryKey;
@@ -80,25 +85,30 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
         return typeTag;
     }
 
+    @JsonIgnore
     @Override
     public final boolean isNested() {
         return false;
     }
 
+    @JsonIgnore
     @Override
     public final boolean isObjectOrCollection() {
         return false;
     }
 
+    @JsonIgnore
     @Override
     public final boolean isCollection() {
         return false;
     }
 
+    @JsonIgnore
     public final boolean isPrimaryKey() {
         return primaryKey;
     }
 
+    @JsonSerialize(using = fieldNameSerialization.class)
     public IValueReference getFieldName() {
         return fieldName;
     }
@@ -122,6 +132,7 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
         return null;
     }
 
+    @JsonIgnore
     @Override
     public int getNumberOfChildren() {
         return 0;

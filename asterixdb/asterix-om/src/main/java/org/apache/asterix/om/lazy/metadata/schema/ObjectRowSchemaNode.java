@@ -30,6 +30,7 @@ import java.util.Map;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
 import org.apache.asterix.om.lazy.metadata.schema.primitive.MissingRowFieldSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
@@ -38,6 +39,9 @@ import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.util.annotations.CriticalPath;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntMap.Entry;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
@@ -45,13 +49,23 @@ import it.unimi.dsi.fastutil.ints.IntImmutableList;
 import it.unimi.dsi.fastutil.ints.IntList;
 
 public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
+
+    private IValueReference fieldName;
+    @Override
+    public ATypeTag getTypeTag() {
+        return ATypeTag.OBJECT;
+    }
+    public int getNumberOfChildren() {
+        return children.size();
+    }
+    @JsonIgnore
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractRowSchemaNode> children;
 
     //    private ArrayBackedValueStorage fieldName;
 
-    private IValueReference fieldName;
 
+    @JsonSerialize(using = fieldNameSerialization.class)
     public IValueReference getFieldName() {
         return fieldName;
     }
@@ -132,13 +146,12 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         return children;
     }
 
-    public int getNumberOfChildren() {
-        return children.size();
-    }
+
 
     /**
      * Should not be used in a {@link CriticalPath}
      */
+    @JsonIgnore
     public IntList getChildrenFieldNameIndexes() {
         return IntImmutableList.toList(fieldNameIndexToChildIndexMap.int2IntEntrySet().stream()
                 .sorted(Comparator.comparingInt(Entry::getIntValue)).mapToInt(Entry::getIntKey));
@@ -148,16 +161,13 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         return fieldNameIndexToChildIndexMap.containsKey(fieldNameIndex);
     }
 
-    @Override
-    public ATypeTag getTypeTag() {
-        return ATypeTag.OBJECT;
-    }
-
+    @JsonIgnore
     @Override
     public boolean isObjectOrCollection() {
         return true;
     }
 
+    @JsonIgnore
     @Override
     public boolean isCollection() {
         return false;

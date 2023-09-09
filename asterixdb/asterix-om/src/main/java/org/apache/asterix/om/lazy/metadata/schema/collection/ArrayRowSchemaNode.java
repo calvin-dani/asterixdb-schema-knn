@@ -22,11 +22,15 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
+import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.data.std.api.IValueReference;
+
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
@@ -47,6 +51,7 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
         return ATypeTag.ARRAY;
     }
 
+    @JsonSerialize(using = fieldNameSerialization.class)
     @Override
     public IValueReference getFieldName() {
         return fieldName;
@@ -61,7 +66,7 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     public int getNumberOfChildren() {
         return getItemNode().getNumberOfChildren();
     }
-
+    @JsonIgnore
     public ATypeTag getItemTypeTag() {
         return getItemNode().getTypeTag();
     }

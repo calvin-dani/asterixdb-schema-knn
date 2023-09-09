@@ -28,6 +28,7 @@ import java.util.Map;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
 import org.apache.asterix.om.lazy.metadata.schema.primitive.MissingRowFieldSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
@@ -35,6 +36,9 @@ import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final AbstractRowSchemaNode originalType;
@@ -81,6 +85,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         children.put(child.getTypeTag(), child);
     }
 
+    @JsonIgnore
     public AbstractRowSchemaNode getOriginalType() {
         return originalType;
     }
@@ -105,11 +110,13 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return children;
     }
 
+    @JsonIgnore
     @Override
     public boolean isObjectOrCollection() {
         return false;
     }
 
+    @JsonIgnore
     @Override
     public boolean isCollection() {
         return false;
@@ -120,6 +127,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return ATypeTag.UNION;
     }
 
+    @JsonSerialize(using = fieldNameSerialization.class)
     @Override
     public IValueReference getFieldName() {
         if (originalType != null) {
@@ -151,6 +159,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return null;
     }
 
+    @JsonIgnore
     public ArrayList<AbstractRowSchemaNode> getChildrenList() {
         return new ArrayList<AbstractRowSchemaNode>(children.values());
     }
@@ -166,6 +175,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
      * @return first numeric node or missing node
      * @see SchemaClipperVisitor
      */
+    @JsonIgnore
     public AbstractRowSchemaNode getNumericChildOrMissing() {
         for (AbstractRowSchemaNode node : children.values()) {
             if (ATypeHierarchy.getTypeDomain(node.getTypeTag()) == ATypeHierarchy.Domain.NUMERIC) {
@@ -175,6 +185,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return MissingRowFieldSchemaNode.INSTANCE;
     }
 
+    @JsonIgnore
     public int getNumberOfNumericChildren() {
         int counter = 0;
         for (AbstractRowSchemaNode node : children.values()) {
