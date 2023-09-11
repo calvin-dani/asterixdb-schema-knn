@@ -44,6 +44,8 @@ public abstract class AbstractRowSchemaNode {
 
     public abstract IValueReference getFieldName();
 
+    public abstract void setFieldName(IValueReference newFieldName);
+
     public abstract boolean isNested();
 
     public abstract boolean isObjectOrCollection();

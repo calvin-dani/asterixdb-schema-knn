@@ -56,6 +56,10 @@ public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode
     public IValueReference getFieldName() {
         return fieldName;
     }
+    @Override
+    public void setFieldName(IValueReference newFieldName){
+        fieldName = newFieldName;
+    }
 
     @Override
     public AbstractRowSchemaNode getChild(int i) {

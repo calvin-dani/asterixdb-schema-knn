@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
@@ -47,7 +48,7 @@ import it.unimi.dsi.fastutil.ints.Int2IntMap.Entry;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntImmutableList;
 import it.unimi.dsi.fastutil.ints.IntList;
-
+@JsonPropertyOrder({"fieldName", "typeTag","numberOfChildren", "children" })
 public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     private IValueReference fieldName;
@@ -68,6 +69,11 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     @JsonSerialize(using = fieldNameSerialization.class)
     public IValueReference getFieldName() {
         return fieldName;
+    }
+
+    @Override
+    public void setFieldName(IValueReference newFieldName){
+        fieldName = newFieldName;
     }
 
     public ObjectRowSchemaNode(IValueReference fieldName) {
@@ -95,7 +101,12 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
-        this.fieldName = fieldName;
+        if(fieldName.getByteArray()[0] == 0) {
+            this.fieldName = null;
+        } else {
+            this.fieldName = fieldName;
+        }
+//        this.fieldName = fieldName;
 
         int numberOfChildren = input.readInt();
 
@@ -181,7 +192,11 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     @Override
     public void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.OBJECT.serialize());
-        output.write(fieldName.getByteArray());
+        if  (fieldName == null) {
+            output.writeByte(0);
+        } else {
+            output.write(fieldName.getByteArray());
+        }
         output.writeInt(children.size());
         for (Entry fieldNameIndexChildIndex : fieldNameIndexToChildIndexMap.int2IntEntrySet()) {
             output.writeInt(fieldNameIndexChildIndex.getIntKey());

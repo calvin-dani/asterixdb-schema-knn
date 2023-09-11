@@ -183,7 +183,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             numberOfChildren = 1;
             AbstractRowSchemaNode primItem = toMergeRoot.getItemNode();
             ATypeTag childTypeTag = primItem.getTypeTag();
-            IValueReference fieldName = primItem.getFieldName(); //TODO CALVIN_DANI add correct fieldName
+            IValueReference fieldName = primItem.getFieldName(); //TODO CALVIN_DANI add now correct fieldName
             AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, columnMetadata, fieldName);
             acceptActualNode(new GenericListRowSchemaNode(childTypeTag, primItem), childNode);
         }

@@ -22,6 +22,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
@@ -34,7 +35,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-
+@JsonPropertyOrder({"fieldName", "typeTag" })
 public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     @JsonIgnore
     private final int columnIndex;
@@ -71,8 +72,12 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
         input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
-
-        this.fieldName = fieldName;
+        if(fieldName.getByteArray()[0] == 0) {
+            this.fieldName = null;
+        } else {
+            this.fieldName = fieldName;
+        }
+//        this.fieldName = fieldName;
 
     }
 
@@ -114,6 +119,11 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     }
 
     @Override
+    public void setFieldName(IValueReference newFieldName){
+        fieldName = newFieldName;
+    }
+
+    @Override
     public final <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
         return visitor.visit(this, arg);
     }
@@ -123,7 +133,11 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
         output.write(typeTag.serialize());
         output.writeInt(columnIndex);
         output.writeBoolean(primaryKey);
-        output.write(fieldName.getByteArray());
+        if(fieldName == null) {
+            output.writeByte(0);
+        } else {
+            output.write(fieldName.getByteArray());
+        }
         pathInfoSerializer.writePathInfo(typeTag, columnIndex, primaryKey);
     }
 

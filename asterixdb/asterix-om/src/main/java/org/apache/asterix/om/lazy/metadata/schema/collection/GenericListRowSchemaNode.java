@@ -66,6 +66,11 @@ public class GenericListRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     @Override
+    public void setFieldName(IValueReference newFieldName) {
+        return;
+    }
+
+    @Override
     public boolean isObjectOrCollection() {
         return false;
     }

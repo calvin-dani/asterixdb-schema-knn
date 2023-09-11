@@ -25,10 +25,12 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
+import org.apache.asterix.om.lazy.metadata.schema.Serialization.mapSerialization;
 import org.apache.asterix.om.lazy.metadata.schema.primitive.MissingRowFieldSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
@@ -39,16 +41,27 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-
+@JsonPropertyOrder({"fieldName","typeTag", "numberOfChildren","children" })
 public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final AbstractRowSchemaNode originalType;
     private IValueReference fieldName;
+    @Override
+    public ATypeTag getTypeTag() {
+        return ATypeTag.UNION;
+    }
+    @Override
+    public int getNumberOfChildren() {
+        return children.size();
+    }
+
     private final Map<ATypeTag, AbstractRowSchemaNode> children;
 
     public UnionRowSchemaNode(AbstractRowSchemaNode child1, AbstractRowSchemaNode child2) {
         children = new EnumMap<>(ATypeTag.class);
         originalType = child1;
         fieldName = originalType.getFieldName();
+        child1.setFieldName(null);
+        child2.setFieldName(null);
         putChild(child1);
         putChild(child2);
     }
@@ -70,8 +83,12 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
-        this.fieldName = fieldName;
-
+        if(fieldName.getByteArray()[0] == 0){
+            this.fieldName = null;
+        }
+        else {
+            this.fieldName = fieldName;
+        }
         int numberOfChildren = input.readInt();
         children = new EnumMap<>(ATypeTag.class);
         for (int i = 0; i < numberOfChildren; i++) {
@@ -105,7 +122,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public AbstractRowSchemaNode getChild(ATypeTag typeTag) {
         return children.getOrDefault(typeTag, MissingRowFieldSchemaNode.INSTANCE);
     }
-
+    @JsonSerialize(using = mapSerialization.class)
     public Map<ATypeTag, AbstractRowSchemaNode> getChildren() {
         return children;
     }
@@ -122,18 +139,18 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return false;
     }
 
-    @Override
-    public ATypeTag getTypeTag() {
-        return ATypeTag.UNION;
-    }
-
     @JsonSerialize(using = fieldNameSerialization.class)
     @Override
     public IValueReference getFieldName() {
         if (originalType != null) {
-            return originalType.getFieldName();
+            return fieldName;
         }
-        return new ArrayBackedValueStorage();
+        return new ArrayBackedValueStorage(1);
+    }
+
+    @Override
+    public void setFieldName(IValueReference newFieldName){
+        fieldName = newFieldName;
     }
 
     @Override
@@ -145,7 +162,11 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.UNION.serialize());
         output.writeByte(originalType.getTypeTag().serialize());
-        output.write(fieldName.getByteArray());
+        if (fieldName == null) {
+            output.writeByte(0);
+        } else {
+            output.write(fieldName.getByteArray());
+        }
         output.writeInt(children.size());
         pathInfoSerializer.enter(this);
         for (AbstractRowSchemaNode child : children.values()) {
@@ -164,10 +185,6 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return new ArrayList<AbstractRowSchemaNode>(children.values());
     }
 
-    @Override
-    public int getNumberOfChildren() {
-        return children.size();
-    }
 
     /**
      * This would return any numeric node

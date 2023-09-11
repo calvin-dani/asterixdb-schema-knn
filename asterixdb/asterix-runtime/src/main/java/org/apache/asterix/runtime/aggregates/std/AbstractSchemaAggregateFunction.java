@@ -24,6 +24,7 @@ import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonFactory;
 import org.apache.asterix.formats.nontagged.LosslessADMJSONPrinterFactoryProvider;
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
@@ -206,7 +207,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
             //Schema
             ObjectRowSchemaNode root = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input, null);
             //            transformer.transform(root);
-            String res = rowMetaData.printRootSchema(root, fieldNamesDictionary);
+//            String res = rowMetaData.printRootSchema(root, fieldNamesDictionary);
             schemaTransformer.transform(root);
 
         } catch (Exception e) {
@@ -226,8 +227,11 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
             } else {
                 ObjectMapper mapper = new ObjectMapper();
                 mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+                mapper.configure(SerializationFeature.WRITE_NULL_MAP_VALUES, false);
+                mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+
                 String jsonString = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-//                mapper.writeValue(resultStorage.getDataOutput(),root);
+//                mapper.writeValue(resultStorage.XÅÎ„AXgetDataOutput(),root);
                 System.out.println(jsonString);
                 stringSerde.serialize(new AString(jsonString), resultStorage.getDataOutput());
             }
