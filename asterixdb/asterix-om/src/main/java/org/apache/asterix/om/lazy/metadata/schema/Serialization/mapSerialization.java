@@ -19,27 +19,28 @@
 
 package org.apache.asterix.om.lazy.metadata.schema.Serialization;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.SerializerProvider;
+import java.io.IOException;
+import java.util.Map;
+
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 
-import java.io.IOException;
-import java.util.Map;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
 
 public class mapSerialization extends JsonSerializer<Map<ATypeTag, AbstractRowSchemaNode>> {
 
     @Override
     public void serialize(Map<ATypeTag, AbstractRowSchemaNode> item, JsonGenerator jsonGenerator,
-                          SerializerProvider serializerProvider) throws IOException {
-            jsonGenerator.writeStartArray();
-//                jsonGenerator.writeArrayFieldStart("children");
+            SerializerProvider serializerProvider) throws IOException {
+        jsonGenerator.writeStartArray();
+        //                jsonGenerator.writeArrayFieldStart("children");
         for (var entry : item.entrySet()) {
-//            System.out.println(entry.getKey() + "/" + entry.getValue());
+            //            System.out.println(entry.getKey() + "/" + entry.getValue());
             jsonGenerator.writeObject(entry.getValue());
 
         }
-                jsonGenerator.writeEndArray();
+        jsonGenerator.writeEndArray();
     }
 }

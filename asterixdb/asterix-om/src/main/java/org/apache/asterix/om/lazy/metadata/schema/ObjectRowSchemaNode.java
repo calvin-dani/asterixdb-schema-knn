@@ -27,7 +27,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
@@ -41,6 +40,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.util.annotations.CriticalPath;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
@@ -48,23 +48,26 @@ import it.unimi.dsi.fastutil.ints.Int2IntMap.Entry;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntImmutableList;
 import it.unimi.dsi.fastutil.ints.IntList;
-@JsonPropertyOrder({"fieldName", "typeTag","numberOfChildren", "children" })
+
+@JsonPropertyOrder({ "fieldName", "typeTag", "numberOfChildren", "children" })
 public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     private IValueReference fieldName;
+
     @Override
     public ATypeTag getTypeTag() {
         return ATypeTag.OBJECT;
     }
+
     public int getNumberOfChildren() {
         return children.size();
     }
+
     @JsonIgnore
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractRowSchemaNode> children;
 
     //    private ArrayBackedValueStorage fieldName;
-
 
     @JsonSerialize(using = fieldNameSerialization.class)
     public IValueReference getFieldName() {
@@ -72,7 +75,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     @Override
-    public void setFieldName(IValueReference newFieldName){
+    public void setFieldName(IValueReference newFieldName) {
         fieldName = newFieldName;
     }
 
@@ -101,12 +104,12 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
-        if(fieldName.getByteArray()[0] == 0) {
+        if (fieldName.getByteArray()[0] == 0) {
             this.fieldName = null;
         } else {
             this.fieldName = fieldName;
         }
-//        this.fieldName = fieldName;
+        //        this.fieldName = fieldName;
 
         int numberOfChildren = input.readInt();
 
@@ -157,8 +160,6 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
         return children;
     }
 
-
-
     /**
      * Should not be used in a {@link CriticalPath}
      */
@@ -192,7 +193,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     @Override
     public void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.OBJECT.serialize());
-        if  (fieldName == null) {
+        if (fieldName == null) {
             output.writeByte(0);
         } else {
             output.write(fieldName.getByteArray());

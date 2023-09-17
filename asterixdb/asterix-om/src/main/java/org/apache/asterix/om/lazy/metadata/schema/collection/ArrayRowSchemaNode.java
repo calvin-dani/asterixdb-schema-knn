@@ -22,8 +22,6 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.util.Map;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
@@ -31,8 +29,11 @@ import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.data.std.api.IValueReference;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-@JsonPropertyOrder({"fieldName", "typeTag","children" })
+
+@JsonPropertyOrder({ "fieldName", "typeTag", "children" })
 public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
 
@@ -59,7 +60,7 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     }
 
     @Override
-    public void setFieldName(IValueReference newFieldName){
+    public void setFieldName(IValueReference newFieldName) {
         fieldName = newFieldName;
     }
 
@@ -67,11 +68,13 @@ public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     public AbstractRowSchemaNode getChild(int i) {
         return getItemNode().getChild(i);
     }
+
     @JsonIgnore
     @Override
     public int getNumberOfChildren() {
         return getItemNode().getNumberOfChildren();
     }
+
     @JsonIgnore
     public ATypeTag getItemTypeTag() {
         return getItemNode().getTypeTag();

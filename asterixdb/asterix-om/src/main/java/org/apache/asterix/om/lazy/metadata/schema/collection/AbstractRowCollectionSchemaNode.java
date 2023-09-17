@@ -23,15 +23,12 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Map;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
 import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
 import org.apache.asterix.om.lazy.metadata.schema.IRowSchemaNodeVisitor;
-import org.apache.asterix.om.lazy.metadata.schema.Serialization.fieldNameSerialization;
 import org.apache.asterix.om.lazy.metadata.schema.Serialization.itemNodeSerialization;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
@@ -40,6 +37,8 @@ import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaNestedNode {
     private AbstractRowSchemaNode item;
@@ -50,7 +49,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     @Override
-    public void setFieldName(IValueReference newFieldName){
+    public void setFieldName(IValueReference newFieldName) {
         fieldName = newFieldName;
     }
 
@@ -72,12 +71,12 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
         input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
-        if(fieldName.getByteArray()[0] == 0) {
+        if (fieldName.getByteArray()[0] == 0) {
             this.fieldName = null;
         } else {
             this.fieldName = fieldName;
         }
-//        this.fieldName = fieldName;
+        //        this.fieldName = fieldName;
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunRowLengthIntArray());
         }
@@ -101,6 +100,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
         }
         return item;
     }
+
     @JsonSerialize(using = itemNodeSerialization.class)
     @JsonProperty("children")
     public final AbstractRowSchemaNode getItemNode() {
@@ -132,7 +132,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     public final void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {
 
         output.write(getTypeTag().serialize());
-        if(fieldName == null) {
+        if (fieldName == null) {
             output.writeByte(0);
         } else {
             output.write(fieldName.getByteArray());

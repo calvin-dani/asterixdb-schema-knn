@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
 
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
@@ -40,15 +39,19 @@ import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-@JsonPropertyOrder({"fieldName","typeTag", "numberOfChildren","children" })
+
+@JsonPropertyOrder({ "fieldName", "typeTag", "numberOfChildren", "children" })
 public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final AbstractRowSchemaNode originalType;
     private IValueReference fieldName;
+
     @Override
     public ATypeTag getTypeTag() {
         return ATypeTag.UNION;
     }
+
     @Override
     public int getNumberOfChildren() {
         return children.size();
@@ -83,10 +86,9 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         input.readFully(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
         fieldName.append(fieldNameSize.getByteArray(), 0, 1);
         fieldName.append(fieldNameBuffer.getByteArray(), 0, fieldNameSize.getByteArray()[0]);
-        if(fieldName.getByteArray()[0] == 0){
+        if (fieldName.getByteArray()[0] == 0) {
             this.fieldName = null;
-        }
-        else {
+        } else {
             this.fieldName = fieldName;
         }
         int numberOfChildren = input.readInt();
@@ -122,6 +124,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public AbstractRowSchemaNode getChild(ATypeTag typeTag) {
         return children.getOrDefault(typeTag, MissingRowFieldSchemaNode.INSTANCE);
     }
+
     @JsonSerialize(using = mapSerialization.class)
     public Map<ATypeTag, AbstractRowSchemaNode> getChildren() {
         return children;
@@ -149,7 +152,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     @Override
-    public void setFieldName(IValueReference newFieldName){
+    public void setFieldName(IValueReference newFieldName) {
         fieldName = newFieldName;
     }
 
@@ -184,7 +187,6 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public ArrayList<AbstractRowSchemaNode> getChildrenList() {
         return new ArrayList<AbstractRowSchemaNode>(children.values());
     }
-
 
     /**
      * This would return any numeric node

@@ -42,7 +42,6 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
         return new IPrinter() {
             private IPrinter nullPrinter;
             private IPrinter fieldPrinter;
-
             private IPrinter stringPrinter;
 
             @Override

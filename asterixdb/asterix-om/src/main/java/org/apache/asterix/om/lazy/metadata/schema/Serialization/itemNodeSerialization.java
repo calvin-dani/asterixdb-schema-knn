@@ -19,22 +19,21 @@
 
 package org.apache.asterix.om.lazy.metadata.schema.Serialization;
 
+    import java.io.IOException;
+
+import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
+
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
-import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
-import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-
-import java.io.IOException;
 
 public class itemNodeSerialization extends JsonSerializer<AbstractRowSchemaNode> {
 
     @Override
     public void serialize(AbstractRowSchemaNode item, JsonGenerator jsonGenerator,
-                          SerializerProvider serializerProvider) throws IOException {
-            jsonGenerator.writeStartArray();
-                jsonGenerator.writeObject(item);
-                jsonGenerator.writeEndArray();
+            SerializerProvider serializerProvider) throws IOException {
+        jsonGenerator.writeStartArray();
+        jsonGenerator.writeObject(item);
+        jsonGenerator.writeEndArray();
     }
 }

@@ -24,9 +24,8 @@ import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonFactory;
-import org.apache.asterix.formats.nontagged.LosslessADMJSONPrinterFactoryProvider;
+import com.fasterxml.jackson.core.JsonParser;
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.RowMetadata;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
@@ -60,9 +59,9 @@ import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
@@ -110,6 +109,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         isWarned = false;
 
         // Schema
+
         Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
         rowMetaData = new RowMetadata(multiPageOpRef);
         transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
@@ -207,7 +207,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
             //Schema
             ObjectRowSchemaNode root = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input, null);
             //            transformer.transform(root);
-//            String res = rowMetaData.printRootSchema(root, fieldNamesDictionary);
+            //            String res = rowMetaData.printRootSchema(root, fieldNamesDictionary);
             schemaTransformer.transform(root);
 
         } catch (Exception e) {
@@ -218,7 +218,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
 
     protected void finishFinalResults(IPointable result) throws HyracksDataException {
         resultStorage.reset();
-//        IRecordDataParser<LosslessADMJSONPrinterFactoryProvider> dataParser;
+        //        IRecordDataParser<LosslessADMJSONPrinterFactoryProvider> dataParser;
         try {
             ObjectRowSchemaNode root = schemaTransformer.getRoot();
             String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
@@ -231,7 +231,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
                 mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
                 String jsonString = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-//                mapper.writeValue(resultStorage.XÅÎ„AXgetDataOutput(),root);
+                //                mapper.writeValue(resultStorage.XÅÎ„AXgetDataOutput(),root);
                 System.out.println(jsonString);
                 stringSerde.serialize(new AString(jsonString), resultStorage.getDataOutput());
             }
