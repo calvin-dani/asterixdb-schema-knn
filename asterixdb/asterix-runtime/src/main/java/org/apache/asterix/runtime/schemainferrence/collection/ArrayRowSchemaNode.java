@@ -32,6 +32,10 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.util.Map;
 
+/*
+Schema node for Array types.
+*/
+
 @JsonPropertyOrder({ "fieldName", "typeTag", "children" })
 public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;

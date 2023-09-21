@@ -34,6 +34,11 @@ import org.apache.hyracks.data.std.api.IValueReference;
 import java.io.DataOutput;
 import java.io.IOException;
 
+/*
+A general node for collection types.
+Holds the collection node and applies collection specific based
+schema operation based on collection types.
+ */
 public class GenericListRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     ObjectRowSchemaNode objectRowSchemaNode;

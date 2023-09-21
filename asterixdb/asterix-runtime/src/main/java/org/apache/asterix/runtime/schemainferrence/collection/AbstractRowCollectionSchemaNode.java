@@ -39,6 +39,10 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Map;
 
+/*
+Node that defines collection nodes methods. Collection schema nodes include Array and Multiset.
+*/
+
 public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaNestedNode {
     private AbstractRowSchemaNode item;
 
@@ -104,10 +108,6 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     @JsonProperty("children")
     public final AbstractRowSchemaNode getItemNode() {
         return item;
-    }
-
-    public final void setItemNode(AbstractRowSchemaNode item) {
-        this.item = item;
     }
 
     @Override

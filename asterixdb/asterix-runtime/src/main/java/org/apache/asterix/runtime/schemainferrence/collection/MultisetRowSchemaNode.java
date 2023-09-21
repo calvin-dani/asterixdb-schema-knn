@@ -31,6 +31,10 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.util.Map;
 
+/*
+Schema node for Multiset types.
+*/
+
 public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
 
