@@ -16,27 +16,23 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.om.lazy;
+package org.apache.asterix.runtime.schemainferrence;
 
-import java.util.ArrayList;
-
-import org.apache.asterix.om.RowMetadata;
-import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
-import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.ObjectRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.UnionRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.ArrayRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.GenericListRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.MultisetRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.primitive.PrimitiveRowSchemaNode;
+import it.unimi.dsi.fastutil.ints.IntList;
+//import org.
+import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.collection.GenericListRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 
-import it.unimi.dsi.fastutil.ints.IntList;
+import java.util.ArrayList;
 
 public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode> {
 
@@ -94,11 +90,6 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, columnMetadata);
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
             }
-            //
-            //            else{
-            ////                PrimitiveRowSchemaNode primNode = (PrimitiveRowSchemaNode) child;
-            //                child.accept(this, mainRoot);
-            //            }
         }
         columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
         columnMetadata.exitNode(mainRoot);

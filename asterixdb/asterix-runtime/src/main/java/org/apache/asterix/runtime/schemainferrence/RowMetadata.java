@@ -16,47 +16,36 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.om;
+package org.apache.asterix.runtime.schemainferrence;
+
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import org.apache.asterix.om.api.IRowWriteMultiPageOp;
+import org.apache.asterix.om.lazy.metadata.AbstractRowMetadata;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.om.lazy.metadata.RowFieldNamesDictionary;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.runtime.schemainferrence.utils.RowSchemaStringBuilderVisitor;
+import org.apache.asterix.om.utils.RowValuesUtil;
+import org.apache.asterix.om.utils.RunRowLengthIntArray;
+import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.commons.lang3.mutable.Mutable;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.util.LogRedactionUtil;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-
-import org.apache.asterix.om.api.IRowWriteMultiPageOp;
-import org.apache.asterix.om.lazy.metadata.AbstractRowMetadata;
-import org.apache.asterix.om.lazy.metadata.PathRowInfoSerializer;
-import org.apache.asterix.om.lazy.metadata.RowFieldNamesDictionary;
-import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNestedNode;
-import org.apache.asterix.om.lazy.metadata.schema.AbstractRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.ObjectRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.UnionRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.ArrayRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.collection.MultisetRowSchemaNode;
-import org.apache.asterix.om.lazy.metadata.schema.primitive.PrimitiveRowSchemaNode;
-import org.apache.asterix.om.types.ARecordType;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.utils.RowSchemaStringBuilderVisitor;
-import org.apache.asterix.om.utils.RowValuesUtil;
-import org.apache.asterix.om.utils.RunRowLengthIntArray;
-import org.apache.asterix.om.values.IRowValuesWriter;
-import org.apache.commons.lang3.mutable.Mutable;
-import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
-import org.apache.hyracks.util.LogRedactionUtil;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-// import org.apache.logging.log4j.LogManager;
-// import org.apache.logging.log4j.Logger;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 /**
  * The schema here is mutable and can change according to the flushed records
