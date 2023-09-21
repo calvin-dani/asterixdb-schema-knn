@@ -20,10 +20,10 @@ package org.apache.asterix.runtime.schemainferrence;
 
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
-import org.apache.asterix.om.lazy.metadata.AbstractRowMetadata;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.AbstractRowMetadata;
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
-import org.apache.asterix.om.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.runtime.schemainferrence.utils.RowSchemaStringBuilderVisitor;
 import org.apache.asterix.om.utils.RowValuesUtil;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;

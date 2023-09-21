@@ -18,12 +18,12 @@
  */
 package org.apache.asterix.runtime.schemainferrence.visitor;
 
-import org.apache.asterix.om.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.om.types.*;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.RowMetadata;
 import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 
