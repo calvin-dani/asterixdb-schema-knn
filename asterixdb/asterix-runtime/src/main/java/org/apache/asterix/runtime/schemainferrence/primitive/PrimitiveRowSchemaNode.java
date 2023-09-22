@@ -35,6 +35,9 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+/*
+A schema node for representing Asterix data types such as : String, Integer
+ */
 @JsonPropertyOrder({ "fieldName", "typeTag" })
 public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     @JsonIgnore

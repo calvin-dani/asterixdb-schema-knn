@@ -27,18 +27,17 @@ import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 
 import java.io.IOException;
 import java.util.Map;
-
+/*
+Map specific serialization for jackson JSON serialization
+*/
 public class mapSerialization extends JsonSerializer<Map<ATypeTag, AbstractRowSchemaNode>> {
 
     @Override
     public void serialize(Map<ATypeTag, AbstractRowSchemaNode> item, JsonGenerator jsonGenerator,
                           SerializerProvider serializerProvider) throws IOException {
         jsonGenerator.writeStartArray();
-        //                jsonGenerator.writeArrayFieldStart("children");
         for (var entry : item.entrySet()) {
-            //            System.out.println(entry.getKey() + "/" + entry.getValue());
             jsonGenerator.writeObject(entry.getValue());
-
         }
         jsonGenerator.writeEndArray();
     }

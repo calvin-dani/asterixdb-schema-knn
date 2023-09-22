@@ -26,21 +26,19 @@ import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 import java.io.IOException;
-
+/*
+Field name specific serialization for jackson JSON serialization
+*/
 public class fieldNameSerialization extends JsonSerializer<IValueReference> {
 
     @Override
     public void serialize(IValueReference iValueReference, JsonGenerator jsonGenerator,
             SerializerProvider serializerProvider) throws IOException {
-        //        jsonGenerator.writeStartObject();
-        //        jsonGenerator.writeFieldName("fieldName");
         ArrayBackedValueStorage fieldNameSize = new ArrayBackedValueStorage(1);
         fieldNameSize.set(iValueReference.getByteArray(), iValueReference.getStartOffset(), 1);
-        //        Integer fieldNameLength = new Integer(iValueReference.getByteArray()[iValueReference.getStartOffset()]);
         String fieldName = new String(iValueReference.getByteArray(),
                 iValueReference.getLength() - fieldNameSize.getByteArray()[0],
                 iValueReference.getLength() - (iValueReference.getLength() - fieldNameSize.getByteArray()[0]));
         jsonGenerator.writeString(fieldName);
-        //        jsonGenerator.writeEndObject();
     }
 }

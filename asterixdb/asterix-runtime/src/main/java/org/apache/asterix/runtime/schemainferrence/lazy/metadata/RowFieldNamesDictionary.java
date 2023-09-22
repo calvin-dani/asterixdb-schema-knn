@@ -40,6 +40,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+/*
+Store FieldName in a hashmap which can be retrieved via an Index
+ */
 public class RowFieldNamesDictionary {
     //For both declared and inferred fields
     private final List<IValueReference> fieldNames;

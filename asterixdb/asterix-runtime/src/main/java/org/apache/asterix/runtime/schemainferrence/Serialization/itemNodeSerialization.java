@@ -25,7 +25,9 @@ import com.fasterxml.jackson.databind.SerializerProvider;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 
 import java.io.IOException;
-
+/*
+Item specific serialization for jackson JSON serialization
+*/
 public class itemNodeSerialization extends JsonSerializer<AbstractRowSchemaNode> {
 
     @Override

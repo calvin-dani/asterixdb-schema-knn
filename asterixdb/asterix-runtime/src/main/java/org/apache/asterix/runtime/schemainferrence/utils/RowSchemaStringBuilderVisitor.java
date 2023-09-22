@@ -38,6 +38,10 @@ import org.apache.hyracks.util.string.UTF8StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 
+/*
+Schema string builder for logging purpose
+Implementation taken from column schema inference.
+ */
 public class RowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<Void, Void> {
     public static String RECORD_SCHEMA = "record";
     public static String META_RECORD_SCHEMA = "meta-record";

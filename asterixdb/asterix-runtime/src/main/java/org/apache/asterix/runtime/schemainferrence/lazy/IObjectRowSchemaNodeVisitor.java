@@ -58,25 +58,4 @@ public interface IObjectRowSchemaNodeVisitor<R, T> {
     R visit(PrimitiveRowSchemaNode primitiveNode, T mainRoot) throws HyracksDataException;
 
     R visit(AbstractRowCollectionSchemaNode collectionNode, T mainRoot) throws HyracksDataException;
-
-    //    /**
-    //     * Visit list value
-    //     *
-    //     * @param pointable either a list with fixed-length items {@link FixedListLazyVisitablePointable} or
-    //     *                  a list with variable-length items {@link VariableListLazyVisitablePointable}
-    //     * @param arg       visitor argument
-    //     * @return return value
-    //     */
-    //
-    //    R visit(AbstractListLazyVisitablePointable pointable, T arg) throws HyracksDataException;
-    //
-    //    /**
-    //     * Atomic values
-    //     *
-    //     * @param pointable any flat item (e.g., {@link org.apache.asterix.om.types.ATypeTag#BIGINT}
-    //     * @param arg       visitor argument
-    //     * @return return value
-    //     * @throws HyracksDataException
-    //     */
-    //    R visit(FlatLazyVisitablePointable pointable, T arg) throws HyracksDataException;
 }
