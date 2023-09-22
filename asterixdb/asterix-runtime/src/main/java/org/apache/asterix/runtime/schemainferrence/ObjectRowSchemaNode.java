@@ -64,7 +64,6 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractRowSchemaNode> children;
 
-    //    private ArrayBackedValueStorage fieldName;
 
     @JsonSerialize(using = fieldNameSerialization.class)
     public IValueReference getFieldName() {

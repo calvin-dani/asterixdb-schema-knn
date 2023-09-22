@@ -36,7 +36,7 @@ import java.util.ArrayList;
 
 public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode> {
 
-    private final RowMetadata columnMetadata;
+    private final RowMetadata rowMetadata;
     private final VoidPointable nonTaggedValue;
     private final ObjectRowSchemaNode root;
     private AbstractRowSchemaNestedNode currentParent;
@@ -46,8 +46,8 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
         return root;
     }
 
-    public RowSchemaTransformer(RowMetadata columnMetadata, ObjectRowSchemaNode root) {
-        this.columnMetadata = columnMetadata;
+    public RowSchemaTransformer(RowMetadata rowMetadata, ObjectRowSchemaNode root) {
+        this.rowMetadata = rowMetadata;
         this.root = root;
         nonTaggedValue = new VoidPointable();
     }
@@ -68,12 +68,12 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
     @Override
     public AbstractRowSchemaNode visit(ObjectRowSchemaNode toMergeRoot, AbstractRowSchemaNode mainRoot)
             throws HyracksDataException {
-        columnMetadata.enterNode(currentParent, mainRoot);
+        rowMetadata.enterNode(currentParent, mainRoot);
         AbstractRowSchemaNestedNode previousParent = currentParent;
 
         ObjectRowSchemaNode objectNode = (ObjectRowSchemaNode) mainRoot;
-        columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
-        //        columnMetadata.printRootSchema(toMergeRoot, columnMetadata.getFieldNamesDictionary(),"MERGER SCHEMA BY SCHEMA BEFORE");
+        rowMetadata.printRootSchema(objectNode, rowMetadata.getFieldNamesDictionary());
+        //        rowMetadata.printRootSchema(toMergeRoot, rowMetadata.getFieldNamesDictionary(),"MERGER SCHEMA BY SCHEMA BEFORE");
         currentParent = objectNode;
         IntList fieldNameIndexes = toMergeRoot.getChildrenFieldNameIndexes();
         for (int i = 0; i < toMergeRoot.getNumberOfChildren(); i++) {
@@ -87,12 +87,12 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 unionChild.accept(this, mainRoot);
             } else if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
-                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, columnMetadata);
+                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata);
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
             }
         }
-        columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
-        columnMetadata.exitNode(mainRoot);
+        rowMetadata.printRootSchema(objectNode, rowMetadata.getFieldNamesDictionary());
+        rowMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;
     }
@@ -100,13 +100,13 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
     @Override
     public AbstractRowSchemaNode visit(MultisetRowSchemaNode toMergeRoot, AbstractRowSchemaNode mainRoot)
             throws HyracksDataException {
-        columnMetadata.enterNode(currentParent, mainRoot);
+        rowMetadata.enterNode(currentParent, mainRoot);
         AbstractRowSchemaNestedNode previousParent = currentParent;
 
         AbstractRowCollectionSchemaNode collectionNode = (AbstractRowCollectionSchemaNode) mainRoot;
-        RunRowLengthIntArray defLevels = columnMetadata.getDefinitionLevels(collectionNode);
+        RunRowLengthIntArray defLevels = rowMetadata.getDefinitionLevels(collectionNode);
         //the level at which an item is missing
-        int missingLevel = columnMetadata.getLevel();
+        int missingLevel = rowMetadata.getLevel();
         currentParent = collectionNode;
         int numberOfChildren = 0;
 
@@ -120,7 +120,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 ATypeTag childTypeTag = child.getTypeTag();
                 IValueReference fieldName = child.getFieldName(); //TODO CALVIN_DANI add correct fieldName
                 AbstractRowSchemaNode childNode =
-                        collectionNode.getOrCreateItem(childTypeTag, columnMetadata, fieldName);
+                        collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
                 /*
                  * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
@@ -132,11 +132,11 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             AbstractRowSchemaNode primItem = toMergeRoot.getItemNode();
             ATypeTag childTypeTag = primItem.getTypeTag();
             IValueReference fieldName = primItem.getFieldName(); //TODO CALVIN_DANI add correct fieldName
-            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, columnMetadata, fieldName);
+            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
             acceptActualNode(new GenericListRowSchemaNode(childTypeTag, primItem), childNode);
         }
 
-        columnMetadata.exitCollectionNode(collectionNode, numberOfChildren);
+        rowMetadata.exitCollectionNode(collectionNode, numberOfChildren);
         currentParent = previousParent;
         return null;
     }
@@ -144,13 +144,13 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
     @Override
     public AbstractRowSchemaNode visit(ArrayRowSchemaNode toMergeRoot, AbstractRowSchemaNode mainRoot)
             throws HyracksDataException {
-        columnMetadata.enterNode(currentParent, mainRoot);
+        rowMetadata.enterNode(currentParent, mainRoot);
         AbstractRowSchemaNestedNode previousParent = currentParent;
 
         AbstractRowCollectionSchemaNode collectionNode = (AbstractRowCollectionSchemaNode) mainRoot;
-        RunRowLengthIntArray defLevels = columnMetadata.getDefinitionLevels(collectionNode);
+        RunRowLengthIntArray defLevels = rowMetadata.getDefinitionLevels(collectionNode);
         //the level at which an item is missing
-        int missingLevel = columnMetadata.getLevel();
+        int missingLevel = rowMetadata.getLevel();
         currentParent = collectionNode;
         int numberOfChildren = 0;
         if (toMergeRoot.getItemTypeTag() == ATypeTag.UNION) {
@@ -163,7 +163,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 ATypeTag childTypeTag = child.getTypeTag();
                 IValueReference fieldName = child.getFieldName(); //TODO CALVIN_DANI add correct fieldName
                 AbstractRowSchemaNode childNode =
-                        collectionNode.getOrCreateItem(childTypeTag, columnMetadata, fieldName);
+                        collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
                 /*
                  * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
@@ -175,11 +175,11 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             AbstractRowSchemaNode primItem = toMergeRoot.getItemNode();
             ATypeTag childTypeTag = primItem.getTypeTag();
             IValueReference fieldName = primItem.getFieldName(); //TODO CALVIN_DANI add now correct fieldName
-            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, columnMetadata, fieldName);
+            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
             acceptActualNode(new GenericListRowSchemaNode(childTypeTag, primItem), childNode);
         }
 
-        columnMetadata.exitCollectionNode(collectionNode, numberOfChildren);
+        rowMetadata.exitCollectionNode(collectionNode, numberOfChildren);
         currentParent = previousParent;
         return null;
     }
@@ -187,7 +187,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
     @Override
     public AbstractRowSchemaNode visit(UnionRowSchemaNode toMergeRoot, AbstractRowSchemaNode mainRoot)
             throws HyracksDataException {
-        columnMetadata.enterNode(currentParent, mainRoot);
+        rowMetadata.enterNode(currentParent, mainRoot);
         AbstractRowSchemaNestedNode previousParent = currentParent;
 
         ObjectRowSchemaNode objectNode = (ObjectRowSchemaNode) mainRoot;
@@ -200,13 +200,13 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             ATypeTag unionChildTypeTag = unionChildNode.getTypeTag();
             if (unionChildTypeTag != ATypeTag.MISSING) {
                 AbstractRowSchemaNode childNode =
-                        objectNode.getOrCreateChild(fieldName, unionChildTypeTag, columnMetadata);
+                        objectNode.getOrCreateChild(fieldName, unionChildTypeTag, rowMetadata);
                 acceptActualNode(new GenericListRowSchemaNode(unionChildTypeTag, unionChildNode), childNode);
             }
         }
 
-        //        columnMetadata.printRootSchema(objectNode, columnMetadata.getFieldNamesDictionary());
-        columnMetadata.exitNode(mainRoot);
+        //        rowMetadata.printRootSchema(objectNode, rowMetadata.getFieldNamesDictionary());
+        rowMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;
     }
@@ -227,7 +227,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
     private void acceptActualNode(AbstractRowSchemaNode nodeToAdd, AbstractRowSchemaNode node)
             throws HyracksDataException {
         if (node.getTypeTag() == ATypeTag.UNION) {
-            columnMetadata.enterNode(currentParent, node);
+            rowMetadata.enterNode(currentParent, node);
             AbstractRowSchemaNestedNode previousParent = currentParent;
 
             UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
@@ -239,7 +239,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(childTypeTag, columnMetadata, fieldName);
+                actualNode = unionNode.getOrCreateChild(childTypeTag, rowMetadata, fieldName);
             }
             //            if (actualNode.getTypeTag() == ATypeTag.MULTISET) {
             //                GenericListRowSchemaNode genericNode = new GenericListRowSchemaNode(nodeToAdd.getTypeTag(),nodeToAdd);
@@ -247,9 +247,9 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             //            }
 
             currentParent = previousParent;
-            columnMetadata.exitNode(node);
+            rowMetadata.exitNode(node);
         } else if (node.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            //            columnMetadata.addNestedNull(currentParent, (AbstractRowSchemaNestedNode) node);
+            //            rowMetadata.addNestedNull(currentParent, (AbstractRowSchemaNestedNode) node);
         } else {
             nodeToAdd.accept(this, node);
         }

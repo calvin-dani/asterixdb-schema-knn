@@ -190,8 +190,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     /**
      * This would return any numeric node
      *
-     * @return first numeric node or missing node
-     * @see SchemaClipperVisitor
+     * @return first numeric node or missing node\
      */
     @JsonIgnore
     public AbstractRowSchemaNode getNumericChildOrMissing() {
