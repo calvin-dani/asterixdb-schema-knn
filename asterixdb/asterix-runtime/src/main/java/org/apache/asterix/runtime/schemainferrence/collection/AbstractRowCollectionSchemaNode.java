@@ -18,26 +18,27 @@
  */
 package org.apache.asterix.runtime.schemainferrence.collection;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import org.apache.asterix.runtime.schemainferrence.RowMetadata;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.Map;
+
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNestedNode;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.IRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainferrence.RowMetadata;
 import org.apache.asterix.runtime.schemainferrence.Serialization.itemNodeSerialization;
+import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
-import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.IOException;
-import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 /*
 Node that defines collection nodes methods. Collection schema nodes include Array and Multiset.
@@ -96,7 +97,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata,
-                                                       IValueReference fieldName) throws HyracksDataException {
+            IValueReference fieldName) throws HyracksDataException {
         AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag, fieldName);
         if (newItem != item) {
             item = newItem;

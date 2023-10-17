@@ -18,25 +18,6 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import it.unimi.dsi.fastutil.ints.Int2IntMap;
-import it.unimi.dsi.fastutil.ints.Int2IntMap.Entry;
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
-import it.unimi.dsi.fastutil.ints.IntImmutableList;
-import it.unimi.dsi.fastutil.ints.IntList;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.utils.RunRowLengthIntArray;
-import org.apache.asterix.runtime.schemainferrence.Serialization.fieldNameSerialization;
-import org.apache.asterix.runtime.schemainferrence.primitive.MissingRowFieldSchemaNode;
-import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.util.annotations.CriticalPath;
-
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutput;
@@ -45,6 +26,27 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.utils.RunRowLengthIntArray;
+import org.apache.asterix.runtime.schemainferrence.Serialization.fieldNameSerialization;
+import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.runtime.schemainferrence.primitive.MissingRowFieldSchemaNode;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.util.annotations.CriticalPath;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2IntMap.Entry;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntImmutableList;
+import it.unimi.dsi.fastutil.ints.IntList;
 
 @JsonPropertyOrder({ "fieldName", "typeTag", "numberOfChildren", "children" })
 public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
@@ -63,7 +65,6 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     @JsonIgnore
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractRowSchemaNode> children;
-
 
     @JsonSerialize(using = fieldNameSerialization.class)
     public IValueReference getFieldName() {
@@ -117,7 +118,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(IValueReference fieldName, ATypeTag childTypeTag,
-                                                  RowMetadata columnMetadata) throws HyracksDataException {
+            RowMetadata columnMetadata) throws HyracksDataException {
         int numberOfChildren = children.size();
         int fieldNameIndex = columnMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, numberOfChildren);
@@ -229,7 +230,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     private static void deserializeChildren(DataInput input, List<AbstractRowSchemaNode> children, int numberOfChildren,
-                                            Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels) throws IOException {
+            Map<AbstractRowSchemaNestedNode, RunRowLengthIntArray> definitionLevels) throws IOException {
         for (int i = 0; i < numberOfChildren; i++) {
             children.add(AbstractRowSchemaNode.deserialize(input, definitionLevels));
         }

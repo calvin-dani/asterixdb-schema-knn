@@ -19,14 +19,16 @@
 
 package org.apache.asterix.runtime.schemainferrence.Serialization;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.SerializerProvider;
+import java.io.IOException;
+import java.util.Map;
+
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 
-import java.io.IOException;
-import java.util.Map;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
+
 /*
 Map specific serialization for jackson JSON serialization
 */
@@ -34,7 +36,7 @@ public class mapSerialization extends JsonSerializer<Map<ATypeTag, AbstractRowSc
 
     @Override
     public void serialize(Map<ATypeTag, AbstractRowSchemaNode> item, JsonGenerator jsonGenerator,
-                          SerializerProvider serializerProvider) throws IOException {
+            SerializerProvider serializerProvider) throws IOException {
         jsonGenerator.writeStartArray();
         for (var entry : item.entrySet()) {
             jsonGenerator.writeObject(entry.getValue());

@@ -19,12 +19,14 @@
 
 package org.apache.asterix.runtime.schemainferrence.Serialization;
 
+import java.io.IOException;
+
+import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
+
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 
-import java.io.IOException;
 /*
 Item specific serialization for jackson JSON serialization
 */
@@ -32,7 +34,7 @@ public class itemNodeSerialization extends JsonSerializer<AbstractRowSchemaNode>
 
     @Override
     public void serialize(AbstractRowSchemaNode item, JsonGenerator jsonGenerator,
-                          SerializerProvider serializerProvider) throws IOException {
+            SerializerProvider serializerProvider) throws IOException {
         jsonGenerator.writeStartArray();
         jsonGenerator.writeObject(item);
         jsonGenerator.writeEndArray();

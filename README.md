@@ -18,6 +18,19 @@
  !-->
 <a href="http://asterixdb.apache.org"><img src="http://asterixdb.apache.org/img/asterixdb_tm.png" height=100></img></a>
 
+## Project Objectives
+
+The project aims to generate JSON schema of the records in the NoSQL Distributed Database. The objective is achieved by creating aggregate function to aggregate schema of all records within a query. Providing valuable insights on the datatypes and data to the user.
+Its application could be used to monitor during development, evaluate the data before running long running queries etc.
+
+### Milestones
+
+1. Adding custom aggregate function for schema inference
+2. Integrating schema inferrer from previous works of AsterixDB columnar database for record -> schema.
+3. Adding schema -> schema inferrer for combining various schema from various distributed controllers in asterixDB
+4. Displaying the schema finally in JSON Schema with DRAFT2020 Dialect
+
+
 ## What is AsterixDB?
 
 AsterixDB is a BDMS (Big Data Management System) with a rich feature set that sets it apart from other Big Data platforms.  Its feature set makes it well-suited to modern needs such as web data warehousing and social data storage and analysis. AsterixDB has:

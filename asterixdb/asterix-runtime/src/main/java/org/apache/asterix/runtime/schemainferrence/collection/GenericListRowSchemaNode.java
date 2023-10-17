@@ -20,6 +20,9 @@
 
 package org.apache.asterix.runtime.schemainferrence.collection;
 
+import java.io.DataOutput;
+import java.io.IOException;
+
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNestedNode;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
@@ -30,9 +33,6 @@ import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSeri
 import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
-
-import java.io.DataOutput;
-import java.io.IOException;
 
 /*
 A general node for collection types.

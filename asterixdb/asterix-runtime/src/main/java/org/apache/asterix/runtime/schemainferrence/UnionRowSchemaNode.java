@@ -18,27 +18,28 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
-import org.apache.asterix.om.utils.RunRowLengthIntArray;
-import org.apache.asterix.runtime.schemainferrence.Serialization.fieldNameSerialization;
-import org.apache.asterix.runtime.schemainferrence.Serialization.mapSerialization;
-import org.apache.asterix.runtime.schemainferrence.primitive.MissingRowFieldSchemaNode;
-import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
+
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
+import org.apache.asterix.om.utils.RunRowLengthIntArray;
+import org.apache.asterix.runtime.schemainferrence.Serialization.fieldNameSerialization;
+import org.apache.asterix.runtime.schemainferrence.Serialization.mapSerialization;
+import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.runtime.schemainferrence.primitive.MissingRowFieldSchemaNode;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 @JsonPropertyOrder({ "fieldName", "typeTag", "numberOfChildren", "children" })
 public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
@@ -108,7 +109,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata,
-                                                  IValueReference fieldName) throws HyracksDataException {
+            IValueReference fieldName) throws HyracksDataException {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
@@ -158,7 +159,6 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
         return visitor.visit(this, arg);
     }
-
 
     @Override
     public void serialize(DataOutput output, PathRowInfoSerializer pathInfoSerializer) throws IOException {

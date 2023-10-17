@@ -20,7 +20,6 @@ package org.apache.asterix.dataflow.data.nontagged.printers.json.lossless;
 
 import java.io.PrintStream;
 
-import org.apache.asterix.formats.nontagged.CSVPrinterFactoryProvider;
 import org.apache.asterix.formats.nontagged.LosslessJSONPrinterFactoryProvider;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.AUnionType;
@@ -61,11 +60,9 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                 fieldPrinter.init();
                 if (b[s] == ATypeTag.SERIALIZED_NULL_TYPE_TAG || b[s] == ATypeTag.SERIALIZED_MISSING_TYPE_TAG) {
                     nullPrinter.print(b, s, l, ps);
-                }
-                else if (b[s] == ATypeTag.SERIALIZED_STRING_TYPE_TAG) {
+                } else if (b[s] == ATypeTag.SERIALIZED_STRING_TYPE_TAG) {
                     stringPrinter.print(b, s, l, ps);
-                }
-                else {
+                } else {
                     fieldPrinter.print(b, s, l, ps);
                 }
             }

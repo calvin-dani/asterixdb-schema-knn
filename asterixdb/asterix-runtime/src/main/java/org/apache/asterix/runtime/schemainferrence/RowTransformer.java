@@ -18,11 +18,11 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
+import org.apache.asterix.om.lazy.AbstractLazyVisitablePointable;
+import org.apache.asterix.om.lazy.AbstractListLazyVisitablePointable;
+import org.apache.asterix.om.lazy.FlatLazyVisitablePointable;
 import org.apache.asterix.om.lazy.ILazyVisitablePointableVisitor;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
-import org.apache.asterix.om.lazy.AbstractListLazyVisitablePointable;
-import org.apache.asterix.om.lazy.AbstractLazyVisitablePointable;
-import org.apache.asterix.om.lazy.FlatLazyVisitablePointable;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
@@ -77,8 +77,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             ATypeTag childTypeTag = pointable.getChildTypeTag();
             if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
-                AbstractRowSchemaNode childNode =
-                        objectNode.getOrCreateChild(fieldNameProp, childTypeTag, rowMetadata);
+                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldNameProp, childTypeTag, rowMetadata);
                 acceptActualNode(pointable.getChildVisitablePointable(), childNode, fieldNameProp);
             }
         }
@@ -144,7 +143,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
     }
 
     private void acceptActualNode(AbstractLazyVisitablePointable pointable, AbstractRowSchemaNode node,
-                                  IValueReference fieldName) throws HyracksDataException {
+            IValueReference fieldName) throws HyracksDataException {
         if (node.getTypeTag() == ATypeTag.UNION) {
             rowMetadata.enterNode(currentParent, node);
             AbstractRowSchemaNestedNode previousParent = currentParent;

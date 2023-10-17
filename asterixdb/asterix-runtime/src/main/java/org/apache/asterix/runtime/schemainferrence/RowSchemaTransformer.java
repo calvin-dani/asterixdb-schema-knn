@@ -18,21 +18,22 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
-import it.unimi.dsi.fastutil.ints.IntList;
-//import org.
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import java.util.ArrayList;
+
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.GenericListRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
+// import org.
+import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 
-import java.util.ArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 
 public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode> {
 
@@ -119,8 +120,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 AbstractRowSchemaNode child = unionChildNode;
                 ATypeTag childTypeTag = child.getTypeTag();
                 IValueReference fieldName = child.getFieldName(); //TODO CALVIN_DANI add correct fieldName
-                AbstractRowSchemaNode childNode =
-                        collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
+                AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
                 /*
                  * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
@@ -162,8 +162,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 AbstractRowSchemaNode child = unionChildNode;
                 ATypeTag childTypeTag = child.getTypeTag();
                 IValueReference fieldName = child.getFieldName(); //TODO CALVIN_DANI add correct fieldName
-                AbstractRowSchemaNode childNode =
-                        collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
+                AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata, fieldName);
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
                 /*
                  * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing

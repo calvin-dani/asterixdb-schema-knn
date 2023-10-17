@@ -18,23 +18,24 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.utils.RunRowLengthIntArray;
-import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.primitive.MissingRowFieldSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
-import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.api.IValueReference;
-
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.Map;
+
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.utils.RunRowLengthIntArray;
+import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.runtime.schemainferrence.primitive.MissingRowFieldSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public abstract class AbstractRowSchemaNode {
     private int counter;

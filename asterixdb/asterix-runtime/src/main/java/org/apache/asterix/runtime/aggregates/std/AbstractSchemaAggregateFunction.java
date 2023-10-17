@@ -24,15 +24,13 @@ import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
 import org.apache.asterix.om.base.AString;
 import org.apache.asterix.om.exceptions.ExceptionUtil;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
-import org.apache.asterix.runtime.schemainferrence.*;
+// import org.apache.asterix.runtime.schemainferrence.*;
 import org.apache.asterix.om.lazy.TypedRecordLazyVisitablePointable;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -42,6 +40,11 @@ import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
 import org.apache.asterix.om.utils.UnsafeUtil;
 import org.apache.asterix.runtime.evaluators.common.ClosedRecordConstructorEvalFactory.ClosedRecordConstructorEval;
+import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.RowMetadata;
+import org.apache.asterix.runtime.schemainferrence.RowSchemaTransformer;
+import org.apache.asterix.runtime.schemainferrence.RowTransformer;
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableObject;
@@ -60,6 +63,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
 
     private final IEvaluatorContext context;
@@ -227,8 +231,9 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
 
                 String jsonString = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
                 //                mapper.writeValue(resultStorage.XÅÎ„AXgetDataOutput(),root);
-                System.out.println(jsonString);
-                stringSerde.serialize(new AString(jsonString), resultStorage.getDataOutput());
+                System.out.println(res);
+                stringSerde.serialize(new AString(res), resultStorage.getDataOutput());
+
             }
 
         } catch (IOException e) {

@@ -18,19 +18,30 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
-import it.unimi.dsi.fastutil.ints.IntArrayList;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
+
+import dev.harrel.jsonschema.Dialects;
+import dev.harrel.jsonschema.Validator;
+import dev.harrel.jsonschema.ValidatorFactory;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.AbstractRowMetadata;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
-import org.apache.asterix.runtime.schemainferrence.utils.RowSchemaStringBuilderVisitor;
 import org.apache.asterix.om.utils.RowValuesUtil;
 import org.apache.asterix.om.utils.RunRowLengthIntArray;
 import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.AbstractRowMetadata;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.PathRowInfoSerializer;
+import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaStringBuilderVisitor;
+import org.apache.asterix.runtime.schemainferrence.utils.RowSchemaStringBuilderVisitor;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
@@ -40,12 +51,7 @@ import org.apache.hyracks.util.LogRedactionUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
-import java.io.DataOutput;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 /**
  * The schema here is mutable and can change according to the flushed records
@@ -82,7 +88,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         changed = true;
         serializeColumnsMetadata();
     }
-
 
     public RowFieldNamesDictionary getFieldNamesDictionary() {
         return fieldNamesDictionary;
@@ -132,7 +137,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         int metaSchemaOffsetPointer = reserveInt(output);
         int pathInfoOffsetPointer = reserveInt(output);
         int lengthDataOffsetPointer = reserveInt(output);
-
 
         //FieldNames
         setOffset(fieldNamesOffsetPointer);
@@ -185,7 +189,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         root.abort(input, definitionLevels);
     }
 
-
     /* ********************************************************
      * Schema related methods
      * ********************************************************
@@ -199,6 +202,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     public int getNumberOfColumns() {
         return this.sizeOfWriters;
     }
+
     // Create schema node
     public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag)
             throws HyracksDataException {
@@ -213,6 +217,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         }
         return currentChild;
     }
+
     // Create schema node with fieldName
     public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag,
             IValueReference fieldName) throws HyracksDataException {
@@ -236,6 +241,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     public void exitLevel(AbstractRowSchemaNestedNode node) {
         level--;
     }
+
     // Update schema level by incrementing
     public void enterNode(AbstractRowSchemaNode parent, AbstractRowSchemaNode node) throws HyracksDataException {
         //Flush all definition levels from parent to child
@@ -244,6 +250,7 @@ public final class RowMetadata extends AbstractRowMetadata {
             level++;
         }
     }
+
     // Update schema level by decrementing
     public void exitNode(AbstractRowSchemaNode node) {
         if (node.isNested()) {
@@ -255,6 +262,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         }
         node.incrementCounter();
     }
+
     // Collection node level updated and set
     public void exitCollectionNode(AbstractRowCollectionSchemaNode collectionNode, int numberOfItems) {
         RunRowLengthIntArray collectionDefLevels = definitionLevels.get(collectionNode);
@@ -273,7 +281,6 @@ public final class RowMetadata extends AbstractRowMetadata {
     public RunRowLengthIntArray getDefinitionLevels(AbstractRowCollectionSchemaNode collectionSchemaNode) {
         return definitionLevels.get(collectionSchemaNode);
     }
-
 
     private void flushNestedDefinitionLevel(int parentMask, int childMask, int startIndex,
             RunRowLengthIntArray parentDefLevels, RunRowLengthIntArray childDefLevels) {
@@ -375,17 +382,55 @@ public final class RowMetadata extends AbstractRowMetadata {
     private static String logSchema(ObjectRowSchemaNode root, ObjectRowSchemaNode metaRoot,
             RowFieldNamesDictionary fieldNamesDictionary) throws HyracksDataException {
         // This should be a low frequency object creation
-        RowSchemaStringBuilderVisitor schemaBuilder = new RowSchemaStringBuilderVisitor(fieldNamesDictionary);
+        //        RowSchemaStringBuilderVisitor schemaBuilder = new RowSchemaStringBuilderVisitor(fieldNamesDictionary);
+        JSONRowSchemaStringBuilderVisitor schemaBuilder = new JSONRowSchemaStringBuilderVisitor(fieldNamesDictionary);
+
         String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));
-        System.out.println(recordSchema + " RECORD SCHEMA");
-        LOGGER.debug("Schema for {} has changed: \n {}", RowSchemaStringBuilderVisitor.RECORD_SCHEMA, recordSchema);
+
+        //        System.out.println(recordSchema + " RECORD SCHEMA");
+        //        LOGGER.debug("Schema for {} has changed: \n {}", RowSchemaStringBuilderVisitor.RECORD_SCHEMA, recordSchema);
         if (metaRoot != null) {
             String metaRecordSchema = LogRedactionUtil.userData(schemaBuilder.build(metaRoot));
             LOGGER.debug("Schema for {} has changed: \n {}", RowSchemaStringBuilderVisitor.META_RECORD_SCHEMA,
                     metaRecordSchema);
         }
+    try {
+        Validator validator = new ValidatorFactory().withDialect(new Dialects.Draft2020Dialect()).createValidator();
+        URI schemaUri = validator.registerSchema(recordSchema);
+        Validator.Result result1 = validator.validate(schemaUri, recordSchema);
+    }
+    catch (Exception e){
+        System.out.println(e + "ERROR");
+    }
+        //        ObjectMapper objectMapper = new ObjectMapper();
+        //        try {
+        //            // Parse the JSON string into a JsonNode (JSON object)
+        //            JsonNode jsonNode = objectMapper.readTree(recordSchema);
+        //            JsonSchema schema = JsonSchema.of(JsonObject.mapFrom(jsonNode));
+        //                        Validator result = Validator.create(
+        //                                schema,
+        //                                        new JsonSchemaOptions().setDraft(Draft.DRAFT201909).setBaseUri("http://localhost:19001").setOutputFormat(OutputFormat.Basic));
+        //
+        //                        OutputUnit res = result.validate(schema);
+        //
+        //                        if (res.getValid()) {
+        //                            // Successful validation
+        //                            System.out.println("TEST");
+        //                        }
+        ////            JsonSerializer jsonSerializer;
+        ////            JsonSchema jsonSchema;
+        //
+        //////
+        //        } catch (Exception e) {
+        //            System.out.println("ERROR");
+        //        }
         return recordSchema;
     }
+    //
+    //    public static JSONObject loadJsonFromFile(String fileName) throws FileNotFoundException {
+    //        Reader reader = new FileReader(fileName);
+    //        return new JSONObject(new JSONTokener(reader));
+    //    }
 
     // Normalize field record type
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {

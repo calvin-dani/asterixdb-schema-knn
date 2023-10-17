@@ -18,7 +18,9 @@
  */
 package org.apache.asterix.runtime.schemainferrence.utils;
 
-import it.unimi.dsi.fastutil.ints.IntList;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.asterix.dataflow.data.nontagged.serde.AStringSerializerDeserializer;
 import org.apache.asterix.om.base.AString;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
@@ -35,8 +37,7 @@ import org.apache.hyracks.data.std.util.ByteArrayAccessibleInputStream;
 import org.apache.hyracks.util.string.UTF8StringReader;
 import org.apache.hyracks.util.string.UTF8StringWriter;
 
-import java.util.ArrayList;
-import java.util.List;
+import it.unimi.dsi.fastutil.ints.IntList;
 
 /*
 Schema string builder for logging purpose

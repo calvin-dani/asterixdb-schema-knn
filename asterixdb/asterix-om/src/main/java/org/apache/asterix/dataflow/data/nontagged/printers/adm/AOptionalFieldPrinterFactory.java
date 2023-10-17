@@ -50,8 +50,8 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                 nullPrinter = (ADMPrinterFactoryProvider.INSTANCE.getPrinterFactory(BuiltinType.ANULL)).createPrinter();
                 fieldPrinter = (ADMPrinterFactoryProvider.INSTANCE.getPrinterFactory(unionType.getActualType()))
                         .createPrinter();
-                stringPrinter = (ADMPrinterFactoryProvider.INSTANCE.getPrinterFactory(BuiltinType.ASTRING))
-                        .createPrinter();
+                stringPrinter =
+                        (ADMPrinterFactoryProvider.INSTANCE.getPrinterFactory(BuiltinType.ASTRING)).createPrinter();
             }
 
             @Override
@@ -59,11 +59,9 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                 fieldPrinter.init();
                 if (b[s] == ATypeTag.SERIALIZED_NULL_TYPE_TAG || b[s] == ATypeTag.SERIALIZED_MISSING_TYPE_TAG) {
                     nullPrinter.print(b, s, l, ps);
-                }
-                else if (b[s] == ATypeTag.SERIALIZED_STRING_TYPE_TAG) {
+                } else if (b[s] == ATypeTag.SERIALIZED_STRING_TYPE_TAG) {
                     stringPrinter.print(b, s, l, ps);
-                }
-                else {
+                } else {
                     fieldPrinter.print(b, s, l, ps);
                 }
             }

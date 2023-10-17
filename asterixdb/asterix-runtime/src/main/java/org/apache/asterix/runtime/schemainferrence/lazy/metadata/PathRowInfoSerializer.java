@@ -18,14 +18,15 @@
  */
 package org.apache.asterix.runtime.schemainferrence.lazy.metadata;
 
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.ints.IntList;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNestedNode;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-
 import java.io.DataOutput;
 import java.io.IOException;
+
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNestedNode;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 
 public class PathRowInfoSerializer {
     private final ArrayBackedValueStorage primaryKeyOutputPathStorage;
