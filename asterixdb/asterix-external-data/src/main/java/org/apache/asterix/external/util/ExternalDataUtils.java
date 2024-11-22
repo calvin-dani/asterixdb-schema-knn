@@ -48,6 +48,8 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TimeZone;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -108,11 +110,9 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableIterable;
 
-import io.delta.standalone.DeltaLog;
-import io.delta.standalone.Snapshot;
-import io.delta.standalone.actions.AddFile;
-
 public class ExternalDataUtils {
+
+    private static final Set<String> validTimeZones = Set.of(TimeZone.getAvailableIDs());
     private static final Map<ATypeTag, IValueParserFactory> valueParserFactoryMap = new EnumMap<>(ATypeTag.class);
     private static final int DEFAULT_MAX_ARGUMENT_SZ = 1024 * 1024;
     private static final int HEADER_FUDGE = 64;
@@ -437,6 +437,7 @@ public class ExternalDataUtils {
     public static void defaultConfiguration(Map<String, String> configuration) {
         String format = configuration.get(ExternalDataConstants.KEY_FORMAT);
         if (format != null) {
+            //todo:utsav
             // default quote, escape character for quote and fields delimiter for csv and tsv format
             if (format.equals(ExternalDataConstants.FORMAT_CSV)) {
                 configuration.putIfAbsent(KEY_DELIMITER, ExternalDataConstants.DEFAULT_DELIMITER);
@@ -474,8 +475,8 @@ public class ExternalDataUtils {
 
         if (configuration.containsKey(ExternalDataConstants.TABLE_FORMAT)) {
             if (isDeltaTable(configuration)) {
-                configuration.put(ExternalDataConstants.KEY_PARSER, ExternalDataConstants.FORMAT_NOOP);
-                configuration.put(ExternalDataConstants.KEY_FORMAT, ExternalDataConstants.FORMAT_PARQUET);
+                configuration.put(ExternalDataConstants.KEY_PARSER, ExternalDataConstants.FORMAT_DELTA);
+                configuration.put(ExternalDataConstants.KEY_FORMAT, ExternalDataConstants.FORMAT_DELTA);
             }
             prepareTableFormat(configuration);
         }
@@ -497,23 +498,11 @@ public class ExternalDataUtils {
             throw new CompilationException(ErrorCode.INVALID_DELTA_TABLE_FORMAT,
                     configuration.get(ExternalDataConstants.KEY_FORMAT));
         }
-    }
-
-    public static void prepareDeltaTableFormat(Map<String, String> configuration, Configuration conf,
-            String tableMetadataPath) {
-        DeltaLog deltaLog = DeltaLog.forTable(conf, tableMetadataPath);
-        Snapshot snapshot = deltaLog.snapshot();
-        List<AddFile> dataFiles = snapshot.getAllFiles();
-        StringBuilder builder = new StringBuilder();
-        for (AddFile batchFile : dataFiles) {
-            builder.append(",");
-            String path = batchFile.getPath();
-            builder.append(tableMetadataPath).append('/').append(path);
+        if (configuration.containsKey(ExternalDataConstants.DeltaOptions.TIMEZONE)
+                && !validTimeZones.contains(configuration.get(ExternalDataConstants.DeltaOptions.TIMEZONE))) {
+            throw new CompilationException(ErrorCode.INVALID_TIMEZONE,
+                    configuration.get(ExternalDataConstants.DeltaOptions.TIMEZONE));
         }
-        if (builder.length() > 0) {
-            builder.deleteCharAt(0);
-        }
-        configuration.put(ExternalDataConstants.KEY_PATH, builder.toString());
     }
 
     public static void prepareIcebergTableFormat(Map<String, String> configuration, Configuration conf,
@@ -569,7 +558,8 @@ public class ExternalDataUtils {
             tableMetadataPath = S3Constants.HADOOP_S3_PROTOCOL + "://"
                     + configuration.get(ExternalDataConstants.CONTAINER_NAME_FIELD_NAME) + '/'
                     + configuration.get(ExternalDataConstants.DEFINITION_FIELD_NAME);
-        } else if (configuration.get(ExternalDataConstants.KEY_READER).equals(ExternalDataConstants.READER_HDFS)) {
+        } else if (configuration.get(ExternalDataConstants.KEY_READER)
+                .equals(ExternalDataConstants.KEY_ADAPTER_NAME_HDFS)) {
             conf.set(ExternalDataConstants.KEY_HADOOP_FILESYSTEM_URI,
                     configuration.get(ExternalDataConstants.KEY_HDFS_URL));
             tableMetadataPath = configuration.get(ExternalDataConstants.KEY_HDFS_URL) + '/' + tableMetadataPath;
@@ -610,11 +600,21 @@ public class ExternalDataUtils {
     public static void validate(Map<String, String> configuration) throws HyracksDataException {
         String format = configuration.get(ExternalDataConstants.KEY_FORMAT);
         String header = configuration.get(ExternalDataConstants.KEY_HEADER);
+        String forceQuote = configuration.get(ExternalDataConstants.KEY_FORCE_QUOTE);
+        String emptyFieldAsNull = configuration.get(ExternalDataConstants.KEY_EMPTY_FIELD_AS_NULL);
         if (format != null && isHeaderRequiredFor(format) && header == null) {
             throw new RuntimeDataException(ErrorCode.PARAMETERS_REQUIRED, ExternalDataConstants.KEY_HEADER);
         }
         if (header != null && !isBoolean(header)) {
             throw new RuntimeDataException(ErrorCode.INVALID_REQ_PARAM_VAL, ExternalDataConstants.KEY_HEADER, header);
+        }
+        if (forceQuote != null && !isBoolean(forceQuote)) {
+            throw new RuntimeDataException(ErrorCode.INVALID_REQ_PARAM_VAL, ExternalDataConstants.KEY_FORCE_QUOTE,
+                    forceQuote);
+        }
+        if (emptyFieldAsNull != null && !isBoolean(emptyFieldAsNull)) {
+            throw new RuntimeDataException(ErrorCode.INVALID_REQ_PARAM_VAL,
+                    ExternalDataConstants.KEY_EMPTY_FIELD_AS_NULL, emptyFieldAsNull);
         }
         char delimiter = validateGetDelimiter(configuration);
         validateGetQuote(configuration, delimiter);
@@ -685,6 +685,9 @@ public class ExternalDataUtils {
                 break;
             case ExternalDataConstants.KEY_ADAPTER_NAME_GCS:
                 validateProperties(configuration, srcLoc, collector);
+                break;
+            case ExternalDataConstants.KEY_ADAPTER_NAME_HDFS:
+                HDFSUtils.validateProperties(configuration, srcLoc, collector);
                 break;
             default:
                 // Nothing needs to be done
@@ -949,7 +952,7 @@ public class ExternalDataUtils {
             if (datasetRecordType.getFieldTypes().length != 0) {
                 throw new CompilationException(ErrorCode.UNSUPPORTED_TYPE_FOR_PARQUET, datasetRecordType.getTypeName());
             } else if (properties.containsKey(ParquetOptions.TIMEZONE)
-                    && !ParquetOptions.VALID_TIME_ZONES.contains(properties.get(ParquetOptions.TIMEZONE))) {
+                    && !validTimeZones.contains(properties.get(ParquetOptions.TIMEZONE))) {
                 //Ensure the configured time zone id is correct
                 throw new CompilationException(ErrorCode.INVALID_TIMEZONE, properties.get(ParquetOptions.TIMEZONE));
             }
@@ -1100,7 +1103,7 @@ public class ExternalDataUtils {
                 String[] nodePathPair = path.trim().split("://");
                 protocol = nodePathPair[0];
                 break;
-            case ExternalDataConstants.KEY_HDFS_URL:
+            case ExternalDataConstants.KEY_ADAPTER_NAME_HDFS:
                 protocol = ExternalDataConstants.KEY_HDFS_URL;
                 break;
             default:

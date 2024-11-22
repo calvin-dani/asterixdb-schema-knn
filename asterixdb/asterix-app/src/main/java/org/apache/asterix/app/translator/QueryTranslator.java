@@ -27,6 +27,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -216,6 +217,7 @@ import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.types.AUnionType;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.BuiltinTypeMap;
 import org.apache.asterix.om.types.IAType;
@@ -4116,21 +4118,37 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                         ExternalDataConstants.WRITER_SUPPORTED_ADAPTERS, copyTo.getSourceLocation(), mdTxnCtx,
                         metadataProvider));
 
-                if (edd.getProperties().get(ExternalDataConstants.KEY_FORMAT)
-                        .equalsIgnoreCase(ExternalDataConstants.FORMAT_PARQUET)) {
-                    if (copyTo.getType() == null) {
-                        throw new CompilationException(ErrorCode.COMPILATION_ERROR,
-                                "TYPE() Expression is required for parquet format");
+                if (ExternalDataConstants.FORMAT_PARQUET
+                        .equalsIgnoreCase(edd.getProperties().get(ExternalDataConstants.KEY_FORMAT))) {
+                    if (copyTo.getType() != null) {
+                        DataverseName dataverseName =
+                                DataverseName.createFromCanonicalForm(ExternalDataConstants.DUMMY_DATAVERSE_NAME);
+                        IAType iaType = translateType(ExternalDataConstants.DUMMY_DATABASE_NAME, dataverseName,
+                                ExternalDataConstants.DUMMY_TYPE_NAME, copyTo.getType(), mdTxnCtx);
+                        edd.getProperties().put(ExternalDataConstants.PARQUET_SCHEMA_KEY,
+                                SchemaConverterVisitor.convertToParquetSchemaString((ARecordType) iaType));
                     }
-
-                    DataverseName dataverseName =
-                            DataverseName.createFromCanonicalForm(ExternalDataConstants.DUMMY_DATAVERSE_NAME);
-                    IAType iaType = translateType(ExternalDataConstants.DUMMY_DATABASE_NAME, dataverseName,
-                            ExternalDataConstants.DUMMY_TYPE_NAME, copyTo.getType(), mdTxnCtx);
-                    edd.getProperties().put(ExternalDataConstants.PARQUET_SCHEMA_KEY,
-                            SchemaConverterVisitor.convertToParquetSchemaString((ARecordType) iaType));
                 }
 
+                if (edd.getProperties().get(ExternalDataConstants.KEY_FORMAT)
+                        .equalsIgnoreCase(ExternalDataConstants.FORMAT_CSV_LOWER_CASE)) {
+                    DataverseName dataverseName =
+                            DataverseName.createFromCanonicalForm(ExternalDataConstants.DUMMY_DATAVERSE_NAME);
+                    IAType iaType;
+                    if (copyTo.getType() != null) {
+                        iaType = translateType(ExternalDataConstants.DUMMY_DATABASE_NAME, dataverseName,
+                                ExternalDataConstants.DUMMY_TYPE_NAME, copyTo.getType(), mdTxnCtx);
+                    } else if (copyTo.getTypeExpressionItemType() != null) {
+                        iaType = translateType(ExternalDataConstants.DUMMY_DATABASE_NAME, dataverseName,
+                                ExternalDataConstants.DUMMY_TYPE_NAME, copyTo.getTypeExpressionItemType(), mdTxnCtx);
+                    } else {
+                        throw new CompilationException(ErrorCode.COMPILATION_ERROR,
+                                "TYPE/AS Expression is required for csv format");
+                    }
+                    ARecordType recordType = (ARecordType) iaType;
+                    validateCSVSchema(recordType);
+                    edd.setItemType(recordType);
+                }
                 Map<VarIdentifier, IAObject> externalVars = createExternalVariables(copyTo, stmtParams);
                 // Query Rewriting (happens under the same ongoing metadata transaction)
                 LangRewritingContext langRewritingContext = createLangRewritingContext(metadataProvider,
@@ -5737,11 +5755,28 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         }
     }
 
+    /**
+     * Normalizes the value of the adapter and ensures that it is supported
+     *
+     * @param details external details
+     * @param sourceLoc source location
+     */
+    private void normalizeAdapters(ExternalDetailsDecl details, SourceLocation sourceLoc) throws CompilationException {
+        String adapter = details.getAdapter();
+        Optional<String> normalizedAdapter = ExternalDataConstants.EXTERNAL_READ_ADAPTERS.stream()
+                .filter(k -> k.equalsIgnoreCase(adapter)).findFirst();
+        if (normalizedAdapter.isEmpty()) {
+            throw CompilationException.create(ErrorCode.UNKNOWN_ADAPTER, sourceLoc, adapter);
+        }
+        details.setAdapter(normalizedAdapter.get());
+    }
+
     protected void validateExternalDatasetProperties(ExternalDetailsDecl externalDetails,
             Map<String, String> properties, SourceLocation srcLoc, MetadataTransactionContext mdTxnCtx,
             IApplicationContext appCtx, MetadataProvider metadataProvider)
             throws AlgebricksException, HyracksDataException {
         // Validate adapter specific properties
+        normalizeAdapters(externalDetails, srcLoc);
         String adapter = externalDetails.getAdapter();
         Map<String, String> details = new HashMap<>(properties);
         details.put(ExternalDataConstants.KEY_EXTERNAL_SOURCE_TYPE, adapter);
@@ -5854,4 +5889,24 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         REPLACED
     }
 
+    private void validateCSVSchema(ARecordType schema) throws CompilationException {
+        final List<String> expectedFieldNames = Arrays.asList(schema.getFieldNames());
+        final List<IAType> expectedFieldTypes = Arrays.asList(schema.getFieldTypes());
+        final int size = expectedFieldNames.size();
+        for (int i = 0; i < size; ++i) {
+            IAType expectedIAType = expectedFieldTypes.get(i);
+            if (!ExternalDataConstants.CSV_WRITER_SUPPORTED_DATA_TYPES.contains(expectedIAType.getTypeTag())) {
+                if (expectedIAType.getTypeTag().equals(ATypeTag.UNION)) {
+                    AUnionType unionType = (AUnionType) expectedIAType;
+                    ATypeTag actualTypeTag = unionType.getActualType().getTypeTag();
+                    if (!ExternalDataConstants.CSV_WRITER_SUPPORTED_DATA_TYPES.contains(actualTypeTag)) {
+                        throw new CompilationException(ErrorCode.TYPE_UNSUPPORTED_CSV_WRITE, actualTypeTag.toString());
+                    }
+                } else {
+                    throw new CompilationException(ErrorCode.TYPE_UNSUPPORTED_CSV_WRITE,
+                            expectedIAType.getTypeTag().toString());
+                }
+            }
+        }
+    }
 }

@@ -19,29 +19,41 @@
 package org.apache.asterix.external.input.record.reader.hdfs;
 
 import java.io.IOException;
+import java.security.PrivilegedExceptionAction;
 
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 public class HDFSRecordReader<K, V extends Writable> extends AbstractHDFSRecordReader<K, V> {
 
     public HDFSRecordReader(boolean[] read, InputSplit[] inputSplits, String[] readSchedule, String nodeName,
-            JobConf conf) {
-        super(read, inputSplits, readSchedule, nodeName, conf);
+            JobConf conf, UserGroupInformation ugi) {
+        super(read, inputSplits, readSchedule, nodeName, conf, ugi);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     protected RecordReader<K, V> getRecordReader(int splitIndex) throws IOException {
-        reader = (RecordReader<K, V>) inputFormat.getRecordReader(inputSplits[splitIndex], conf, Reporter.NULL);
+        try {
+            reader = ugi == null ? getReader(splitIndex)
+                    : ugi.doAs((PrivilegedExceptionAction<RecordReader<K, V>>) () -> getReader(splitIndex));
+        } catch (InterruptedException ex) {
+            throw HyracksDataException.create(ex);
+        }
         if (key == null) {
             key = reader.createKey();
             value = reader.createValue();
         }
         return reader;
+    }
+
+    @SuppressWarnings("unchecked")
+    private RecordReader<K, V> getReader(int splitIndex) throws IOException {
+        return (RecordReader<K, V>) inputFormat.getRecordReader(inputSplits[splitIndex], conf, Reporter.NULL);
     }
 
     @Override

@@ -23,7 +23,7 @@ USE test;
 
 
 CREATE TYPE ColumnType1 AS {
-  id: integer
+  id: int
 };
 
 CREATE COLLECTION TestCollection(ColumnType1) PRIMARY KEY id;

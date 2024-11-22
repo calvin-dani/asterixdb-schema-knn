@@ -25,8 +25,8 @@ import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 
 public class ParquetExternalFilePrinterFactory implements IExternalPrinterFactory {
-    private static final long serialVersionUID = 8971234908711234L;
-    private final String parquetSchemaString;
+    private static final long serialVersionUID = 8971234908711235L;
+    private String parquetSchemaString;
     private final IAType typeInfo;
     private final CompressionCodecName compressionCodecName;
     private final long rowGroupSize;
@@ -41,6 +41,19 @@ public class ParquetExternalFilePrinterFactory implements IExternalPrinterFactor
         this.rowGroupSize = rowGroupSize;
         this.pageSize = pageSize;
         this.writerVersion = writerVersion;
+    }
+
+    public ParquetExternalFilePrinterFactory(CompressionCodecName compressionCodecName, IAType typeInfo,
+            long rowGroupSize, int pageSize, ParquetProperties.WriterVersion writerVersion) {
+        this.compressionCodecName = compressionCodecName;
+        this.typeInfo = typeInfo;
+        this.rowGroupSize = rowGroupSize;
+        this.pageSize = pageSize;
+        this.writerVersion = writerVersion;
+    }
+
+    public void setParquetSchemaString(String parquetSchemaString) {
+        this.parquetSchemaString = parquetSchemaString;
     }
 
     @Override

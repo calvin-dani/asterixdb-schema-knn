@@ -19,20 +19,23 @@
 
 USE test;
 
+
+
+
+
+
+insert into TestCollection({"id":1, "name": []});
+
+
+
 COPY (
-   select c.* from TestCollection c
-) toWriter
-TO S3
-PATH ("copy-to-result", "parquet-error-checks15")
-TYPE ( {id : int, name : string, list : [int] )
+select c.* from TestCollection c
+    ) toWriter
+TO %adapter%
+PATH (%pathprefix% "copy-to-result", "parquet-error-checks15")
 WITH {
-    "accessKeyId":"dummyAccessKey",
-    "secretAccessKey":"dummySecretKey",
-    "region":"us-west-2",
-    "serviceEndpoint":"http://127.0.0.1:8001",
-    "container":"playground",
+    %template_colons%,
+    %additionalProperties%
     "format":"parquet"
-}
-
-
+    }
 

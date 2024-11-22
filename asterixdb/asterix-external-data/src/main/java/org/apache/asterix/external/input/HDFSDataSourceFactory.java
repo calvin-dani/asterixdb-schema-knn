@@ -22,15 +22,20 @@ import static org.apache.asterix.external.util.ExternalDataConstants.CONTAINER_N
 import static org.apache.asterix.external.util.ExternalDataConstants.FORMAT_PARQUET;
 import static org.apache.hyracks.api.util.ExceptionUtils.getMessageOrToString;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.security.PrivilegedExceptionAction;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.apache.asterix.common.api.IApplicationContext;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
+import org.apache.asterix.common.external.IExternalFilterEvaluator;
 import org.apache.asterix.common.external.IExternalFilterEvaluatorFactory;
 import org.apache.asterix.external.api.AsterixInputStream;
 import org.apache.asterix.external.api.IExternalDataRuntimeContext;
@@ -38,6 +43,7 @@ import org.apache.asterix.external.api.IExternalDataSourceFactory;
 import org.apache.asterix.external.api.IRecordReader;
 import org.apache.asterix.external.api.IRecordReaderFactory;
 import org.apache.asterix.external.input.filter.embedder.IExternalFilterValueEmbedder;
+import org.apache.asterix.external.input.record.reader.abstracts.AbstractExternalInputStreamFactory;
 import org.apache.asterix.external.input.record.reader.hdfs.HDFSRecordReader;
 import org.apache.asterix.external.input.record.reader.hdfs.parquet.ParquetFileRecordReader;
 import org.apache.asterix.external.input.record.reader.stream.StreamRecordReader;
@@ -45,12 +51,20 @@ import org.apache.asterix.external.input.stream.HDFSInputStream;
 import org.apache.asterix.external.provider.StreamRecordReaderProvider;
 import org.apache.asterix.external.provider.context.ExternalStreamRuntimeDataContext;
 import org.apache.asterix.external.util.ExternalDataConstants;
+import org.apache.asterix.external.util.ExternalDataPrefix;
 import org.apache.asterix.external.util.ExternalDataUtils;
 import org.apache.asterix.external.util.HDFSUtils;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.mapred.FileInputFormat;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
+import org.apache.hadoop.security.Credentials;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.api.application.ICCServiceContext;
@@ -58,15 +72,20 @@ import org.apache.hyracks.api.application.IServiceContext;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.exceptions.IWarningCollector;
+import org.apache.hyracks.api.exceptions.Warning;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.hdfs.dataflow.ConfFactory;
 import org.apache.hyracks.hdfs.dataflow.InputSplitsFactory;
 import org.apache.hyracks.hdfs.scheduler.Scheduler;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExternalDataSourceFactory {
 
     private static final long serialVersionUID = 1L;
-    private static final List<String> recordReaderNames = Collections.singletonList("hdfs");
+    private static final List<String> recordReaderNames =
+            Collections.singletonList(ExternalDataConstants.KEY_ADAPTER_NAME_HDFS);
+    private static final Logger LOGGER = LogManager.getLogger();
 
     protected transient AlgebricksAbsolutePartitionConstraint clusterLocations;
     protected transient IServiceContext serviceCtx;
@@ -85,13 +104,65 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
     private String nodeName;
     private Class recordReaderClazz;
     private IExternalFilterEvaluatorFactory filterEvaluatorFactory;
+    private transient Credentials credentials;
+    private byte[] serializedCredentials;
+    private transient UserGroupInformation ugi;
 
     @Override
     public void configure(IServiceContext serviceCtx, Map<String, String> configuration,
             IWarningCollector warningCollector, IExternalFilterEvaluatorFactory filterEvaluatorFactory)
             throws AlgebricksException, HyracksDataException {
         JobConf hdfsConf = prepareHDFSConf(serviceCtx, configuration, filterEvaluatorFactory);
+        credentials = HDFSUtils.configureHadoopAuthentication(configuration, hdfsConf);
+        try {
+            if (credentials != null) {
+                serializedCredentials = HDFSUtils.serialize(credentials);
+                ugi = UserGroupInformation.createRemoteUser(UUID.randomUUID().toString());
+                ugi.addCredentials(credentials);
+            }
+        } catch (IOException ex) {
+            throw HyracksDataException.create(ex);
+        }
+        if (!configuration.containsKey(ExternalDataConstants.KEY_PATH)) {
+            extractRequiredFiles(serviceCtx, configuration, warningCollector, filterEvaluatorFactory, hdfsConf);
+        }
         configureHdfsConf(hdfsConf, configuration);
+    }
+
+    private void extractRequiredFiles(IServiceContext serviceCtx, Map<String, String> configuration,
+            IWarningCollector warningCollector, IExternalFilterEvaluatorFactory filterEvaluatorFactory,
+            JobConf hdfsConf) throws HyracksDataException, AlgebricksException {
+        AbstractExternalInputStreamFactory.IncludeExcludeMatcher includeExcludeMatcher =
+                ExternalDataUtils.getIncludeExcludeMatchers(configuration);
+
+        IExternalFilterEvaluator evaluator = filterEvaluatorFactory.create(serviceCtx, warningCollector);
+        ExternalDataPrefix externalDataPrefix = new ExternalDataPrefix(configuration);
+        configuration.put(ExternalDataPrefix.PREFIX_ROOT_FIELD_NAME, externalDataPrefix.getRoot());
+        try (FileSystem fs = ugi == null ? FileSystem.get(hdfsConf)
+                : ugi.doAs((PrivilegedExceptionAction<FileSystem>) () -> FileSystem.get(hdfsConf))) {
+            List<Path> reqFiles = new ArrayList<>();
+            RemoteIterator<LocatedFileStatus> files =
+                    fs.listFiles(new Path(configuration.get(ExternalDataPrefix.PREFIX_ROOT_FIELD_NAME)), true);
+            while (files.hasNext()) {
+                LocatedFileStatus file = files.next();
+                if (ExternalDataUtils.evaluate(file.getPath().toUri().getPath(), includeExcludeMatcher.getPredicate(),
+                        includeExcludeMatcher.getMatchersList(), externalDataPrefix, evaluator, warningCollector)) {
+                    reqFiles.add(file.getPath());
+                }
+            }
+            if (reqFiles.isEmpty()) {
+                if (warningCollector.shouldWarn()) {
+                    warningCollector.warn(Warning.of(null, ErrorCode.EXTERNAL_SOURCE_CONFIGURATION_RETURNED_NO_FILES));
+                }
+                HDFSUtils.setInputDir(hdfsConf, "");
+            } else {
+                FileInputFormat.setInputPaths(hdfsConf, reqFiles.toArray(new Path[0]));
+            }
+        } catch (FileNotFoundException ex) {
+            throw CompilationException.create(ErrorCode.EXTERNAL_SOURCE_CONFIGURATION_RETURNED_NO_FILES);
+        } catch (InterruptedException | IOException ex) {
+            throw HyracksDataException.create(ex);
+        }
     }
 
     protected JobConf prepareHDFSConf(IServiceContext serviceCtx, Map<String, String> configuration,
@@ -103,13 +174,15 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
         return HDFSUtils.configureHDFSJobConf(configuration);
     }
 
-    protected void configureHdfsConf(JobConf conf, Map<String, String> configuration) throws AlgebricksException {
+    protected void configureHdfsConf(JobConf conf, Map<String, String> configuration)
+            throws AlgebricksException, HyracksDataException {
         String formatString = configuration.get(ExternalDataConstants.KEY_FORMAT);
         try {
             confFactory = new ConfFactory(conf);
             clusterLocations = getPartitionConstraint();
             int numPartitions = clusterLocations.getLocations().length;
-            InputSplit[] configInputSplits = getInputSplits(conf, numPartitions);
+            InputSplit[] configInputSplits = ugi == null ? getInputSplits(conf, numPartitions)
+                    : ugi.doAs((PrivilegedExceptionAction<InputSplit[]>) () -> getInputSplits(conf, numPartitions));
             readSchedule = hdfsScheduler.getLocationConstraints(configInputSplits);
             inputSplitsFactory = new InputSplitsFactory(configInputSplits);
             read = new boolean[readSchedule.length];
@@ -125,6 +198,8 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
                 recordReaderClazz = StreamRecordReaderProvider.getRecordReaderClazz(configuration);
                 this.recordClass = char[].class;
             }
+        } catch (InterruptedException e) {
+            throw HyracksDataException.create(e);
         } catch (IOException e) {
             throw new CompilationException(ErrorCode.EXTERNAL_SOURCE_ERROR, e, getMessageOrToString(e));
         } catch (Exception e) {
@@ -157,7 +232,7 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
     public AsterixInputStream createInputStream(IHyracksTaskContext ctx) throws HyracksDataException {
         try {
             restoreConfig(ctx);
-            return new HDFSInputStream(read, inputSplits, readSchedule, nodeName, conf, configuration);
+            return new HDFSInputStream(read, inputSplits, readSchedule, nodeName, conf, configuration, ugi);
         } catch (Exception e) {
             throw HyracksDataException.create(e);
         }
@@ -169,6 +244,16 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
             inputSplits = inputSplitsFactory.getSplits();
             nodeName = ctx.getJobletContext().getServiceContext().getNodeId();
             configured = true;
+            try {
+                if (serializedCredentials != null) {
+                    credentials = new Credentials();
+                    HDFSUtils.deserialize(serializedCredentials, credentials);
+                    ugi = UserGroupInformation.createRemoteUser(UUID.randomUUID().toString());
+                    ugi.addCredentials(credentials);
+                }
+            } catch (IOException ex) {
+                throw HyracksDataException.create(ex);
+            }
         }
     }
 
@@ -237,7 +322,8 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
                  */
                 readerConf = confFactory.getConf();
             }
-            return createRecordReader(configuration, read, inputSplits, readSchedule, nodeName, readerConf, context);
+            return createRecordReader(configuration, read, inputSplits, readSchedule, nodeName, readerConf, context,
+                    ugi);
         } catch (Exception e) {
             throw HyracksDataException.create(e);
         }
@@ -262,12 +348,12 @@ public class HDFSDataSourceFactory implements IRecordReaderFactory<Object>, IExt
 
     private static IRecordReader<?> createRecordReader(Map<String, String> configuration, boolean[] read,
             InputSplit[] inputSplits, String[] readSchedule, String nodeName, JobConf conf,
-            IExternalDataRuntimeContext context) {
-        if (configuration.get(ExternalDataConstants.KEY_INPUT_FORMAT.trim())
+            IExternalDataRuntimeContext context, UserGroupInformation ugi) {
+        if (configuration.get(ExternalDataConstants.KEY_INPUT_FORMAT).trim()
                 .equals(ExternalDataConstants.INPUT_FORMAT_PARQUET)) {
-            return new ParquetFileRecordReader<>(read, inputSplits, readSchedule, nodeName, conf, context);
+            return new ParquetFileRecordReader<>(read, inputSplits, readSchedule, nodeName, conf, context, ugi);
         } else {
-            return new HDFSRecordReader<>(read, inputSplits, readSchedule, nodeName, conf);
+            return new HDFSRecordReader<>(read, inputSplits, readSchedule, nodeName, conf, ugi);
         }
     }
 }

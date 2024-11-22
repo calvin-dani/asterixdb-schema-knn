@@ -19,6 +19,12 @@
 
 package org.apache.asterix.lang.sqlpp.rewrites.visitor;
 
+import static org.apache.asterix.common.utils.ConstantUtil.LIKE_ESCAPE;
+import static org.apache.asterix.common.utils.ConstantUtil.PERCENT;
+import static org.apache.asterix.common.utils.ConstantUtil.UNDERSCORE;
+import static org.apache.asterix.lang.sqlpp.rewrites.visitor.OperatorExpressionVisitor.LikePattern.EQUAL;
+import static org.apache.asterix.lang.sqlpp.rewrites.visitor.OperatorExpressionVisitor.LikePattern.PREFIX;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -34,10 +40,12 @@ import org.apache.asterix.lang.common.expression.QuantifiedExpression;
 import org.apache.asterix.lang.common.expression.QuantifiedExpression.Quantifier;
 import org.apache.asterix.lang.common.expression.VariableExpr;
 import org.apache.asterix.lang.common.literal.FalseLiteral;
+import org.apache.asterix.lang.common.literal.StringLiteral;
 import org.apache.asterix.lang.common.literal.TrueLiteral;
 import org.apache.asterix.lang.common.rewrites.LangRewritingContext;
 import org.apache.asterix.lang.common.struct.OperatorType;
 import org.apache.asterix.lang.common.struct.QuantifiedPair;
+import org.apache.asterix.lang.common.util.ExpressionUtils;
 import org.apache.asterix.lang.sqlpp.expression.CaseExpression;
 import org.apache.asterix.lang.sqlpp.util.FunctionMapUtil;
 import org.apache.asterix.lang.sqlpp.util.SqlppRewriteUtil;
@@ -82,17 +90,27 @@ public class OperatorExpressionVisitor extends AbstractSqlppExpressionScopingVis
         return operatorExpr;
     }
 
-    private Expression processLikeOperator(OperatorExpr operatorExpr, OperatorType opType) {
-        CallExpr likeExpr =
-                new CallExpr(new FunctionSignature(BuiltinFunctions.STRING_LIKE), operatorExpr.getExprList());
-        likeExpr.addHints(operatorExpr.getHints());
-        likeExpr.setSourceLocation(operatorExpr.getSourceLocation());
+    private Expression processLikeOperator(OperatorExpr operatorExpr, OperatorType opType) throws CompilationException {
         switch (opType) {
             case LIKE:
-                return likeExpr;
+                Expression target = operatorExpr.getExprList().get(0);
+                Expression patternExpr = operatorExpr.getExprList().get(1);
+                String patternStr = ExpressionUtils.getStringLiteral(patternExpr);
+                if (patternStr != null) {
+                    StringBuilder likePatternStr = new StringBuilder();
+                    LikePattern likePattern = processPattern(patternStr, likePatternStr);
+                    if (likePattern == PREFIX) {
+                        return convertLikeToRange(operatorExpr, target, likePatternStr.toString());
+                    } else if (likePattern == EQUAL) {
+                        Expression processedExpr = new LiteralExpr(new StringLiteral(likePatternStr.toString()));
+                        return createOperatorExpression(OperatorType.EQ, target, processedExpr, operatorExpr.getHints(),
+                                operatorExpr.getSourceLocation());
+                    }
+                }
+                return createLikeExpression(operatorExpr);
             case NOT_LIKE:
                 CallExpr notLikeExpr = new CallExpr(new FunctionSignature(BuiltinFunctions.NOT),
-                        new ArrayList<>(Collections.singletonList(likeExpr)));
+                        new ArrayList<>(Collections.singletonList(createLikeExpression(operatorExpr))));
                 notLikeExpr.setSourceLocation(operatorExpr.getSourceLocation());
                 return notLikeExpr;
             default:
@@ -156,19 +174,8 @@ public class OperatorExpressionVisitor extends AbstractSqlppExpressionScopingVis
         Expression target = operatorExpr.getExprList().get(0);
         Expression left = operatorExpr.getExprList().get(1);
         Expression right = operatorExpr.getExprList().get(2);
+        Expression andExpr = createRangeExpression(target, OperatorType.GE, left, right, OperatorType.LE, operatorExpr);
 
-        // Creates the expression target >= left.
-        Expression leftComparison = createOperatorExpression(OperatorType.GE, target, left, operatorExpr.getHints(),
-                operatorExpr.getSourceLocation());
-        // Creates the expression target <= right.
-        Expression targetCopy = (Expression) SqlppRewriteUtil.deepCopy(target);
-
-        // remove any selectivity hints from operatorExpr; do not want to duplicate those hints
-        Expression rightComparison = createOperatorExpression(OperatorType.LE, targetCopy, right,
-                removeSelectivityHints(operatorExpr), operatorExpr.getSourceLocation());
-
-        Expression andExpr = createOperatorExpression(OperatorType.AND, leftComparison, rightComparison, null,
-                operatorExpr.getSourceLocation());
         switch (opType) {
             case BETWEEN:
                 return andExpr;
@@ -260,5 +267,68 @@ public class OperatorExpressionVisitor extends AbstractSqlppExpressionScopingVis
             }
         }
         return comparison;
+    }
+
+    private Expression createRangeExpression(Expression target, OperatorType leftOp, Expression left, Expression right,
+            OperatorType rightOp, OperatorExpr operatorExpr) throws CompilationException {
+        Expression leftComparison = createOperatorExpression(leftOp, target, left, operatorExpr.getHints(),
+                operatorExpr.getSourceLocation());
+        Expression targetCopy = (Expression) SqlppRewriteUtil.deepCopy(target);
+
+        // remove any selectivity hints from operatorExpr; do not want to duplicate those hints
+        Expression rightComparison = createOperatorExpression(rightOp, targetCopy, right,
+                removeSelectivityHints(operatorExpr), operatorExpr.getSourceLocation());
+
+        Expression andExpr = createOperatorExpression(OperatorType.AND, leftComparison, rightComparison, null,
+                operatorExpr.getSourceLocation());
+        return andExpr;
+    }
+
+    private Expression convertLikeToRange(OperatorExpr operatorExpr, Expression target, String prefix)
+            throws CompilationException {
+        int lastCodePoint = prefix.codePointAt(prefix.length() - 1);
+        String incrementedLastChar = new String(Character.toChars(lastCodePoint + 1));
+        String incrementedStr = prefix.substring(0, prefix.length() - 1) + incrementedLastChar;
+        Expression left = new LiteralExpr(new StringLiteral(prefix));
+        Expression right = new LiteralExpr(new StringLiteral(incrementedStr));
+        return createRangeExpression(target, OperatorType.GE, left, right, OperatorType.LT, operatorExpr);
+    }
+
+    private static CallExpr createLikeExpression(OperatorExpr operatorExpr) {
+        CallExpr likeExpr =
+                new CallExpr(new FunctionSignature(BuiltinFunctions.STRING_LIKE), operatorExpr.getExprList());
+        likeExpr.addHints(operatorExpr.getHints());
+        likeExpr.setSourceLocation(operatorExpr.getSourceLocation());
+        return likeExpr;
+    }
+
+    private static LikePattern processPattern(String pattern, StringBuilder likePatternStr) {
+        // note: similar logic is applied in StringLikeDescriptor
+        LikePattern likePattern = EQUAL;
+        for (int i = 0, length = pattern.length(); i < length; i++) {
+            char c = pattern.charAt(i);
+            if (c == LIKE_ESCAPE) {
+                char nextChar;
+                // escape character can't be last, and only %, _ and the escape char are allowed after it
+                if (i >= length - 1 || ((nextChar = pattern.charAt(i + 1)) != PERCENT && nextChar != UNDERSCORE
+                        && nextChar != LIKE_ESCAPE)) {
+                    return null;
+                }
+                likePatternStr.append(nextChar);
+                ++i;
+            } else if (c == PERCENT && i == pattern.length() - 1) {
+                likePattern = PREFIX;
+            } else if (c == UNDERSCORE || c == PERCENT) {
+                return null;
+            } else {
+                likePatternStr.append(c);
+            }
+        }
+        return likePattern;
+    }
+
+    enum LikePattern {
+        PREFIX,
+        EQUAL
     }
 }

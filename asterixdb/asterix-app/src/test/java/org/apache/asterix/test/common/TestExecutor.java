@@ -1274,7 +1274,11 @@ public class TestExecutor {
                 if (isDmlRecoveryTest && statement.contains("nc1://")) {
                     statement = statement.replaceAll("nc1://", "127.0.0.1://../../../../../../asterix-app/");
                 }
-                executeSqlppUpdateOrDdl(statement, OutputFormat.forCompilationUnit(cUnit));
+                if (cUnit.getPlaceholder().isEmpty()) {
+                    executeSqlppUpdateOrDdl(statement, OutputFormat.forCompilationUnit(cUnit));
+                } else {
+                    executeSqlppUpdateOrDdl(statement, OutputFormat.forCompilationUnit(cUnit), cUnit);
+                }
                 break;
             case "pollget":
             case "pollquery":
@@ -2424,6 +2428,8 @@ public class TestExecutor {
                     str = applyAzureSubstitution(str, placeholders);
                 } else if (placeholder.getValue().equalsIgnoreCase("GCS")) {
                     str = applyGCSSubstitution(str, placeholders);
+                } else if (placeholder.getValue().equalsIgnoreCase("HDFS")) {
+                    str = applyHDFSSubstitution(str, placeholders);
                 }
             } else {
                 // Any other place holders, just replace with the value
@@ -2451,7 +2457,7 @@ public class TestExecutor {
     }
 
     protected boolean noTemplateRequired(String str) {
-        return !str.contains("%template%");
+        return !str.contains("%template%") && !str.contains("%template_colons%");
     }
 
     protected String applyS3Substitution(String str, List<Placeholder> placeholders) {
@@ -2502,7 +2508,11 @@ public class TestExecutor {
     }
 
     protected String setS3TemplateDefault(String str) {
-        return str.replace("%template%", TestConstants.S3_TEMPLATE_DEFAULT);
+        if (str.contains("%template%")) {
+            return str.replace("%template%", TestConstants.S3_TEMPLATE_DEFAULT);
+        } else {
+            return str.replace("%template_colons%", TestConstants.S3_TEMPLATE_DEFAULT_NO_PARENTHESES_WITH_COLONS);
+        }
     }
 
     protected String applyAzureSubstitution(String str, List<Placeholder> placeholders) {
@@ -2534,6 +2544,11 @@ public class TestExecutor {
         return str;
     }
 
+    protected String applyHDFSSubstitution(String str, List<Placeholder> placeholders) {
+        str = setHDFSTemplateDefault(str);
+        return str;
+    }
+
     protected String setAzureTemplate(String str) {
         return str.replace("%template%", TEMPLATE);
     }
@@ -2544,6 +2559,15 @@ public class TestExecutor {
 
     protected String setGCSTemplateDefault(String str) {
         return str;
+    }
+
+    protected String setHDFSTemplateDefault(String str) {
+        if (str.contains("%template%")) {
+            return str.replace("%template%", TestConstants.HDFS.HDFS_TEMPLATE_DEFAULT);
+        } else {
+            return str.replace("%template_colons%",
+                    TestConstants.HDFS.HDFS_TEMPLATE_DEFAULT_NO_PARENTHESES_WITH_COLONS);
+        }
     }
 
     protected void fail(boolean runDiagnostics, TestCaseContext testCaseCtx, CompilationUnit cUnit,

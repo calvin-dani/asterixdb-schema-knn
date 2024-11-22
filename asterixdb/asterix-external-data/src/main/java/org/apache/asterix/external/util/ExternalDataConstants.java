@@ -18,8 +18,8 @@
  */
 package org.apache.asterix.external.util;
 
+import java.util.List;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -90,6 +90,9 @@ public class ExternalDataConstants {
     public static final String KEY_INCLUDE = "include";
     public static final String KEY_EXCLUDE = "exclude";
     public static final String KEY_QUOTE = "quote";
+    public static final String KEY_FORCE_QUOTE = "force-quote";
+    public static final String KEY_EMPTY_FIELD_AS_NULL = "empty_field_as_null";
+    public static final String KEY_RECORD_DELIMITER = "record-delimiter";
     public static final String KEY_ESCAPE = "escape";
     public static final String KEY_PARSER = "parser";
     public static final String KEY_DATASET_RECORD = "dataset-record";
@@ -157,6 +160,13 @@ public class ExternalDataConstants {
     public static final String KEY_ADAPTER_NAME_AZURE_BLOB = "AZUREBLOB";
     public static final String KEY_ADAPTER_NAME_AZURE_DATA_LAKE = "AZUREDATALAKE";
     public static final String KEY_ADAPTER_NAME_GCS = "GCS";
+    public static final String KEY_ADAPTER_NAME_HDFS = "HDFS";
+
+    public static final Set<String> EXTERNAL_READ_ADAPTERS = Set.of(KEY_ADAPTER_NAME_TWITTER_PUSH,
+            KEY_ADAPTER_NAME_PUSH_TWITTER, KEY_ADAPTER_NAME_TWITTER_PULL, KEY_ADAPTER_NAME_PULL_TWITTER,
+            KEY_ADAPTER_NAME_TWITTER_USER_STREAM, KEY_ADAPTER_NAME_LOCALFS, KEY_ADAPTER_NAME_SOCKET,
+            KEY_ADAPTER_NAME_HTTP, KEY_ADAPTER_NAME_AWS_S3, KEY_ADAPTER_NAME_AZURE_BLOB,
+            KEY_ADAPTER_NAME_AZURE_DATA_LAKE, KEY_ADAPTER_NAME_GCS, KEY_ADAPTER_NAME_HDFS);
 
     /**
      * HDFS class names
@@ -174,6 +184,29 @@ public class ExternalDataConstants {
     public static final String INPUT_FORMAT_TEXT = "text-input-format";
     public static final String INPUT_FORMAT_SEQUENCE = "sequence-input-format";
     public static final String INPUT_FORMAT_PARQUET = "parquet-input-format";
+
+    public static final String HDFS_BLOCKSIZE = "blocksize";
+    public static final String HDFS_REPLICATION = "replication";
+    public static final String HADOOP_AUTHENTICATION = "authentication";
+    public static final String KERBEROS_PROTOCOL = "kerberos";
+    public static final String KERBEROS_REALM = "realm";
+    public static final String KERBEROS_KDC = "kdc";
+    public static final String HDFS_USE_DATANODE_HOSTNAME = "use-datanode-hostname";
+    public static final String KERBEROS_PRINCIPAL = "principal";
+    public static final String KERBEROS_PASSWORD = "password";
+
+    public static final String KEY_HDFS_BLOCKSIZE = "dfs.blocksize";
+    public static final String KEY_HDFS_REPLICATION = "dfs.replication";
+    public static final String KEY_HADOOP_AUTHENTICATION = "hadoop.security.authentication";
+    public static final String KEY_KERBEROS_CONF = "java.security.krb5.conf";
+    public static final String KEY_NAMENODE_PRINCIPAL_PATTERN = "dfs.namenode.kerberos.principal.pattern";
+    public static final String KEY_HDFS_USE_DATANODE_HOSTNAME = "dfs.client.use.datanode.hostname";
+    public static final String KERBEROS_LOGIN_MODULE = "com.sun.security.auth.module.Krb5LoginModule";
+    public static final String KERBEROS_CONFIG_REFRESH = "refreshKrb5Config";
+    public static final String KERBEROS_CONFIG_FILE_CONTENT =
+            "[libdefaults]\n\tdefault_realm = %1$s\n\n[realms]\n\t%1$s = {\n\t\tkdc = %2$s\n\t}";
+    public static final String[] KERBEROS_CONFIG_FILE_PATTERN = { "krb5", ".conf" };
+
     /**
      * Builtin streams
      */
@@ -188,6 +221,8 @@ public class ExternalDataConstants {
     public static final String HAS_HEADER = "has.header";
     public static final String TIME_TRACKING = "time.tracking";
     public static final String DEFAULT_QUOTE = "\"";
+    public static final String DEFAULT_SINGLE_QUOTE = "'";
+    public static final String NONE = "none";
     public static final String NODE_RESOLVER_FACTORY_PROPERTY = "node.Resolver";
     public static final String DEFAULT_DELIMITER = ",";
     public static final String EXTERNAL_LIBRARY_SEPARATOR = "#";
@@ -199,6 +234,7 @@ public class ExternalDataConstants {
     public static final String FORMAT_ADM = "adm";
     public static final String FORMAT_AVRO = "avro";
     public static final String FORMAT_JSON_LOWER_CASE = "json";
+    public static final String FORMAT_CSV_LOWER_CASE = "csv";
     public static final String FORMAT_JSON_UPPER_CASE = "JSON";
     public static final String FORMAT_DELIMITED_TEXT = "delimited-text";
     public static final String FORMAT_TWEET = "twitter-status";
@@ -339,15 +375,34 @@ public class ExternalDataConstants {
     public static final Set<String> PARQUET_WRITER_SUPPORTED_COMPRESSION;
     public static final Set<String> PARQUET_WRITER_SUPPORTED_VERSION;
     public static final int PARQUET_DICTIONARY_PAGE_SIZE = 1048576;
+    public static final List<String> WRITER_SUPPORTED_QUOTES;
+    public static final List<ATypeTag> CSV_WRITER_SUPPORTED_DATA_TYPES =
+            List.of(ATypeTag.TINYINT, ATypeTag.SMALLINT, ATypeTag.INTEGER, ATypeTag.BIGINT, ATypeTag.UINT8,
+                    ATypeTag.UINT16, ATypeTag.UINT64, ATypeTag.FLOAT, ATypeTag.DOUBLE, ATypeTag.STRING,
+                    ATypeTag.BOOLEAN, ATypeTag.DATETIME, ATypeTag.UINT32, ATypeTag.DATE, ATypeTag.TIME);
+    public static final String PARQUET_MAX_SCHEMAS_KEY = "max-schemas";
+    public static final int PARQUET_MAX_SCHEMAS_DEFAULT_VALUE = 5;
+    public static final int PARQUET_MAX_SCHEMAS_MAX_VALUE = 10;
 
     static {
-        WRITER_SUPPORTED_FORMATS = Set.of(FORMAT_JSON_LOWER_CASE, FORMAT_PARQUET);
+        WRITER_SUPPORTED_FORMATS = Set.of(FORMAT_JSON_LOWER_CASE, FORMAT_PARQUET, FORMAT_CSV_LOWER_CASE);
         WRITER_SUPPORTED_ADAPTERS = Set.of(ALIAS_LOCALFS_ADAPTER.toLowerCase(), KEY_ADAPTER_NAME_AWS_S3.toLowerCase(),
-                KEY_ADAPTER_NAME_GCS.toLowerCase());
+                KEY_ADAPTER_NAME_GCS.toLowerCase(), KEY_ADAPTER_NAME_HDFS.toLowerCase());
         TEXTUAL_WRITER_SUPPORTED_COMPRESSION = Set.of(KEY_COMPRESSION_GZIP);
         PARQUET_WRITER_SUPPORTED_COMPRESSION =
                 Set.of(KEY_COMPRESSION_GZIP, KEY_COMPRESSION_SNAPPY, KEY_COMPRESSION_ZSTD);
         PARQUET_WRITER_SUPPORTED_VERSION = Set.of(PARQUET_WRITER_VERSION_VALUE_1, PARQUET_WRITER_VERSION_VALUE_2);
+        WRITER_SUPPORTED_QUOTES = List.of(DEFAULT_QUOTE, DEFAULT_SINGLE_QUOTE, NONE);
+    }
+
+    public static class DeltaOptions {
+        private DeltaOptions() {
+        }
+
+        public static final String DECIMAL_TO_DOUBLE = "decimal-to-double";
+        public static final String TIMESTAMP_AS_LONG = "timestamp-to-long";
+        public static final String DATE_AS_INT = "date-to-int";
+        public static final String TIMEZONE = "timezone";
     }
 
     public static class ParquetOptions {
@@ -379,10 +434,5 @@ public class ExternalDataConstants {
          */
         public static final String TIMEZONE = "timezone";
         public static final String HADOOP_TIMEZONE = ASTERIX_HADOOP_PREFIX + TIMEZONE;
-
-        /**
-         * Valid time zones that are supported by Java
-         */
-        public static final Set<String> VALID_TIME_ZONES = Set.of(TimeZone.getAvailableIDs());
     }
 }

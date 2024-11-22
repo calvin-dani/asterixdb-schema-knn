@@ -19,13 +19,17 @@
 package org.apache.asterix.external.util;
 
 import static org.apache.asterix.common.exceptions.ErrorCode.INVALID_REQ_PARAM_VAL;
+import static org.apache.asterix.common.exceptions.ErrorCode.MAXIMUM_VALUE_ALLOWED_FOR_PARAM;
 import static org.apache.asterix.common.exceptions.ErrorCode.MINIMUM_VALUE_ALLOWED_FOR_PARAM;
 import static org.apache.asterix.common.exceptions.ErrorCode.PARAMETERS_REQUIRED;
+import static org.apache.asterix.external.util.ExternalDataConstants.FORMAT_CSV;
 import static org.apache.asterix.external.util.ExternalDataConstants.FORMAT_JSON_LOWER_CASE;
 import static org.apache.asterix.external.util.ExternalDataConstants.FORMAT_PARQUET;
 import static org.apache.asterix.external.util.ExternalDataConstants.KEY_PARQUET_PAGE_SIZE;
 import static org.apache.asterix.external.util.ExternalDataConstants.KEY_PARQUET_ROW_GROUP_SIZE;
 import static org.apache.asterix.external.util.ExternalDataConstants.KEY_WRITER_MAX_RESULT;
+import static org.apache.asterix.external.util.ExternalDataConstants.PARQUET_MAX_SCHEMAS_KEY;
+import static org.apache.asterix.external.util.ExternalDataConstants.PARQUET_MAX_SCHEMAS_MAX_VALUE;
 import static org.apache.asterix.external.util.ExternalDataConstants.PARQUET_WRITER_VERSION_KEY;
 import static org.apache.asterix.external.util.ExternalDataConstants.WRITER_MAX_RESULT_MINIMUM;
 
@@ -51,6 +55,15 @@ public class WriterValidationUtil {
         validateMaxResult(configuration, sourceLocation);
     }
 
+    private static void validateQuote(Map<String, String> configuration, SourceLocation sourceLocation)
+            throws CompilationException {
+        String quote = configuration.get(ExternalDataConstants.KEY_QUOTE);
+        if (quote != null && !ExternalDataConstants.WRITER_SUPPORTED_QUOTES.contains(quote.toLowerCase())) {
+            throw CompilationException.create(ErrorCode.INVALID_QUOTE, sourceLocation, quote,
+                    ExternalDataConstants.WRITER_SUPPORTED_QUOTES.toString());
+        }
+    }
+
     private static void validateAdapter(String adapter, Set<String> supportedAdapters, SourceLocation sourceLocation)
             throws CompilationException {
         checkSupported(ExternalDataConstants.KEY_EXTERNAL_SOURCE_TYPE, adapter, supportedAdapters,
@@ -69,6 +82,9 @@ public class WriterValidationUtil {
             case FORMAT_PARQUET:
                 validateParquet(configuration, sourceLocation);
                 break;
+            case FORMAT_CSV:
+                validateCSV(configuration, sourceLocation);
+                break;
         }
     }
 
@@ -78,6 +94,7 @@ public class WriterValidationUtil {
         validateParquetRowGroupSize(configuration);
         validateParquetPageSize(configuration);
         validateVersion(configuration, sourceLocation);
+        validateMaxParquetSchemas(configuration, sourceLocation);
     }
 
     private static void validateVersion(Map<String, String> configuration, SourceLocation sourceLocation)
@@ -115,6 +132,15 @@ public class WriterValidationUtil {
         validateTextualCompression(configuration, sourceLocation);
     }
 
+    private static void validateCSV(Map<String, String> configuration, SourceLocation sourceLocation)
+            throws CompilationException {
+        validateTextualCompression(configuration, sourceLocation);
+        validateDelimiter(configuration, sourceLocation);
+        validateRecordDelimiter(configuration, sourceLocation);
+        validateQuote(configuration, sourceLocation);
+        validateEscape(configuration, sourceLocation);
+    }
+
     private static void validateParquetCompression(Map<String, String> configuration, SourceLocation sourceLocation)
             throws CompilationException {
         String compression = configuration.get(ExternalDataConstants.KEY_WRITER_COMPRESSION);
@@ -147,6 +173,24 @@ public class WriterValidationUtil {
             if (value < WRITER_MAX_RESULT_MINIMUM) {
                 throw new CompilationException(MINIMUM_VALUE_ALLOWED_FOR_PARAM, KEY_WRITER_MAX_RESULT,
                         WRITER_MAX_RESULT_MINIMUM, value);
+            }
+        } catch (NumberFormatException e) {
+            throw CompilationException.create(ErrorCode.INTEGER_VALUE_EXPECTED, sourceLocation, maxResult);
+        }
+    }
+
+    private static void validateMaxParquetSchemas(Map<String, String> configuration, SourceLocation sourceLocation)
+            throws CompilationException {
+        String maxResult = configuration.get(PARQUET_MAX_SCHEMAS_KEY);
+        if (maxResult == null) {
+            return;
+        }
+
+        try {
+            int value = Integer.parseInt(maxResult);
+            if (value > PARQUET_MAX_SCHEMAS_MAX_VALUE) {
+                throw new CompilationException(MAXIMUM_VALUE_ALLOWED_FOR_PARAM, PARQUET_MAX_SCHEMAS_KEY,
+                        PARQUET_MAX_SCHEMAS_MAX_VALUE, value);
             }
         } catch (NumberFormatException e) {
             throw CompilationException.create(ErrorCode.INTEGER_VALUE_EXPECTED, sourceLocation, maxResult);
@@ -202,6 +246,33 @@ public class WriterValidationUtil {
         if (!supportedSet.contains(normalizedValue)) {
             List<String> sorted = supportedSet.stream().sorted().collect(Collectors.toList());
             throw CompilationException.create(errorCode, sourceLocation, value, format, sorted.toString());
+        }
+    }
+
+    private static void validateDelimiter(Map<String, String> configuration, SourceLocation sourceLocation)
+            throws CompilationException {
+        // Will this affect backward compatibility
+        String delimiter = configuration.get(ExternalDataConstants.KEY_DELIMITER);
+        unitByteCondition(delimiter, sourceLocation, ErrorCode.INVALID_DELIMITER);
+    }
+
+    private static void validateEscape(Map<String, String> configuration, SourceLocation sourceLocation)
+            throws CompilationException {
+        // Will this affect backward compatibility?
+        String escape = configuration.get(ExternalDataConstants.KEY_ESCAPE);
+        unitByteCondition(escape, sourceLocation, ErrorCode.INVALID_ESCAPE);
+    }
+
+    private static void validateRecordDelimiter(Map<String, String> configuration, SourceLocation sourceLocation)
+            throws CompilationException {
+        String recordDel = configuration.get(ExternalDataConstants.KEY_RECORD_DELIMITER);
+        unitByteCondition(recordDel, sourceLocation, ErrorCode.INVALID_FORCE_QUOTE);
+    }
+
+    private static void unitByteCondition(String param, SourceLocation sourceLocation, ErrorCode errorCode)
+            throws CompilationException {
+        if (param != null && param.length() > 1 && param.getBytes().length != 1) {
+            throw CompilationException.create(errorCode, sourceLocation, param);
         }
     }
 
