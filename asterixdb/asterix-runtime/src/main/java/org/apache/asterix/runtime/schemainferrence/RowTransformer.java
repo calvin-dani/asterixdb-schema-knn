@@ -162,8 +162,6 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
         for (int i = 0; i < pointable.getNumberOfChildren(); i++) {
             pointable.nextChild();
             IValueReference fieldName = pointable.getFieldName();
-            //            ArrayBackedValueStorage fieldNameProp = new ArrayBackedValueStorage(fieldName.getLength());
-            //            fieldNameProp.append(fieldName);
             ATypeTag childTypeTag = pointable.getChildTypeTag();
             if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields

@@ -73,13 +73,13 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
     }
 
     public String build(ObjectRowSchemaNode root) throws HyracksDataException {
-        builder.append("{ \n");
-        builder.append("\"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n")
-                .append("\"$id\": \"https://json-schema.org/draft/2020-12/schema\",\n");
-        builder.append("\"type\":\"object\",\n");
+        builder.append("{ ");
+        builder.append("\"$schema\": \"https://json-schema.org/draft/2020-12/schema\",")
+                .append("\"$id\": \"https://json-schema.org/draft/2020-12/schema\",");
+        builder.append("\"type\":\"object\", ");
         visit(root, null);
         //        appendPostDecor();
-        builder.append(" }\n");
+        builder.append(" }\n ");
         return builder.toString();
     }
 
@@ -90,7 +90,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         level++;
         indent++;
         // Prop open
-        builder.append("\"properties\": { \n");
+        builder.append("\"properties\": {  ");
         for (int i = 0; i < children.size(); i++) {
 
             int index = fieldNameIndexes.getInt(i);
@@ -100,24 +100,24 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             append(fieldName, index, child);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 if (child.isNested()) {
-                    builder.append(",\n");
+                    builder.append(", ");
                 } else {
-                    builder.append("\n");
+                    builder.append(" ");
                 }
             }
             child.accept(this, null);
             if (i != children.size() - 1 && child.getTypeTag() != ATypeTag.UNION) {
-                builder.append(" },\n");
+                builder.append(" }, ");
             } else if (child.getTypeTag() != ATypeTag.UNION) {
-                builder.append(" }\n");
+                builder.append(" } ");
             } else if (child.isNested()) {
-                builder.append(",\n");
+                builder.append(", ");
             } else {
-                builder.append("\n");
+                builder.append(" ");
             }
         }
         // Prop close
-        builder.append(" }\n");
+        builder.append(" } ");
 
         level--;
         indent--;
@@ -130,25 +130,25 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         indent++;
         AbstractRowSchemaNode itemNode = collectionNode.getItemNode();
         builder.append("\"items\": ");
-        builder.append("{ \n\"oneOf\": [\n");
+        builder.append("{  \"oneOf\": [ ");
         //        append("\"oneOf\": [  ", itemNode);
         if (itemNode.getTypeTag() != ATypeTag.UNION) {
             builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(itemNode.getTypeTag()));
 
             if (itemNode.isNested()) {
-                builder.append(",\n");
+                builder.append(", ");
             }
         }
 
         itemNode.accept(this, null);
         if (!itemNode.isNested()) {
-            builder.append(" }\n");
+            builder.append(" } ");
         } else {
-            builder.append("\n");
+            builder.append(" ");
         }
-        //        builder.append("}\n");
-        builder.append("]\n").append(" }\n");
+        //        builder.append("} ");
+        builder.append("] ").append(" } ");
         //        appendPostDecor();
         level--;
         indent--;
@@ -158,7 +158,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
     @Override
     public Void visit(UnionRowSchemaNode unionNode, Void arg) throws HyracksDataException {
         indent++;
-        builder.append("{ \"oneOf\": [\n");
+        builder.append("{ \"oneOf\": [ ");
         List<AbstractRowSchemaNode> unionChildren =
                 new ArrayList<AbstractRowSchemaNode>(unionNode.getChildren().values());
         //        for (AbstractRowSchemaNode child : unionNode.getChildren().values()) {
@@ -169,18 +169,18 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
                 builder.append("{  \"type\":");
                 writeSchemaType(getNormalizedTypeTag(child.getTypeTag()));
                 if (child.isNested()) {
-                    builder.append(",\n");
+                    builder.append(", ");
                 }
             }
             child.accept(this, null);
             if (i != unionChildren.size() - 1) {
-                builder.append(" },\n");
+                builder.append(" }, ");
             } else {
-                builder.append(" }\n");
+                builder.append(" } ");
             }
         }
-        builder.append("]\n }");
-        //        builder.append("]\n");
+        builder.append("]  }");
+        //        builder.append("] ");
         indent--;
         return null;
     }
@@ -197,7 +197,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
 
     private void appendPostDecor() {
         //        builder.append("|    ".repeat(Math.max(0, indent - 1)));
-        builder.append("}\n");
+        builder.append("} ");
     }
 
     private void append(String key, AbstractRowSchemaNode node) throws HyracksDataException {
@@ -210,11 +210,11 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         //        if (!node.isNested()) {
         //            final PrimitiveRowSchemaNode primitiveNode = (PrimitiveRowSchemaNode) node;
         if (node.getTypeTag() != ATypeTag.UNION) {
-            builder.append("{ \n\"type\":");
+            builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(node.getTypeTag()));
         }
         //        }
-        //        builder.append("\n");
+        //        builder.append(" ");
     }
 
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {

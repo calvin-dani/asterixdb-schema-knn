@@ -81,13 +81,13 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(IValueReference fieldName, ATypeTag childTypeTag,
-            RowMetadata columnMetadata) throws HyracksDataException {
+            RowMetadata rowMetadata) throws HyracksDataException {
         int numberOfChildren = children.size();
-        int fieldNameIndex = columnMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
+        int fieldNameIndex = rowMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, numberOfChildren);
         AbstractRowSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
 
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag);
+        AbstractRowSchemaNode newChild = rowMetadata.getOrCreateChild(currentChild, childTypeTag);
         if (currentChild == null) {
             children.add(childIndex, newChild);
             fieldNameIndexToChildIndexMap.put(fieldNameIndex, childIndex);
