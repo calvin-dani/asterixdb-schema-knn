@@ -30,6 +30,7 @@ import org.apache.asterix.lang.common.base.Expression;
 import org.apache.asterix.lang.common.clause.LetClause;
 import org.apache.asterix.lang.common.expression.ListSliceExpression;
 import org.apache.asterix.lang.common.rewrites.LangRewritingContext;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.FunctionDecl;
 import org.apache.asterix.lang.common.statement.ViewDecl;
 import org.apache.asterix.lang.common.struct.Identifier;
@@ -276,6 +277,11 @@ public class SqlppInlineUdfsVisitor extends AbstractInlineUdfsVisitor implements
         winExpr.setExprList(inlinedList.second);
         inlined |= inlinedList.first;
         return inlined;
+    }
+
+    @Override
+    public Boolean visit(DeclareSchema dd, Void arg) throws CompilationException {
+        return null;
     }
 
     @Override

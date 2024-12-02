@@ -65,6 +65,7 @@ import org.apache.asterix.lang.common.statement.DatabaseDropStatement;
 import org.apache.asterix.lang.common.statement.DatasetDecl;
 import org.apache.asterix.lang.common.statement.DataverseDecl;
 import org.apache.asterix.lang.common.statement.DataverseDropStatement;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.DeleteStatement;
 import org.apache.asterix.lang.common.statement.DisconnectFeedStatement;
 import org.apache.asterix.lang.common.statement.DropDatasetStatement;
@@ -102,6 +103,8 @@ public interface ILangVisitor<R, T> {
     R visit(NodegroupDecl ngd, T arg) throws CompilationException;
 
     R visit(DatasetDecl dd, T arg) throws CompilationException;
+
+    R visit(DeclareSchema dd, T arg) throws CompilationException;
 
     R visit(LoadStatement stmtLoad, T arg) throws CompilationException;
 

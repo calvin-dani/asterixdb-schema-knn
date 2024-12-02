@@ -20,12 +20,14 @@ package org.apache.asterix.lang.sqlpp.visitor;
 
 import java.util.Collections;
 
+import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.common.metadata.Namespace;
 import org.apache.asterix.lang.common.base.Expression;
 import org.apache.asterix.lang.common.clause.WhereClause;
 import org.apache.asterix.lang.common.expression.CallExpr;
 import org.apache.asterix.lang.common.expression.VariableExpr;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.DeleteStatement;
 import org.apache.asterix.lang.common.statement.Query;
 import org.apache.asterix.lang.common.util.FunctionUtil;
@@ -49,6 +51,11 @@ public class SqlppDeleteRewriteVisitor extends AbstractSqlppAstVisitor<Void, Met
     public static final SqlppDeleteRewriteVisitor INSTANCE = new SqlppDeleteRewriteVisitor();
 
     private SqlppDeleteRewriteVisitor() {
+    }
+
+    @Override
+    public Void visit(DeclareSchema dd, MetadataProvider arg) throws CompilationException {
+        return null;
     }
 
     @Override

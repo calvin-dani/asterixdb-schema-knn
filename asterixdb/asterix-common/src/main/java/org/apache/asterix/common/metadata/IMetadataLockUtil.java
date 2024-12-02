@@ -54,6 +54,12 @@ public interface IMetadataLockUtil {
             boolean isDefaultCompactionPolicy, DatasetConfig.DatasetType datasetType, Object datasetDetails,
             IMetadataProvider metadataProvider) throws AlgebricksException;
 
+    void readDatasetBegin(IMetadataLockManager lockManager, LockList locks, String database,
+            DataverseName dataverseName, String itemTypeDatabase, DataverseName itemTypeDataverseName,
+            String itemTypeName, String metaItemTypeDatabase, DataverseName metaItemTypeDataverseName,
+            String metaItemTypeName, String nodeGroupName, String compactionPolicyName,
+            boolean isDefaultCompactionPolicy) throws AlgebricksException;
+
     void dropDatasetBegin(IMetadataLockManager lockManager, LockList locks, String database,
             DataverseName dataverseName, String datasetName) throws AlgebricksException;
 

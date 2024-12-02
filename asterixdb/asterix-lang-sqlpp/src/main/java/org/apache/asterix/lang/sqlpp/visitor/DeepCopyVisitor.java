@@ -48,6 +48,7 @@ import org.apache.asterix.lang.common.expression.QuantifiedExpression;
 import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.lang.common.expression.UnaryExpr;
 import org.apache.asterix.lang.common.expression.VariableExpr;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.FunctionDecl;
 import org.apache.asterix.lang.common.statement.Query;
 import org.apache.asterix.lang.common.struct.Identifier;
@@ -270,6 +271,11 @@ public class DeepCopyVisitor extends AbstractSqlppQueryExpressionVisitor<ILangEx
                 (Expression) fd.getFuncBody().accept(this, arg), fd.isStored());
         copy.setSourceLocation(fd.getSourceLocation());
         return copy;
+    }
+
+    @Override
+    public ILangExpression visit(DeclareSchema dd, Void arg) throws CompilationException {
+        return null;
     }
 
     @Override

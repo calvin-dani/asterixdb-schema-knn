@@ -24,6 +24,7 @@ import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.functions.FunctionSignature;
 import org.apache.asterix.lang.common.base.IVisitorExtension;
 import org.apache.asterix.lang.common.expression.CallExpr;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.sqlpp.visitor.base.AbstractSqlppContainsExpressionVisitor;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Function;
@@ -40,6 +41,11 @@ public final class CheckNonFunctionalExpressionVisitor extends AbstractSqlppCont
 
     public CheckNonFunctionalExpressionVisitor(MetadataProvider metadataProvider) {
         this.metadataProvider = metadataProvider;
+    }
+
+    @Override
+    public Boolean visit(DeclareSchema dd, Void arg) throws CompilationException {
+        return null;
     }
 
     @Override

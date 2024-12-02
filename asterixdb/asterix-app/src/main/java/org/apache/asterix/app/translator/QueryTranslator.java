@@ -144,6 +144,7 @@ import org.apache.asterix.lang.common.statement.DatabaseDropStatement;
 import org.apache.asterix.lang.common.statement.DatasetDecl;
 import org.apache.asterix.lang.common.statement.DataverseDecl;
 import org.apache.asterix.lang.common.statement.DataverseDropStatement;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.DeleteStatement;
 import org.apache.asterix.lang.common.statement.DisconnectFeedStatement;
 import org.apache.asterix.lang.common.statement.DropDatasetStatement;
@@ -404,6 +405,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                         handleCreateDatasetStatement(metadataProvider, stmt, hcc, requestParameters,
                                 Creator.DEFAULT_CREATOR);
                         //                        inferDeclaredSchemaStatement(metadataProvider,stmt);
+                        break;
+                    case DECLARE_SCHEMA:
+                        handleDeclareSchemaStatement(metadataProvider, stmt);
                         break;
                     case CREATE_INDEX:
                         handleCreateIndexStatement(metadataProvider, stmt, hcc, requestParameters,
@@ -861,8 +865,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             doCreateDatasetStatement(metadataProvider, dd, stmtActiveNamespace, datasetName, itemTypeNamespace,
                     itemTypeExpr, itemTypeName, metaItemTypeExpr, metaItemTypeNamespace, metaItemTypeName, hcc,
                     requestParameters, creator);
-            //            doFetchDeclaredSchemaStatement(metadataProvider, dd, stmtActiveNamespace, datasetName, itemTypeNamespace,
-            //                    itemTypeExpr, itemTypeName);
             if (dd.getQuery() != null) {
                 final IResultSet resultSet = requestParameters.getResultSet();
                 final ResultDelivery resultDelivery = requestParameters.getResultProperties().getDelivery();
@@ -881,33 +883,40 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
     }
 
-    public void inferDeclaredSchemaStatement(MetadataProvider metadataProvider, Statement stmt) throws Exception {
-        DatasetDecl dd = (DatasetDecl) stmt;
+    public void handleDeclareSchemaStatement(MetadataProvider metadataProvider, Statement stmt) throws Exception {
+        DeclareSchema dd = (DeclareSchema) stmt;
         String datasetName = dd.getName().getValue();
         metadataProvider.validateDatabaseObjectName(dd.getNamespace(), datasetName, stmt.getSourceLocation());
         Namespace stmtActiveNamespace = getActiveNamespace(dd.getNamespace());
         DataverseName dataverseName = stmtActiveNamespace.getDataverseName();
         String databaseName = stmtActiveNamespace.getDatabaseName();
-        TypeExpression itemTypeExpr = dd.getItemType();
-        Triple<Namespace, String, Boolean> itemTypeQualifiedName = extractDatasetItemTypeName(stmtActiveNamespace,
-                datasetName, itemTypeExpr, false, stmt.getSourceLocation());
-        Namespace itemTypeNamespace = itemTypeQualifiedName.first;
-
-        String itemTypeName = itemTypeQualifiedName.second;
 
         if (isCompileOnly()) {
             return;
         }
-
         lockUtil.compactBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName, datasetName);
-
         try {
-            doFetchDeclaredSchemaStatement(metadataProvider, dd, stmtActiveNamespace, datasetName, itemTypeNamespace,
-                    itemTypeExpr, itemTypeName);
+
+            MetadataTransactionContext mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+            Dataset ds = metadataProvider.findDataset(stmtActiveNamespace.getDatabaseName(),
+                    stmtActiveNamespace.getDataverseName(), dd.getNameValue(), false);
+            IAType type = metadataProvider.findType(ds.getItemTypeDatabaseName(), ds.getItemTypeDataverseName(),
+                    ds.getItemTypeName());
+            if (type != null) {
+                Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
+                RowMetadata rowMetaData = new RowMetadata(multiPageOpRef);
+                RowTransformer transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
+                transformer.transform((ARecordType) type);
+                RowSchemaTransformer schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
+                ObjectRowSchemaNode root = schemaTransformer.getRoot();
+                String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
+                apiFramework.printMetaDataAsResult(metadataProvider, sessionOutput, responsePrinter, false, res);
+            }
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
         } finally {
             metadataProvider.getLocks().unlock();
         }
-
     }
 
     protected Optional<? extends Dataset> doCreateDatasetStatement(MetadataProvider metadataProvider, DatasetDecl dd,
@@ -999,16 +1008,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     false, metadataProvider, sourceLoc);
             itemTypeEntity = itemTypePair.first;
             IAType itemType = itemTypeEntity.getDatatype();
-            if (itemType != null) {
-                Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-                RowMetadata rowMetaData = new RowMetadata(multiPageOpRef);
-                RowTransformer transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
-                transformer.transform((ARecordType) itemType);
-                RowSchemaTransformer schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
-                ObjectRowSchemaNode root = schemaTransformer.getRoot();
-                String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
-                apiFramework.printMetaDataAsResult(metadataProvider, sessionOutput, responsePrinter, false, res);
-            }
             boolean itemTypeIsInline = itemTypePair.second;
 
             String ngName = ngNameId != null ? ngNameId
@@ -1188,85 +1187,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             throw e;
         }
         return Optional.of(dataset);
-    }
-
-    protected void doFetchDeclaredSchemaStatement(MetadataProvider metadataProvider, DatasetDecl dd,
-            Namespace namespace, String datasetName, Namespace itemTypeNamespace, TypeExpression itemTypeExpr,
-            String itemTypeName) throws Exception {
-        DataverseName dataverseName = namespace.getDataverseName();
-        String databaseName = namespace.getDatabaseName();
-
-        DataverseName itemTypeDataverseName = null;
-        String itemTypeDatabaseName = null;
-        if (itemTypeNamespace != null) {
-            itemTypeDataverseName = itemTypeNamespace.getDataverseName();
-            itemTypeDatabaseName = itemTypeNamespace.getDatabaseName();
-        }
-
-        SourceLocation sourceLoc = dd.getSourceLocation();
-        DatasetType dsType = dd.getDatasetType();
-
-        MetadataTransactionContext mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
-        metadataProvider.setMetadataTxnContext(mdTxnCtx);
-
-        StorageProperties storageProperties = metadataProvider.getStorageProperties();
-        DatasetFormatInfo datasetFormatInfo = dd.getDatasetFormatInfo(storageProperties.getStorageFormat(),
-                storageProperties.getColumnMaxTupleCount(), storageProperties.getColumnFreeSpaceTolerance(),
-                storageProperties.getColumnMaxLeafNodeSize());
-        try {
-            //TODO(DB): also check for database existence?
-
-            // Check if the dataverse exists
-            Dataverse dv = MetadataManager.INSTANCE.getDataverse(mdTxnCtx, databaseName, dataverseName);
-            if (dv == null) {
-                throw new CompilationException(ErrorCode.UNKNOWN_DATAVERSE, sourceLoc,
-                        MetadataUtil.dataverseName(databaseName, dataverseName, metadataProvider.isUsingDatabase()));
-            }
-
-            Dataset ds = metadataProvider.findDataset(databaseName, dataverseName, datasetName, true);
-            if (ds != null) {
-                if (ds.getDatasetType() == DatasetType.VIEW) {
-                    throw new CompilationException(ErrorCode.VIEW_EXISTS, sourceLoc,
-                            DatasetUtil.getFullyQualifiedDisplayName(ds));
-                }
-                if (dd.getIfNotExists()) {
-                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
-                    return;
-                } else {
-                    throw new CompilationException(ErrorCode.DATASET_EXISTS, sourceLoc, datasetName, dataverseName);
-                }
-            }
-
-            List<TypeExpression> partitioningExprTypes = null;
-            if (dsType == DatasetType.INTERNAL) {
-                partitioningExprTypes = ((InternalDetailsDecl) dd.getDatasetDetailsDecl()).getPartitioningExprTypes();
-            }
-
-            Pair<Datatype, Boolean> itemTypePair = fetchDatasetItemType(mdTxnCtx, dsType, datasetFormatInfo.getFormat(),
-                    partitioningExprTypes, itemTypeDatabaseName, itemTypeDataverseName, itemTypeName, itemTypeExpr,
-                    false, metadataProvider, sourceLoc);
-            Datatype itemTypeEntity = itemTypePair.first;
-            IAType itemType = itemTypeEntity.getDatatype();
-            if (itemType != null) {
-                Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-                RowMetadata rowMetaData = new RowMetadata(multiPageOpRef);
-                RowTransformer transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
-                transformer.transform((ARecordType) itemType);
-                RowSchemaTransformer schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
-                ObjectRowSchemaNode root = schemaTransformer.getRoot();
-                String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
-                apiFramework.printMetaDataAsResult(metadataProvider, sessionOutput, responsePrinter, false, res);
-            }
-
-        } catch (AlgebricksException e) {
-            throw new RuntimeException(e);
-        } catch (ACIDException e) {
-            throw new RuntimeException(e);
-        } catch (RemoteException e) {
-            throw new RuntimeException(e);
-        } finally {
-            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
-        }
     }
 
     protected boolean isDatasetWithoutTypeSpec(DatasetDecl datasetDecl, ARecordType aRecordType,

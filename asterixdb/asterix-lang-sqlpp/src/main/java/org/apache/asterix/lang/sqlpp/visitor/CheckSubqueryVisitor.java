@@ -45,6 +45,7 @@ import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.lang.common.expression.UnaryExpr;
 import org.apache.asterix.lang.common.expression.VariableExpr;
 import org.apache.asterix.lang.common.statement.CopyToStatement;
+import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.FunctionDecl;
 import org.apache.asterix.lang.common.statement.Query;
 import org.apache.asterix.lang.common.struct.Identifier;
@@ -181,6 +182,11 @@ public class CheckSubqueryVisitor extends AbstractSqlppQueryExpressionVisitor<Bo
     @Override
     public Boolean visit(FunctionDecl fd, ILangExpression arg) throws CompilationException {
         return fd.getFuncBody().accept(this, arg);
+    }
+
+    @Override
+    public Boolean visit(DeclareSchema dd, ILangExpression arg) throws CompilationException {
+        return null;
     }
 
     @Override

@@ -398,8 +398,6 @@ public class APIFramework {
             if (printSignature) {
                 printer.addResultPrinter(SignaturePrinter.INSTANCE);
             }
-            printer.addResultPrinter(new ExplainOnlyResultsPrinter(metadataProvider.getApplicationContext(),
-                    "{\"test\":\"metadataRes\"}\n", output));
             printer.addResultPrinter(
                     new ExplainOnlyResultsPrinter(metadataProvider.getApplicationContext(), metadataRes, output));
             printer.printResults();
