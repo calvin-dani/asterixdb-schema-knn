@@ -108,11 +108,14 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             child.accept(this, null);
             if (i != children.size() - 1 && child.getTypeTag() != ATypeTag.UNION) {
                 builder.append(" }, ");
-            } else if (child.getTypeTag() != ATypeTag.UNION) {
+            }
+            else if (i != children.size() - 1 && child.isNested()) {
+                builder.append(" , ");
+            }
+            else if (child.getTypeTag() != ATypeTag.UNION) {
                 builder.append(" } ");
-            } else if (child.isNested()) {
-                builder.append(", ");
-            } else {
+            }
+            else {
                 builder.append(" ");
             }
         }
@@ -131,7 +134,6 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         AbstractRowSchemaNode itemNode = collectionNode.getItemNode();
         builder.append("\"items\": ");
         builder.append("{  \"oneOf\": [ ");
-        //        append("\"oneOf\": [  ", itemNode);
         if (itemNode.getTypeTag() != ATypeTag.UNION) {
             builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(itemNode.getTypeTag()));
@@ -248,7 +250,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
                 return;
             case DOUBLE:
             case BIGINT:
-                builder.append("\"integer\"");
+                builder.append("\"number\"");
                 return;
             case UUID:
             case STRING:

@@ -146,7 +146,6 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public void abort(DataInputStream input) throws IOException {
-        //        definitionLevels.put(this, new RunRowLengthIntArray());
 
         int numberOfChildren = input.readInt();
 

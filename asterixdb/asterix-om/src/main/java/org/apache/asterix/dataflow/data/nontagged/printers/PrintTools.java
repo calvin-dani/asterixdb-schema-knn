@@ -25,8 +25,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.asterix.dataflow.data.nontagged.printers.csv.CSVUtils;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
@@ -513,5 +515,76 @@ public class PrintTools {
             return "";
         }
     }
+
+    /**
+     * Checks if the given byte array represents a JSON object.
+     *
+     * @param b  The byte array containing the JSON data.
+     * @param s  The start offset in the byte array.
+     * @param l  The length of the JSON data.
+     * @return True if the byte array represents a JSON object, false otherwise.
+     */
+    public static boolean isJsonObject(byte[] b, int s, int l) {
+        ObjectMapper objectMapper = new ObjectMapper();
+        try {
+            JsonNode jsonNode = objectMapper.readTree(new String(b, s, l));
+            return jsonNode.isObject();
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Pretty prints a JsonNode to the given StringBuilder with the specified indentation.
+    *
+    * @param node   The JsonNode to pretty print.
+    * @param out    The StringBuilder to write the pretty-printed JSON.
+    * @param indent The indentation level.
+    */
+    public static void prettyPrintJsonNode(JsonNode node, StringBuilder out, int indent) {
+        if (node.isObject()) {
+            out.append("{");
+            Iterator<String> fieldNames = node.fieldNames();
+            while (fieldNames.hasNext()) {
+                String fieldName = fieldNames.next();
+                pad(out, indent + 2);
+                out.append("\"").append(fieldName).append("\": ");
+                prettyPrintJsonNode(node.get(fieldName), out, indent + 2);
+                if (fieldNames.hasNext()) {
+                    out.append(",");
+                }
+            }
+            pad(out, indent);
+            out.append("}");
+        } else if (node.isArray()) {
+            out.append("[");
+            Iterator<JsonNode> children = node.elements();
+            while (children.hasNext()) {
+                JsonNode child = children.next();
+                pad(out, indent + 2);
+                prettyPrintJsonNode(child, out, indent + 2);
+                if (children.hasNext()) {
+                    out.append(",");
+                }
+            }
+            pad(out, indent);
+            out.append("]");
+        } else {
+            out.append(node.toString());
+        }
+    }
+
+    /**
+     * Pads the given StringBuilder with spaces for the specified indentation level.
+     *
+     * @param out    The StringBuilder to pad.
+     * @param indent The number of spaces to pad.
+     */
+    private static void pad(StringBuilder out, int indent) {
+        for (int i = 0; i < indent; i++) {
+            out.append(' ');
+        }
+    }
+
 
 }

@@ -20,6 +20,9 @@ package org.apache.asterix.dataflow.data.nontagged.printers.json.lossless;
 
 import java.io.PrintStream;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.asterix.dataflow.data.nontagged.printers.PrintTools;
 import org.apache.asterix.formats.nontagged.LosslessJSONPrinterFactoryProvider;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.AUnionType;
@@ -60,8 +63,18 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                 fieldPrinter.init();
                 if (b[s] == ATypeTag.SERIALIZED_NULL_TYPE_TAG || b[s] == ATypeTag.SERIALIZED_MISSING_TYPE_TAG) {
                     nullPrinter.print(b, s, l, ps);
-                } else if (b[s] == ATypeTag.SERIALIZED_STRING_TYPE_TAG) {
-                    stringPrinter.print(b, s, l, ps);
+                }else if (PrintTools.isJsonObject(b, s, l)) {
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    JsonNode jsonNode = null;
+                    try {
+                        jsonNode = objectMapper.readTree(new String(b, s, l));
+                        StringBuilder sb = new StringBuilder();
+                        PrintTools.prettyPrintJsonNode(jsonNode, sb, 0);
+                        ps.print(sb.toString());
+                    }
+                    catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 } else {
                     fieldPrinter.print(b, s, l, ps);
                 }

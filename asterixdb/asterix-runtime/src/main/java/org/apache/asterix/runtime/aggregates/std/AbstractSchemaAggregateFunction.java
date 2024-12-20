@@ -23,6 +23,7 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.api.IRowWriteMultiPageOp;
@@ -38,6 +39,7 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
+import org.apache.asterix.om.utils.JSONDeserializerForTypes;
 import org.apache.asterix.om.utils.UnsafeUtil;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
@@ -58,6 +60,9 @@ import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
 
@@ -197,14 +202,19 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
         try {
             ObjectRowSchemaNode root = schemaTransformer.getRoot();
             String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode jsonNode = objectMapper.readTree(res);
+            String jsonString = objectMapper.writeValueAsString(jsonNode);
             if (root == null) {
                 throw new HyracksDataException("Cannot compute Schema on empty root.");
             } else {
-                stringSerde.serialize(new AString(res), resultStorage.getDataOutput());
+                resultStorage.getDataOutput().write(jsonString.getBytes(StandardCharsets.UTF_8));
             }
 
         } catch (IOException e) {
             throw HyracksDataException.create(e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
         result.set(resultStorage);
     }
