@@ -20,8 +20,6 @@ package org.apache.asterix.dataflow.data.nontagged.printers.json.lossless;
 
 import java.io.PrintStream;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.asterix.dataflow.data.nontagged.printers.PrintTools;
 import org.apache.asterix.formats.nontagged.LosslessJSONPrinterFactoryProvider;
 import org.apache.asterix.om.types.ATypeTag;
@@ -30,6 +28,9 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.hyracks.algebricks.data.IPrinter;
 import org.apache.hyracks.algebricks.data.IPrinterFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class AOptionalFieldPrinterFactory implements IPrinterFactory {
 
@@ -63,7 +64,7 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                 fieldPrinter.init();
                 if (b[s] == ATypeTag.SERIALIZED_NULL_TYPE_TAG || b[s] == ATypeTag.SERIALIZED_MISSING_TYPE_TAG) {
                     nullPrinter.print(b, s, l, ps);
-                }else if (PrintTools.isJsonObject(b, s, l)) {
+                } else if (PrintTools.isJsonObject(b, s, l)) {
                     ObjectMapper objectMapper = new ObjectMapper();
                     JsonNode jsonNode = null;
                     try {
@@ -71,8 +72,7 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                         StringBuilder sb = new StringBuilder();
                         PrintTools.prettyPrintJsonNode(jsonNode, sb, 0);
                         ps.print(sb.toString());
-                    }
-                    catch (Exception e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
                     }
                 } else {

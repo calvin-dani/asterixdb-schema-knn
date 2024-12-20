@@ -173,10 +173,14 @@ public class DeclareSchema extends AbstractStatement {
     //        return new DatasetFormatInfo(datasetFormat, maxTupleCount, freeSpaceTolerance, maxLeafNodeSize);
     //    }
 
+    //    @Override
+    //    public Void visit(DeclareSchema dd, Void arg) throws CompilationException {
+    //        return null;
+    //    }
+
     public Map<String, String> getHints() {
         return hints;
     }
-
 
     @Override
     public <R, T> R accept(ILangVisitor<R, T> visitor, T arg) throws CompilationException {

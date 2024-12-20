@@ -18,12 +18,9 @@
  */
 package org.apache.asterix.dataflow.data.nontagged.printers.adm;
 
-import java.io.IOException;
 import java.io.PrintStream;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.asterix.dataflow.data.nontagged.printers.PrintTools;
 import org.apache.asterix.formats.nontagged.ADMPrinterFactoryProvider;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.AUnionType;
@@ -34,12 +31,6 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-
-import org.apache.asterix.dataflow.data.nontagged.printers.PrintTools;
 
 public class AOptionalFieldPrinterFactory implements IPrinterFactory {
 
@@ -78,8 +69,7 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                         StringBuilder sb = new StringBuilder();
                         PrintTools.prettyPrintJsonNode(jsonNode, sb, 0);
                         ps.print(sb.toString());
-                    }
-                    catch (Exception e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
                     }
                 } else {

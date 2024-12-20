@@ -25,7 +25,6 @@ import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.lang.common.expression.CallExpr;
 import org.apache.asterix.lang.common.expression.VariableExpr;
 import org.apache.asterix.lang.common.statement.CopyToStatement;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.Query;
 import org.apache.asterix.lang.common.util.FunctionUtil;
 import org.apache.asterix.lang.sqlpp.clause.FromClause;
@@ -42,10 +41,7 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 public class SqlppCopyToRewriteVisitor extends AbstractSqlppAstVisitor<Void, MetadataProvider> {
     public static final SqlppCopyToRewriteVisitor INSTANCE = new SqlppCopyToRewriteVisitor();
 
-    @Override
-    public Void visit(DeclareSchema dd, MetadataProvider arg) throws CompilationException {
-        return null;
-    }
+
 
     @Override
     public Void visit(CopyToStatement stmtCopy, MetadataProvider metadataProvider) throws CompilationException {

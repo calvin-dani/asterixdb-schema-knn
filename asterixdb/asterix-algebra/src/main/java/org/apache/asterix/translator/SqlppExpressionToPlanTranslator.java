@@ -55,7 +55,6 @@ import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.lang.common.expression.VariableExpr;
 import org.apache.asterix.lang.common.literal.IntegerLiteral;
 import org.apache.asterix.lang.common.literal.StringLiteral;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.Query;
 import org.apache.asterix.lang.common.struct.OperatorType;
 import org.apache.asterix.lang.common.struct.QuantifiedPair;
@@ -193,11 +192,7 @@ public class SqlppExpressionToPlanTranslator extends LangExpressionToPlanTransla
         }
     }
 
-    @Override
-    public Pair<ILogicalOperator, LogicalVariable> visit(DeclareSchema dd, Mutable<ILogicalOperator> arg)
-            throws CompilationException {
-        return null;
-    }
+
 
     @Override
     public Pair<ILogicalOperator, LogicalVariable> visit(SelectExpression selectExpression,

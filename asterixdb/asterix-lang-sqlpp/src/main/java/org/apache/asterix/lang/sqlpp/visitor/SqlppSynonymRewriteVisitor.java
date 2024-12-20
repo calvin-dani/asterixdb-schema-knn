@@ -23,7 +23,6 @@ import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.common.metadata.Namespace;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.DeleteStatement;
 import org.apache.asterix.lang.common.statement.InsertStatement;
 import org.apache.asterix.lang.common.statement.LoadStatement;
@@ -43,10 +42,7 @@ public class SqlppSynonymRewriteVisitor extends AbstractSqlppAstVisitor<Void, Me
     private SqlppSynonymRewriteVisitor() {
     }
 
-    @Override
-    public Void visit(DeclareSchema dd, MetadataProvider arg) throws CompilationException {
-        return null;
-    }
+
 
     @Override
     public Void visit(LoadStatement loadStmt, MetadataProvider metadataProvider) throws CompilationException {

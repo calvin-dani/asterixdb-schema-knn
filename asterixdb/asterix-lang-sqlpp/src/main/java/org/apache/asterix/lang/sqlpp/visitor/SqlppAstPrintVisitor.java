@@ -40,7 +40,6 @@ import org.apache.asterix.lang.common.expression.ListSliceExpression;
 import org.apache.asterix.lang.common.expression.LiteralExpr;
 import org.apache.asterix.lang.common.expression.VariableExpr;
 import org.apache.asterix.lang.common.literal.StringLiteral;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.struct.Identifier;
 import org.apache.asterix.lang.common.util.FunctionUtil;
 import org.apache.asterix.lang.common.visitor.QueryPrintVisitor;
@@ -287,10 +286,7 @@ public class SqlppAstPrintVisitor extends QueryPrintVisitor implements ISqlppVis
         return null;
     }
 
-    @Override
-    public Void visit(DeclareSchema dd, Integer arg) throws CompilationException {
-        return null;
-    }
+
 
     @Override
     public Void visit(GroupbyClause gc, Integer step) throws CompilationException {

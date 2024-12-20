@@ -21,8 +21,6 @@ package org.apache.asterix.dataflow.data.nontagged.printers.json.losslessadm;
 
 import java.io.PrintStream;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.asterix.dataflow.data.nontagged.printers.PrintTools;
 import org.apache.asterix.formats.nontagged.LosslessADMJSONPrinterFactoryProvider;
 import org.apache.asterix.om.types.ATypeTag;
@@ -31,6 +29,9 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.hyracks.algebricks.data.IPrinter;
 import org.apache.hyracks.algebricks.data.IPrinterFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class AOptionalFieldPrinterFactory implements IPrinterFactory {
 
@@ -73,11 +74,10 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                         StringBuilder sb = new StringBuilder();
                         PrintTools.prettyPrintJsonNode(jsonNode, sb, 0);
                         ps.print(sb.toString());
-                    }
-                    catch (Exception e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
                     }
-                }  else {
+                } else {
                     fieldPrinter.print(b, s, l, ps);
                 }
             }

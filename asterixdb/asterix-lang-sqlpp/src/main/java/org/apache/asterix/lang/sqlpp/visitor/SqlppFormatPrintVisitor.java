@@ -30,7 +30,6 @@ import org.apache.asterix.lang.common.clause.GroupbyClause;
 import org.apache.asterix.lang.common.clause.LetClause;
 import org.apache.asterix.lang.common.expression.GbyVariableExpressionPair;
 import org.apache.asterix.lang.common.expression.VariableExpr;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.InsertStatement;
 import org.apache.asterix.lang.common.visitor.FormatPrintVisitor;
 import org.apache.asterix.lang.sqlpp.clause.AbstractBinaryCorrelateClause;
@@ -296,10 +295,7 @@ public class SqlppFormatPrintVisitor extends FormatPrintVisitor implements ISqlp
         return null;
     }
 
-    @Override
-    public Void visit(DeclareSchema dd, Integer arg) throws CompilationException {
-        return null;
-    }
+
 
     @Override
     public Void visit(InsertStatement insert, Integer step) throws CompilationException {

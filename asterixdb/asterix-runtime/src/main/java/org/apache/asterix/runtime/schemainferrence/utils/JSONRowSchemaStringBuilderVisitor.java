@@ -108,14 +108,11 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             child.accept(this, null);
             if (i != children.size() - 1 && child.getTypeTag() != ATypeTag.UNION) {
                 builder.append(" }, ");
-            }
-            else if (i != children.size() - 1 && child.isNested()) {
+            } else if (i != children.size() - 1 && child.isNested()) {
                 builder.append(" , ");
-            }
-            else if (child.getTypeTag() != ATypeTag.UNION) {
+            } else if (child.getTypeTag() != ATypeTag.UNION) {
                 builder.append(" } ");
-            }
-            else {
+            } else {
                 builder.append(" ");
             }
         }

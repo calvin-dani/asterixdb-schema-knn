@@ -39,7 +39,6 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
-import org.apache.asterix.om.utils.JSONDeserializerForTypes;
 import org.apache.asterix.om.utils.UnsafeUtil;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;

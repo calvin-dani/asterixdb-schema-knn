@@ -29,7 +29,6 @@ import org.apache.asterix.lang.common.clause.GroupbyClause;
 import org.apache.asterix.lang.common.expression.GbyVariableExpressionPair;
 import org.apache.asterix.lang.common.expression.QuantifiedExpression;
 import org.apache.asterix.lang.common.expression.VariableExpr;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.struct.QuantifiedPair;
 import org.apache.asterix.lang.sqlpp.clause.AbstractBinaryCorrelateClause;
 import org.apache.asterix.lang.sqlpp.clause.FromClause;
@@ -86,10 +85,6 @@ public class BindingVariableVisitor extends AbstractSqlppAstVisitor<Void, Collec
         return null;
     }
 
-    @Override
-    public Void visit(DeclareSchema dd, Collection<VariableExpr> arg) throws CompilationException {
-        return null;
-    }
 
     @Override
     public Void visit(QuantifiedExpression qe, Collection<VariableExpr> bindingVars) throws CompilationException {

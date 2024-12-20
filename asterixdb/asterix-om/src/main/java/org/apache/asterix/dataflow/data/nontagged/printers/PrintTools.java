@@ -28,7 +28,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.asterix.dataflow.data.nontagged.printers.csv.CSVUtils;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
@@ -43,6 +42,7 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.locationtech.jts.geom.Geometry;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class PrintTools {
@@ -585,6 +585,5 @@ public class PrintTools {
             out.append(' ');
         }
     }
-
 
 }

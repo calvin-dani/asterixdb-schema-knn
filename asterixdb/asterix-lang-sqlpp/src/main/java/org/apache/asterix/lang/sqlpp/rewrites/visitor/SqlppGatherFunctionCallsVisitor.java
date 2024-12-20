@@ -27,7 +27,6 @@ import org.apache.asterix.lang.common.base.Expression;
 import org.apache.asterix.lang.common.clause.LetClause;
 import org.apache.asterix.lang.common.expression.AbstractCallExpression;
 import org.apache.asterix.lang.common.expression.ListSliceExpression;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.struct.Identifier;
 import org.apache.asterix.lang.common.visitor.GatherFunctionCallsVisitor;
 import org.apache.asterix.lang.sqlpp.clause.AbstractBinaryCorrelateClause;
@@ -220,11 +219,6 @@ public final class SqlppGatherFunctionCallsVisitor extends GatherFunctionCallsVi
         for (Expression expr : winExpr.getExprList()) {
             expr.accept(this, arg);
         }
-        return null;
-    }
-
-    @Override
-    public Void visit(DeclareSchema dd, Void arg) throws CompilationException {
         return null;
     }
 
