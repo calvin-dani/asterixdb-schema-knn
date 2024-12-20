@@ -117,44 +117,6 @@ public class MetadataLockUtil implements IMetadataLockUtil {
     }
 
     @Override
-    public void readDatasetBegin(IMetadataLockManager lockMgr, LockList locks, String database,
-            DataverseName dataverseName, String itemTypeDatabase, DataverseName itemTypeDataverseName,
-            String itemTypeName, String metaItemTypeDatabase, DataverseName metaItemTypeDataverseName,
-            String metaItemTypeName, String nodeGroupName, String compactionPolicyName,
-            boolean isDefaultCompactionPolicy) throws AlgebricksException {
-        readDatasetBeginPre(lockMgr, locks, database, dataverseName, itemTypeDatabase, itemTypeDataverseName,
-                itemTypeName, metaItemTypeDatabase, metaItemTypeDataverseName, metaItemTypeName, nodeGroupName,
-                compactionPolicyName, isDefaultCompactionPolicy);
-    }
-
-    protected final void readDatasetBeginPre(IMetadataLockManager lockMgr, LockList locks, String database,
-            DataverseName dataverseName, String itemTypeDatabase, DataverseName itemTypeDataverseName,
-            String itemTypeName, String metaItemTypeDatabase, DataverseName metaItemTypeDataverseName,
-            String metaItemTypeName, String nodeGroupName, String compactionPolicyName,
-            boolean isDefaultCompactionPolicy) throws AlgebricksException {
-        lockMgr.acquireDatabaseReadLock(locks, database);
-        lockMgr.acquireDataverseReadLock(locks, database, dataverseName);
-        lockIfDifferentNamespace(lockMgr, locks, database, dataverseName, itemTypeDatabase, itemTypeDataverseName);
-        lockIfDifferentNamespace(lockMgr, locks, database, dataverseName, itemTypeDatabase, itemTypeDataverseName,
-                metaItemTypeDatabase, metaItemTypeDataverseName);
-
-        lockMgr.acquireDataTypeReadLock(locks, itemTypeDatabase, itemTypeDataverseName, itemTypeName);
-        if (metaItemTypeDatabase != null && metaItemTypeDataverseName != null && !sameNamespace(metaItemTypeDatabase,
-                metaItemTypeDataverseName, itemTypeDatabase, itemTypeDataverseName)
-                && !metaItemTypeName.equals(itemTypeName)) {
-            //TODO(DB): why check the type name?
-            lockMgr.acquireDataTypeReadLock(locks, metaItemTypeDatabase, metaItemTypeDataverseName, metaItemTypeName);
-
-        }
-        if (nodeGroupName != null) {
-            lockMgr.acquireNodeGroupReadLock(locks, nodeGroupName);
-        }
-        if (!isDefaultCompactionPolicy) {
-            lockMgr.acquireMergePolicyReadLock(locks, compactionPolicyName);
-        }
-    }
-
-    @Override
     public void createIndexBegin(IMetadataLockManager lockMgr, LockList locks, String database,
             DataverseName dataverseName, String datasetName, String fullTextConfigName) throws AlgebricksException {
         lockMgr.acquireDatabaseReadLock(locks, database);

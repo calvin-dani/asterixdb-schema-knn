@@ -404,7 +404,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     case DATASET_DECL:
                         handleCreateDatasetStatement(metadataProvider, stmt, hcc, requestParameters,
                                 Creator.DEFAULT_CREATOR);
-                        //                        inferDeclaredSchemaStatement(metadataProvider,stmt);
                         break;
                     case DECLARE_SCHEMA:
                         handleDeclareSchemaStatement(metadataProvider, stmt);
