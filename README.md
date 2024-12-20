@@ -18,105 +18,34 @@
  !-->
 <a href="http://asterixdb.apache.org"><img src="http://asterixdb.apache.org/img/asterixdb_tm.png" height=100></img></a>
 
-# Introducing Schema Inference as a Scalable SQL Function
-
-## Project Objectives
-
-### Contributors
-
-Calvin Thomas Dani
-
-Guided by : Dr. Shiva Jahangiri
-
-Submission for EDBT 25' 
-
-## Abstract 
-This project introduces a novel approach to schema infer-
-ence as an on-demand function integrated directly within
-a DBMS, targeting NoSQL databases where schema flexi-
-bility can create challenges. Unlike previous methods re-
-lying on external frameworks like Apache Spark, our so-
-lution enables schema inference as a SQL function, allow-
-ing users to infer schemas natively within the DBMS. Im-
-plemented in Apache AsterixDB, it performs schema dis-
-covery in two phases—local inference and global schema
-merging—leveraging internal resources for improved per-
-formance. Experiments with real-world datasets show up to
-a two orders of magnitude performance boost over external
-methods, enhancing usability and scalability.
-
-## Description
-The project aims to generate JSON schema of the records in the NoSQL Distributed Database. The objective is achieved by creating aggregate function to aggregate schema of all records within a query. Providing valuable insights on the datatypes and data to the user.
-Its application could be used to monitor during development, evaluate the data before running long running queries etc.
-  
-1. Aggregate Function
-- Aggregate functions return single valued results based on defined function.
-- Extending the definition we will be returning a single schema by aggregating all schema in the distributed controllers
-2. Record -> Schema phase
-- This phase of the aggregate function converts each record to its schema.
-- The basis of this functionality is based on one of AsterixDB Columnar capabilities.
-- Each cluster of records at the end of this phase will have a schema describing all the records in it.
-3. Schema -> Schema phase
-- This phase of the aggregate function aggregates each schema to one single schema.
-- At the end of this phase we will have one single schema which is an aggregate of all the schema.
-- This schema will be able to describe all the records in the dataverse
-4. JSON Schema Draft 2020 output
-- This is the defined output of the schema generated sent to the console to be consumed by the end user.
-
-
-
-
-[//]: # (### Milestones)
-
-[//]: # ()
-[//]: # (1. Adding custom aggregate function for schema inference:)
-
-[//]: # (   - Status : Completed)
-
-[//]: # (2. Integrating schema inferrer from previous works of AsterixDB columnar database for record -> schema.)
-
-[//]: # (   - Status : Completed )
-
-[//]: # (3. Adding schema -> schema inferrer for combining various schema from various distributed controllers in asterixDB)
-
-[//]: # (   - Status : Completed)
-
-[//]: # (4. Adding test to the  test suite to validate created schema )
-
-[//]: # (   - Status : Completed)
-
-[//]: # (5. Displaying the schema finally in JSON Schema with DRAFT2020 Dialect)
-
-[//]: # (   - Status : In Progress)
-
 ## What is AsterixDB?
 
 AsterixDB is a BDMS (Big Data Management System) with a rich feature set that sets it apart from other Big Data platforms.  Its feature set makes it well-suited to modern needs such as web data warehousing and social data storage and analysis. AsterixDB has:
 
 - __Data model__<br/>
-A semistructured NoSQL style data model ([ADM](https://ci.apache.org/projects/asterixdb/datamodel.html)) resulting from
-extending JSON with object database ideas
+  A semistructured NoSQL style data model ([ADM](https://ci.apache.org/projects/asterixdb/datamodel.html)) resulting from
+  extending JSON with object database ideas
 
 - __Query languages__<br/>
-An expressive and declarative query language ([SQL++](http://asterixdb.apache.org/docs/0.9.7/sqlpp/manual.html) that supports a broad range of queries and analysis over semistructured data
+  An expressive and declarative query language ([SQL++](http://asterixdb.apache.org/docs/0.9.7/sqlpp/manual.html) that supports a broad range of queries and analysis over semistructured data
 
 - __Scalability__<br/>
-A parallel runtime query execution engine, Apache Hyracks, that has been scale-tested on up to 1000+ cores and 500+ disks
+  A parallel runtime query execution engine, Apache Hyracks, that has been scale-tested on up to 1000+ cores and 500+ disks
 
 - __Native storage__<br/>
-Partitioned LSM-based data storage and indexing to support efficient ingestion and management of semistructured data
+  Partitioned LSM-based data storage and indexing to support efficient ingestion and management of semistructured data
 
 - __External storage__<br/>
-Support for query access to externally stored data (e.g., data in HDFS) as well as to data stored natively by AsterixDB
+  Support for query access to externally stored data (e.g., data in HDFS) as well as to data stored natively by AsterixDB
 
 - __Data types__<br/>
-A rich set of primitive data types, including spatial and temporal data in addition to integer, floating point, and textual data
+  A rich set of primitive data types, including spatial and temporal data in addition to integer, floating point, and textual data
 
 - __Indexing__<br/>
-Secondary indexing options that include B+ trees, R trees, and inverted keyword (exact and fuzzy) index types
+  Secondary indexing options that include B+ trees, R trees, and inverted keyword (exact and fuzzy) index types
 
 - __Transactions__<br/>
-Basic transactional (concurrency and recovery) capabilities akin to those of a NoSQL store
+  Basic transactional (concurrency and recovery) capabilities akin to those of a NoSQL store
 
 Learn more about AsterixDB at its [website](http://asterixdb.apache.org).
 
@@ -155,22 +84,6 @@ Here are steps to get AsterixDB running on your local machine:
 
         http://localhost:19006
 
-* Queries to load:
-
-        drop dataverse sampleDataVerse if exists;
-        create dataverse sampleDataVerse;
-        use sampleDataVerse;
-        create type Opentype as {uid:uuid};
-        use sampleDataVerse;
-        create dataset sampleDataSet(Opentype) primary key uid autogenerated; 
-        copy sampleDataSet from localfs path ('localhost://{INSERT PATH TO ANY JSON DATA}') with {'format':'json'};"
-
-One sample JSON data used in experiments can be found here : https://www.kaggle.com/datasets/roamresearch/prescriptionbasedprediction
-
-* Queries to infer schema:
-
-        use sampleDataVerse; array_schema((SELECT value ds from sampleDataSet ds)); 
-
 * Read more [documentation](https://ci.apache.org/projects/asterixdb/index.html) to learn the data model, query language, and how to create a cluster instance.
 
 ## Documentation
@@ -193,9 +106,8 @@ are used in the documentation that are generated directly from the grammar.
 ## Community support
 
 - __Users__</br>
-maling list: [users@asterixdb.apache.org](mailto:users@asterixdb.apache.org)</br>
-Join the list by sending an email to [users-subscribe@asterixdb.apache.org](mailto:users-subscribe@asterixdb.apache.org)</br>
+  maling list: [users@asterixdb.apache.org](mailto:users@asterixdb.apache.org)</br>
+  Join the list by sending an email to [users-subscribe@asterixdb.apache.org](mailto:users-subscribe@asterixdb.apache.org)</br>
 - __Developers and contributors__</br>
-mailing list:[dev@asterixdb.apache.org](mailto:dev@asterixdb.apache.org)</br>
-Join the list by sending an email to [dev-subscribe@asterixdb.apache.org](mailto:dev-subscribe@asterixdb.apache.org)
-
+  mailing list:[dev@asterixdb.apache.org](mailto:dev@asterixdb.apache.org)</br>
+  Join the list by sending an email to [dev-subscribe@asterixdb.apache.org](mailto:dev-subscribe@asterixdb.apache.org)
