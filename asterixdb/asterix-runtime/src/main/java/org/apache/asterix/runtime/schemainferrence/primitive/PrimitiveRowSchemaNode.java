@@ -46,7 +46,13 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
 
     public PrimitiveRowSchemaNode(ATypeTag typeTag, DataInput input) throws IOException {
         this.typeTag = typeTag;
+        primaryKey = input.readBoolean();
 
+    }
+
+    public PrimitiveRowSchemaNode(ATypeTag typeTag, DataInput input, boolean fromColumnar) throws IOException {
+        this.typeTag = typeTag;
+        input.skipBytes(4);
         primaryKey = input.readBoolean();
 
     }

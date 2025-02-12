@@ -49,7 +49,7 @@ public final class RowMetadata extends AbstractRowMetadata {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private final Mutable<IRowWriteMultiPageOp> multiPageOpRef;
-    private final RowFieldNamesDictionary fieldNamesDictionary;
+    public final RowFieldNamesDictionary fieldNamesDictionary;
     private final ObjectRowSchemaNode root;
     private final ObjectRowSchemaNode metaRoot;
 

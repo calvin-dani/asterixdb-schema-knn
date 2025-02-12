@@ -30,6 +30,8 @@ import org.apache.asterix.column.metadata.schema.primitive.PrimitiveSchemaNode;
 import org.apache.asterix.dataflow.data.nontagged.serde.AStringSerializerDeserializer;
 import org.apache.asterix.om.base.AString;
 import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ByteArrayAccessibleDataInputStream;
@@ -66,8 +68,13 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
     }
 
     public String build(ObjectSchemaNode root) throws HyracksDataException {
-        builder.append("root\n");
+        builder.append("{ ");
+        builder.append("\"$schema\": \"https://json-schema.org/draft/2020-12/schema\",")
+                .append("\"$id\": \"https://json-schema.org/draft/2020-12/schema\",");
+        builder.append("\"type\":\"object\", ");
         visit(root, null);
+        //        appendPostDecor();
+        builder.append(" }\n ");
         return builder.toString();
     }
 
@@ -77,14 +84,32 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         IntList fieldNameIndexes = objectNode.getChildrenFieldNameIndexes();
         level++;
         indent++;
-
+        builder.append("\"properties\": {  ");
         for (int i = 0; i < children.size(); i++) {
             int index = fieldNameIndexes.getInt(i);
             String fieldName = index < 0 ? "<empty>" : fieldNames.get(index);
             AbstractSchemaNode child = children.get(i);
             append(fieldName, index, child);
+            if (child.getTypeTag() != ATypeTag.UNION) {
+                if (child.isNested()) {
+                    builder.append(", ");
+                } else {
+                    builder.append(" ");
+                }
+            }
             child.accept(this, null);
+            if (i != children.size() - 1 && child.getTypeTag() != ATypeTag.UNION) {
+                builder.append("  }, ");
+            } else if (i != children.size() - 1 && child.isNested()) {
+                builder.append(" , ");
+            } else if (child.getTypeTag() != ATypeTag.UNION) {
+                builder.append(" } ");
+            } else {
+                builder.append(" ");
+            }
         }
+
+        builder.append(" } ");
 
         level--;
         indent--;
@@ -96,8 +121,27 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         level++;
         indent++;
         AbstractSchemaNode itemNode = collectionNode.getItemNode();
-        append("item", itemNode);
+        builder.append("\"items\": ");
+        builder.append("{  \"oneOf\": [ ");
+        if (itemNode.getTypeTag() != ATypeTag.UNION) {
+            builder.append("{  \"type\":");
+            writeSchemaType(getNormalizedTypeTag(itemNode.getTypeTag()));
+
+            if (itemNode.isNested()) {
+                builder.append(", ");
+            }
+        }
+
+//        append("item", itemNode);
         itemNode.accept(this, null);
+//        if (!itemNode.isNested()) {
+            builder.append(" } ");
+//        } else {
+//            builder.append(" ");
+//        }
+        //        builder.append("} ");
+        builder.append("] ").append(" } ");
+        //        appendPostDecor();
         level--;
         indent--;
         return null;
@@ -106,10 +150,28 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
     @Override
     public Void visit(UnionSchemaNode unionNode, Void arg) throws HyracksDataException {
         indent++;
-        for (AbstractSchemaNode child : unionNode.getChildren().values()) {
-            append(child.getTypeTag().toString(), child);
+        builder.append("{ \"oneOf\": [ ");
+        List<AbstractSchemaNode> unionChildren =
+                new ArrayList<AbstractSchemaNode>(unionNode.getChildren().values());
+        for (int i = 0; i < unionChildren.size(); i++) {
+            AbstractSchemaNode child = unionChildren.get(i);
+//            append(child.getTypeTag().toString(), child);
+            if (child.getTypeTag() != ATypeTag.UNION) {
+                builder.append("{  \"type\":");
+                writeSchemaType(getNormalizedTypeTag(child.getTypeTag()));
+                if (child.isNested()) {
+                    builder.append(", ");
+                }
+            }
             child.accept(this, null);
+            if (i != unionChildren.size() - 1) {
+                builder.append(" }, ");
+            } else {
+                builder.append(" } ");
+            }
         }
+        builder.append("]  }");
+        //        builder.append("] ");
         indent--;
         return null;
     }
@@ -124,27 +186,82 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         builder.append("|-- ");
     }
 
-    private void append(String key, AbstractSchemaNode node) {
+    private void append(String key, AbstractSchemaNode node) throws HyracksDataException {
         append(key, -1, node);
     }
 
-    private void append(String key, int index, AbstractSchemaNode node) {
-        appendDecor();
-        builder.append(key);
-        if (index >= 0) {
-            builder.append(" (");
-            builder.append(index);
-            builder.append(')');
+    private void append(String key, int index, AbstractSchemaNode node) throws HyracksDataException {
+        builder.append("\"").append(key).append("\"").append(": ");
+        //        if (!node.isNested()) {
+        //            final PrimitiveRowSchemaNode primitiveNode = (PrimitiveRowSchemaNode) node;
+        if (node.getTypeTag() != ATypeTag.UNION) {
+            builder.append("{  \"type\":");
+            writeSchemaType(getNormalizedTypeTag(node.getTypeTag()));
+
+//        appendDecor();
+//        builder.append(key);
+//        if (index >= 0) {
+//            builder.append(" (");
+//            builder.append(index);
+//            builder.append(')');
+//        }
+//        builder.append(": ");
+//        builder.append(node.getTypeTag().toString());
+//        builder.append(" <level: ");
+//        builder.append(level);
+//        if (!node.isNested()) {
+//            final PrimitiveSchemaNode primitiveNode = (PrimitiveSchemaNode) node;
+//            builder.append(", index: ");
+//            builder.append(primitiveNode.getColumnIndex());
+//        }
+//        builder.append(">\n");
         }
-        builder.append(": ");
-        builder.append(node.getTypeTag().toString());
-        builder.append(" <level: ");
-        builder.append(level);
-        if (!node.isNested()) {
-            final PrimitiveSchemaNode primitiveNode = (PrimitiveSchemaNode) node;
-            builder.append(", index: ");
-            builder.append(primitiveNode.getColumnIndex());
+    }
+
+    public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {
+        switch (typeTag) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+                return ATypeTag.BIGINT;
+            case FLOAT:
+                return ATypeTag.DOUBLE;
+            default:
+                return typeTag;
         }
-        builder.append(">\n");
+    }
+
+    private void writeSchemaType(ATypeTag normalizedTypeTag) throws HyracksDataException {
+        switch (normalizedTypeTag) {
+            case OBJECT:
+                builder.append("\"object\"");
+                return;
+            case MULTISET:
+            case ARRAY:
+                builder.append("\"array\"");
+                return;
+            case NULL:
+            case MISSING:
+                builder.append("\"null\"");
+                return;
+            case BOOLEAN:
+                builder.append("\"boolean\"");
+                return;
+            case DOUBLE:
+            case BIGINT:
+                builder.append("\"number\"");
+                return;
+            case UUID:
+            case STRING:
+                builder.append("\"string\"");
+                return;
+            case UNION:
+                builder.append("\"union\"");
+                return;
+            default:
+                throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
+
+        }
+
     }
 }

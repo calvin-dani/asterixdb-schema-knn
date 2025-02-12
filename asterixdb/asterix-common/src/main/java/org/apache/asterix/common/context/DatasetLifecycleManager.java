@@ -107,6 +107,20 @@ public class DatasetLifecycleManager implements IDatasetLifecycleManager, ILifeC
         return getIndex(datasetID, resourceID);
     }
 
+    public String getResourcePathFromDatasetId(int datasetId) throws HyracksDataException {
+        DatasetResource datasetResource = datasets.get(datasetId);
+        if (datasetResource == null) {
+            throw new HyracksDataException("Dataset with ID " + datasetId + " not found.");
+        }
+        for (Map.Entry<Long, IndexInfo> entry : datasetResource.getIndexes().entrySet()) {
+            LocalResource localResource = (entry.getValue().getLocalResource());
+            if (localResource != null) {
+                return localResource.getPath();
+            }
+        }
+        throw new HyracksDataException("Resource path for dataset ID " + datasetId + " not found.");
+    }
+
     @Override
     public synchronized ILSMIndex getIndex(int datasetID, long resourceID) throws HyracksDataException {
         validateDatasetLifecycleManagerState();

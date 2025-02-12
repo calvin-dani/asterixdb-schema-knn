@@ -80,6 +80,7 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
     private final IColumnValuesWriterFactory columnWriterFactory;
     private final List<IColumnValuesWriter> columnWriters;
     private final ArrayBackedValueStorage serializedMetadata;
+    private final ArrayBackedValueStorage serializedFieldNamesDictionary;
     private final PathInfoSerializer pathInfoSerializer;
     private final IntArrayList nullWriterIndexes;
     private final boolean metaContainsKeys;
@@ -120,6 +121,7 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
         }
 
         serializedMetadata = new ArrayBackedValueStorage();
+        serializedFieldNamesDictionary = new ArrayBackedValueStorage();
         changed = true;
         serializeColumnsMetadata();
     }
@@ -146,6 +148,29 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
         //Add definition levels for the root
         addDefinitionLevelsAndGet(root);
         this.serializedMetadata = serializedMetadata;
+        serializedFieldNamesDictionary = new ArrayBackedValueStorage();
+        changed = false;
+    }
+
+    public FlushColumnMetadata(Mutable<IColumnWriteMultiPageOp> multiPageOpRef, ObjectSchemaNode root,  Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels) {
+//        super(datasetType, metaType, primaryKeys.size());
+        super(null, null, 0);
+        this.multiPageOpRef = multiPageOpRef;
+        this.columnWriterFactory = null;
+        this.definitionLevels = definitionLevels;
+        this.columnWriters = null;
+        level = -1;
+        repeated = 0;
+        this.fieldNamesDictionary = AbstractFieldNamesDictionary.create();
+        this.root = root;
+        this.metaRoot = null;
+        this.metaContainsKeys = false;
+        pathInfoSerializer = new PathInfoSerializer();
+        nullWriterIndexes = new IntArrayList();
+        //Add definition levels for the root
+        addDefinitionLevelsAndGet(root);
+        this.serializedMetadata = null;
+        serializedFieldNamesDictionary = new ArrayBackedValueStorage();
         changed = false;
     }
 

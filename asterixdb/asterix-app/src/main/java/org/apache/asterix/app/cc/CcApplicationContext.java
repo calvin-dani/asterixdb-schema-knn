@@ -34,6 +34,7 @@ import org.apache.asterix.common.api.INamespaceResolver;
 import org.apache.asterix.common.api.INodeJobTracker;
 import org.apache.asterix.common.api.IReceptionist;
 import org.apache.asterix.common.api.IReceptionistFactory;
+import org.apache.asterix.common.api.IRequestMetadata;
 import org.apache.asterix.common.api.IRequestTracker;
 import org.apache.asterix.common.cluster.IClusterStateManager;
 import org.apache.asterix.common.cluster.IGlobalRecoveryManager;
@@ -68,6 +69,7 @@ import org.apache.asterix.runtime.transaction.ResourceIdManager;
 import org.apache.asterix.runtime.utils.BulkTxnIdFactory;
 import org.apache.asterix.runtime.utils.ClusterStateManager;
 import org.apache.asterix.runtime.utils.NoOpCoordinationService;
+import org.apache.asterix.runtime.utils.RequestMetadata;
 import org.apache.asterix.runtime.utils.RequestTracker;
 import org.apache.asterix.runtime.utils.RuntimeComponentsProvider;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -119,6 +121,7 @@ public class CcApplicationContext implements ICcApplicationContext {
     private final ICompressionManager compressionManager;
     private final IReceptionist receptionist;
     private final IRequestTracker requestTracker;
+    private final IRequestMetadata requestMetadata;
     private final IConfigValidator configValidator;
     private final IAdapterFactoryService adapterFactoryService;
     private final ReentrantReadWriteLock compilationLock = new ReentrantReadWriteLock(true);
@@ -170,6 +173,7 @@ public class CcApplicationContext implements ICcApplicationContext {
         compressionManager = new CompressionManager(storageProperties);
         receptionist = receptionistFactory.create();
         requestTracker = new RequestTracker(this);
+        requestMetadata = new RequestMetadata(this);
         configValidator = configValidatorFactory.create();
         this.adapterFactoryService = adapterFactoryService;
         this.namespacePathResolver = namespacePathResolver;
@@ -369,6 +373,11 @@ public class CcApplicationContext implements ICcApplicationContext {
     @Override
     public IRequestTracker getRequestTracker() {
         return requestTracker;
+    }
+
+    @Override
+    public IRequestMetadata getRequestMetadata() {
+        return requestMetadata;
     }
 
     @Override

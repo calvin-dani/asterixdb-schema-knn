@@ -21,7 +21,8 @@ package org.apache.asterix.column.metadata;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
 
-public abstract class AbstractColumnMetadata implements IColumnMetadata {
+public abstract class
+AbstractColumnMetadata implements IColumnMetadata {
     protected static final int WRITERS_POINTER = 0;
     protected static final int FIELD_NAMES_POINTER = WRITERS_POINTER + Integer.BYTES;
     protected static final int SCHEMA_POINTER = FIELD_NAMES_POINTER + Integer.BYTES;

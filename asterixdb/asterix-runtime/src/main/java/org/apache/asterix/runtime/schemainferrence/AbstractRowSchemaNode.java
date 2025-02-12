@@ -91,6 +91,32 @@ public abstract class AbstractRowSchemaNode {
         }
     }
 
+    public static AbstractRowSchemaNode deserializeFromColumnar(DataInput input) throws IOException {
+        ATypeTag typeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
+        switch (typeTag) {
+            case SYSTEM_NULL:
+                return MissingRowFieldSchemaNode.INSTANCE;
+            case OBJECT:
+                return new ObjectRowSchemaNode(input);
+            case ARRAY:
+                return new ArrayRowSchemaNode(input);
+            case MULTISET:
+                return new MultisetRowSchemaNode(input);
+            case UNION:
+                return new UnionRowSchemaNode(input);
+            case NULL:
+            case MISSING:
+            case BOOLEAN:
+            case BIGINT:
+            case DOUBLE:
+            case STRING:
+            case UUID:
+                return new PrimitiveRowSchemaNode(typeTag, input, true);
+            default:
+                throw new UnsupportedEncodingException(typeTag + " is not supported");
+        }
+    }
+
     public abstract AbstractRowSchemaNode getChild(int i);
 
     public abstract int getNumberOfChildren();
