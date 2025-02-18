@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.asterix.app.function.collectionschema;
+package org.apache.asterix.app.function.currentschema;
 
 import static org.apache.asterix.app.message.ExecuteStatementRequestMessage.DEFAULT_NC_TIMEOUT_MILLIS;
 
@@ -44,7 +44,6 @@ import org.apache.asterix.external.api.IRecordReader;
 import org.apache.asterix.metadata.declared.AbstractDatasourceFunction;
 import org.apache.asterix.om.dictionary.AbstractFieldNamesDictionary;
 import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
-import org.apache.asterix.runtime.schemainferrence.*;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableObject;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
@@ -82,7 +81,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             String collection, String index, IFileSplitProvider splitProvider,
             IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition) {
         super(locations);
-        System.out.println("FOLLOW THE LETTERS : I");
+
         this.database = database;
         this.dataverse = dataverse;
         this.collection = collection;
@@ -120,12 +119,15 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             }
 
             count.incrementAndGet();
-            int offset =  response.getSerSchema().getStorage().getStartOffset();
-            int length =  response.getSerSchema().getStorage().getLength();
-            int fieldNamesStart = offset + IntegerPointable.getInteger(response.getSerSchema().getStorage().getByteArray(), offset + FIELD_NAMES_POINTER);
-            int metaRootStart = IntegerPointable.getInteger(response.getSerSchema().getStorage().getByteArray(), offset + META_SCHEMA_POINTER);
-            int metaRootSize =
-                    metaRootStart < 0 ? 0 : IntegerPointable.getInteger(response.getSerSchema().getStorage().getByteArray(), offset + PATH_INFO_POINTER) - metaRootStart;
+            int offset = response.getSerSchema().getStorage().getStartOffset();
+            int length = response.getSerSchema().getStorage().getLength();
+            int fieldNamesStart = offset + IntegerPointable
+                    .getInteger(response.getSerSchema().getStorage().getByteArray(), offset + FIELD_NAMES_POINTER);
+            int metaRootStart = IntegerPointable.getInteger(response.getSerSchema().getStorage().getByteArray(),
+                    offset + META_SCHEMA_POINTER);
+            int metaRootSize = metaRootStart < 0 ? 0
+                    : IntegerPointable.getInteger(response.getSerSchema().getStorage().getByteArray(),
+                            offset + PATH_INFO_POINTER) - metaRootStart;
             DataInput input =
                     new DataInputStream(new ByteArrayInputStream(response.getSerSchema().getStorage().getByteArray(),
                             fieldNamesStart, length));
@@ -138,7 +140,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
 
             //ColumnMetadata //TODO CALVIN DANI define multipageref
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-            FlushColumnMetadata rowMetaData = new FlushColumnMetadata(multiPageOpRef,root,definitionLevels);
+            FlushColumnMetadata rowMetaData = new FlushColumnMetadata(multiPageOpRef, root, definitionLevels);
             ColumnSchemaTransformer schemaTransformer = new ColumnSchemaTransformer(rowMetaData, rowMetaData.getRoot());
 
             schemaTransformer.setToMergeFieldNamesDictionary(fieldNamesDictionary);

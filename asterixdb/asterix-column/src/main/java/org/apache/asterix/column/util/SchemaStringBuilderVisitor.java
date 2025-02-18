@@ -31,7 +31,6 @@ import org.apache.asterix.dataflow.data.nontagged.serde.AStringSerializerDeseria
 import org.apache.asterix.om.base.AString;
 import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ByteArrayAccessibleDataInputStream;
@@ -132,13 +131,13 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
             }
         }
 
-//        append("item", itemNode);
+        //        append("item", itemNode);
         itemNode.accept(this, null);
-//        if (!itemNode.isNested()) {
-            builder.append(" } ");
-//        } else {
-//            builder.append(" ");
-//        }
+        //        if (!itemNode.isNested()) {
+        builder.append(" } ");
+        //        } else {
+        //            builder.append(" ");
+        //        }
         //        builder.append("} ");
         builder.append("] ").append(" } ");
         //        appendPostDecor();
@@ -151,11 +150,10 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
     public Void visit(UnionSchemaNode unionNode, Void arg) throws HyracksDataException {
         indent++;
         builder.append("{ \"oneOf\": [ ");
-        List<AbstractSchemaNode> unionChildren =
-                new ArrayList<AbstractSchemaNode>(unionNode.getChildren().values());
+        List<AbstractSchemaNode> unionChildren = new ArrayList<AbstractSchemaNode>(unionNode.getChildren().values());
         for (int i = 0; i < unionChildren.size(); i++) {
             AbstractSchemaNode child = unionChildren.get(i);
-//            append(child.getTypeTag().toString(), child);
+            //            append(child.getTypeTag().toString(), child);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 builder.append("{  \"type\":");
                 writeSchemaType(getNormalizedTypeTag(child.getTypeTag()));
@@ -198,23 +196,23 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
             builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(node.getTypeTag()));
 
-//        appendDecor();
-//        builder.append(key);
-//        if (index >= 0) {
-//            builder.append(" (");
-//            builder.append(index);
-//            builder.append(')');
-//        }
-//        builder.append(": ");
-//        builder.append(node.getTypeTag().toString());
-//        builder.append(" <level: ");
-//        builder.append(level);
-//        if (!node.isNested()) {
-//            final PrimitiveSchemaNode primitiveNode = (PrimitiveSchemaNode) node;
-//            builder.append(", index: ");
-//            builder.append(primitiveNode.getColumnIndex());
-//        }
-//        builder.append(">\n");
+            //        appendDecor();
+            //        builder.append(key);
+            //        if (index >= 0) {
+            //            builder.append(" (");
+            //            builder.append(index);
+            //            builder.append(')');
+            //        }
+            //        builder.append(": ");
+            //        builder.append(node.getTypeTag().toString());
+            //        builder.append(" <level: ");
+            //        builder.append(level);
+            //        if (!node.isNested()) {
+            //            final PrimitiveSchemaNode primitiveNode = (PrimitiveSchemaNode) node;
+            //            builder.append(", index: ");
+            //            builder.append(primitiveNode.getColumnIndex());
+            //        }
+            //        builder.append(">\n");
         }
     }
 

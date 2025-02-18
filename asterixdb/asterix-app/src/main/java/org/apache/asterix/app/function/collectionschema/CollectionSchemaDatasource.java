@@ -28,37 +28,36 @@ import org.apache.asterix.metadata.api.IDatasourceFunction;
 import org.apache.asterix.metadata.declared.DataSourceId;
 import org.apache.asterix.metadata.declared.FunctionDataSource;
 import org.apache.asterix.metadata.declared.MetadataProvider;
+import org.apache.asterix.om.types.IAType;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.core.algebra.properties.INodeDomain;
-import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
-import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 
-public class SchemaDatasource extends FunctionDataSource {
+public class CollectionSchemaDatasource extends FunctionDataSource {
 
-    private static final DataSourceId STORAGE_SIZE_DATASOURCE_ID = new DataSourceId(
-            SchemaRewriter.INDEX_SCHEMA.getDatabase(), FunctionSignature.getDataverseName(SchemaRewriter.INDEX_SCHEMA),
-            SchemaRewriter.INDEX_SCHEMA.getName());
+    private static final DataSourceId STORAGE_SIZE_DATASOURCE_ID =
+            new DataSourceId(CollectionSchemaRewriter.COLLECTION_SCHEMA.getDatabase(),
+                    FunctionSignature.getDataverseName(CollectionSchemaRewriter.COLLECTION_SCHEMA),
+                    CollectionSchemaRewriter.COLLECTION_SCHEMA.getName());
     private final String database;
     private final DataverseName dataverse;
     private final String collection;
     private final String index;
-    private final IFileSplitProvider splitProvider;
-    private final IndexDataflowHelperFactory indexDataflowHelperFactory;
+    private final IAType type;
+
     private final int[][] partition;
     private final AlgebricksAbsolutePartitionConstraint constraint;
 
-    SchemaDatasource(INodeDomain domain, String database, DataverseName dataverse, String collection, String index,
-            IFileSplitProvider splitProvider, IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition,
-            AlgebricksAbsolutePartitionConstraint constraint) throws AlgebricksException {
-        super(STORAGE_SIZE_DATASOURCE_ID, SchemaRewriter.INDEX_SCHEMA, domain);
+    CollectionSchemaDatasource(INodeDomain domain, String database, DataverseName dataverse, String collection,
+            String index, IAType type, int[][] partition, AlgebricksAbsolutePartitionConstraint constraint)
+            throws AlgebricksException {
+        super(STORAGE_SIZE_DATASOURCE_ID, CollectionSchemaRewriter.COLLECTION_SCHEMA, domain);
         System.out.println("FOLLOW THE LETTERS : J2");
         this.database = database;
         this.dataverse = dataverse;
         this.collection = collection;
         this.index = index;
-        this.splitProvider = splitProvider;
-        this.indexDataflowHelperFactory = indexDataflowHelperFactory;
+        this.type = type;
         this.partition = partition;
         this.constraint = constraint;
     }
@@ -87,18 +86,19 @@ public class SchemaDatasource extends FunctionDataSource {
     @Override
     protected IDatasourceFunction createFunction(MetadataProvider metadataProvider,
             AlgebricksAbsolutePartitionConstraint locations) {
-        System.out.println("FOLLOW THE LETTERS : K");
-        return new SchemaFunction(locations, database, dataverse, collection, index, splitProvider,
-                indexDataflowHelperFactory, partition);
+
+        return new CollectionSchemaFunction(
+                AlgebricksAbsolutePartitionConstraint.randomLocation(locations.getLocations()), database, dataverse,
+                collection, index, partition, type);
     }
 
     @Override
     protected boolean sameFunctionDatasource(FunctionDataSource other) {
-        System.out.println("FOLLOW THE LETTERS : L");
+
         if (!Objects.equals(this.functionId, other.getFunctionId())) {
             return false;
         }
-        SchemaDatasource that = (SchemaDatasource) other;
+        CollectionSchemaDatasource that = (CollectionSchemaDatasource) other;
         return Objects.equals(this.database, that.getDatabase()) && Objects.equals(this.dataverse, that.getDataverse())
                 && Objects.equals(this.collection, that.getCollection()) && Objects.equals(this.index, that.getIndex());
     }

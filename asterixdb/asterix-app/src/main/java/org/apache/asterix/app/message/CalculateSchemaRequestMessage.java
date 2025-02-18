@@ -44,7 +44,7 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
 
     public CalculateSchemaRequestMessage(String nodeId, long reqId, String database, DataverseName dataverse,
             String collection, String index) {
-        System.out.println("FOLLOW THE LETTERS : E");
+
         this.nodeId = nodeId;
         this.reqId = reqId;
         this.database = database;
@@ -55,7 +55,7 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
 
     @Override
     public void handle(ICcApplicationContext appCtx) throws HyracksDataException {
-        System.out.println("FOLLOW THE LETTERS : F");
+
         CCMessageBroker messageBroker = (CCMessageBroker) appCtx.getServiceContext().getMessageBroker();
         try {
             System.out.println(

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.asterix.app.function.collectionschema;
+package org.apache.asterix.app.function.currentschema;
 
 import static org.apache.asterix.common.exceptions.ErrorCode.TYPE_MISMATCH_FUNCTION;
 
@@ -61,14 +61,13 @@ public class SchemaRewriter extends FunctionRewriter {
 
     private SchemaRewriter(FunctionIdentifier functionId) {
         super(functionId);
-        System.out.println("FOLLOW THE LETTERS : G");
 
     }
 
     @Override
     protected FunctionDataSource toDatasource(IOptimizationContext context, AbstractFunctionCallExpression function)
             throws AlgebricksException {
-        System.out.println("FOLLOW THE LETTERS : H");
+
         //TODO : CALVIN DANI change to 3 args only
         if (function.getArguments().size() != 3) {
             throw new CompilationException(ErrorCode.COMPILATION_INVALID_NUM_OF_ARGS, INDEX_SCHEMA.getName());
@@ -88,9 +87,10 @@ public class SchemaRewriter extends FunctionRewriter {
         DataverseName dataverse =
                 DataverseName.createSinglePartName(ConstantExpressionUtil.getStringConstant(scopeExpr));
         String collection = ConstantExpressionUtil.getStringConstant(collectionExpr);
-        Dataset dataset = metadataProvider.findDataset(database, dataverse, collection);;
+        Dataset dataset = metadataProvider.findDataset(database, dataverse, collection);
         if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.ROW) {
-            throw new CompilationException(ErrorCode.CONFIGURATION_PARAMETER_INVALID_TYPE, dataset.getDatasetName(), "DATASET should be in storage format : COLUMNAR");
+            throw new CompilationException(ErrorCode.CONFIGURATION_PARAMETER_INVALID_TYPE, dataset.getDatasetName(),
+                    "DATASET should be in storage format : COLUMNAR");
         }
         Index primaryIndex =
                 MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), dataset.getDatabaseName(),

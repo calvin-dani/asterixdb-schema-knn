@@ -50,8 +50,6 @@ public class DeclareSchema extends AbstractStatement {
         this.itemType = itemType;
         this.metaItemType = metaItemType;
         this.hints = hints;
-        //        this.withObjectNode = DatasetDeclParametersUtil.validateAndGetWithObjectNode(withRecord, datasetType);
-        //        this.ifNotExists = ifNotExists;
         this.datasetType = datasetType;
         this.datasetDetailsDecl = idd;
     }

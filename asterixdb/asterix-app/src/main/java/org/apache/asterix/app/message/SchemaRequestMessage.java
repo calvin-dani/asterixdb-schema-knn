@@ -52,7 +52,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
 
     public SchemaRequestMessage(long reqId, String database, String dataverse, String collection, String index,
             Dataset dataset) {
-        System.out.println("FOLLOW THE LETTERS : Q");
+
         this.reqId = reqId;
         this.database = database;
         this.dataverse = dataverse;
@@ -63,13 +63,13 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
 
     @Override
     public void handle(INcApplicationContext appCtx) throws HyracksDataException {
-        System.out.println("FOLLOW THE LETTERS : R");
+
         try {
 
             DatasetInfo dsInfo = appCtx.getDatasetLifecycleManager().getDatasetInfo(this.dataset.getDatasetId());
             if (dsInfo == null) {
-//                                throw HyracksDataException.create("Dataset " + dataset.getDataverseName() + "." + dataset.getDatasetName()
-//                                        + " does not exist on this node");
+                //                                throw HyracksDataException.create("Dataset " + dataset.getDataverseName() + "." + dataset.getDatasetName()
+                //                                        + " does not exist on this node");
             }
 
             dsInfo.getIndexes().forEach((indexId, indexInfo) -> {
@@ -122,7 +122,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     }
 
     private void respond(INcApplicationContext appCtx, SchemaResponseMessage response) throws HyracksDataException {
-        System.out.println("FOLLOW THE LETTERS : S");
+
         NCMessageBroker messageBroker = (NCMessageBroker) appCtx.getServiceContext().getMessageBroker();
         try {
             System.out.println("HEREEEEEE : SchemaRequestMessage respond" + appCtx.getNodeProperties().toString());

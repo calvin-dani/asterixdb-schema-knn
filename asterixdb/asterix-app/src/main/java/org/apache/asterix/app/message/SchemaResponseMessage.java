@@ -99,7 +99,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
             //        RowFieldNamesDictionary fieldNamesDictionary = RowFieldNamesDictionary.deserialize(input);
             //Schema
             Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
-            ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input,definitionLevels);
+            ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
             ObjectSchemaNode metaRoot = null;
 
             //        if (metaType != null) {
@@ -121,7 +121,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
 
             //FieldNames
             //            RowFieldNamesDictionary fieldNamesDictionary = RowFieldNamesDictionary.deserialize(input);
-                schemaTransformer.setToMergeFieldNamesDictionary(fieldNamesDictionary);
+            schemaTransformer.setToMergeFieldNamesDictionary(fieldNamesDictionary);
             //            //Schema
             //            ObjectRowSchemaNode root = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input);
             schemaTransformer.transform(root);

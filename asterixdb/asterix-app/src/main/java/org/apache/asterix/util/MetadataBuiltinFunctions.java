@@ -31,8 +31,9 @@ import org.apache.asterix.app.function.QueryPartitionRewriter;
 import org.apache.asterix.app.function.StorageComponentsRewriter;
 import org.apache.asterix.app.function.TPCDSAllTablesDataGeneratorRewriter;
 import org.apache.asterix.app.function.TPCDSSingleTableDataGeneratorRewriter;
-import org.apache.asterix.app.function.collectionschema.SchemaRewriter;
+import org.apache.asterix.app.function.collectionschema.CollectionSchemaRewriter;
 import org.apache.asterix.app.function.collectionsize.StorageSizeRewriter;
+import org.apache.asterix.app.function.currentschema.SchemaRewriter;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.typecomputer.impl.AInt64TypeComputer;
 import org.apache.asterix.om.utils.RecordUtil;
@@ -117,6 +118,12 @@ public class MetadataBuiltinFunctions {
         BuiltinFunctions.addFunction(SchemaRewriter.INDEX_SCHEMA, AInt64TypeComputer.INSTANCE, true);
         BuiltinFunctions.addUnnestFun(SchemaRewriter.INDEX_SCHEMA, true);
         BuiltinFunctions.addDatasourceFunction(SchemaRewriter.INDEX_SCHEMA, SchemaRewriter.INSTANCE);
+
+        // schema
+        BuiltinFunctions.addFunction(CollectionSchemaRewriter.COLLECTION_SCHEMA, AInt64TypeComputer.INSTANCE, true);
+        BuiltinFunctions.addUnnestFun(CollectionSchemaRewriter.COLLECTION_SCHEMA, true);
+        BuiltinFunctions.addDatasourceFunction(CollectionSchemaRewriter.COLLECTION_SCHEMA,
+                CollectionSchemaRewriter.INSTANCE);
     }
 
     private MetadataBuiltinFunctions() {
