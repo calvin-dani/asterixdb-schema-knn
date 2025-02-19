@@ -159,7 +159,8 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
         this.multiPageOpRef = multiPageOpRef;
         this.columnWriterFactory = null;
         this.definitionLevels = definitionLevels;
-        this.columnWriters = null;
+        //TODO deploy CALVIN DANI with this
+        this.columnWriters = new ArrayList<>();
         level = -1;
         repeated = 0;
         this.fieldNamesDictionary = AbstractFieldNamesDictionary.create();
@@ -338,7 +339,7 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
      */
     public void init(IColumnWriteMultiPageOp multiPageOp) throws HyracksDataException {
         multiPageOpRef.setValue(multiPageOp);
-
+        // TODO CALVIN DANI
         //Reset writer for the first write
         for (int i = 0; i < columnWriters.size(); i++) {
             columnWriters.get(i).reset();
@@ -570,6 +571,7 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
             case BIGINT:
             case STRING:
             case UUID:
+                //TODO: CALVIN DANI
                 int columnIndex = nullWriterIndexes.isEmpty() ? columnWriters.size() : nullWriterIndexes.removeInt(0);
                 boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
                 ATypeTag normalizedTypeTag = primaryKey ? childTypeTag : getNormalizedTypeTag(childTypeTag);

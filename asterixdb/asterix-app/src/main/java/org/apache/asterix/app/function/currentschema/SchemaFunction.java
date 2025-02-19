@@ -140,6 +140,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
 
             //ColumnMetadata //TODO CALVIN DANI define multipageref
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
+            //TODO CALVIN DANI to extend it and overwrite and remove flush functionalities or modify.
             FlushColumnMetadata rowMetaData = new FlushColumnMetadata(multiPageOpRef, root, definitionLevels);
             ColumnSchemaTransformer schemaTransformer = new ColumnSchemaTransformer(rowMetaData, rowMetaData.getRoot());
 
