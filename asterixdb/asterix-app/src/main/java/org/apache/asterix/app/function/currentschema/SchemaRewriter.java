@@ -48,13 +48,16 @@ import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCa
 import org.apache.hyracks.algebricks.core.algebra.expressions.ConstantExpression;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * This function takes a collection's fully qualified name (database.scope.collection) and returns the collection's size
  */
 
 public class SchemaRewriter extends FunctionRewriter {
-
+    private static final Logger LOGGER = LogManager.getLogger();
     public static final FunctionIdentifier INDEX_SCHEMA =
             FunctionConstants.newAsterix("current-schema", FunctionIdentifier.VARARGS);
     public static final SchemaRewriter INSTANCE = new SchemaRewriter(INDEX_SCHEMA);
@@ -104,6 +107,9 @@ public class SchemaRewriter extends FunctionRewriter {
         String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
         AlgebricksAbsolutePartitionConstraint secondaryPartitionConstraint =
                 (AlgebricksAbsolutePartitionConstraint) partitioningProperties.getConstraints();
+        LOGGER.log(Level.INFO, "FUNCTION ARGUMENTS: {} {} {}",ConstantExpressionUtil.getStringConstant(databaseExpr),
+                ConstantExpressionUtil.getStringConstant(scopeExpr),ConstantExpressionUtil.getStringConstant(collectionExpr));
+
         return new SchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection, index,
                 partitioningProperties.getSplitsProvider(), indexDataflowHelperFactory, partitionMap,
                 secondaryPartitionConstraint);

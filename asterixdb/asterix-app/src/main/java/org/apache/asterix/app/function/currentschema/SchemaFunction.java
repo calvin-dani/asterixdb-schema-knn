@@ -20,6 +20,7 @@
 package org.apache.asterix.app.function.currentschema;
 
 import static org.apache.asterix.app.message.ExecuteStatementRequestMessage.DEFAULT_NC_TIMEOUT_MILLIS;
+import static org.apache.hyracks.api.messages.IMessage.logMessage;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInput;
@@ -55,6 +56,7 @@ import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -142,11 +144,12 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
             //TODO CALVIN DANI to extend it and overwrite and remove flush functionalities or modify.
             FlushColumnMetadata rowMetaData = new FlushColumnMetadata(multiPageOpRef, root, definitionLevels);
+            LOGGER.log(Level.INFO, "ROOT CHILDREN: {}", rowMetaData.getRoot().getChildren().toString());
             ColumnSchemaTransformer schemaTransformer = new ColumnSchemaTransformer(rowMetaData, rowMetaData.getRoot());
 
             schemaTransformer.setToMergeFieldNamesDictionary(fieldNamesDictionary);
             schemaTransformer.transform(root);
-
+            LOGGER.log(Level.INFO, "COUNT AND PARTITION LENGTH: {} {}", count.get(), this.partition.length);
             return new SchemaReader(rowMetaData, count.get() == this.partition.length);
         } catch (Exception e) {
             LOGGER.info("Could not calculate collection size", e);
