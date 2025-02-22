@@ -97,7 +97,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
     @Override
     public IRecordReader<char[]> createRecordReader(IHyracksTaskContext ctx, int partition)
             throws HyracksDataException {
-
+        LOGGER.log(Level.INFO, "START OF CREATE RECORD");
         int[] part = this.partition[partition];
         INCServiceContext serviceCtx = ctx.getJobletContext().getServiceContext();
         INCMessageBroker messageBroker = (INCMessageBroker) serviceCtx.getMessageBroker();
@@ -109,9 +109,10 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             indexDataflowHelpers[i] = indexDataflowHelperFactory.create(serviceCtx, part[i]);
             indexDataflowHelpers[i].open();
         }
+        LOGGER.log(Level.INFO, "AFTER CREATE RECORD INDEXDATAFLOWHELPER");
         CalculateSchemaRequestMessage request = new CalculateSchemaRequestMessage(serviceCtx.getNodeId(), futureId,
                 database, dataverse, collection, index);
-
+        LOGGER.log(Level.INFO, "AFTER CREATE RECORD CALCSCHEMAREQUESTMESSAGE REQUEST");
         try {
             messageBroker.sendMessageToPrimaryCC(request);
             CalculateSchemaResponseMessage response = (CalculateSchemaResponseMessage) messageFuture
@@ -133,13 +134,14 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             DataInput input =
                     new DataInputStream(new ByteArrayInputStream(response.getSerSchema().getStorage().getByteArray(),
                             fieldNamesStart, length));
+            LOGGER.log(Level.INFO, "AFTER CREATE RECORD DESERIALIZING");
             //FieldNames
             IFieldNamesDictionary fieldNamesDictionary = AbstractFieldNamesDictionary.deserialize(input);
-
+            LOGGER.log(Level.INFO, "AFTER CREATE RECORD DESERIALIZING fieldNamesDictionary");
             //Schema
             Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
             ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
-
+            LOGGER.log(Level.INFO, "AFTER CREATE RECORD DESERIALIZING root");
             //ColumnMetadata //TODO CALVIN DANI define multipageref
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
             //TODO CALVIN DANI to extend it and overwrite and remove flush functionalities or modify.
