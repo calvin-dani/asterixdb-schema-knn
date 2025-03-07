@@ -19,8 +19,11 @@
 
 package org.apache.asterix.column.operation.lsm.flush;
 
+import java.io.Serializable;
+import java.io.IOException;
 import java.util.ArrayList;
 
+import org.apache.asterix.column.metadata.PathInfoSerializer;
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
 import org.apache.asterix.column.metadata.schema.IObjectSchemaNodeVisitor;
@@ -31,24 +34,31 @@ import org.apache.asterix.column.metadata.schema.collection.ArraySchemaNode;
 import org.apache.asterix.column.metadata.schema.collection.GenericListSchemaNode;
 import org.apache.asterix.column.metadata.schema.collection.MultisetSchemaNode;
 import org.apache.asterix.column.metadata.schema.primitive.PrimitiveSchemaNode;
+import org.apache.asterix.column.values.IColumnValuesWriter;
 import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 
 import it.unimi.dsi.fastutil.ints.IntList;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
-public class ColumnSchemaTransformer implements IObjectSchemaNodeVisitor<AbstractSchemaNode, AbstractSchemaNode> {
+public class ColumnSchemaTransformer implements IObjectSchemaNodeVisitor<AbstractSchemaNode, AbstractSchemaNode>, Serializable {
 
     private final FlushColumnMetadata rowMetadata;
     private final ObjectSchemaNode root;
     private AbstractSchemaNestedNode currentParent;
+    private IFieldNamesDictionary toMergeFieldNamesDictionary;
+    private final ArrayBackedValueStorage serializedMetadata;
 
     public void setToMergeFieldNamesDictionary(IFieldNamesDictionary toMergeFieldNamesDictionary) {
         this.toMergeFieldNamesDictionary = toMergeFieldNamesDictionary;
     }
 
-    private IFieldNamesDictionary toMergeFieldNamesDictionary;
+    public FlushColumnMetadata getRowMetadata() {
+        return rowMetadata;
+    }
+
 
     public ObjectSchemaNode getRoot() {
         return root;
@@ -57,6 +67,7 @@ public class ColumnSchemaTransformer implements IObjectSchemaNodeVisitor<Abstrac
     public ColumnSchemaTransformer(FlushColumnMetadata rowMetadata, ObjectSchemaNode root) {
         this.rowMetadata = rowMetadata;
         this.root = root;
+        this.serializedMetadata = new ArrayBackedValueStorage();
     }
 
     /**
@@ -80,9 +91,16 @@ public class ColumnSchemaTransformer implements IObjectSchemaNodeVisitor<Abstrac
 
         ObjectSchemaNode objectNode = (ObjectSchemaNode) mainRoot;
         currentParent = objectNode;
+        System.out.println("CHECKING TRANSFORM WHILE INIT ASTERIX: A");
         IntList fieldNameIndexes = toMergeRoot.getChildrenFieldNameIndexes();
+        System.out.println("CHECKING TRANSFORM WHILE INIT ASTERIX: B");
+
         for (int i = 0; i < toMergeRoot.getNumberOfChildren(); i++) {
+            System.out.println("CHECKING TRANSFORM WHILE INIT ASTERIX: L " + i );
+            System.out.println("NUNMBER OF CHILDEREN OF MERGE ROOT " + toMergeRoot.getNumberOfChildren() );
+            System.out.println("CHECK Field name index " + fieldNameIndexes );
             int index = fieldNameIndexes.getInt(i);
+            System.out.println("CHECK INDEX " + index + " " + toMergeFieldNamesDictionary.getFieldName(index));
             IValueReference fieldName = this.toMergeFieldNamesDictionary.getFieldName(index);
             AbstractSchemaNode child = toMergeRoot.getChild(index);
             ATypeTag childTypeTag = child.getTypeTag();
@@ -234,5 +252,31 @@ public class ColumnSchemaTransformer implements IObjectSchemaNodeVisitor<Abstrac
             nodeToAdd.accept(this, node);
         }
     }
+
+//    public ArrayBackedValueStorage serialize() throws IOException{
+//        ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+//        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+//        try (ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteArrayOutputStream)) {
+//            objectOutputStream.writeObject(this);
+//        }
+//        storage.reset();
+//        storage.append(byteArrayOutputStream.toByteArray(), 0, byteArrayOutputStream.size());
+//        return storage;
+//    }
+
+//    private void serializeChanges() throws IOException {
+//        serializedMetadata.reset();
+//        DataOutput output = serializedMetadata.getDataOutput();
+//
+//
+//        //FieldNames
+//        this.toMergeFieldNamesDictionary.serialize(output);
+//
+//        //Schema
+//        root.serialize(output, new PathInfoSerializer());
+//
+//
+//
+//    }
 
 }

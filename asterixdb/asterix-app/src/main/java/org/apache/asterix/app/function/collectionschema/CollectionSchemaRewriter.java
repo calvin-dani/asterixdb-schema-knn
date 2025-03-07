@@ -229,22 +229,8 @@ public class CollectionSchemaRewriter extends FunctionRewriter {
 
         IAType type = metadataProvider.findType(dataset.getItemTypeDatabaseName(), dataset.getItemTypeDataverseName(),
                 dataset.getItemTypeName());
-        //        if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.ROW) {
-        //            throw new CompilationException(ErrorCode.CONFIGURATION_PARAMETER_INVALID_TYPE, dataset.getDatasetName(), "DATASET should be in storage format : COLUMNAR");
-        //        }
-        //        Index primaryIndex =
-        //                MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), dataset.getDatabaseName(),
-        //                        dataset.getDataverseName(), dataset.getDatasetName(), dataset.getDatasetName());
-        //        PartitioningProperties partitioningProperties =
-        //                metadataProvider.getPartitioningProperties(dataset, primaryIndex.getIndexName());
-        //        IndexDataflowHelperFactory indexDataflowHelperFactory =
-        //                new IndexDataflowHelperFactory(metadataProvider.getStorageComponentProvider().getStorageManager(),
-        //                        partitioningProperties.getSplitsProvider());
-        //        int[][] partitionMap = partitioningProperties.getComputeStorageMap();
-        String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
-        //        AlgebricksAbsolutePartitionConstraint secondaryPartitionConstraint =
-        //                (AlgebricksAbsolutePartitionConstraint) partitioningProperties.getConstraints();
-        Index primaryIndex =
+       String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
+       Index primaryIndex =
                 MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), dataset.getDatabaseName(),
                         dataset.getDataverseName(), dataset.getDatasetName(), dataset.getDatasetName());
 

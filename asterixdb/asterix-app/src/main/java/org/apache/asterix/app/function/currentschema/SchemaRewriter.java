@@ -107,8 +107,9 @@ public class SchemaRewriter extends FunctionRewriter {
         String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
         AlgebricksAbsolutePartitionConstraint secondaryPartitionConstraint =
                 (AlgebricksAbsolutePartitionConstraint) partitioningProperties.getConstraints();
-        LOGGER.log(Level.INFO, "FUNCTION ARGUMENTS: {} {} {}",ConstantExpressionUtil.getStringConstant(databaseExpr),
-                ConstantExpressionUtil.getStringConstant(scopeExpr),ConstantExpressionUtil.getStringConstant(collectionExpr));
+        LOGGER.log(Level.INFO, "FUNCTION ARGUMENTS: {} {} {}", ConstantExpressionUtil.getStringConstant(databaseExpr),
+                ConstantExpressionUtil.getStringConstant(scopeExpr),
+                ConstantExpressionUtil.getStringConstant(collectionExpr));
 
         return new SchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection, index,
                 partitioningProperties.getSplitsProvider(), indexDataflowHelperFactory, partitionMap,

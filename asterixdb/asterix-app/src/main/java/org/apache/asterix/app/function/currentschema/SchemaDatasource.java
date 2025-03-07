@@ -88,7 +88,8 @@ public class SchemaDatasource extends FunctionDataSource {
     protected IDatasourceFunction createFunction(MetadataProvider metadataProvider,
             AlgebricksAbsolutePartitionConstraint locations) {
 
-        return new SchemaFunction(locations, database, dataverse, collection, index, splitProvider,
+        return new SchemaFunction(AlgebricksAbsolutePartitionConstraint.randomLocation(locations.getLocations()),
+                database, dataverse, collection, index, splitProvider,
                 indexDataflowHelperFactory, partition);
     }
 

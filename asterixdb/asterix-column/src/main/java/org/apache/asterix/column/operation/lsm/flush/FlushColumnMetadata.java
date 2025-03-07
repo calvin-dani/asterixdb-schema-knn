@@ -153,17 +153,21 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
     }
 
     public FlushColumnMetadata(Mutable<IColumnWriteMultiPageOp> multiPageOpRef, ObjectSchemaNode root,
-            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels) {
+            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels, IFieldNamesDictionary fieldNamesDictionary, IColumnValuesWriterFactory columnWriters) {
         //        super(datasetType, metaType, primaryKeys.size());
         super(null, null, 0);
         this.multiPageOpRef = multiPageOpRef;
-        this.columnWriterFactory = null;
+        this.columnWriterFactory = columnWriters;
         this.definitionLevels = definitionLevels;
         //TODO deploy CALVIN DANI with this
         this.columnWriters = new ArrayList<>();
         level = -1;
         repeated = 0;
-        this.fieldNamesDictionary = AbstractFieldNamesDictionary.create();
+        if (fieldNamesDictionary == null) {
+            this.fieldNamesDictionary = AbstractFieldNamesDictionary.create();
+        } else {
+            this.fieldNamesDictionary = fieldNamesDictionary;
+        }
         this.root = root;
         this.metaRoot = null;
         this.metaContainsKeys = false;
@@ -171,9 +175,9 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
         nullWriterIndexes = new IntArrayList();
         //Add definition levels for the root
         addDefinitionLevelsAndGet(root);
-        this.serializedMetadata = null;
+        serializedMetadata = new ArrayBackedValueStorage();
         serializedFieldNamesDictionary = new ArrayBackedValueStorage();
-        changed = false;
+        changed = true;
     }
 
     public IFieldNamesDictionary getFieldNamesDictionary() {

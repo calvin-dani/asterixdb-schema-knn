@@ -129,12 +129,15 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
             if (itemNode.isNested()) {
                 builder.append(", ");
             }
+            else{
+                builder.append(" } ");
+            }
         }
 
         //        append("item", itemNode);
         itemNode.accept(this, null);
         //        if (!itemNode.isNested()) {
-        builder.append(" } ");
+        //        builder.append(" } ");
         //        } else {
         //            builder.append(" ");
         //        }

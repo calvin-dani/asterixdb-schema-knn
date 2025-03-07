@@ -18,9 +18,12 @@
  */
 package org.apache.asterix.app.message;
 
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
 import org.apache.asterix.common.api.INcApplicationContext;
+import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.context.DatasetInfo;
 import org.apache.asterix.common.messaging.CcIdentifiedMessage;
@@ -31,6 +34,9 @@ import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm.LSMColumnBTree;
 import org.apache.hyracks.storage.common.LocalResource;
@@ -49,9 +55,11 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     private final Dataset dataset;
     IColumnMetadata columnMetadata;
     ArrayBackedValueStorage serializedColumnMetadata;
+    private static AtomicInteger counter = new AtomicInteger(0);
+    private final IFileSplitProvider splitProvider;
 
     public SchemaRequestMessage(long reqId, String database, String dataverse, String collection, String index,
-            Dataset dataset) {
+            Dataset dataset, IFileSplitProvider splitProvider) {
 
         this.reqId = reqId;
         this.database = database;
@@ -59,13 +67,27 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
         this.collection = collection;
         this.index = index;
         this.dataset = dataset;
+        this.splitProvider = splitProvider;
     }
 
     @Override
     public void handle(INcApplicationContext appCtx) throws HyracksDataException {
 
-        try {
 
+        try {
+            counter.incrementAndGet();
+            Set<Integer> partSet =  appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
+            int[] part = partSet.stream().mapToInt(Integer::intValue).toArray();
+            IndexDataflowHelperFactory indexDataflowHelperFactory =
+                    new IndexDataflowHelperFactory(appCtx.getStorageComponentProvider().getStorageManager(),
+                            splitProvider);
+            final IIndexDataflowHelper[] indexDataflowHelpers = new IIndexDataflowHelper[part.length];
+            for (int i = 0; i < part.length; i++) {
+                indexDataflowHelpers[i] = indexDataflowHelperFactory.create(appCtx.getServiceContext(), part[i]);
+                indexDataflowHelpers[i].open();
+            }
+ // IO 0 (0 and 1) and IO 1
+            // appctx -- path nc1 or nc2 becayse of random partition
             DatasetInfo dsInfo = appCtx.getDatasetLifecycleManager().getDatasetInfo(this.dataset.getDatasetId());
             if (dsInfo == null) {
                 //                                throw HyracksDataException.create("Dataset " + dataset.getDataverseName() + "." + dataset.getDatasetName()
@@ -78,12 +100,6 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
                     if (indexInfo.getIndex() instanceof LSMColumnBTree) {
                         // TODO : CALVIN DANI CHECK IF SECONDARY INDEX CAN BE LSMCOLUMNBTREE!
                         LSMColumnBTree lsmColumnBTree = (LSMColumnBTree) indexInfo.getIndex();
-                        //                        try {
-                        //                            // TODO CALVIN DANI  CHECK LSMB activate for columnMetadata
-                        ////                            lsmColumnBTree.activate();
-                        //                        } catch (HyracksDataException e) {
-                        //                            throw new RuntimeException(e);
-                        //                        }
                         this.columnMetadata = lsmColumnBTree.getPublicColumnMetadata();
                         try {
                             this.serializedColumnMetadata =
@@ -95,7 +111,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
 
                 }
             });
-
+            System.out.println("TESTING NODE OUTPUT : ColumnMetadata handle "  + this.columnMetadata.getNumberOfColumns() + " NODE : " + appCtx.getServiceContext().getNodeId() + " Count: " + counter);
             SchemaResponseMessage response = new SchemaResponseMessage(reqId,
                     new SerializableArrayBackedValueStorage(serializedColumnMetadata), null);
             respond(appCtx, response);

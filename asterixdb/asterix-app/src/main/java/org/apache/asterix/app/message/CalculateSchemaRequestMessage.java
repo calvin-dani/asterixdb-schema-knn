@@ -19,15 +19,21 @@
 package org.apache.asterix.app.message;
 
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
+import org.apache.asterix.common.messaging.api.ICCMessageBroker;
 import org.apache.asterix.common.messaging.api.ICcAddressedMessage;
+import org.apache.asterix.common.messaging.api.INcResponse;
 import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.messaging.CCMessageBroker;
 import org.apache.asterix.utils.SchemaUtil;
+import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
 
@@ -41,9 +47,11 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
     private final DataverseName dataverse;
     private final String collection;
     private final String index;
+    private final IFileSplitProvider splitProvider;
+    private static AtomicInteger count = new AtomicInteger(0);
 
     public CalculateSchemaRequestMessage(String nodeId, long reqId, String database, DataverseName dataverse,
-            String collection, String index) {
+            String collection, String index, IFileSplitProvider splitProvider) {
 
         this.nodeId = nodeId;
         this.reqId = reqId;
@@ -51,17 +59,21 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         this.dataverse = dataverse;
         this.collection = collection;
         this.index = index;
+        this.splitProvider = splitProvider;
+        count = new AtomicInteger(0);
     }
 
     @Override
     public void handle(ICcApplicationContext appCtx) throws HyracksDataException {
 
         CCMessageBroker messageBroker = (CCMessageBroker) appCtx.getServiceContext().getMessageBroker();
+
         try {
-            System.out.println(
-                    "HEREEEEEE : CalculateSchemaRequestMessage handle" + appCtx.getNodeProperties().toString());
+
             SerializableArrayBackedValueStorage serColumnMetaData =
-                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index);
+                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index,splitProvider);
+            count.incrementAndGet();
+            LOGGER.info("Count: {}", count);
             CalculateSchemaResponseMessage response =
                     new CalculateSchemaResponseMessage(this.reqId, serColumnMetaData, null);
             messageBroker.sendApplicationMessageToNC(response, nodeId);
@@ -77,4 +89,9 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
             }
         }
     }
+
+//    @Override
+//    public void setResult(MutablePair<ICCMessageBroker.ResponseState, Object> result) {
+//
+//    }
 }

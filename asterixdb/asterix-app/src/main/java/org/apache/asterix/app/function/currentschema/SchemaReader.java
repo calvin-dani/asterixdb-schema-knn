@@ -30,27 +30,52 @@ import org.apache.asterix.external.input.record.CharArrayRecord;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.util.ByteBufferInputStream;
 import org.apache.hyracks.util.LogRedactionUtil;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class SchemaReader extends FunctionReader {
+    private static final Logger LOGGER = LogManager.getLogger();
     private static int instanceCount = 0;
     private final FlushColumnMetadata rowMetaData;
     private final CharArrayRecord record;
-    private boolean hasNext = false;
-
+    private boolean hasNext = true;
+    String jsonString = "";
     private final ByteBufferInputStream bbis = new ByteBufferInputStream();
     private final DataInputStream dis = new DataInputStream(bbis);
 
-    SchemaReader(FlushColumnMetadata rowMetaData, boolean lastPartition) throws HyracksDataException {
-
+    SchemaReader(FlushColumnMetadata rowMetaData)
+            throws HyracksDataException, JsonProcessingException {
+        if(rowMetaData == null) {
+            throw new HyracksDataException("Row metadata is null");
+        }
         this.rowMetaData = rowMetaData;
         record = new CharArrayRecord();
         instanceCount++;
-        if (lastPartition) {
-            hasNext = true;
-        }
+//        LOGGER.log(Level.INFO, "INIT SCHEMA READER  Last partition and rowmetadata: {} {}", lastPartition,
+//                this.rowMetaData.getRoot().getChildren().toString());
+
+        SchemaStringBuilderVisitor schemaBuilderJson =
+                new SchemaStringBuilderVisitor(rowMetaData.getFieldNamesDictionary());
+        LOGGER.log(Level.INFO, "IN INiT CREATING SCHEMA BULDER JSON: {}",
+                this.rowMetaData.getRoot().getChildren().toString());
+
+        //        SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(rowMetaData.getFieldNamesDictionary());
+        String recordSchema = LogRedactionUtil.userData(schemaBuilderJson.build(rowMetaData.getRoot()));
+        LOGGER.log(Level.INFO, "IN INiT  CREATING SCHEMA JSON: {}",
+                this.rowMetaData.getRoot().getChildren().toString());
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        JsonNode jsonNode = objectMapper.readTree(recordSchema);
+        this.jsonString = objectMapper.writeValueAsString(jsonNode);
+
+        LOGGER.log(Level.INFO, "IN INiT  SCHEMA: {}", jsonString);
+
+
     }
 
     @Override
@@ -63,18 +88,30 @@ public class SchemaReader extends FunctionReader {
         //TODO CALVIN DANI: RETURN NULL skip reading if only count equals last;
 
         record.reset();
-        SchemaStringBuilderVisitor schemaBuilderJson =
-                new SchemaStringBuilderVisitor(rowMetaData.getFieldNamesDictionary());
-        //        SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(rowMetaData.getFieldNamesDictionary());
-        String recordSchema = LogRedactionUtil.userData(schemaBuilderJson.build(rowMetaData.getRoot()));
-        ObjectMapper objectMapper = new ObjectMapper();
-        JsonNode jsonNode = objectMapper.readTree(recordSchema);
-        String jsonString = objectMapper.writeValueAsString(jsonNode);
+//        LOGGER.log(Level.INFO, "STARTING RECORD READER: {}", this.rowMetaData.getRoot().getChildren().toString());
+//
+//        SchemaStringBuilderVisitor schemaBuilderJson =
+//                new SchemaStringBuilderVisitor(rowMetaData.getFieldNamesDictionary());
+//        LOGGER.log(Level.INFO, "CREATING SCHEMA BULDER JSON: {}", this.rowMetaData.getRoot().getChildren().toString());
+//
+//        //        SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(rowMetaData.getFieldNamesDictionary());
+//        String recordSchema = LogRedactionUtil.userData(schemaBuilderJson.build(rowMetaData.getRoot()));
+//        LOGGER.log(Level.INFO, "CREATING SCHEMA JSON: {}", this.rowMetaData.getRoot().getChildren().toString());
+//
+//        ObjectMapper objectMapper = new ObjectMapper();
+//        JsonNode jsonNode = objectMapper.readTree(recordSchema);
+//        String jsonString = objectMapper.writeValueAsString(jsonNode);
+//        LOGGER.log(Level.INFO, "JACKSON MAGIC: {}", this.rowMetaData.getRoot().getChildren().toString());
+
         hasNext = false;
-        String result = "{\"Schema\":" + jsonString + "}";
+        String result = "{\"Schema\":" + this.jsonString + "}";
+//        LOGGER.log(Level.INFO, "MAKING RECORD: {}", this.rowMetaData.getRoot().getChildren().toString());
+
         record.append(result.toCharArray());
         record.endRecord();
-        hasNext = false;
+//        hasNext = false;
+//        LOGGER.log(Level.INFO, "FIN: {}", this.rowMetaData.getRoot().getChildren().toString());
+
         return record;
     }
 

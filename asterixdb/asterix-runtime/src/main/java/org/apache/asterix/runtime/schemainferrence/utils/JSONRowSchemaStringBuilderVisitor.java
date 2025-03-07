@@ -138,11 +138,14 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             if (itemNode.isNested()) {
                 builder.append(", ");
             }
+            else{
+                builder.append("} ");
+            }
         }
 
         itemNode.accept(this, null);
         //        if (!itemNode.isNested()) {
-        builder.append(" } ");
+        //        builder.append(" } ");
         //        } else {
         //            builder.append(" ");
         //        }
