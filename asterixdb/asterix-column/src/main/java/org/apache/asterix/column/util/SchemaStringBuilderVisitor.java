@@ -42,7 +42,7 @@ import it.unimi.dsi.fastutil.ints.IntList;
 
 public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void> {
     private final StringBuilder builder;
-    private final List<String> fieldNames;
+    private List<String> fieldNames;
 
     private int level;
     private int indent;
@@ -64,6 +64,22 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         }
         level = 0;
         indent = 0;
+    }
+
+    public void updateFieldNames(IFieldNamesDictionary dictionary) throws HyracksDataException {
+        this.fieldNames = new ArrayList<>();
+        AStringSerializerDeserializer stringSerDer =
+                new AStringSerializerDeserializer(new UTF8StringWriter(), new UTF8StringReader());
+        List<IValueReference> extractedFieldNames = dictionary.getFieldNames();
+
+        //Deserialize field names
+        ByteArrayAccessibleInputStream in = new ByteArrayAccessibleInputStream(new byte[0], 0, 0);
+        ByteArrayAccessibleDataInputStream dataIn = new ByteArrayAccessibleDataInputStream(in);
+        for (IValueReference serFieldName : extractedFieldNames) {
+            in.setContent(serFieldName.getByteArray(), 0, serFieldName.getLength());
+            AString fieldName = stringSerDer.deserialize(dataIn);
+            this.fieldNames.add(fieldName.getStringValue());
+        }
     }
 
     public String build(ObjectSchemaNode root) throws HyracksDataException {

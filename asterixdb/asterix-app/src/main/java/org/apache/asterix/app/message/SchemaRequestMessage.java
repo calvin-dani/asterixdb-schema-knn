@@ -73,7 +73,10 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     @Override
     public void handle(INcApplicationContext appCtx) throws HyracksDataException {
 
-
+//        DatasetInfo datasetInfo = datasetLifeCycleManager.getDatasetInfo(datasetId.getId());
+//        // TODO: Remove the isOpen check and let it fail if flush is requested for a dataset that is closed
+//
+//        datasetInfo.waitForIO();
         try {
             counter.incrementAndGet();
             Set<Integer> partSet =  appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
@@ -86,16 +89,18 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
                 indexDataflowHelpers[i] = indexDataflowHelperFactory.create(appCtx.getServiceContext(), part[i]);
                 indexDataflowHelpers[i].open();
             }
- // IO 0 (0 and 1) and IO 1
-            // appctx -- path nc1 or nc2 becayse of random partition
+
             DatasetInfo dsInfo = appCtx.getDatasetLifecycleManager().getDatasetInfo(this.dataset.getDatasetId());
             if (dsInfo == null) {
-                //                                throw HyracksDataException.create("Dataset " + dataset.getDataverseName() + "." + dataset.getDatasetName()
-                //                                        + " does not exist on this node");
+                throw HyracksDataException.create(new Exception("Dataset does not exist on this node"));
+            }
+            if (dsInfo.isOpen()) {
+                appCtx.getDatasetLifecycleManager().flushDataset(this.dataset.getDatasetId(), false);
             }
 
             dsInfo.getIndexes().forEach((indexId, indexInfo) -> {
                 LocalResource localResource = indexInfo.getLocalResource();
+
                 if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.COLUMN) {
                     if (indexInfo.getIndex() instanceof LSMColumnBTree) {
                         // TODO : CALVIN DANI CHECK IF SECONDARY INDEX CAN BE LSMCOLUMNBTREE!

@@ -108,7 +108,7 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
 
     @Override
     public IValueReference getFieldName() {
-        return null;
+        return fieldName;
     }
 
     @Override

@@ -130,9 +130,16 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
 
                 schemaTransformer.setToMergeFieldNamesDictionary(newColumnMetadata.getFieldNamesDictionary());
                 schemaTransformer.transform(newColumnMetadata.getRoot());
-                System.out.println("Result is not null Resp 3" + result.getValue().toString() + " Count: " + count);
+                System.out.println("----------------------------------------------");
+                SchemaStringBuilderVisitor schemaBuilderJso2n =
+                        new SchemaStringBuilderVisitor(schemaTransformer.getRowMetadata().getFieldNamesDictionary());
+//                schemaBuilderJson.updateFieldNames(schemaTransformer.getRowMetadata().getFieldNamesDictionary());
+                String currecordSchema2 = LogRedactionUtil.userData(schemaBuilderJso2n.build(schemaTransformer.getRowMetadata().getRoot()));
+                System.out.println("NEW CurrentSchema: " + currecordSchema2);
+                System.out.println("----------------------------------------------");
+//                System.out.println("Result is not null Resp 3" + result.getValue().toString() + " Count: " + count);
                 result.setValue(new SerializableArrayBackedValueStorage((ArrayBackedValueStorage)schemaTransformer.getRowMetadata().serializeColumnsMetadata()));
-                System.out.println("Result is not null Resp 4" + result.getValue().toString() + " Count: " + count);
+//                System.out.println("Result is not null Resp 4" + result.getValue().toString() + " Count: " + count);
                 break;
             case UNINITIALIZED:
                 result.setLeft(ResponseState.SUCCESS);

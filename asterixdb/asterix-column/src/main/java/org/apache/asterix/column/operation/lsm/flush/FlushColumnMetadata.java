@@ -61,6 +61,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
 import org.apache.hyracks.util.LogRedactionUtil;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -610,16 +611,17 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
 
     private static void logSchema(ObjectSchemaNode root, ObjectSchemaNode metaRoot,
             IFieldNamesDictionary fieldNamesDictionary) throws HyracksDataException {
-        if (!LOGGER.isDebugEnabled()) {
-            return;
-        }
+//        TODO : CALVIN DANI REVERT THIS
+//        if (!LOGGER.isDebugEnabled()) {
+//            return;
+//        }
         // This should be a low frequency object creation
         SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(fieldNamesDictionary);
         String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));
-        LOGGER.debug("Schema for {} has changed: {}", RECORD_SCHEMA, recordSchema);
+        LOGGER.log(Level.INFO,"Schema for {} has changed: {}", RECORD_SCHEMA, recordSchema);
         if (metaRoot != null) {
             String metaRecordSchema = LogRedactionUtil.userData(schemaBuilder.build(metaRoot));
-            LOGGER.debug("Schema for {} has changed: {}", META_RECORD_SCHEMA, metaRecordSchema);
+            LOGGER.log(Level.INFO,"Schema for {} has changed: {}", META_RECORD_SCHEMA, metaRecordSchema);
         }
     }
 }
