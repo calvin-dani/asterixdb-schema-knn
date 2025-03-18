@@ -24,7 +24,6 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
@@ -51,7 +50,6 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 import org.apache.hyracks.util.LogRedactionUtil;
-import org.apache.logging.log4j.Level;
 
 public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
 
@@ -59,9 +57,9 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
     private final long reqId;
     SerializableArrayBackedValueStorage serializedColumnMetaData;
     private final Throwable failure;
-//    protected ColumnSchemaTransformer schemaTransformer;
-//    FlushColumnMetadata columnMetadata;
-    private static AtomicInteger count = new AtomicInteger(0);
+    //    protected ColumnSchemaTransformer schemaTransformer;
+    //    FlushColumnMetadata columnMetadata;
+    //    private static AtomicInteger count = new AtomicInteger(0);
 
     protected static final int WRITERS_POINTER = 0;
     protected static final int FIELD_NAMES_POINTER = WRITERS_POINTER + Integer.BYTES;
@@ -74,7 +72,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
             throws HyracksDataException {
         this.reqId = reqId;
         this.serializedColumnMetaData = columnMetaData;
-//        this.columnMetadata = deserialiseColumnMetadata(columnMetaData);
+        //        this.columnMetadata = deserialiseColumnMetadata(columnMetaData);
         this.failure = failure;
 
     }
@@ -93,15 +91,11 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
             return;
         }
         try {
-            if(result == null) {
-//                result = new MutablePair<>(ResponseState.UNINITIALIZED, null);
-                System.out.println("Result is null");
+            if (result == null) {
+                result = new MutablePair<>(ResponseState.UNINITIALIZED, null);
             }
-            count.incrementAndGet();
-            System.out.println("Result is not null" + result.getValue().toString() + " Count: " + count);
-
             setResponse(result);
-            } catch (Exception e) {
+        } catch (Exception e) {
             System.out.println(e);
         }
     }
@@ -109,13 +103,15 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
     private void setResponse(MutablePair<ResponseState, Object> result) throws IOException {
         switch (result.getKey()) {
             case SUCCESS:
-                System.out.println("Result is not null Resp -1" + result.getValue().toString() + " Count: " + count);
-                SerializableArrayBackedValueStorage currentSerColumnMetaData = (SerializableArrayBackedValueStorage)result.getValue();
-                System.out.println("Result is not null Resp 0" + result.getValue().toString() + " Count: " + count);
-                FlushColumnMetadata newColumnMetadata =  deserializeColumnMetadata(serializedColumnMetaData);
-                System.out.println("Result is not null Resp 1" + result.getValue().toString() + " Count: " + count);
-                ColumnSchemaTransformer schemaTransformer = initSchemaTransformer(deserializeColumnMetadata(currentSerColumnMetaData));
-                System.out.println("Result is not null Resp 2" + result.getValue().toString() + " Count: " + count);
+                //                System.out.println("Result is not null Resp -1" + result.getValue().toString() + " Count: " + count);
+                SerializableArrayBackedValueStorage currentSerColumnMetaData =
+                        (SerializableArrayBackedValueStorage) result.getValue();
+                //                System.out.println("Result is not null Resp 0" + result.getValue().toString() + " Count: " + count);
+                FlushColumnMetadata newColumnMetadata = deserializeColumnMetadata(serializedColumnMetaData);
+                //                System.out.println("Result is not null Resp 1" + result.getValue().toString() + " Count: " + count);
+                ColumnSchemaTransformer schemaTransformer =
+                        initSchemaTransformer(deserializeColumnMetadata(currentSerColumnMetaData));
+                //                System.out.println("Result is not null Resp 2" + result.getValue().toString() + " Count: " + count);
 
                 System.out.println("----------------------------------------------");
                 SchemaStringBuilderVisitor schemaBuilderJson =
@@ -123,7 +119,8 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
                 SchemaStringBuilderVisitor curschemaBuilderJson =
                         new SchemaStringBuilderVisitor(schemaTransformer.getRowMetadata().getFieldNamesDictionary());
                 String recordSchema = LogRedactionUtil.userData(schemaBuilderJson.build(newColumnMetadata.getRoot()));
-                String currecordSchema = LogRedactionUtil.userData(curschemaBuilderJson.build(schemaTransformer.getRowMetadata().getRoot()));
+                String currecordSchema = LogRedactionUtil
+                        .userData(curschemaBuilderJson.build(schemaTransformer.getRowMetadata().getRoot()));
                 System.out.println("New Schema: " + recordSchema);
                 System.out.println("CurrentSchema: " + currecordSchema);
                 System.out.println("----------------------------------------------");
@@ -133,17 +130,28 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
                 System.out.println("----------------------------------------------");
                 SchemaStringBuilderVisitor schemaBuilderJso2n =
                         new SchemaStringBuilderVisitor(schemaTransformer.getRowMetadata().getFieldNamesDictionary());
-//                schemaBuilderJson.updateFieldNames(schemaTransformer.getRowMetadata().getFieldNamesDictionary());
-                String currecordSchema2 = LogRedactionUtil.userData(schemaBuilderJso2n.build(schemaTransformer.getRowMetadata().getRoot()));
+                //                schemaBuilderJson.updateFieldNames(schemaTransformer.getRowMetadata().getFieldNamesDictionary());
+                String currecordSchema2 = LogRedactionUtil
+                        .userData(schemaBuilderJso2n.build(schemaTransformer.getRowMetadata().getRoot()));
                 System.out.println("NEW CurrentSchema: " + currecordSchema2);
                 System.out.println("----------------------------------------------");
-//                System.out.println("Result is not null Resp 3" + result.getValue().toString() + " Count: " + count);
-                result.setValue(new SerializableArrayBackedValueStorage((ArrayBackedValueStorage)schemaTransformer.getRowMetadata().serializeColumnsMetadata()));
-//                System.out.println("Result is not null Resp 4" + result.getValue().toString() + " Count: " + count);
+                //                System.out.println("Result is not null Resp 3" + result.getValue().toString() + " Count: " + count);
+                result.setValue(new SerializableArrayBackedValueStorage(
+                        (ArrayBackedValueStorage) schemaTransformer.getRowMetadata().serializeColumnsMetadata()));
+                //                System.out.println("Result is not null Resp 4" + result.getValue().toString() + " Count: " + count);
                 break;
             case UNINITIALIZED:
                 result.setLeft(ResponseState.SUCCESS);
-                System.out.println("Result is not null Resp" + result.getValue().toString() + " Count: " + count);
+                //                System.out.println("Result is not null Resp" + result.getValue().toString() + " Count: " + count);
+                System.out.println("----------------------------------------------");
+                FlushColumnMetadata newColumnMetadata2 = deserializeColumnMetadata(serializedColumnMetaData);
+                //                System.out.println("Result is not null Resp 1" + result.getValue().toString() + " Count: " + count);
+                SchemaStringBuilderVisitor schemaBuilderJson2 =
+                        new SchemaStringBuilderVisitor(newColumnMetadata2.getFieldNamesDictionary());
+                String recordSchema2 =
+                        LogRedactionUtil.userData(schemaBuilderJson2.build(newColumnMetadata2.getRoot()));
+                System.out.println("New Schema: " + recordSchema2);
+                System.out.println("----------------------------------------------");
                 result.setValue(serializedColumnMetaData);
                 break;
             default:
@@ -152,49 +160,40 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
     }
 
     public FlushColumnMetadata deserializeColumnMetadata(SerializableArrayBackedValueStorage serColumnMetaData) {
-        try{
-        ArrayBackedValueStorage storage = serColumnMetaData.getStorage();
-        int offset = storage.getStartOffset();
-        int length = storage.getLength();
-        int fieldNamesStart = offset + IntegerPointable
-                .getInteger(storage.getByteArray(), offset + FIELD_NAMES_POINTER);
-        int metaRootStart = IntegerPointable.getInteger(storage.getByteArray(),
-                offset + META_SCHEMA_POINTER);
-        int metaRootSize = metaRootStart < 0 ? 0
-                : IntegerPointable.getInteger(storage.getByteArray(),
-                offset + PATH_INFO_POINTER) - metaRootStart;
-        DataInput input =
-                new DataInputStream(new ByteArrayInputStream(storage.getByteArray(),
-                        fieldNamesStart, length));
-        IFieldNamesDictionary fieldNamesDictionary = AbstractFieldNamesDictionary.deserialize(input);
-        Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
-        ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
-        Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-        IColumnValuesWriterFactory factory = new ColumnValuesWriterFactory(multiPageOpRef);
-        FlushColumnMetadata rowMetaData = new FlushColumnMetadata(multiPageOpRef, root, definitionLevels,fieldNamesDictionary,factory);
-        return rowMetaData;
-        }
-        catch (IOException e) {
+        try {
+            ArrayBackedValueStorage storage = serColumnMetaData.getStorage();
+            int offset = storage.getStartOffset();
+            int length = storage.getLength();
+            int fieldNamesStart =
+                    offset + IntegerPointable.getInteger(storage.getByteArray(), offset + FIELD_NAMES_POINTER);
+            int metaRootStart = IntegerPointable.getInteger(storage.getByteArray(), offset + META_SCHEMA_POINTER);
+            int metaRootSize = metaRootStart < 0 ? 0
+                    : IntegerPointable.getInteger(storage.getByteArray(), offset + PATH_INFO_POINTER) - metaRootStart;
+            DataInput input =
+                    new DataInputStream(new ByteArrayInputStream(storage.getByteArray(), fieldNamesStart, length));
+            IFieldNamesDictionary fieldNamesDictionary = AbstractFieldNamesDictionary.deserialize(input);
+            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
+            ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
+            Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
+            IColumnValuesWriterFactory factory = new ColumnValuesWriterFactory(multiPageOpRef);
+            FlushColumnMetadata rowMetaData =
+                    new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary, factory);
+            return rowMetaData;
+        } catch (IOException e) {
             System.out.println("Error in deserialiseColumnMetadata: " + e.getMessage());
             return null;
         }
 
     }
 
-    public ColumnSchemaTransformer initSchemaTransformer(FlushColumnMetadata rowMetaData){
-        System.out.println("Result is not null Resp 2 a");
+    public ColumnSchemaTransformer initSchemaTransformer(FlushColumnMetadata rowMetaData) {
         ColumnSchemaTransformer schemaTransformer = new ColumnSchemaTransformer(rowMetaData, rowMetaData.getRoot());
-        System.out.println("Result is not null Resp 2 b");
         schemaTransformer.setToMergeFieldNamesDictionary(rowMetaData.getFieldNamesDictionary());
-        System.out.println("Result is not null Resp 2 c");
         return schemaTransformer;
     }
-
-
 
     @Override
     public boolean isWhispered() {
         return true;
     }
 }
-

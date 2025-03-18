@@ -18,22 +18,19 @@
  */
 package org.apache.asterix.app.message;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
-import org.apache.asterix.common.messaging.api.ICCMessageBroker;
 import org.apache.asterix.common.messaging.api.ICcAddressedMessage;
-import org.apache.asterix.common.messaging.api.INcResponse;
 import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.messaging.CCMessageBroker;
 import org.apache.asterix.utils.SchemaUtil;
-import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
 
@@ -71,7 +68,7 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         try {
 
             SerializableArrayBackedValueStorage serColumnMetaData =
-                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index,splitProvider);
+                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index, splitProvider);
             count.incrementAndGet();
             LOGGER.info("Count: {}", count);
             CalculateSchemaResponseMessage response =
@@ -90,8 +87,8 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         }
     }
 
-//    @Override
-//    public void setResult(MutablePair<ICCMessageBroker.ResponseState, Object> result) {
-//
-//    }
+    //    @Override
+    //    public void setResult(MutablePair<ICCMessageBroker.ResponseState, Object> result) {
+    //
+    //    }
 }

@@ -229,8 +229,8 @@ public class CollectionSchemaRewriter extends FunctionRewriter {
 
         IAType type = metadataProvider.findType(dataset.getItemTypeDatabaseName(), dataset.getItemTypeDataverseName(),
                 dataset.getItemTypeName());
-       String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
-       Index primaryIndex =
+        String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
+        Index primaryIndex =
                 MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), dataset.getDatabaseName(),
                         dataset.getDataverseName(), dataset.getDatasetName(), dataset.getDatasetName());
 

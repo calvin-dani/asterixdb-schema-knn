@@ -19,6 +19,8 @@
 
 package org.apache.asterix.app.function.currentschema;
 
+import static org.apache.asterix.app.message.ExecuteStatementRequestMessage.DEFAULT_NC_TIMEOUT_MILLIS;
+
 import java.io.ByteArrayInputStream;
 import java.io.DataInput;
 import java.io.DataInputStream;
@@ -60,8 +62,6 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import static org.apache.asterix.app.message.ExecuteStatementRequestMessage.DEFAULT_NC_TIMEOUT_MILLIS;
-
 public class SchemaFunction extends AbstractDatasourceFunction {
 
     private static final Logger LOGGER = LogManager.getLogger();
@@ -96,8 +96,6 @@ public class SchemaFunction extends AbstractDatasourceFunction {
         count = new AtomicInteger(0);
     }
 
-
-
     @Override
     public IRecordReader<char[]> createRecordReader(IHyracksTaskContext ctx, int partition) // 0 , 1, 2
             throws HyracksDataException {
@@ -107,12 +105,12 @@ public class SchemaFunction extends AbstractDatasourceFunction {
         INCMessageBroker messageBroker = (INCMessageBroker) serviceCtx.getMessageBroker();
         MessageFuture messageFuture = messageBroker.registerMessageFuture();
         long futureId = messageFuture.getFutureId();
-                LOGGER.log(Level.INFO, "AFTER CREATE RECORD INDEXDATAFLOWHELPER");
+        LOGGER.log(Level.INFO, "AFTER CREATE RECORD INDEXDATAFLOWHELPER");
         CalculateSchemaRequestMessage request = new CalculateSchemaRequestMessage(serviceCtx.getNodeId(), futureId,
-                database, dataverse, collection, index,splitProvider);
+                database, dataverse, collection, index, splitProvider);
         LOGGER.log(Level.INFO, "AFTER CREATE RECORD CALCSCHEMAREQUESTMESSAGE REQUEST");
         try {
-                LOGGER.log(Level.INFO, "BEFORE SEND MESSAGE TO PRIMARY CC");
+            LOGGER.log(Level.INFO, "BEFORE SEND MESSAGE TO PRIMARY CC");
             messageBroker.sendMessageToPrimaryCC(request);
             CalculateSchemaResponseMessage response = (CalculateSchemaResponseMessage) messageFuture
                     .get(DEFAULT_NC_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
@@ -122,8 +120,8 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             LOGGER.log(Level.INFO, "what is schema function response : {} partiton {}", response, partition);
 
             count.incrementAndGet();
-                FlushColumnMetadata columnMetadata = deserializeColumnMetadata(response.getSerSchema());
-                return new SchemaReader(columnMetadata);
+            FlushColumnMetadata columnMetadata = deserializeColumnMetadata(response.getSerSchema());
+            return new SchemaReader(columnMetadata);
             //TODO CALVIN DANI : CHECK TIME OUT ISSUE, NUMBER OF NCS OR IODEVICES AND PARTITIONS INCREASES
             //TODO CALVIN DANI : CHECK TIME OUT ISSUE, NUMBER OF NCS OR IODEVICES AND PARTITIONS INCREASES
         } catch (Exception e) {
@@ -135,29 +133,26 @@ public class SchemaFunction extends AbstractDatasourceFunction {
     }
 
     public FlushColumnMetadata deserializeColumnMetadata(SerializableArrayBackedValueStorage serColumnMetaData) {
-        try{
+        try {
             ArrayBackedValueStorage storage = serColumnMetaData.getStorage();
             int offset = storage.getStartOffset();
             int length = storage.getLength();
-            int fieldNamesStart = offset + IntegerPointable
-                    .getInteger(storage.getByteArray(), offset + FIELD_NAMES_POINTER);
-            int metaRootStart = IntegerPointable.getInteger(storage.getByteArray(),
-                    offset + META_SCHEMA_POINTER);
+            int fieldNamesStart =
+                    offset + IntegerPointable.getInteger(storage.getByteArray(), offset + FIELD_NAMES_POINTER);
+            int metaRootStart = IntegerPointable.getInteger(storage.getByteArray(), offset + META_SCHEMA_POINTER);
             int metaRootSize = metaRootStart < 0 ? 0
-                    : IntegerPointable.getInteger(storage.getByteArray(),
-                    offset + PATH_INFO_POINTER) - metaRootStart;
+                    : IntegerPointable.getInteger(storage.getByteArray(), offset + PATH_INFO_POINTER) - metaRootStart;
             DataInput input =
-                    new DataInputStream(new ByteArrayInputStream(storage.getByteArray(),
-                            fieldNamesStart, length));
+                    new DataInputStream(new ByteArrayInputStream(storage.getByteArray(), fieldNamesStart, length));
             IFieldNamesDictionary fieldNamesDictionary = AbstractFieldNamesDictionary.deserialize(input);
             Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
             ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
             IColumnValuesWriterFactory factory = new ColumnValuesWriterFactory(multiPageOpRef);
-            FlushColumnMetadata rowMetaData = new FlushColumnMetadata(multiPageOpRef, root, definitionLevels,fieldNamesDictionary,factory);
+            FlushColumnMetadata rowMetaData =
+                    new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary, factory);
             return rowMetaData;
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             System.out.println("Error in deserialiseColumnMetadata: " + e.getMessage());
             return null;
         }

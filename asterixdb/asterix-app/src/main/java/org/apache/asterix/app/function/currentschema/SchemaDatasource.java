@@ -89,8 +89,7 @@ public class SchemaDatasource extends FunctionDataSource {
             AlgebricksAbsolutePartitionConstraint locations) {
 
         return new SchemaFunction(AlgebricksAbsolutePartitionConstraint.randomLocation(locations.getLocations()),
-                database, dataverse, collection, index, splitProvider,
-                indexDataflowHelperFactory, partition);
+                database, dataverse, collection, index, splitProvider, indexDataflowHelperFactory, partition);
     }
 
     @Override

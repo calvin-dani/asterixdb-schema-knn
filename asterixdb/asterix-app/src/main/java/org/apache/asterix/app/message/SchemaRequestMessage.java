@@ -18,12 +18,14 @@
  */
 package org.apache.asterix.app.message;
 
+import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 
+import org.apache.asterix.column.operation.lsm.flush.ColumnSchemaTransformer;
+import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
 import org.apache.asterix.common.api.INcApplicationContext;
-import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.context.DatasetInfo;
 import org.apache.asterix.common.messaging.CcIdentifiedMessage;
@@ -37,9 +39,7 @@ import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm.LSMColumnBTree;
-import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -53,7 +53,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     private final String collection;
     private final String index;
     private final Dataset dataset;
-    IColumnMetadata columnMetadata;
+    FlushColumnMetadata columnMetadata;
     ArrayBackedValueStorage serializedColumnMetadata;
     private static AtomicInteger counter = new AtomicInteger(0);
     private final IFileSplitProvider splitProvider;
@@ -73,17 +73,17 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     @Override
     public void handle(INcApplicationContext appCtx) throws HyracksDataException {
 
-//        DatasetInfo datasetInfo = datasetLifeCycleManager.getDatasetInfo(datasetId.getId());
-//        // TODO: Remove the isOpen check and let it fail if flush is requested for a dataset that is closed
-//
-//        datasetInfo.waitForIO();
+        //        DatasetInfo datasetInfo = datasetLifeCycleManager.getDatasetInfo(datasetId.getId());
+        //        // TODO: Remove the isOpen check and let it fail if flush is requested for a dataset that is closed
+        //
+        //        datasetInfo.waitForIO();
         try {
             counter.incrementAndGet();
-            Set<Integer> partSet =  appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
+            Set<Integer> partSet =
+                    appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
             int[] part = partSet.stream().mapToInt(Integer::intValue).toArray();
-            IndexDataflowHelperFactory indexDataflowHelperFactory =
-                    new IndexDataflowHelperFactory(appCtx.getStorageComponentProvider().getStorageManager(),
-                            splitProvider);
+            IndexDataflowHelperFactory indexDataflowHelperFactory = new IndexDataflowHelperFactory(
+                    appCtx.getStorageComponentProvider().getStorageManager(), splitProvider);
             final IIndexDataflowHelper[] indexDataflowHelpers = new IIndexDataflowHelper[part.length];
             for (int i = 0; i < part.length; i++) {
                 indexDataflowHelpers[i] = indexDataflowHelperFactory.create(appCtx.getServiceContext(), part[i]);
@@ -97,29 +97,74 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
             if (dsInfo.isOpen()) {
                 appCtx.getDatasetLifecycleManager().flushDataset(this.dataset.getDatasetId(), false);
             }
+            //            ColumnSchemaTransformer columnSchemaTransformer = null;
+            //
+            //            dsInfo.getIndexes().forEach((indexId, indexInfo) -> {
+            ////                LocalResource localResource = indexInfo.getLocalResource();
+            //                if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.COLUMN) {
+            //                    if (indexInfo.getIndex() instanceof LSMColumnBTree) {
+            //                        // TODO : CALVIN DANI CHECK IF SECONDARY INDEX CAN BE LSMCOLUMNBTREE!
+            //                        LSMColumnBTree lsmColumnBTree = (LSMColumnBTree) indexInfo.getIndex();
+            //                        this.columnMetadata = (FlushColumnMetadata)lsmColumnBTree.getPublicColumnMetadata();
+            //                        System.out.println("TESTING NODE OUTPUT : Partition "
+            //                                + Arrays.toString(part) + " NODE : "
+            //                                + appCtx.getServiceContext().getNodeId() + this.columnMetadata.getNumberOfColumns());
+            //                        if (columnSchemaTransformer == null) {
+            //                            columnSchemaTransformer = new ColumnSchemaTransformer(this.columnMetadata,this.columnMetadata.getRoot());
+            //                            columnSchemaTransformer.setToMergeFieldNamesDictionary(this.columnMetadata.getFieldNamesDictionary());
+            //                        }
+            //                        else{
+            //                            try {
+            //                                columnSchemaTransformer.transform(this.columnMetadata.getRoot());
+            //                            } catch (HyracksDataException e) {
+            //                                throw new RuntimeException(e);
+            //                            }
+            //                        }
+            //
+            //                    }
+            //
+            //                }
+            //            });
+
+            //            this.serializedColumnMetadata =
+            //                    (ArrayBackedValueStorage) columnSchemaTransformer.getRowMetadata().serializeColumnsMetadata();
+            //            SchemaResponseMessage response = new SchemaResponseMessage(reqId,
+            //                    new SerializableArrayBackedValueStorage(serializedColumnMetadata), null);
+            //            respond(appCtx, response);
+
+            final ColumnSchemaTransformer[] columnSchemaTransformer = { null };
 
             dsInfo.getIndexes().forEach((indexId, indexInfo) -> {
-                LocalResource localResource = indexInfo.getLocalResource();
-
                 if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.COLUMN) {
                     if (indexInfo.getIndex() instanceof LSMColumnBTree) {
-                        // TODO : CALVIN DANI CHECK IF SECONDARY INDEX CAN BE LSMCOLUMNBTREE!
                         LSMColumnBTree lsmColumnBTree = (LSMColumnBTree) indexInfo.getIndex();
-                        this.columnMetadata = lsmColumnBTree.getPublicColumnMetadata();
-                        try {
-                            this.serializedColumnMetadata =
-                                    (ArrayBackedValueStorage) this.columnMetadata.serializeColumnsMetadata();
-                        } catch (HyracksDataException e) {
-                            throw new RuntimeException(e);
+                        this.columnMetadata = (FlushColumnMetadata) lsmColumnBTree.getPublicColumnMetadata();
+                        System.out.println("TESTING NODE OUTPUT : Partition " + Arrays.toString(part) + " NODE : "
+                                + appCtx.getServiceContext().getNodeId() + this.columnMetadata.getNumberOfColumns());
+                        if (columnSchemaTransformer[0] == null) {
+                            columnSchemaTransformer[0] =
+                                    new ColumnSchemaTransformer(this.columnMetadata, this.columnMetadata.getRoot());
+                            columnSchemaTransformer[0]
+                                    .setToMergeFieldNamesDictionary(this.columnMetadata.getFieldNamesDictionary());
+                        } else {
+                            try {
+                                columnSchemaTransformer[0]
+                                        .setToMergeFieldNamesDictionary(this.columnMetadata.getFieldNamesDictionary());
+                                columnSchemaTransformer[0].transform(this.columnMetadata.getRoot());
+                            } catch (HyracksDataException e) {
+                                throw new RuntimeException(e);
+                            }
                         }
                     }
-
                 }
             });
-            System.out.println("TESTING NODE OUTPUT : ColumnMetadata handle "  + this.columnMetadata.getNumberOfColumns() + " NODE : " + appCtx.getServiceContext().getNodeId() + " Count: " + counter);
+
+            this.serializedColumnMetadata =
+                    (ArrayBackedValueStorage) columnSchemaTransformer[0].getRowMetadata().serializeColumnsMetadata();
             SchemaResponseMessage response = new SchemaResponseMessage(reqId,
                     new SerializableArrayBackedValueStorage(serializedColumnMetadata), null);
             respond(appCtx, response);
+
         } catch (Exception e) {
             LOGGER.info("failed to get collection size", e);
             SchemaResponseMessage response = new SchemaResponseMessage(reqId, null, e);
@@ -146,7 +191,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
 
         NCMessageBroker messageBroker = (NCMessageBroker) appCtx.getServiceContext().getMessageBroker();
         try {
-            System.out.println("HEREEEEEE : SchemaRequestMessage respond" + appCtx.getNodeProperties().toString());
+            System.out.println("HEREEEEEE : SchemaRequestMessage respond" + appCtx.getServiceContext().getNodeId());
             messageBroker.sendMessageToPrimaryCC(response);
         } catch (Exception e) {
             LOGGER.info("failed to send collection size to cc", e);

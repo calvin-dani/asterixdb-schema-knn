@@ -22,27 +22,12 @@ import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.
 import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.REBALANCE_REQUIRED;
 import static org.apache.asterix.common.exceptions.ErrorCode.REJECT_BAD_CLUSTER_STATE;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInput;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.asterix.app.message.SchemaRequestMessage;
-import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
-import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
-import org.apache.asterix.column.metadata.schema.ObjectSchemaNode;
-import org.apache.asterix.column.operation.lsm.flush.ColumnSchemaTransformer;
-import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
-import org.apache.asterix.column.util.RunLengthIntArray;
-import org.apache.asterix.column.util.SchemaStringBuilderVisitor;
 import org.apache.asterix.common.api.IClusterManagementWork;
 import org.apache.asterix.common.api.IMetadataLockManager;
 import org.apache.asterix.common.config.DatasetConfig;
@@ -59,18 +44,9 @@ import org.apache.asterix.metadata.MetadataTransactionContext;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
-import org.apache.asterix.om.dictionary.AbstractFieldNamesDictionary;
-import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
-import org.apache.commons.lang3.mutable.Mutable;
-import org.apache.commons.lang3.mutable.MutableObject;
 import org.apache.hyracks.api.util.InvokeUtil;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
-import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
-import org.apache.hyracks.util.LogRedactionUtil;
-import org.apache.logging.log4j.Level;
 
 public class SchemaUtil {
 
@@ -82,7 +58,8 @@ public class SchemaUtil {
     protected static final int OFFSETS_SIZE = PATH_INFO_POINTER + Integer.BYTES;
 
     public static SerializableArrayBackedValueStorage getDatasetInfo(ICcApplicationContext appCtx, String database,
-                                                                     DataverseName dataverse, String collection, String index, IFileSplitProvider splitProvider) throws IOException,Exception {
+            DataverseName dataverse, String collection, String index, IFileSplitProvider splitProvider)
+            throws IOException, Exception {
         IClusterManagementWork.ClusterState state = appCtx.getClusterStateManager().getState();
         if (!(state == ACTIVE || state == REBALANCE_REQUIRED)) {
             throw new RuntimeDataException(REJECT_BAD_CLUSTER_STATE, state);
@@ -129,12 +106,11 @@ public class SchemaUtil {
             List<SchemaRequestMessage> requests = new ArrayList<>();
             for (int i = 0; i < ncs.size(); i++) {
                 requests.add(new SchemaRequestMessage(reqId, database, dataverse.getCanonicalForm(), collection, index,
-                        dataset,splitProvider));
+                        dataset, splitProvider));
             }
             return (SerializableArrayBackedValueStorage) messageBroker.sendSyncRequestToNCs(reqId, ncs, requests,
                     TimeUnit.SECONDS.toMillis(60000), true);
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw e;
         } finally {
             InvokeUtil.tryWithCleanups(() -> MetadataManager.INSTANCE.commitTransaction(mdTxnCtx),

@@ -154,7 +154,8 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
     }
 
     public FlushColumnMetadata(Mutable<IColumnWriteMultiPageOp> multiPageOpRef, ObjectSchemaNode root,
-            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels, IFieldNamesDictionary fieldNamesDictionary, IColumnValuesWriterFactory columnWriters) {
+            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels,
+            IFieldNamesDictionary fieldNamesDictionary, IColumnValuesWriterFactory columnWriters) {
         //        super(datasetType, metaType, primaryKeys.size());
         super(null, null, 0);
         this.multiPageOpRef = multiPageOpRef;
@@ -576,7 +577,6 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
             case BIGINT:
             case STRING:
             case UUID:
-                //TODO: CALVIN DANI
                 int columnIndex = nullWriterIndexes.isEmpty() ? columnWriters.size() : nullWriterIndexes.removeInt(0);
                 boolean primaryKey = columnIndex < getNumberOfPrimaryKeys();
                 ATypeTag normalizedTypeTag = primaryKey ? childTypeTag : getNormalizedTypeTag(childTypeTag);
@@ -611,17 +611,17 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
 
     private static void logSchema(ObjectSchemaNode root, ObjectSchemaNode metaRoot,
             IFieldNamesDictionary fieldNamesDictionary) throws HyracksDataException {
-//        TODO : CALVIN DANI REVERT THIS
-//        if (!LOGGER.isDebugEnabled()) {
-//            return;
-//        }
+        //        TODO : CALVIN DANI REVERT THIS
+        //        if (!LOGGER.isDebugEnabled()) {
+        //            return;
+        //        }
         // This should be a low frequency object creation
         SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(fieldNamesDictionary);
         String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));
-        LOGGER.log(Level.INFO,"Schema for {} has changed: {}", RECORD_SCHEMA, recordSchema);
+        LOGGER.log(Level.INFO, "Schema for {} has changed: {}", RECORD_SCHEMA, recordSchema);
         if (metaRoot != null) {
             String metaRecordSchema = LogRedactionUtil.userData(schemaBuilder.build(metaRoot));
-            LOGGER.log(Level.INFO,"Schema for {} has changed: {}", META_RECORD_SCHEMA, metaRecordSchema);
+            LOGGER.log(Level.INFO, "Schema for {} has changed: {}", META_RECORD_SCHEMA, metaRecordSchema);
         }
     }
 }
