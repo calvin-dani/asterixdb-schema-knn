@@ -53,13 +53,14 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     private final String collection;
     private final String index;
     private final Dataset dataset;
+    private final boolean toFlush;
     FlushColumnMetadata columnMetadata;
     ArrayBackedValueStorage serializedColumnMetadata;
     private static AtomicInteger counter = new AtomicInteger(0);
     private final IFileSplitProvider splitProvider;
 
     public SchemaRequestMessage(long reqId, String database, String dataverse, String collection, String index,
-            Dataset dataset, IFileSplitProvider splitProvider) {
+            Dataset dataset, IFileSplitProvider splitProvider, boolean toFlush) {
 
         this.reqId = reqId;
         this.database = database;
@@ -68,6 +69,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
         this.index = index;
         this.dataset = dataset;
         this.splitProvider = splitProvider;
+        this.toFlush = toFlush;
     }
 
     @Override
@@ -94,7 +96,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
             if (dsInfo == null) {
                 throw HyracksDataException.create(new Exception("Dataset does not exist on this node"));
             }
-            if (dsInfo.isOpen()) {
+            if (dsInfo.isOpen() && toFlush) {
                 appCtx.getDatasetLifecycleManager().flushDataset(this.dataset.getDatasetId(), false);
             }
             //            ColumnSchemaTransformer columnSchemaTransformer = null;

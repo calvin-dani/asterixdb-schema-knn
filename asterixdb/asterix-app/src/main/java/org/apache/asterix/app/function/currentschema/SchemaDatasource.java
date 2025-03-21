@@ -47,10 +47,11 @@ public class SchemaDatasource extends FunctionDataSource {
     private final IndexDataflowHelperFactory indexDataflowHelperFactory;
     private final int[][] partition;
     private final AlgebricksAbsolutePartitionConstraint constraint;
+    private final boolean toFlush;
 
     SchemaDatasource(INodeDomain domain, String database, DataverseName dataverse, String collection, String index,
             IFileSplitProvider splitProvider, IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition,
-            AlgebricksAbsolutePartitionConstraint constraint) throws AlgebricksException {
+            AlgebricksAbsolutePartitionConstraint constraint,boolean toFlush) throws AlgebricksException {
         super(STORAGE_SIZE_DATASOURCE_ID, SchemaRewriter.INDEX_SCHEMA, domain);
         System.out.println("FOLLOW THE LETTERS : J2");
         this.database = database;
@@ -61,6 +62,7 @@ public class SchemaDatasource extends FunctionDataSource {
         this.indexDataflowHelperFactory = indexDataflowHelperFactory;
         this.partition = partition;
         this.constraint = constraint;
+        this.toFlush = toFlush;
     }
 
     public String getDatabase() {
@@ -89,7 +91,7 @@ public class SchemaDatasource extends FunctionDataSource {
             AlgebricksAbsolutePartitionConstraint locations) {
 
         return new SchemaFunction(AlgebricksAbsolutePartitionConstraint.randomLocation(locations.getLocations()),
-                database, dataverse, collection, index, splitProvider, indexDataflowHelperFactory, partition);
+                database, dataverse, collection, index, splitProvider, indexDataflowHelperFactory, partition,toFlush);
     }
 
     @Override

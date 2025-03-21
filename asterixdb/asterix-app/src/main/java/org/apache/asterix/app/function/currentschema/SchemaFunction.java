@@ -73,6 +73,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
     private final IFileSplitProvider splitProvider;
     private final IndexDataflowHelperFactory indexDataflowHelperFactory;
     private final int[][] partition;
+    private final boolean toFlush;
     private static AtomicInteger count = new AtomicInteger(0);
     protected static final int WRITERS_POINTER = 0;
     protected static final int FIELD_NAMES_POINTER = WRITERS_POINTER + Integer.BYTES;
@@ -83,7 +84,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
 
     SchemaFunction(AlgebricksAbsolutePartitionConstraint locations, String database, DataverseName dataverse,
             String collection, String index, IFileSplitProvider splitProvider,
-            IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition) {
+            IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition, boolean toFlush) {
         super(locations);
 
         this.database = database;
@@ -93,7 +94,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
         this.splitProvider = splitProvider;
         this.indexDataflowHelperFactory = indexDataflowHelperFactory;
         this.partition = partition;
-        count = new AtomicInteger(0);
+        this.toFlush = toFlush;
     }
 
     @Override
@@ -107,7 +108,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
         long futureId = messageFuture.getFutureId();
         LOGGER.log(Level.INFO, "AFTER CREATE RECORD INDEXDATAFLOWHELPER");
         CalculateSchemaRequestMessage request = new CalculateSchemaRequestMessage(serviceCtx.getNodeId(), futureId,
-                database, dataverse, collection, index, splitProvider);
+                database, dataverse, collection, index, splitProvider,toFlush);
         LOGGER.log(Level.INFO, "AFTER CREATE RECORD CALCSCHEMAREQUESTMESSAGE REQUEST");
         try {
             LOGGER.log(Level.INFO, "BEFORE SEND MESSAGE TO PRIMARY CC");
@@ -119,11 +120,8 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             }
             LOGGER.log(Level.INFO, "what is schema function response : {} partiton {}", response, partition);
 
-            count.incrementAndGet();
             FlushColumnMetadata columnMetadata = deserializeColumnMetadata(response.getSerSchema());
             return new SchemaReader(columnMetadata);
-            //TODO CALVIN DANI : CHECK TIME OUT ISSUE, NUMBER OF NCS OR IODEVICES AND PARTITIONS INCREASES
-            //TODO CALVIN DANI : CHECK TIME OUT ISSUE, NUMBER OF NCS OR IODEVICES AND PARTITIONS INCREASES
         } catch (Exception e) {
             LOGGER.info("Could not calculate collection size", e);
             throw HyracksDataException.create(e);

@@ -72,7 +72,7 @@ public class SchemaRewriter extends FunctionRewriter {
             throws AlgebricksException {
 
         //TODO : CALVIN DANI change to 3 args only
-        if (function.getArguments().size() != 3) {
+        if (function.getArguments().size() != 4) {
             throw new CompilationException(ErrorCode.COMPILATION_INVALID_NUM_OF_ARGS, INDEX_SCHEMA.getName());
         }
 
@@ -80,6 +80,7 @@ public class SchemaRewriter extends FunctionRewriter {
         ILogicalExpression databaseExpr = function.getArguments().get(0).getValue();
         ILogicalExpression scopeExpr = function.getArguments().get(1).getValue();
         ILogicalExpression collectionExpr = function.getArguments().get(2).getValue();
+        ILogicalExpression toFlushExpr = function.getArguments().get(3).getValue();
         ILogicalExpression indexExpr = null;
         if (function.getArguments().size() == 4) {
             indexExpr = function.getArguments().get(3).getValue();
@@ -91,6 +92,7 @@ public class SchemaRewriter extends FunctionRewriter {
                 DataverseName.createSinglePartName(ConstantExpressionUtil.getStringConstant(scopeExpr));
         String collection = ConstantExpressionUtil.getStringConstant(collectionExpr);
         Dataset dataset = metadataProvider.findDataset(database, dataverse, collection);
+        boolean toFlush = Boolean.TRUE.equals(ConstantExpressionUtil.getBooleanConstant(toFlushExpr));
         if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.ROW) {
             throw new CompilationException(ErrorCode.CONFIGURATION_PARAMETER_INVALID_TYPE, dataset.getDatasetName(),
                     "DATASET should be in storage format : COLUMNAR");
@@ -113,7 +115,7 @@ public class SchemaRewriter extends FunctionRewriter {
 
         return new SchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection, index,
                 partitioningProperties.getSplitsProvider(), indexDataflowHelperFactory, partitionMap,
-                secondaryPartitionConstraint);
+                secondaryPartitionConstraint,toFlush);
     }
 
     private void verifyArgs(List<Mutable<ILogicalExpression>> args) throws CompilationException {
@@ -121,9 +123,15 @@ public class SchemaRewriter extends FunctionRewriter {
             ConstantExpression expr = (ConstantExpression) args.get(i).getValue();
             AsterixConstantValue value = (AsterixConstantValue) expr.getValue();
             ATypeTag type = value.getObject().getType().getTypeTag();
-            if (type != ATypeTag.STRING) {
+            if (type != ATypeTag.STRING && i != 3) {
                 throw new CompilationException(TYPE_MISMATCH_FUNCTION, INDEX_SCHEMA.getName(),
                         ExceptionUtil.indexToPosition(i), ATypeTag.STRING, type);
+            }
+            else{
+                if(i == 3 && type != ATypeTag.BOOLEAN){
+                    throw new CompilationException(TYPE_MISMATCH_FUNCTION, INDEX_SCHEMA.getName(),
+                            ExceptionUtil.indexToPosition(i), ATypeTag.BOOLEAN, type);
+                }
             }
         }
     }

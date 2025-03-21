@@ -44,11 +44,12 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
     private final DataverseName dataverse;
     private final String collection;
     private final String index;
+    private final boolean toFlush;
     private final IFileSplitProvider splitProvider;
     private static AtomicInteger count = new AtomicInteger(0);
 
     public CalculateSchemaRequestMessage(String nodeId, long reqId, String database, DataverseName dataverse,
-            String collection, String index, IFileSplitProvider splitProvider) {
+            String collection, String index, IFileSplitProvider splitProvider,boolean toFlush) {
 
         this.nodeId = nodeId;
         this.reqId = reqId;
@@ -57,7 +58,7 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         this.collection = collection;
         this.index = index;
         this.splitProvider = splitProvider;
-        count = new AtomicInteger(0);
+        this.toFlush = toFlush;
     }
 
     @Override
@@ -68,7 +69,7 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         try {
 
             SerializableArrayBackedValueStorage serColumnMetaData =
-                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index, splitProvider);
+                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index, splitProvider, toFlush);
             count.incrementAndGet();
             LOGGER.info("Count: {}", count);
             CalculateSchemaResponseMessage response =
