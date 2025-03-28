@@ -85,6 +85,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
 
     @Override
     public Void visit(ObjectRowSchemaNode objectNode, Void arg) throws HyracksDataException {
+        List<String> requiredFieldNames = new ArrayList<>();
         List<AbstractRowSchemaNode> children = objectNode.getChildren();
         IntList fieldNameIndexes = objectNode.getChildrenFieldNameIndexes();
         level++;
@@ -96,7 +97,9 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             int index = fieldNameIndexes.getInt(i);
             String fieldName = fieldNames.get(index);
             AbstractRowSchemaNode child = children.get(i);
-
+            if (!child.isOptional()){
+                requiredFieldNames.add(fieldName);
+            }
             append(fieldName, index, child);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 if (child.isNested()) {
@@ -116,8 +119,20 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
                 builder.append(" ");
             }
         }
+
         // Prop close
         builder.append(" } ");
+        if(!requiredFieldNames.isEmpty()) {
+            builder.append(", ");
+            builder.append("\"required\": [ ");
+            for (int i = 0; i < requiredFieldNames.size(); i++) {
+                builder.append("\"").append(requiredFieldNames.get(i)).append("\"");
+                if (i != requiredFieldNames.size() - 1) {
+                    builder.append(", ");
+                }
+            }
+            builder.append(" ]");
+        }
 
         level--;
         indent--;

@@ -49,18 +49,21 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     private IValueReference fieldName;
+    private boolean optional = false;
 
-    AbstractRowCollectionSchemaNode() {
+    AbstractRowCollectionSchemaNode(boolean optional) {
+        this.optional = optional;
         item = null;
     }
 
     AbstractRowCollectionSchemaNode(DataInput input) throws IOException {
+        setOptional(input.readBoolean());
         item = AbstractRowSchemaNestedNode.deserialize(input);
     }
 
     public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata)
             throws HyracksDataException {
-        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag);
+        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag,isOptional());
         if (newItem != item) {
             item = newItem;
         }
@@ -87,21 +90,34 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     @Override
-    public final void serialize(DataOutput output) throws IOException {
+    public final boolean isOptional() {
+        return getOptional();
+    }
 
+    @Override
+    public final void serialize(DataOutput output) throws IOException {
         output.write(getTypeTag().serialize());
+        output.writeBoolean(isOptional());
         item.serialize(output);
     }
 
     public static AbstractRowCollectionSchemaNode create(ATypeTag typeTag) {
-        //        IValueReference initFieldName = new ArrayBackedValueStorage();
         if (typeTag == ATypeTag.ARRAY) {
-            return new ArrayRowSchemaNode();
+            //TODO: CALVIN DANI look into optional of this static method
+            return new ArrayRowSchemaNode(false);
         }
-        return new MultisetRowSchemaNode();
+        return new MultisetRowSchemaNode(false);
     }
 
     public final <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
         return visitor.visit(this, arg);
+    }
+
+    public void setOptional(boolean optional) {
+        this.optional = optional;
+    }
+
+    public boolean getOptional() {
+        return this.optional;
     }
 }

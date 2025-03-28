@@ -25,9 +25,9 @@ import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
  * A special schema node a non-existing object or union field
  */
 public final class MissingRowFieldSchemaNode extends PrimitiveRowSchemaNode {
-    public static final AbstractRowSchemaNode INSTANCE = new MissingRowFieldSchemaNode();
+    public static final AbstractRowSchemaNode INSTANCE = new MissingRowFieldSchemaNode(false);
 
-    private MissingRowFieldSchemaNode() {
-        super(ATypeTag.MISSING, false);
+    private MissingRowFieldSchemaNode(boolean optional) {
+        super(ATypeTag.MISSING, false, optional);
     }
 }

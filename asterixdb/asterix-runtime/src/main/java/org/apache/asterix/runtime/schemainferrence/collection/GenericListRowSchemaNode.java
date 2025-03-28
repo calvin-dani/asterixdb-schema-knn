@@ -75,6 +75,11 @@ public class GenericListRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     @Override
+    public boolean isOptional() {
+        return false;
+    }
+
+    @Override
     public boolean isObjectOrCollection() {
         return false;
     }

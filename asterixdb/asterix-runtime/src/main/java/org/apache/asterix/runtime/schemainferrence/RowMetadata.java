@@ -64,7 +64,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         level = -1;
         fieldNamesDictionary = new RowFieldNamesDictionary();
         //        ArrayBackedValueStorage initFieldName = new ArrayBackedValueStorage(1);
-        root = new ObjectRowSchemaNode();
+        root = new ObjectRowSchemaNode(false);
         metaRoot = null;
         //Add definition levels for the root
         serializedMetadata = new ArrayBackedValueStorage();
@@ -175,14 +175,14 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     // Create schema node
-    public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag)
+    public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag, boolean optional)
             throws HyracksDataException {
         AbstractRowSchemaNode currentChild = child;
         ATypeTag normalizedTypeTag = getNormalizedTypeTag(childTypeTag);
         if (currentChild == null || normalizedTypeTag != ATypeTag.MISSING && normalizedTypeTag != ATypeTag.NULL
                 && currentChild.getTypeTag() != ATypeTag.UNION && currentChild.getTypeTag() != normalizedTypeTag) {
             //Create a new child or union type if required type is different from the current child type
-            currentChild = createChild(child, normalizedTypeTag);
+            currentChild = createChild(child, normalizedTypeTag,optional);
             //Flag that the schema has changed
             changed = true;
         }
@@ -217,30 +217,30 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     // Create union and primitive, object, array and Multiset  node
-    private AbstractRowSchemaNode createChild(AbstractRowSchemaNode child, ATypeTag normalizedTypeTag) {
+    private AbstractRowSchemaNode createChild(AbstractRowSchemaNode child, ATypeTag normalizedTypeTag,boolean optional) throws HyracksDataException {
         AbstractRowSchemaNode createdChild;
         if (child != null) {
             if (child.getTypeTag() == ATypeTag.NULL) {
-                createdChild = createChild(normalizedTypeTag);
+                createdChild = createChild(normalizedTypeTag,optional);
             } else {
                 //Different type. Make union
-                createdChild = new UnionRowSchemaNode(child, createChild(normalizedTypeTag));
+                createdChild = new UnionRowSchemaNode(child, createChild(normalizedTypeTag,optional));
             }
         } else {
-            createdChild = createChild(normalizedTypeTag);
+            createdChild = createChild(normalizedTypeTag,optional);
         }
         return createdChild;
     }
 
     // Create object , array , multiset and primitive node
-    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag) {
+    private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag,boolean optional) {
         switch (normalizedTypeTag) {
             case OBJECT:
-                return new ObjectRowSchemaNode();
+                return new ObjectRowSchemaNode(optional);
             case ARRAY:
-                return new ArrayRowSchemaNode();
+                return new ArrayRowSchemaNode(optional);
             case MULTISET:
-                return new MultisetRowSchemaNode();
+                return new MultisetRowSchemaNode(optional);
             case NULL:
             case MISSING:
             case BOOLEAN:
@@ -248,7 +248,7 @@ public final class RowMetadata extends AbstractRowMetadata {
             case BIGINT:
             case STRING:
             case UUID:
-                return new PrimitiveRowSchemaNode(normalizedTypeTag, false);
+                return new PrimitiveRowSchemaNode(normalizedTypeTag, false,optional);
             default:
                 throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
 

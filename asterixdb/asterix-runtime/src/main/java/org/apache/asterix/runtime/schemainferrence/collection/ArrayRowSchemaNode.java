@@ -32,9 +32,8 @@ Schema node for Array types.
 public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
 
-    public ArrayRowSchemaNode() {
-        super();
-        //        this.fieldName = fieldName;
+    public ArrayRowSchemaNode(boolean optional) {
+        super(optional);
     }
 
     public ArrayRowSchemaNode(DataInput input) throws IOException {

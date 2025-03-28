@@ -86,10 +86,14 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
 
             for (int i = 0; i < recType.getFieldNames().length; i++) {
                 String fieldName = recType.getFieldNames()[i];
-
+                boolean optional = false;
                 IAType fieldType = recType.getFieldType(fieldName);
                 ATypeTag childTypeTag = fieldType.getTypeTag();
-
+                if(fieldType.getTypeTag() == ATypeTag.UNION) {
+                    fieldType = ((AUnionType) fieldType).getActualType();
+                    childTypeTag = fieldType.getTypeTag();
+                    optional = true;
+                }
                 if (childTypeTag != ATypeTag.MISSING) {
                     ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
                     try {
@@ -99,7 +103,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
                         throw HyracksDataException.create(e);
                     }
                     // Only write actual field values (including NULL) but ignore MISSING fields
-                    AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(storage, childTypeTag, rowMetadata);
+                    AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(storage, childTypeTag, rowMetadata,optional);
                     if (fieldType.getTypeTag() == ATypeTag.OBJECT) {
                         acceptActualNode((ARecordType) fieldType, childNode);
                     } else if (fieldType.getTypeTag() == ATypeTag.MULTISET) {
@@ -143,6 +147,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
 
     @Override
     public AbstractRowSchemaNode visit(AUnionType unionType, AbstractRowSchemaNode arg) {
+
         return null;
     }
 
@@ -165,7 +170,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             ATypeTag childTypeTag = pointable.getChildTypeTag();
             if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
-                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata);
+                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata,false);
                 acceptActualNode(pointable.getChildVisitablePointable(), childNode);
             }
         }
@@ -217,7 +222,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), rowMetadata);
+                actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), rowMetadata,false);
             }
             pointable.accept(this, actualNode);
 
@@ -243,7 +248,8 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata);
+                //TODO : CALVIN DANI check if the optional flag is correct
+                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata,false);
             }
             recType.accept(this, actualNode);
 
@@ -269,7 +275,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata);
+                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata,false);
             }
             recType.accept(this, actualNode);
 
@@ -295,7 +301,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata);
+                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata,false);
             }
             recType.accept(this, actualNode);
 
@@ -307,6 +313,31 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             recType.accept(this, node);
         }
     }
+
+//    private void acceptActualNode(AUnionType recType, AbstractRowSchemaNode node) throws HyracksDataException {
+//        if (node.getTypeTag() == ATypeTag.UNION) {
+//            rowMetadata.enterNode(currentParent, node);
+//            AbstractRowSchemaNestedNode previousParent = currentParent;
+//
+//            UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
+//            currentParent = unionNode;
+//
+//            ATypeTag childTypeTag = recType.getTypeTag();
+//            AbstractRowSchemaNode actualNode;
+//            if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
+//                actualNode = unionNode.getOriginalType();
+//            } else {
+//                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata);
+//            }
+//            recType.accept(this, actualNode);
+//            currentParent = previousParent;
+//            rowMetadata.exitNode(node);
+//        } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
+//            rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
+//        } else {
+//            recType.accept(this, node);
+//        }
+//    }
 
     public void acceptActualNode(IAType flatType, AbstractRowSchemaNode arg) {
     }

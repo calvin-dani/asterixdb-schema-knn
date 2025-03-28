@@ -88,7 +88,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 unionChild.accept(this, mainRoot);
             } else if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
-                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata);
+                AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata,child.isOptional());
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
             }
         }
@@ -186,7 +186,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             ATypeTag unionChildTypeTag = unionChildNode.getTypeTag();
             if (unionChildTypeTag != ATypeTag.MISSING) {
                 AbstractRowSchemaNode childNode =
-                        objectNode.getOrCreateChild(fieldName, unionChildTypeTag, rowMetadata);
+                        objectNode.getOrCreateChild(fieldName, unionChildTypeTag, rowMetadata,unionChildNode.isOptional());
                 acceptActualNode(new GenericListRowSchemaNode(unionChildTypeTag, unionChildNode), childNode);
             }
         }
@@ -224,7 +224,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(childTypeTag, rowMetadata);
+                actualNode = unionNode.getOrCreateChild(childTypeTag, rowMetadata,nodeToAdd.isOptional());
             }
             nodeToAdd.accept(this, actualNode);
 

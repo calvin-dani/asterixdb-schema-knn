@@ -147,6 +147,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
             IColumnValuesWriterFactory factory = new ColumnValuesWriterFactory(multiPageOpRef);
+            LOGGER.log(Level.INFO, "COLUMN WRITEER FACTORY IS NULL ? {}", factory == null);
             FlushColumnMetadata rowMetaData =
                     new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary, factory);
             return rowMetaData;

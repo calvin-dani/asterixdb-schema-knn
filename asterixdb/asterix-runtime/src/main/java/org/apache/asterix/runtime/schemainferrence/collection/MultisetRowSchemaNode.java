@@ -32,8 +32,8 @@ Schema node for Multiset types.
 public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
 
-    public MultisetRowSchemaNode() {
-        super();
+    public MultisetRowSchemaNode(boolean optional) {
+        super(optional);
     }
 
     public MultisetRowSchemaNode(DataInput input) throws IOException {

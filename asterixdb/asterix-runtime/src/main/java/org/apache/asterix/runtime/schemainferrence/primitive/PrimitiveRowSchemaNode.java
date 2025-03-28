@@ -36,18 +36,20 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     private final ATypeTag typeTag;
     private final boolean primaryKey;
     private IValueReference fieldName;
+    private boolean optional = false;
 
-    public PrimitiveRowSchemaNode(ATypeTag typeTag, boolean primaryKey) {
+    public PrimitiveRowSchemaNode(ATypeTag typeTag, boolean primaryKey,boolean optional) {
 
         this.typeTag = typeTag;
         this.primaryKey = primaryKey;
+        this.optional = optional;
 
     }
 
     public PrimitiveRowSchemaNode(ATypeTag typeTag, DataInput input) throws IOException {
         this.typeTag = typeTag;
         primaryKey = input.readBoolean();
-
+        optional = input.readBoolean();
     }
 
     public PrimitiveRowSchemaNode(ATypeTag typeTag, DataInput input, boolean fromColumnar) throws IOException {
@@ -81,6 +83,11 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
         return primaryKey;
     }
 
+    @Override
+    public final boolean isOptional() {
+        return optional;
+    }
+
     public IValueReference getFieldName() {
         return fieldName;
     }
@@ -98,8 +105,8 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     @Override
     public void serialize(DataOutput output) throws IOException {
         output.write(typeTag.serialize());
-
         output.writeBoolean(primaryKey);
+        output.writeBoolean(optional);
     }
 
     @Override

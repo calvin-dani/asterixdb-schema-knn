@@ -3136,9 +3136,6 @@ public class BuiltinFunctions {
     }
 
     private static void addFunction(BuiltinFunctionInfo functionInfo) {
-        if (functionInfo.getFunctionIdentifier().getName().contains("array_avg")) {
-            System.out.println("REACHED HERE");
-        }
         registeredFunctions.put(functionInfo.getFunctionIdentifier(), functionInfo);
     }
 

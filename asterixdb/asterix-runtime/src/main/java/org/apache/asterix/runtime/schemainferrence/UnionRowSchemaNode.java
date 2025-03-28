@@ -81,23 +81,23 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata,
-            IValueReference fieldName) throws HyracksDataException {
+            IValueReference fieldName,boolean optional) throws HyracksDataException {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag,optional);
         if (currentChild != newChild) {
             putChild(newChild);
         }
         return newChild;
     }
 
-    public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata)
+    public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata, boolean optional)
             throws HyracksDataException {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag,optional);
         if (currentChild != newChild) {
             putChild(newChild);
         }
@@ -122,6 +122,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         return false;
     }
 
+
     @Override
     public IValueReference getFieldName() {
         if (originalType != null) {
@@ -133,6 +134,11 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     @Override
     public void setFieldName(IValueReference newFieldName) {
         fieldName = newFieldName;
+    }
+
+    @Override
+    public boolean isOptional() {
+        return false;
     }
 
     @Override
