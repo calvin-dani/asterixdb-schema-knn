@@ -98,6 +98,7 @@ public abstract class AbstractSchemaNode {
                 throw new UnsupportedEncodingException(typeTag + " is not supported");
         }
     }
+
     public abstract AbstractSchemaNode getChild(int i);
 
     public abstract int getNumberOfChildren();

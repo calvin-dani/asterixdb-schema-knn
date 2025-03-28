@@ -73,5 +73,4 @@ public class CollectionSchemaReader extends FunctionReader {
         return record;
     }
 
-
 }

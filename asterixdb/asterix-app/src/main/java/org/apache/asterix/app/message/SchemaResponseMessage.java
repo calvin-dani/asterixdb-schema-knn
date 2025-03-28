@@ -66,7 +66,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
     protected static final int PATH_INFO_POINTER = META_SCHEMA_POINTER + Integer.BYTES;
     protected static final int OFFSETS_SIZE = PATH_INFO_POINTER + Integer.BYTES;
 
-    public SchemaResponseMessage(long reqId, SerializableArrayBackedValueStorage columnMetaData, Throwable failure){
+    public SchemaResponseMessage(long reqId, SerializableArrayBackedValueStorage columnMetaData, Throwable failure) {
         this.reqId = reqId;
         this.serializedColumnMetaData = columnMetaData;
         this.failure = failure;
@@ -92,7 +92,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
             }
             setResponse(result);
         } catch (Exception e) {
-            LOGGER.log(Level.ERROR,"Error in SchemaResponseMessage.setResult: " + e.getMessage());
+            LOGGER.log(Level.ERROR, "Error in SchemaResponseMessage.setResult: " + e.getMessage());
         }
     }
 

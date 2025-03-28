@@ -18,7 +18,6 @@
  */
 package org.apache.asterix.app.message;
 
-import java.util.Arrays;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -93,7 +92,6 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
             if (dsInfo.isOpen() && toFlush) {
                 appCtx.getDatasetLifecycleManager().flushDataset(this.dataset.getDatasetId(), false);
             }
-
 
             final ColumnSchemaTransformer[] columnSchemaTransformer = { null };
 

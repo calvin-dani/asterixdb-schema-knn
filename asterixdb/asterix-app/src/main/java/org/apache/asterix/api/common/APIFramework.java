@@ -392,7 +392,6 @@ public class APIFramework {
         }
     }
 
-
     protected IPrinterFactoryProvider getPrinterFactoryProvider(IDataFormat format,
             SessionConfig.OutputFormat outputFormat) throws AlgebricksException {
         switch (outputFormat) {

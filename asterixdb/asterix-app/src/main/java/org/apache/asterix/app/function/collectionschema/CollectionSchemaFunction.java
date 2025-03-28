@@ -19,8 +19,6 @@
 
 package org.apache.asterix.app.function.collectionschema;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 import org.apache.asterix.common.messaging.api.INCMessageBroker;
 import org.apache.asterix.common.messaging.api.MessageFuture;
 import org.apache.asterix.common.metadata.DataverseName;

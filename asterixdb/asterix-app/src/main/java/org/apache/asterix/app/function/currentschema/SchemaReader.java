@@ -27,7 +27,6 @@ import org.apache.asterix.column.util.SchemaStringBuilderVisitor;
 import org.apache.asterix.external.api.IRawRecord;
 import org.apache.asterix.external.input.record.CharArrayRecord;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.dataflow.common.comm.util.ByteBufferInputStream;
 import org.apache.hyracks.util.LogRedactionUtil;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -77,6 +76,5 @@ public class SchemaReader extends FunctionReader {
 
         return record;
     }
-
 
 }
