@@ -42,8 +42,6 @@ public class SqlppSynonymRewriteVisitor extends AbstractSqlppAstVisitor<Void, Me
     private SqlppSynonymRewriteVisitor() {
     }
 
-
-
     @Override
     public Void visit(LoadStatement loadStmt, MetadataProvider metadataProvider) throws CompilationException {
         Quadruple<DataverseName, String, Boolean, String> dsName =

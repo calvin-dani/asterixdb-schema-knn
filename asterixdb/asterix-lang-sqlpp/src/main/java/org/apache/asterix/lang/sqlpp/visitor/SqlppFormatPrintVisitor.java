@@ -295,8 +295,6 @@ public class SqlppFormatPrintVisitor extends FormatPrintVisitor implements ISqlp
         return null;
     }
 
-
-
     @Override
     public Void visit(InsertStatement insert, Integer step) throws CompilationException {
         out.print(skip(step) + "insert into " + datasetSymbol

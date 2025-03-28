@@ -83,7 +83,6 @@ public class CheckSql92AggregateVisitor extends AbstractSqlppQueryExpressionVisi
         return false;
     }
 
-
     @Override
     public Boolean visit(LiteralExpr l, ILangExpression parentSelectBlock) throws CompilationException {
         return false;

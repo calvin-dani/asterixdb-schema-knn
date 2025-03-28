@@ -196,7 +196,6 @@ public class AbstractSqlppSimpleExpressionVisitor
         return null;
     }
 
-
     @Override
     public Expression visit(WhereClause whereClause, ILangExpression arg) throws CompilationException {
         whereClause.setWhereExpr(visit(whereClause.getWhereExpr(), whereClause));

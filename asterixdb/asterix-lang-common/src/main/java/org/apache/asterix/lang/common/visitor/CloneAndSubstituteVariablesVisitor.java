@@ -184,8 +184,6 @@ public class CloneAndSubstituteVariablesVisitor extends
         return new Pair<>(newF, env);
     }
 
-
-
     @Override
     public Pair<ILangExpression, VariableSubstitutionEnvironment> visit(IfExpr ifexpr,
             VariableSubstitutionEnvironment env) throws CompilationException {

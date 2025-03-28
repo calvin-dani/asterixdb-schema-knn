@@ -28,7 +28,6 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.asterix.app.message.CalculateSchemaRequestMessage;
 import org.apache.asterix.app.message.CalculateSchemaResponseMessage;
@@ -58,7 +57,6 @@ import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
-import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -74,7 +72,6 @@ public class SchemaFunction extends AbstractDatasourceFunction {
     private final IndexDataflowHelperFactory indexDataflowHelperFactory;
     private final int[][] partition;
     private final boolean toFlush;
-    private static AtomicInteger count = new AtomicInteger(0);
     protected static final int WRITERS_POINTER = 0;
     protected static final int FIELD_NAMES_POINTER = WRITERS_POINTER + Integer.BYTES;
     protected static final int SCHEMA_POINTER = FIELD_NAMES_POINTER + Integer.BYTES;
@@ -98,32 +95,26 @@ public class SchemaFunction extends AbstractDatasourceFunction {
     }
 
     @Override
-    public IRecordReader<char[]> createRecordReader(IHyracksTaskContext ctx, int partition) // 0 , 1, 2
+    public IRecordReader<char[]> createRecordReader(IHyracksTaskContext ctx, int partition)
             throws HyracksDataException {
-        LOGGER.log(Level.INFO, "START OF CREATE RECORD");
-        LOGGER.log(Level.INFO, "PARITION IN CREATE RECORD : {} {}", this.partition, partition);
         INCServiceContext serviceCtx = ctx.getJobletContext().getServiceContext();
         INCMessageBroker messageBroker = (INCMessageBroker) serviceCtx.getMessageBroker();
         MessageFuture messageFuture = messageBroker.registerMessageFuture();
         long futureId = messageFuture.getFutureId();
-        LOGGER.log(Level.INFO, "AFTER CREATE RECORD INDEXDATAFLOWHELPER");
         CalculateSchemaRequestMessage request = new CalculateSchemaRequestMessage(serviceCtx.getNodeId(), futureId,
-                database, dataverse, collection, index, splitProvider,toFlush);
-        LOGGER.log(Level.INFO, "AFTER CREATE RECORD CALCSCHEMAREQUESTMESSAGE REQUEST");
+                database, dataverse, collection, index, splitProvider, toFlush);
         try {
-            LOGGER.log(Level.INFO, "BEFORE SEND MESSAGE TO PRIMARY CC");
             messageBroker.sendMessageToPrimaryCC(request);
             CalculateSchemaResponseMessage response = (CalculateSchemaResponseMessage) messageFuture
                     .get(DEFAULT_NC_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
             if (response.getFailure() != null) {
                 throw HyracksDataException.create(response.getFailure());
             }
-            LOGGER.log(Level.INFO, "what is schema function response : {} partiton {}", response, partition);
 
             FlushColumnMetadata columnMetadata = deserializeColumnMetadata(response.getSerSchema());
             return new SchemaReader(columnMetadata);
         } catch (Exception e) {
-            LOGGER.info("Could not calculate collection size", e);
+            LOGGER.info("Could not fetch schema", e);
             throw HyracksDataException.create(e);
         } finally {
             messageBroker.deregisterMessageFuture(futureId);
@@ -147,12 +138,10 @@ public class SchemaFunction extends AbstractDatasourceFunction {
             ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
             Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
             IColumnValuesWriterFactory factory = new ColumnValuesWriterFactory(multiPageOpRef);
-            LOGGER.log(Level.INFO, "COLUMN WRITEER FACTORY IS NULL ? {}", factory == null);
             FlushColumnMetadata rowMetaData =
                     new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary, factory);
             return rowMetaData;
         } catch (IOException e) {
-            System.out.println("Error in deserialiseColumnMetadata: " + e.getMessage());
             return null;
         }
 

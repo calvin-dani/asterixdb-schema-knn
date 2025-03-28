@@ -153,7 +153,6 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
 
     @Override
     public void setFieldName(IValueReference newFieldName) {
-
     }
 
     @Override

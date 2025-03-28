@@ -38,7 +38,7 @@ public class PrimitiveRowSchemaNode extends AbstractRowSchemaNode {
     private IValueReference fieldName;
     private boolean optional = false;
 
-    public PrimitiveRowSchemaNode(ATypeTag typeTag, boolean primaryKey,boolean optional) {
+    public PrimitiveRowSchemaNode(ATypeTag typeTag, boolean primaryKey, boolean optional) {
 
         this.typeTag = typeTag;
         this.primaryKey = primaryKey;

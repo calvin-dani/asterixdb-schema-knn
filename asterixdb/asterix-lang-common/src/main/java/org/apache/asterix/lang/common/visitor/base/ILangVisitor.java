@@ -103,8 +103,6 @@ public interface ILangVisitor<R, T> {
 
     R visit(DatasetDecl dd, T arg) throws CompilationException;
 
-
-
     R visit(LoadStatement stmtLoad, T arg) throws CompilationException;
 
     R visit(CopyFromStatement stmtCopy, T arg) throws CompilationException;

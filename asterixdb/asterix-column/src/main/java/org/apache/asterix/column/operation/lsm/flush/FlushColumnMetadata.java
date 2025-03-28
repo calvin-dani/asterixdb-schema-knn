@@ -611,9 +611,9 @@ public final class FlushColumnMetadata extends AbstractColumnMetadata {
 
     private static void logSchema(ObjectSchemaNode root, ObjectSchemaNode metaRoot,
             IFieldNamesDictionary fieldNamesDictionary) throws HyracksDataException {
-            if (!LOGGER.isDebugEnabled()) {
-                    return;
-                }
+        if (!LOGGER.isDebugEnabled()) {
+            return;
+        }
         // This should be a low frequency object creation
         SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(fieldNamesDictionary);
         String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));

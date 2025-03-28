@@ -392,19 +392,6 @@ public class APIFramework {
         }
     }
 
-    public void printMetaDataAsResult(MetadataProvider metadataProvider, SessionOutput output, IResponsePrinter printer,
-            boolean printSignature, String metadataRes) throws AlgebricksException {
-        try {
-            if (printSignature) {
-                printer.addResultPrinter(SignaturePrinter.INSTANCE);
-            }
-            printer.addResultPrinter(
-                    new ExplainOnlyResultsPrinter(metadataProvider.getApplicationContext(), metadataRes, output));
-            printer.printResults();
-        } catch (HyracksDataException e) {
-            throw new AlgebricksException(e);
-        }
-    }
 
     protected IPrinterFactoryProvider getPrinterFactoryProvider(IDataFormat format,
             SessionConfig.OutputFormat outputFormat) throws AlgebricksException {

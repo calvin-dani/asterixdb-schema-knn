@@ -71,7 +71,6 @@ public class SchemaRewriter extends FunctionRewriter {
     protected FunctionDataSource toDatasource(IOptimizationContext context, AbstractFunctionCallExpression function)
             throws AlgebricksException {
 
-        //TODO : CALVIN DANI change to 3 args only
         if (function.getArguments().size() != 4) {
             throw new CompilationException(ErrorCode.COMPILATION_INVALID_NUM_OF_ARGS, INDEX_SCHEMA.getName());
         }
@@ -109,13 +108,10 @@ public class SchemaRewriter extends FunctionRewriter {
         String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
         AlgebricksAbsolutePartitionConstraint secondaryPartitionConstraint =
                 (AlgebricksAbsolutePartitionConstraint) partitioningProperties.getConstraints();
-        LOGGER.log(Level.INFO, "FUNCTION ARGUMENTS: {} {} {}", ConstantExpressionUtil.getStringConstant(databaseExpr),
-                ConstantExpressionUtil.getStringConstant(scopeExpr),
-                ConstantExpressionUtil.getStringConstant(collectionExpr));
 
         return new SchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection, index,
                 partitioningProperties.getSplitsProvider(), indexDataflowHelperFactory, partitionMap,
-                secondaryPartitionConstraint,toFlush);
+                secondaryPartitionConstraint, toFlush);
     }
 
     private void verifyArgs(List<Mutable<ILogicalExpression>> args) throws CompilationException {
@@ -126,9 +122,8 @@ public class SchemaRewriter extends FunctionRewriter {
             if (type != ATypeTag.STRING && i != 3) {
                 throw new CompilationException(TYPE_MISMATCH_FUNCTION, INDEX_SCHEMA.getName(),
                         ExceptionUtil.indexToPosition(i), ATypeTag.STRING, type);
-            }
-            else{
-                if(i == 3 && type != ATypeTag.BOOLEAN){
+            } else {
+                if (i == 3 && type != ATypeTag.BOOLEAN) {
                     throw new CompilationException(TYPE_MISMATCH_FUNCTION, INDEX_SCHEMA.getName(),
                             ExceptionUtil.indexToPosition(i), ATypeTag.BOOLEAN, type);
                 }

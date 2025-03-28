@@ -41,8 +41,6 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 public class SqlppCopyToRewriteVisitor extends AbstractSqlppAstVisitor<Void, MetadataProvider> {
     public static final SqlppCopyToRewriteVisitor INSTANCE = new SqlppCopyToRewriteVisitor();
 
-
-
     @Override
     public Void visit(CopyToStatement stmtCopy, MetadataProvider metadataProvider) throws CompilationException {
         if (stmtCopy.getNamespace() == null) {

@@ -55,6 +55,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractRowSchemaNode> children;
     private boolean optional;
+
     public IValueReference getFieldName() {
         return fieldName;
     }
@@ -82,13 +83,13 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(IValueReference fieldName, ATypeTag childTypeTag,
-            RowMetadata rowMetadata,boolean optional) throws HyracksDataException {
+            RowMetadata rowMetadata, boolean optional) throws HyracksDataException {
         int numberOfChildren = children.size();
         int fieldNameIndex = rowMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, numberOfChildren);
         AbstractRowSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
 
-        AbstractRowSchemaNode newChild = rowMetadata. getOrCreateChild(currentChild, childTypeTag,optional);
+        AbstractRowSchemaNode newChild = rowMetadata.getOrCreateChild(currentChild, childTypeTag, optional);
         if (currentChild == null) {
             children.add(childIndex, newChild);
             fieldNameIndexToChildIndexMap.put(fieldNameIndex, childIndex);

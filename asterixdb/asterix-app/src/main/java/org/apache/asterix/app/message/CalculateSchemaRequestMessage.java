@@ -18,7 +18,6 @@
  */
 package org.apache.asterix.app.message;
 
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
 import org.apache.asterix.common.messaging.api.ICcAddressedMessage;
@@ -46,10 +45,9 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
     private final String index;
     private final boolean toFlush;
     private final IFileSplitProvider splitProvider;
-    private static AtomicInteger count = new AtomicInteger(0);
 
     public CalculateSchemaRequestMessage(String nodeId, long reqId, String database, DataverseName dataverse,
-            String collection, String index, IFileSplitProvider splitProvider,boolean toFlush) {
+            String collection, String index, IFileSplitProvider splitProvider, boolean toFlush) {
 
         this.nodeId = nodeId;
         this.reqId = reqId;
@@ -70,13 +68,10 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
 
             SerializableArrayBackedValueStorage serColumnMetaData =
                     SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index, splitProvider, toFlush);
-            count.incrementAndGet();
-            LOGGER.info("Count: {}", count);
             CalculateSchemaResponseMessage response =
                     new CalculateSchemaResponseMessage(this.reqId, serColumnMetaData, null);
             messageBroker.sendApplicationMessageToNC(response, nodeId);
         } catch (Exception ex) {
-            LOGGER.info("Failed to process request", ex);
             try {
                 CalculateSchemaResponseMessage response =
                         new CalculateSchemaResponseMessage(this.reqId, FAILED_CALCULATED_SCHEMA, ex);
@@ -88,8 +83,4 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         }
     }
 
-    //    @Override
-    //    public void setResult(MutablePair<ICCMessageBroker.ResponseState, Object> result) {
-    //
-    //    }
 }

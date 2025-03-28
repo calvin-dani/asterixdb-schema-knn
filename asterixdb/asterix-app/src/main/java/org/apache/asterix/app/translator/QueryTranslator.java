@@ -144,7 +144,6 @@ import org.apache.asterix.lang.common.statement.DatabaseDropStatement;
 import org.apache.asterix.lang.common.statement.DatasetDecl;
 import org.apache.asterix.lang.common.statement.DataverseDecl;
 import org.apache.asterix.lang.common.statement.DataverseDropStatement;
-import org.apache.asterix.lang.common.statement.DeclareSchema;
 import org.apache.asterix.lang.common.statement.DeleteStatement;
 import org.apache.asterix.lang.common.statement.DisconnectFeedStatement;
 import org.apache.asterix.lang.common.statement.DropDatasetStatement;
@@ -214,7 +213,6 @@ import org.apache.asterix.metadata.utils.IndexUtil;
 import org.apache.asterix.metadata.utils.KeyFieldTypeUtil;
 import org.apache.asterix.metadata.utils.SampleOperationsHelper;
 import org.apache.asterix.metadata.utils.TypeUtil;
-import org.apache.asterix.om.api.IRowWriteMultiPageOp;
 import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.types.ARecordType;
@@ -229,10 +227,6 @@ import org.apache.asterix.runtime.fulltext.AbstractFullTextFilterDescriptor;
 import org.apache.asterix.runtime.fulltext.FullTextConfigDescriptor;
 import org.apache.asterix.runtime.fulltext.StopwordsFullTextFilterDescriptor;
 import org.apache.asterix.runtime.operators.DatasetStreamStats;
-import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.RowMetadata;
-import org.apache.asterix.runtime.schemainferrence.RowSchemaTransformer;
-import org.apache.asterix.runtime.schemainferrence.RowTransformer;
 import org.apache.asterix.transaction.management.service.transaction.DatasetIdFactory;
 import org.apache.asterix.transaction.management.service.transaction.GlobalTxInfo;
 import org.apache.asterix.translator.AbstractLangTranslator;
@@ -404,9 +398,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     case DATASET_DECL:
                         handleCreateDatasetStatement(metadataProvider, stmt, hcc, requestParameters,
                                 Creator.DEFAULT_CREATOR);
-                        break;
-                    case DECLARE_SCHEMA:
-                        handleDeclareSchemaStatement(metadataProvider, stmt);
                         break;
                     case CREATE_INDEX:
                         handleCreateIndexStatement(metadataProvider, stmt, hcc, requestParameters,
@@ -880,42 +871,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             metadataProvider.getLocks().unlock();
         }
 
-    }
-
-    public void handleDeclareSchemaStatement(MetadataProvider metadataProvider, Statement stmt) throws Exception {
-        DeclareSchema dd = (DeclareSchema) stmt;
-        String datasetName = dd.getName().getValue();
-        metadataProvider.validateDatabaseObjectName(dd.getNamespace(), datasetName, stmt.getSourceLocation());
-        Namespace stmtActiveNamespace = getActiveNamespace(dd.getNamespace());
-        DataverseName dataverseName = stmtActiveNamespace.getDataverseName();
-        String databaseName = stmtActiveNamespace.getDatabaseName();
-
-        if (isCompileOnly()) {
-            return;
-        }
-        lockUtil.compactBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName, datasetName);
-        try {
-
-            MetadataTransactionContext mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
-            metadataProvider.setMetadataTxnContext(mdTxnCtx);
-            Dataset ds = metadataProvider.findDataset(stmtActiveNamespace.getDatabaseName(),
-                    stmtActiveNamespace.getDataverseName(), dd.getNameValue(), false);
-            IAType type = metadataProvider.findType(ds.getItemTypeDatabaseName(), ds.getItemTypeDataverseName(),
-                    ds.getItemTypeName());
-            if (type != null) {
-                Mutable<IRowWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-                RowMetadata rowMetaData = new RowMetadata(multiPageOpRef);
-                RowTransformer transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
-                transformer.transform((ARecordType) type);
-                RowSchemaTransformer schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
-                ObjectRowSchemaNode root = schemaTransformer.getRoot();
-                String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
-                apiFramework.printMetaDataAsResult(metadataProvider, sessionOutput, responsePrinter, false, res);
-            }
-            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
-        } finally {
-            metadataProvider.getLocks().unlock();
-        }
     }
 
     protected Optional<? extends Dataset> doCreateDatasetStatement(MetadataProvider metadataProvider, DatasetDecl dd,

@@ -85,7 +85,6 @@ public class BindingVariableVisitor extends AbstractSqlppAstVisitor<Void, Collec
         return null;
     }
 
-
     @Override
     public Void visit(QuantifiedExpression qe, Collection<VariableExpr> bindingVars) throws CompilationException {
         List<QuantifiedPair> quantifiedList = qe.getQuantifiedList();

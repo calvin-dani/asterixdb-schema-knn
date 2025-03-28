@@ -126,7 +126,6 @@ public final class CheckDatasetOnlyResolutionVisitor
         return false;
     }
 
-
     @Override
     public Boolean visit(LiteralExpr l, VariableExpr arg) throws CompilationException {
         return false;

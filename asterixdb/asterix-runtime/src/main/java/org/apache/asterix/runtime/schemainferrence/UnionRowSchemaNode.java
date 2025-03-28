@@ -81,11 +81,11 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     }
 
     public AbstractRowSchemaNode getOrCreateChild(ATypeTag childTypeTag, RowMetadata columnMetadata,
-            IValueReference fieldName,boolean optional) throws HyracksDataException {
+            IValueReference fieldName, boolean optional) throws HyracksDataException {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag,optional);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag, optional);
         if (currentChild != newChild) {
             putChild(newChild);
         }
@@ -97,7 +97,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         ATypeTag normalizedTypeTag = RowMetadata.getNormalizedTypeTag(childTypeTag);
         AbstractRowSchemaNode currentChild = children.get(normalizedTypeTag);
         //The parent of a union child should be the actual parent
-        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag,optional);
+        AbstractRowSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, normalizedTypeTag, optional);
         if (currentChild != newChild) {
             putChild(newChild);
         }
@@ -121,7 +121,6 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     public boolean isCollection() {
         return false;
     }
-
 
     @Override
     public IValueReference getFieldName() {

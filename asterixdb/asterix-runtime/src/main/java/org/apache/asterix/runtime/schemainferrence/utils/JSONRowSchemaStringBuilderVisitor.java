@@ -97,7 +97,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             int index = fieldNameIndexes.getInt(i);
             String fieldName = fieldNames.get(index);
             AbstractRowSchemaNode child = children.get(i);
-            if (!child.isOptional()){
+            if (!child.isOptional()) {
                 requiredFieldNames.add(fieldName);
             }
             append(fieldName, index, child);
@@ -122,7 +122,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
 
         // Prop close
         builder.append(" } ");
-        if(!requiredFieldNames.isEmpty()) {
+        if (!requiredFieldNames.isEmpty()) {
             builder.append(", ");
             builder.append("\"required\": [ ");
             for (int i = 0; i < requiredFieldNames.size(); i++) {

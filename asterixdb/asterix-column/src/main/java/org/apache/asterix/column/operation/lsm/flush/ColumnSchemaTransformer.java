@@ -43,7 +43,7 @@ import it.unimi.dsi.fastutil.ints.IntList;
 public class ColumnSchemaTransformer
         implements IObjectSchemaNodeVisitor<AbstractSchemaNode, AbstractSchemaNode>, Serializable {
 
-    private final FlushColumnMetadata rowMetadata;
+    private final FlushColumnMetadata colMetadata;
     private final ObjectSchemaNode root;
     private AbstractSchemaNestedNode currentParent;
     private IFieldNamesDictionary toMergeFieldNamesDictionary;
@@ -53,16 +53,16 @@ public class ColumnSchemaTransformer
         this.toMergeFieldNamesDictionary = toMergeFieldNamesDictionary;
     }
 
-    public FlushColumnMetadata getRowMetadata() {
-        return rowMetadata;
+    public FlushColumnMetadata getColMetadata() {
+        return colMetadata;
     }
 
     public ObjectSchemaNode getRoot() {
         return root;
     }
 
-    public ColumnSchemaTransformer(FlushColumnMetadata rowMetadata, ObjectSchemaNode root) {
-        this.rowMetadata = rowMetadata;
+    public ColumnSchemaTransformer(FlushColumnMetadata colMetadata, ObjectSchemaNode root) {
+        this.colMetadata = colMetadata;
         this.root = root;
         this.serializedMetadata = new ArrayBackedValueStorage();
     }
@@ -83,7 +83,7 @@ public class ColumnSchemaTransformer
     @Override
     public AbstractSchemaNode visit(ObjectSchemaNode toMergeRoot, AbstractSchemaNode mainRoot)
             throws HyracksDataException {
-        rowMetadata.enterNode(currentParent, mainRoot);
+        colMetadata.enterNode(currentParent, mainRoot);
         AbstractSchemaNestedNode previousParent = currentParent;
 
         ObjectSchemaNode objectNode = (ObjectSchemaNode) mainRoot;
@@ -107,11 +107,11 @@ public class ColumnSchemaTransformer
                 unionChild.accept(this, mainRoot);
             } else if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
-                AbstractSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata);
+                AbstractSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, colMetadata);
                 acceptActualNode(new GenericListSchemaNode(childTypeTag, child), childNode);
             }
         }
-        rowMetadata.exitNode(mainRoot);
+        colMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;
     }
@@ -119,7 +119,7 @@ public class ColumnSchemaTransformer
     @Override
     public AbstractSchemaNode visit(MultisetSchemaNode toMergeRoot, AbstractSchemaNode mainRoot)
             throws HyracksDataException {
-        rowMetadata.enterNode(currentParent, mainRoot);
+        colMetadata.enterNode(currentParent, mainRoot);
         AbstractSchemaNestedNode previousParent = currentParent;
 
         AbstractCollectionSchemaNode collectionNode = (AbstractCollectionSchemaNode) mainRoot;
@@ -134,7 +134,7 @@ public class ColumnSchemaTransformer
 
             for (AbstractSchemaNode child : unionChildren) {
                 ATypeTag childTypeTag = child.getTypeTag();
-                AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata);
+                AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, colMetadata);
                 acceptActualNode(new GenericListSchemaNode(childTypeTag, child), childNode);
                 /*
                  * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
@@ -144,11 +144,11 @@ public class ColumnSchemaTransformer
             numberOfChildren = 1;
             AbstractSchemaNode primItem = toMergeRoot.getItemNode();
             ATypeTag childTypeTag = primItem.getTypeTag();
-            AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata);
+            AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, colMetadata);
             acceptActualNode(new GenericListSchemaNode(childTypeTag, primItem), childNode);
         }
 
-        rowMetadata.exitCollectionNode(collectionNode, numberOfChildren);
+        colMetadata.exitCollectionNode(collectionNode, numberOfChildren);
         currentParent = previousParent;
         return null;
     }
@@ -156,7 +156,7 @@ public class ColumnSchemaTransformer
     @Override
     public AbstractSchemaNode visit(ArraySchemaNode toMergeRoot, AbstractSchemaNode mainRoot)
             throws HyracksDataException {
-        rowMetadata.enterNode(currentParent, mainRoot);
+        colMetadata.enterNode(currentParent, mainRoot);
         AbstractSchemaNestedNode previousParent = currentParent;
 
         AbstractCollectionSchemaNode collectionNode = (AbstractCollectionSchemaNode) mainRoot;
@@ -170,7 +170,7 @@ public class ColumnSchemaTransformer
 
             for (AbstractSchemaNode child : unionChildren) {
                 ATypeTag childTypeTag = child.getTypeTag();
-                AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata);
+                AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, colMetadata);
                 acceptActualNode(new GenericListSchemaNode(childTypeTag, child), childNode);
                 /*
                  * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
@@ -180,11 +180,11 @@ public class ColumnSchemaTransformer
             numberOfChildren = 1;
             AbstractSchemaNode primItem = toMergeRoot.getItemNode();
             ATypeTag childTypeTag = primItem.getTypeTag();
-            AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata);
+            AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, colMetadata);
             acceptActualNode(new GenericListSchemaNode(childTypeTag, primItem), childNode);
         }
 
-        rowMetadata.exitCollectionNode(collectionNode, numberOfChildren);
+        colMetadata.exitCollectionNode(collectionNode, numberOfChildren);
         currentParent = previousParent;
         return null;
     }
@@ -192,7 +192,7 @@ public class ColumnSchemaTransformer
     @Override
     public AbstractSchemaNode visit(UnionSchemaNode toMergeRoot, AbstractSchemaNode mainRoot)
             throws HyracksDataException {
-        rowMetadata.enterNode(currentParent, mainRoot);
+        colMetadata.enterNode(currentParent, mainRoot);
         AbstractSchemaNestedNode previousParent = currentParent;
 
         ObjectSchemaNode objectNode = (ObjectSchemaNode) mainRoot;
@@ -204,11 +204,11 @@ public class ColumnSchemaTransformer
             IValueReference fieldName = toMergeRoot.getFieldName();
             ATypeTag unionChildTypeTag = unionChildNode.getTypeTag();
             if (unionChildTypeTag != ATypeTag.MISSING) {
-                AbstractSchemaNode childNode = objectNode.getOrCreateChild(fieldName, unionChildTypeTag, rowMetadata);
+                AbstractSchemaNode childNode = objectNode.getOrCreateChild(fieldName, unionChildTypeTag, colMetadata);
                 acceptActualNode(new GenericListSchemaNode(unionChildTypeTag, unionChildNode), childNode);
             }
         }
-        rowMetadata.exitNode(mainRoot);
+        colMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;
     }
@@ -228,7 +228,7 @@ public class ColumnSchemaTransformer
 
     private void acceptActualNode(AbstractSchemaNode nodeToAdd, AbstractSchemaNode node) throws HyracksDataException {
         if (node.getTypeTag() == ATypeTag.UNION) {
-            rowMetadata.enterNode(currentParent, node);
+            colMetadata.enterNode(currentParent, node);
             AbstractSchemaNestedNode previousParent = currentParent;
 
             UnionSchemaNode unionNode = (UnionSchemaNode) node;
@@ -239,41 +239,15 @@ public class ColumnSchemaTransformer
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
             } else {
-                actualNode = unionNode.getOrCreateChild(childTypeTag, rowMetadata);
+                actualNode = unionNode.getOrCreateChild(childTypeTag, colMetadata);
             }
             nodeToAdd.accept(this, actualNode);
 
             currentParent = previousParent;
-            rowMetadata.exitNode(node);
+            colMetadata.exitNode(node);
         } else {
             nodeToAdd.accept(this, node);
         }
     }
-
-    //    public ArrayBackedValueStorage serialize() throws IOException{
-    //        ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
-    //        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-    //        try (ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteArrayOutputStream)) {
-    //            objectOutputStream.writeObject(this);
-    //        }
-    //        storage.reset();
-    //        storage.append(byteArrayOutputStream.toByteArray(), 0, byteArrayOutputStream.size());
-    //        return storage;
-    //    }
-
-    //    private void serializeChanges() throws IOException {
-    //        serializedMetadata.reset();
-    //        DataOutput output = serializedMetadata.getDataOutput();
-    //
-    //
-    //        //FieldNames
-    //        this.toMergeFieldNamesDictionary.serialize(output);
-    //
-    //        //Schema
-    //        root.serialize(output, new PathInfoSerializer());
-    //
-    //
-    //
-    //    }
 
 }

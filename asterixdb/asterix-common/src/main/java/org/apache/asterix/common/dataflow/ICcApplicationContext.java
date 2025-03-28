@@ -24,7 +24,6 @@ import org.apache.asterix.common.api.IApplicationContext;
 import org.apache.asterix.common.api.ICoordinationService;
 import org.apache.asterix.common.api.IMetadataLockManager;
 import org.apache.asterix.common.api.INodeJobTracker;
-import org.apache.asterix.common.api.IRequestMetadata;
 import org.apache.asterix.common.api.IRequestTracker;
 import org.apache.asterix.common.cluster.IClusterStateManager;
 import org.apache.asterix.common.cluster.IGlobalRecoveryManager;
@@ -140,13 +139,6 @@ public interface ICcApplicationContext extends IApplicationContext {
      * @return the request tracker.
      */
     IRequestTracker getRequestTracker();
-
-    /**
-     * Gets the request tracker.
-     *
-     * @return the request tracker.
-     */
-    IRequestMetadata getRequestMetadata();
 
     /**
      * Gets the coordination service

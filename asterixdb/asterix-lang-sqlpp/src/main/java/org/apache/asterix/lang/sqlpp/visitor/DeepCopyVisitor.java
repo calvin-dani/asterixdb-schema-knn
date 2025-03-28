@@ -272,8 +272,6 @@ public class DeepCopyVisitor extends AbstractSqlppQueryExpressionVisitor<ILangEx
         return copy;
     }
 
-
-
     @Override
     public WhereClause visit(WhereClause whereClause, Void arg) throws CompilationException {
         WhereClause copy = new WhereClause((Expression) whereClause.getWhereExpr().accept(this, arg));

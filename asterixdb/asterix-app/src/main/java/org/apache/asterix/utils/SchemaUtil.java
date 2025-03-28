@@ -58,7 +58,7 @@ public class SchemaUtil {
     protected static final int OFFSETS_SIZE = PATH_INFO_POINTER + Integer.BYTES;
 
     public static SerializableArrayBackedValueStorage getDatasetInfo(ICcApplicationContext appCtx, String database,
-            DataverseName dataverse, String collection, String index, IFileSplitProvider splitProvider,boolean toFlush)
+            DataverseName dataverse, String collection, String index, IFileSplitProvider splitProvider, boolean toFlush)
             throws IOException, Exception {
         IClusterManagementWork.ClusterState state = appCtx.getClusterStateManager().getState();
         if (!(state == ACTIVE || state == REBALANCE_REQUIRED)) {
@@ -106,7 +106,7 @@ public class SchemaUtil {
             List<SchemaRequestMessage> requests = new ArrayList<>();
             for (int i = 0; i < ncs.size(); i++) {
                 requests.add(new SchemaRequestMessage(reqId, database, dataverse.getCanonicalForm(), collection, index,
-                        dataset, splitProvider,toFlush));
+                        dataset, splitProvider, toFlush));
             }
             return (SerializableArrayBackedValueStorage) messageBroker.sendSyncRequestToNCs(reqId, ncs, requests,
                     TimeUnit.SECONDS.toMillis(60000), true);

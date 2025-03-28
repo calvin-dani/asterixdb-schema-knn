@@ -286,8 +286,6 @@ public class SqlppAstPrintVisitor extends QueryPrintVisitor implements ISqlppVis
         return null;
     }
 
-
-
     @Override
     public Void visit(GroupbyClause gc, Integer step) throws CompilationException {
         if (gc.isGroupAll()) {

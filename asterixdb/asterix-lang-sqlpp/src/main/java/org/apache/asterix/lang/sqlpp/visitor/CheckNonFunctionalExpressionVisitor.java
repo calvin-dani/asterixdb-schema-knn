@@ -42,7 +42,6 @@ public final class CheckNonFunctionalExpressionVisitor extends AbstractSqlppCont
         this.metadataProvider = metadataProvider;
     }
 
-
     @Override
     public Boolean visit(CallExpr callExpr, Void arg) throws CompilationException {
         FunctionSignature fs = callExpr.getFunctionSignature();

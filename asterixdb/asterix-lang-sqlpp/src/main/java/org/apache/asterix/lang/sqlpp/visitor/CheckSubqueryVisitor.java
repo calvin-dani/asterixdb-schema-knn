@@ -183,8 +183,6 @@ public class CheckSubqueryVisitor extends AbstractSqlppQueryExpressionVisitor<Bo
         return fd.getFuncBody().accept(this, arg);
     }
 
-
-
     @Override
     public Boolean visit(LiteralExpr l, ILangExpression arg) throws CompilationException {
         return false;

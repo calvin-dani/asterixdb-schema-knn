@@ -52,7 +52,6 @@ public class CollectionSchemaDatasource extends FunctionDataSource {
             String index, IAType type, int[][] partition, AlgebricksAbsolutePartitionConstraint constraint)
             throws AlgebricksException {
         super(STORAGE_SIZE_DATASOURCE_ID, CollectionSchemaRewriter.COLLECTION_SCHEMA, domain);
-        System.out.println("FOLLOW THE LETTERS : J2");
         this.database = database;
         this.dataverse = dataverse;
         this.collection = collection;

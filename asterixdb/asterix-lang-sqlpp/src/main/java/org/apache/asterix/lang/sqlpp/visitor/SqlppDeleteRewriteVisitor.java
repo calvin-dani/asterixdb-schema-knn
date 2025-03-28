@@ -51,8 +51,6 @@ public class SqlppDeleteRewriteVisitor extends AbstractSqlppAstVisitor<Void, Met
     private SqlppDeleteRewriteVisitor() {
     }
 
-
-
     @Override
     public Void visit(DeleteStatement deleteStmt, MetadataProvider metadataProvider) {
         DataverseName dataverseName = deleteStmt.getDataverseName();

@@ -278,8 +278,6 @@ public class SqlppInlineUdfsVisitor extends AbstractInlineUdfsVisitor implements
         return inlined;
     }
 
-
-
     @Override
     public Boolean visit(ListSliceExpression expression, Void arg) throws CompilationException {
         Pair<Boolean, Expression> expressionResult = inlineUdfsAndViewsInExpr(expression.getExpr());

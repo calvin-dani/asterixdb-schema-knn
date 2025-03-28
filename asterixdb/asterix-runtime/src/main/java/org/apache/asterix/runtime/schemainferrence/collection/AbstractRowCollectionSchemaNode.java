@@ -63,7 +63,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
 
     public final AbstractRowSchemaNode getOrCreateItem(ATypeTag childTypeTag, RowMetadata columnMetadata)
             throws HyracksDataException {
-        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag,isOptional());
+        AbstractRowSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag, isOptional());
         if (newItem != item) {
             item = newItem;
         }

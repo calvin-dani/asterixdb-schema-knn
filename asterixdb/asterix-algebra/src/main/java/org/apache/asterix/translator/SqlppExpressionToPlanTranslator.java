@@ -192,8 +192,6 @@ public class SqlppExpressionToPlanTranslator extends LangExpressionToPlanTransla
         }
     }
 
-
-
     @Override
     public Pair<ILogicalOperator, LogicalVariable> visit(SelectExpression selectExpression,
             Mutable<ILogicalOperator> tupSource) throws CompilationException {

@@ -293,8 +293,6 @@ public class FreeVariableVisitor extends AbstractSqlppQueryExpressionVisitor<Voi
         return null;
     }
 
-
-
     @Override
     public Void visit(WhereClause whereClause, Collection<VariableExpr> freeVars) throws CompilationException {
         whereClause.getWhereExpr().accept(this, freeVars);

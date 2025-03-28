@@ -57,6 +57,7 @@ public abstract class AbstractSchemaNode {
         return counter;
     }
 
+    // TODO : CALVIN DANI Check field name logic for all schema inference transformations
     public abstract IValueReference getFieldName();
 
     public abstract void setFieldName(IValueReference newFieldName);
@@ -97,7 +98,6 @@ public abstract class AbstractSchemaNode {
                 throw new UnsupportedEncodingException(typeTag + " is not supported");
         }
     }
-
     public abstract AbstractSchemaNode getChild(int i);
 
     public abstract int getNumberOfChildren();
