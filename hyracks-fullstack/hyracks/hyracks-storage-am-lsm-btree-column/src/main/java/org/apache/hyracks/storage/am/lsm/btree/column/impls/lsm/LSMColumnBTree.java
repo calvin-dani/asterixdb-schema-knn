@@ -120,6 +120,10 @@ public class LSMColumnBTree extends LSMBTree {
         return columnMetadata;
     }
 
+    public IColumnMetadata getPublicColumnMetadata() {
+        return columnMetadata;
+    }
+
     @Override
     protected LSMBTreeRangeSearchCursor createCursor(AbstractLSMIndexOperationContext opCtx,
             boolean returnDeletedTuples, IIndexCursorStats stats) {

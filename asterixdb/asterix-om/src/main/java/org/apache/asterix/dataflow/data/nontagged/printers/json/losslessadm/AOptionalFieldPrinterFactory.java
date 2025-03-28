@@ -21,6 +21,7 @@ package org.apache.asterix.dataflow.data.nontagged.printers.json.losslessadm;
 
 import java.io.PrintStream;
 
+import org.apache.asterix.dataflow.data.nontagged.printers.PrintTools;
 import org.apache.asterix.formats.nontagged.LosslessADMJSONPrinterFactoryProvider;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.AUnionType;
@@ -28,6 +29,9 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.hyracks.algebricks.data.IPrinter;
 import org.apache.hyracks.algebricks.data.IPrinterFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class AOptionalFieldPrinterFactory implements IPrinterFactory {
 
@@ -62,8 +66,17 @@ public class AOptionalFieldPrinterFactory implements IPrinterFactory {
                 fieldPrinter.init();
                 if (b[s] == ATypeTag.SERIALIZED_MISSING_TYPE_TAG) {
                     missingPrinter.print(b, s, l, ps);
-                } else if (b[s] == ATypeTag.SERIALIZED_NULL_TYPE_TAG) {
-                    nullPrinter.print(b, s, l, ps);
+                } else if (PrintTools.isJsonObject(b, s, l)) {
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    JsonNode jsonNode = null;
+                    try {
+                        jsonNode = objectMapper.readTree(new String(b, s, l));
+                        StringBuilder sb = new StringBuilder();
+                        PrintTools.prettyPrintJsonNode(jsonNode, sb, 0);
+                        ps.print(sb.toString());
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 } else {
                     fieldPrinter.print(b, s, l, ps);
                 }

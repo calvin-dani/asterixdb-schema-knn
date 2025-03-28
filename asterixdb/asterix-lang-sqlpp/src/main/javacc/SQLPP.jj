@@ -3946,7 +3946,6 @@ Query Query() throws ParseException:
   }
 }
 
-
 Expression Expression():
 {
   Expression expr = null;
