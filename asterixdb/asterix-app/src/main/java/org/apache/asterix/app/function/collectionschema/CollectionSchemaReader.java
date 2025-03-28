@@ -35,7 +35,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class CollectionSchemaReader extends FunctionReader {
-    private static int instanceCount = 0;
     private final RowMetadata rowMetaData;
     private final CharArrayRecord record;
     private boolean hasNext = true;
@@ -47,10 +46,6 @@ public class CollectionSchemaReader extends FunctionReader {
 
         this.rowMetaData = rowMetaData;
         record = new CharArrayRecord();
-        instanceCount++;
-        //        if (lastPartition) {
-        //            hasNext = true;
-        //        }
     }
 
     @Override
@@ -67,9 +62,6 @@ public class CollectionSchemaReader extends FunctionReader {
         ObjectRowSchemaNode root = schemaTransformer.getRoot();
         String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
 
-        //        SchemaStringBuilderVisitor schemaBuilderJson = new SchemaStringBuilderVisitor(rowMetaData.getFieldNamesDictionary());
-        ////        SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(rowMetaData.getFieldNamesDictionary());
-        //        String recordSchema = LogRedactionUtil.userData(schemaBuilderJson.build(rowMetaData.getRoot()));
         ObjectMapper objectMapper = new ObjectMapper();
         JsonNode jsonNode = objectMapper.readTree(res);
         String jsonString = objectMapper.writeValueAsString(jsonNode);
@@ -81,8 +73,5 @@ public class CollectionSchemaReader extends FunctionReader {
         return record;
     }
 
-    public static int getInstanceCount() {
-        return instanceCount;
-    }
 
 }

@@ -47,10 +47,14 @@ import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOGGER = LogManager.getLogger();
     private final long reqId;
     SerializableArrayBackedValueStorage serializedColumnMetaData;
     private final Throwable failure;
@@ -88,7 +92,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
             }
             setResponse(result);
         } catch (Exception e) {
-            System.out.println(e);
+            LOGGER.log(Level.ERROR,"Error in SchemaResponseMessage.setResult: " + e.getMessage());
         }
     }
 
@@ -136,7 +140,7 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
                     new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary, factory);
             return rowMetaData;
         } catch (IOException e) {
-            System.out.println("Error in deserialiseColumnMetadata: " + e.getMessage());
+            LOGGER.log(Level.ERROR, "Error in deserialiseColumnMetadata: " + e.getMessage());
             return null;
         }
 

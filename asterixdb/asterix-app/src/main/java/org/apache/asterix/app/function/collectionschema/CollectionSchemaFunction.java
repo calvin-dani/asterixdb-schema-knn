@@ -50,7 +50,6 @@ public class CollectionSchemaFunction extends AbstractDatasourceFunction {
     private final String index;
     private final IAType type;
     private final int[][] partition;
-    private static AtomicInteger count = new AtomicInteger(0);
 
     CollectionSchemaFunction(AlgebricksAbsolutePartitionConstraint locations, String database, DataverseName dataverse,
             String collection, String index, int[][] partition, IAType type) {
@@ -81,7 +80,7 @@ public class CollectionSchemaFunction extends AbstractDatasourceFunction {
 
             return new CollectionSchemaReader(rowMetaData);
         } catch (Exception e) {
-            LOGGER.info("Could not calculate collection size", e);
+            LOGGER.info("Could not calculate schema", e);
             throw HyracksDataException.create(e);
         } finally {
             messageBroker.deregisterMessageFuture(futureId);

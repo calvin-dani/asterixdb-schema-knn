@@ -240,7 +240,6 @@ public class CollectionSchemaRewriter extends FunctionRewriter {
                 new IndexDataflowHelperFactory(metadataProvider.getStorageComponentProvider().getStorageManager(),
                         partitioningProperties.getSplitsProvider());
         int[][] partitionMap = partitioningProperties.getComputeStorageMap();
-        //        String index = indexExpr != null ? ConstantExpressionUtil.getStringConstant(indexExpr) : null;
         AlgebricksAbsolutePartitionConstraint secondaryPartitionConstraint =
                 (AlgebricksAbsolutePartitionConstraint) partitioningProperties.getConstraints();
         return new CollectionSchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection,

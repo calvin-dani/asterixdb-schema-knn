@@ -73,7 +73,7 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
     @Override
     public void handle(INcApplicationContext appCtx) throws HyracksDataException {
 
-        //        // TODO: Remove the isOpen check and let it fail if flush is requested for a dataset that is closed
+        // TODO: Remove the isOpen check and let it fail if flush is requested for a dataset that is closed
         try {
             Set<Integer> partSet =
                     appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
@@ -102,8 +102,6 @@ public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddr
                     if (indexInfo.getIndex() instanceof LSMColumnBTree) {
                         LSMColumnBTree lsmColumnBTree = (LSMColumnBTree) indexInfo.getIndex();
                         this.columnMetadata = (FlushColumnMetadata) lsmColumnBTree.getPublicColumnMetadata();
-                        System.out.println("TESTING NODE OUTPUT : Partition " + Arrays.toString(part) + " NODE : "
-                                + appCtx.getServiceContext().getNodeId() + this.columnMetadata.getNumberOfColumns());
                         if (columnSchemaTransformer[0] == null) {
                             columnSchemaTransformer[0] =
                                     new ColumnSchemaTransformer(this.columnMetadata, this.columnMetadata.getRoot());

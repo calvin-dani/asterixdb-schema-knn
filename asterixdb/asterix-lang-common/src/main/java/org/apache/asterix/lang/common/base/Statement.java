@@ -72,7 +72,6 @@ public interface Statement extends ILangExpression {
     }
 
     enum Kind {
-        DECLARE_SCHEMA,
         DATASET_DECL,
         DATAVERSE_DECL,
         DATABASE_DROP,

@@ -88,16 +88,10 @@ public class ColumnSchemaTransformer
 
         ObjectSchemaNode objectNode = (ObjectSchemaNode) mainRoot;
         currentParent = objectNode;
-        System.out.println("CHECKING TRANSFORM WHILE INIT ASTERIX: A");
         IntList fieldNameIndexes = toMergeRoot.getChildrenFieldNameIndexes();
-        System.out.println("CHECKING TRANSFORM WHILE INIT ASTERIX: B");
 
         for (int i = 0; i < toMergeRoot.getNumberOfChildren(); i++) {
-            System.out.println("CHECKING TRANSFORM WHILE INIT ASTERIX: L " + i);
-            System.out.println("NUNMBER OF CHILDEREN OF MERGE ROOT " + toMergeRoot.getNumberOfChildren());
-            System.out.println("CHECK Field name index " + fieldNameIndexes);
             int index = fieldNameIndexes.getInt(i);
-            System.out.println("CHECK INDEX " + index + " " + toMergeFieldNamesDictionary.getFieldName(index));
             IValueReference fieldName = this.toMergeFieldNamesDictionary.getFieldName(index);
             AbstractSchemaNode child = toMergeRoot.getChild(index);
             ATypeTag childTypeTag = child.getTypeTag();

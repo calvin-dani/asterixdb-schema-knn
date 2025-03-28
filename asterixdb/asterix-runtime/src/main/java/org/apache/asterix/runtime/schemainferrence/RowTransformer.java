@@ -316,31 +316,6 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
         }
     }
 
-    //    private void acceptActualNode(AUnionType recType, AbstractRowSchemaNode node) throws HyracksDataException {
-    //        if (node.getTypeTag() == ATypeTag.UNION) {
-    //            rowMetadata.enterNode(currentParent, node);
-    //            AbstractRowSchemaNestedNode previousParent = currentParent;
-    //
-    //            UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
-    //            currentParent = unionNode;
-    //
-    //            ATypeTag childTypeTag = recType.getTypeTag();
-    //            AbstractRowSchemaNode actualNode;
-    //            if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
-    //                actualNode = unionNode.getOriginalType();
-    //            } else {
-    //                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata);
-    //            }
-    //            recType.accept(this, actualNode);
-    //            currentParent = previousParent;
-    //            rowMetadata.exitNode(node);
-    //        } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-    //            rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
-    //        } else {
-    //            recType.accept(this, node);
-    //        }
-    //    }
-
     public void acceptActualNode(IAType flatType, AbstractRowSchemaNode arg) {
     }
 

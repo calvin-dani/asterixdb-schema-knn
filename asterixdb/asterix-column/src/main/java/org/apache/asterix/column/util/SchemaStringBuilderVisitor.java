@@ -149,16 +149,8 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
             }
         }
 
-        //        append("item", itemNode);
         itemNode.accept(this, null);
-        //        if (!itemNode.isNested()) {
-        //        builder.append(" } ");
-        //        } else {
-        //            builder.append(" ");
-        //        }
-        //        builder.append("} ");
         builder.append("] ").append(" } ");
-        //        appendPostDecor();
         level--;
         indent--;
         return null;
@@ -208,29 +200,9 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
 
     private void append(String key, int index, AbstractSchemaNode node) throws HyracksDataException {
         builder.append("\"").append(key).append("\"").append(": ");
-        //        if (!node.isNested()) {
-        //            final PrimitiveRowSchemaNode primitiveNode = (PrimitiveRowSchemaNode) node;
         if (node.getTypeTag() != ATypeTag.UNION) {
             builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(node.getTypeTag()));
-
-            //        appendDecor();
-            //        builder.append(key);
-            //        if (index >= 0) {
-            //            builder.append(" (");
-            //            builder.append(index);
-            //            builder.append(')');
-            //        }
-            //        builder.append(": ");
-            //        builder.append(node.getTypeTag().toString());
-            //        builder.append(" <level: ");
-            //        builder.append(level);
-            //        if (!node.isNested()) {
-            //            final PrimitiveSchemaNode primitiveNode = (PrimitiveSchemaNode) node;
-            //            builder.append(", index: ");
-            //            builder.append(primitiveNode.getColumnIndex());
-            //        }
-            //        builder.append(">\n");
         }
     }
 
