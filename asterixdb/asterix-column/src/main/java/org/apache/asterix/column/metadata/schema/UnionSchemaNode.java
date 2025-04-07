@@ -23,6 +23,7 @@ import static org.apache.asterix.column.util.ColumnValuesUtil.getNormalizedTypeT
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
 
@@ -34,10 +35,12 @@ import org.apache.asterix.column.util.RunLengthIntArray;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 
 public final class UnionSchemaNode extends AbstractSchemaNestedNode {
     private final AbstractSchemaNode originalType;
     private final Map<ATypeTag, AbstractSchemaNode> children;
+    private IValueReference fieldName;
 
     public UnionSchemaNode(AbstractSchemaNode child1, AbstractSchemaNode child2) {
         children = new EnumMap<>(ATypeTag.class);
@@ -85,6 +88,10 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
         return children.getOrDefault(typeTag, MissingFieldSchemaNode.INSTANCE);
     }
 
+    public ArrayList<AbstractSchemaNode> getChildrenList() {
+        return new ArrayList<AbstractSchemaNode>(children.values());
+    }
+
     public Map<ATypeTag, AbstractSchemaNode> getChildren() {
         return children;
     }
@@ -100,8 +107,18 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
     }
 
     @Override
+    public IValueReference getFieldName() {
+        return fieldName;
+    }
+
+    @Override
     public ATypeTag getTypeTag() {
         return ATypeTag.UNION;
+    }
+
+    @Override
+    public void setFieldName(IValueReference newFieldName) {
+        fieldName = newFieldName;
     }
 
     @Override
@@ -119,6 +136,16 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
             child.serialize(output, pathInfoSerializer);
         }
         pathInfoSerializer.exit(this);
+    }
+
+    @Override
+    public AbstractSchemaNode getChild(int i) {
+        return null;
+    }
+
+    @Override
+    public int getNumberOfChildren() {
+        return 0;
     }
 
     /**
@@ -148,5 +175,9 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
         }
 
         return counter;
+    }
+
+    public final <R, T> R accept(IObjectSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return visitor.visit(this, arg);
     }
 }

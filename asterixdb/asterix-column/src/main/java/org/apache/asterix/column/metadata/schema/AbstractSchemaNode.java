@@ -32,6 +32,7 @@ import org.apache.asterix.column.metadata.schema.primitive.PrimitiveSchemaNode;
 import org.apache.asterix.column.util.RunLengthIntArray;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 
 public abstract class AbstractSchemaNode {
     private int counter;
@@ -56,7 +57,14 @@ public abstract class AbstractSchemaNode {
         return counter;
     }
 
+    // TODO : CALVIN DANI Check field name logic for all schema inference transformations
+    public abstract IValueReference getFieldName();
+
+    public abstract void setFieldName(IValueReference newFieldName);
+
     public abstract <R, T> R accept(ISchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
+
+    public abstract <R, T> R accept(IObjectSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
 
     public abstract void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException;
 
@@ -90,4 +98,8 @@ public abstract class AbstractSchemaNode {
                 throw new UnsupportedEncodingException(typeTag + " is not supported");
         }
     }
+
+    public abstract AbstractSchemaNode getChild(int i);
+
+    public abstract int getNumberOfChildren();
 }

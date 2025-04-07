@@ -23,8 +23,12 @@ import java.io.IOException;
 import java.util.Map;
 
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
+import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
+import org.apache.asterix.column.metadata.schema.IObjectSchemaNodeVisitor;
 import org.apache.asterix.column.util.RunLengthIntArray;
 import org.apache.asterix.om.types.ATypeTag;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 
 public final class MultisetSchemaNode extends AbstractCollectionSchemaNode {
     public MultisetSchemaNode() {
@@ -39,5 +43,34 @@ public final class MultisetSchemaNode extends AbstractCollectionSchemaNode {
     @Override
     public ATypeTag getTypeTag() {
         return ATypeTag.MULTISET;
+    }
+
+    @Override
+    public IValueReference getFieldName() {
+        return null;
+    }
+
+    @Override
+    public void setFieldName(IValueReference newFieldName) {
+
+    }
+
+    @Override
+    public <R, T> R accept(IObjectSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return null;
+    }
+
+    @Override
+    public AbstractSchemaNode getChild(int i) {
+        return null;
+    }
+
+    @Override
+    public int getNumberOfChildren() {
+        return 0;
+    }
+
+    public ATypeTag getItemTypeTag() {
+        return getItemNode().getTypeTag();
     }
 }
