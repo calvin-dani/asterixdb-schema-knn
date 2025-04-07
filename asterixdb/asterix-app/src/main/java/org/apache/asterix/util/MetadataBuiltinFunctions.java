@@ -121,6 +121,11 @@ public class MetadataBuiltinFunctions {
         BuiltinFunctions.addUnnestFun(CollectionSchemaRewriter.COLLECTION_SCHEMA, true);
         BuiltinFunctions.addDatasourceFunction(CollectionSchemaRewriter.COLLECTION_SCHEMA,
                 CollectionSchemaRewriter.INSTANCE);
+
+        // schema
+        BuiltinFunctions.addFunction(SchemaRewriter.INDEX_SCHEMA, AInt64TypeComputer.INSTANCE, true);
+        BuiltinFunctions.addUnnestFun(SchemaRewriter.INDEX_SCHEMA, true);
+        BuiltinFunctions.addDatasourceFunction(SchemaRewriter.INDEX_SCHEMA, SchemaRewriter.INSTANCE);
     }
 
     private MetadataBuiltinFunctions() {
