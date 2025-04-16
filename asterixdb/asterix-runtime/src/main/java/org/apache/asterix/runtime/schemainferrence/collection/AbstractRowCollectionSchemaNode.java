@@ -49,7 +49,6 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     }
 
     private IValueReference fieldName;
-    private boolean optional = false;
 
     AbstractRowCollectionSchemaNode(boolean optional) {
         this.optional = optional;

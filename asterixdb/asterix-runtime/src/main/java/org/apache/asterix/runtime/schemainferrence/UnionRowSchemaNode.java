@@ -137,7 +137,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     @Override
     public boolean isOptional() {
-        return false;
+        return true;
     }
 
     @Override

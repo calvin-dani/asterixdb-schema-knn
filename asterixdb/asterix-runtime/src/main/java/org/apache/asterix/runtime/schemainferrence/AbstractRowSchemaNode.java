@@ -35,6 +35,8 @@ import org.apache.hyracks.data.std.api.IValueReference;
 public abstract class AbstractRowSchemaNode {
     private int counter;
 
+    public boolean optional = true;
+
     public abstract ATypeTag getTypeTag();
 
     public abstract IValueReference getFieldName();
@@ -122,4 +124,8 @@ public abstract class AbstractRowSchemaNode {
     public abstract AbstractRowSchemaNode getChild(int i);
 
     public abstract int getNumberOfChildren();
+
+    public void setOptional(boolean optional) {
+        this.optional = optional;
+    }
 }
