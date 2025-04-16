@@ -17,15 +17,6 @@
  * under the License.
  */
 
-/*
- * Description    : Tests array_schema() with aggregate combiner
- * Success        : Yes
- */
-
 use test;
 
-select element query_schema((
-  select element x
-  from  Numeric as x
-  where x is known
-));
+load dataset Numeric using localfs((`path`=`asterix_nc1://data/nontagged/diffFieldTypesData_7.json`),(`format`=`adm`));

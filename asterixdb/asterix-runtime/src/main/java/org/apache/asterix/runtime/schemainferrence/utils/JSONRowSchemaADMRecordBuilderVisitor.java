@@ -171,16 +171,16 @@ public class JSONRowSchemaADMRecordBuilderVisitor
                 stringSerde.serialize(new AString(requiredFieldNames.get(i)), requiredOut.getDataOutput());
                 requiredListBuilder.addItem(requiredOut);
             }
+            requiredOut.reset();
+            requiredListBuilder.write(requiredOut.getDataOutput(), true);
+            addKeyValue("required", requiredOut, parentRB);
         }
-        requiredOut.reset();
-        requiredListBuilder.write(requiredOut.getDataOutput(), true);
 
         //        recordBuilder.write(out,true);
 
         level--;
         indent--;
 
-        addKeyValue("required", requiredOut, parentRB);
         return null;
     }
 

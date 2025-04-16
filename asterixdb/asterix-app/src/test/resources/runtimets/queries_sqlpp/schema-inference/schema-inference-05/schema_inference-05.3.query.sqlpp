@@ -24,7 +24,7 @@
 
 use test;
 
-select element array_schema((
+select element query_schema((
   select element x
   from  Numeric as x
   where x is known

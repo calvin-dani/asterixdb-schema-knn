@@ -33,8 +33,4 @@ public interface IRowMetadata {
      */
     IValueReference serializeRowMetadata() throws HyracksDataException;
 
-    /**
-     * abort in case of an error. This should clean up any artifact
-     */
-    void abort() throws HyracksDataException;
 }

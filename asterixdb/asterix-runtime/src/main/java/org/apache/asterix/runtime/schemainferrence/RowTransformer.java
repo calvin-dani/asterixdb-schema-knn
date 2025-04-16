@@ -47,6 +47,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
     private final ObjectRowSchemaNode root;
     private AbstractRowSchemaNestedNode currentParent;
     private int primaryKeysLength;
+    private boolean optional;
 
     public ObjectRowSchemaNode getRoot() {
         return root;
@@ -56,6 +57,19 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
         this.rowMetadata = rowMetadata;
         this.root = root;
         nonTaggedValue = new VoidPointable();
+        optional = true;
+    }
+
+    /**
+     *
+     * @param recType record recType
+     * @return the estimated size (possibly overestimated) of the primary key(s) columns
+     */
+    public int transform(ARecordType recType,boolean optional) throws HyracksDataException {
+        this.optional = optional;
+        transform(recType);
+        this.optional = true;
+        return 0;
     }
 
     /**
@@ -104,7 +118,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
                     }
                     // Only write actual field values (including NULL) but ignore MISSING fields
                     AbstractRowSchemaNode childNode =
-                            objectNode.getOrCreateChild(storage, childTypeTag, rowMetadata, optional);
+                            objectNode.getOrCreateChild(storage, childTypeTag, rowMetadata, this.optional);
                     if (fieldType.getTypeTag() == ATypeTag.OBJECT) {
                         acceptActualNode((ARecordType) fieldType, childNode);
                     } else if (fieldType.getTypeTag() == ATypeTag.MULTISET) {
@@ -172,7 +186,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
                 AbstractRowSchemaNode childNode =
-                        objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata, false);
+                        objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata, true);
                 acceptActualNode(pointable.getChildVisitablePointable(), childNode);
             }
         }
@@ -251,7 +265,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
                 actualNode = unionNode.getOriginalType();
             } else {
                 //TODO : CALVIN DANI check if the optional flag is correct
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, false);
+                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, this.optional);
             }
             recType.accept(this, actualNode);
 

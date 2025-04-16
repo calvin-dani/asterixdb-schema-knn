@@ -58,5 +58,15 @@
         <output-dir compare="Text">schema-inference-07</output-dir>
       </compilation-unit>
     </test-case>
+    <test-case FilePath="schema-inference">
+      <compilation-unit name="schema-inference-08">
+        <output-dir compare="Text">schema-inference-08</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="schema-inference">
+      <compilation-unit name="schema-inference-09">
+        <output-dir compare="Text">schema-inference-09</output-dir>
+      </compilation-unit>
+    </test-case>
   </test-group>
 </test-suite>

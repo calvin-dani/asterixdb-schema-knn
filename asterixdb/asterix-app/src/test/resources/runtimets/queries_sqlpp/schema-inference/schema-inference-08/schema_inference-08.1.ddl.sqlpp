@@ -17,15 +17,15 @@
  * under the License.
  */
 
-/*
- * Description    : Tests array_schema() with aggregate combiner
- * Success        : Yes
- */
+drop  dataverse test if exists;
+create  dataverse test;
 
 use test;
 
-select element query_schema((
-  select element x
-  from  Numeric as x
-  where x is known
-));
+create type test.NumericType as
+{
+  id : integer,
+first_name: string
+};
+
+create internal dataset Numeric(NumericType) primary key id;

@@ -115,7 +115,6 @@ public class MetadataBuiltinFunctions {
         BuiltinFunctions.addUnnestFun(StorageSizeRewriter.STORAGE_SIZE, true);
         BuiltinFunctions.addDatasourceFunction(StorageSizeRewriter.STORAGE_SIZE, StorageSizeRewriter.INSTANCE);
 
-
         // collection schema
         BuiltinFunctions.addFunction(CollectionSchemaRewriter.COLLECTION_SCHEMA, AInt64TypeComputer.INSTANCE, true);
         BuiltinFunctions.addUnnestFun(CollectionSchemaRewriter.COLLECTION_SCHEMA, true);

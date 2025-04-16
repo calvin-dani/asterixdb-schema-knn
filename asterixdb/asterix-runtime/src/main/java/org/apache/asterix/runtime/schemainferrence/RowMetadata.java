@@ -139,25 +139,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         IntegerPointable.setInteger(serializedMetadata.getByteArray(), pointer, offset);
     }
 
-    @Override
-    public void abort() throws HyracksDataException {
-        DataInputStream input = new DataInputStream(new ByteArrayInputStream(serializedMetadata.getByteArray()));
-        try {
-            abort(input);
-        } catch (IOException e) {
-            throw HyracksDataException.create(e);
-        }
-    }
-
-    private void abort(DataInputStream input) throws IOException {
-        level = -1;
-        changed = false;
-
-        fieldNamesDictionary.abort(input);
-
-        root.abort(input);
-    }
-
     /* ********************************************************
      * Schema related methods
      * ********************************************************

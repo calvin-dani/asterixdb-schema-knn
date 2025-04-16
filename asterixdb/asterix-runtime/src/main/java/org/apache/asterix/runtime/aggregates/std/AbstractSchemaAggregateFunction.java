@@ -200,17 +200,16 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
             ObjectRowSchemaNode root = schemaTransformer.getRoot();
             String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
             ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode jsonNode = objectMapper.readTree(res);
-            //            ARecordType admSchema = (ARecordType) JSONDeserializerForTypes.convertFromJSON(jsonNode);
-            //            JSONDataParser parser = new JSONDataParser(null, null);
-            //            parser.setInputNode(jsonNode);
-            //            parser.parseAnyValue(resultStorage.getDataOutput());
 
-            String jsonString = objectMapper.writeValueAsString(jsonNode);
+            JSONRowSchemaADMRecordBuilderVisitor schemaADMBuilder =
+                    new JSONRowSchemaADMRecordBuilderVisitor(rowMetaData.getFieldNamesDictionary());
+            ArrayBackedValueStorage admResult = schemaADMBuilder.build(root);
+
+//            String jsonString = objectMapper.writeValueAsString(jsonNode);
             if (root == null) {
                 throw new HyracksDataException("Cannot compute Schema on empty root.");
             } else {
-                resultStorage.getDataOutput().write(jsonString.getBytes(StandardCharsets.UTF_8));
+                resultStorage.getDataOutput().write(admResult.getByteArray());
             }
 
         } catch (IOException e) {

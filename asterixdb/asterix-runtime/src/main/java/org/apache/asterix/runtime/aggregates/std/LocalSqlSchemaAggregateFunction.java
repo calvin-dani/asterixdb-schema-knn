@@ -39,7 +39,7 @@ public class LocalSqlSchemaAggregateFunction extends AbstractSchemaAggregateFunc
         super(args, context, sourceLoc, aggFieldState);
         recType = (ARecordType) aggFieldState;
         // CREATE BASE SIS TREE
-        super.transformer.transform(recType);
+        super.transformer.transform(recType,false);
     }
 
     @Override
