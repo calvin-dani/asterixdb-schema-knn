@@ -1150,6 +1150,10 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier GET_OVERLAPPING_INTERVAL =
             FunctionConstants.newAsterix("get-overlapping-interval", 2);
 
+    //Vector functions
+    public static final FunctionIdentifier VECTOR_DISTANCE = FunctionConstants.newAsterix("vector-distance", 3);
+
+
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
             FunctionConstants.newAsterix("unix-time-from-date-in-days", 1);
@@ -1866,7 +1870,8 @@ public class BuiltinFunctions {
         addFunction(SCALAR_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
-
+        // Vector functions
+        addFunction(VECTOR_DISTANCE, AStringTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);

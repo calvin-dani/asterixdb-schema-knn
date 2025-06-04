@@ -170,5 +170,10 @@
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-column</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.github.haifengl</groupId>
+      <artifactId>smile-core</artifactId>
+      <version>4.3.0</version>
+    </dependency>
   </dependencies>
 </project>
