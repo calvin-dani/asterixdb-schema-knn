@@ -148,7 +148,7 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
 
                         formatPointable.set(pointables[2].getByteArray(), pointables[2].getStartOffset() + 1,
                                 pointables[2].getLength());
-
+                        boolean vectorCalSuccess = true;
                         if (checkDimensionType(vectorList0, vectorList1)) {
                             double[] vector1 = vectorList0.stream().mapToDouble(Double::doubleValue).toArray();
                             double[] vector2 = vectorList1.stream().mapToDouble(Double::doubleValue).toArray();
@@ -169,9 +169,15 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
                                 double dotCal =  MathEx.dot(vector1,vector2);
                                 distanceCal = dotCal;
                             }
+                            else{
+                                vectorCalSuccess = false;
+                            }
+                        }
+                        else {
+                            vectorCalSuccess = false;
                         }
                         try {
-                            writeResult(distanceCal, dataOutput);
+                            writeResult(distanceCal, dataOutput,vectorCalSuccess);
                         } catch (IOException e) {
                             throw HyracksDataException.create(e);
                         }
@@ -183,17 +189,26 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
 
     }
 
-    protected void writeResult(double distance,DataOutput dataOutput) throws IOException {
-        AMutableDouble aDouble = new AMutableDouble(-1);
-        ISerializerDeserializer<ABoolean> booleanSerde =
-                SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ABOOLEAN);
+    protected void writeResult(double distance,DataOutput dataOutput,boolean vectorCalSuccess) throws IOException {
+        if (vectorCalSuccess) {
+            AMutableDouble aDouble = new AMutableDouble(-1);
+            ISerializerDeserializer<ABoolean> booleanSerde =
+                    SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ABOOLEAN);
 
-       ISerializerDeserializer<ADouble> doubleSerde =
-                SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
+            ISerializerDeserializer<ADouble> doubleSerde =
+                    SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
 
 
-        aDouble.setValue(distance);
-        doubleSerde.serialize(aDouble,dataOutput);
+            aDouble.setValue(distance);
+            doubleSerde.serialize(aDouble, dataOutput);
+        }
+        else {
+             ISerializerDeserializer<ANull> nullSerde =
+                    SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ANULL);
+
+            nullSerde.serialize(ANull.NULL,dataOutput);
+        }
+
     }
 
     public boolean checkDimensionType(List<Double> vectorList0, List<Double> vectorList1)  {
