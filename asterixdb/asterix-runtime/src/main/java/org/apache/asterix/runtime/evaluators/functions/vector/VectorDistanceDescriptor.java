@@ -75,12 +75,12 @@ import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 @MissingNullInOutFunction
 public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescriptor {
     private static final long serialVersionUID = 1L;
-    private static final UTF8StringPointable EUCLIDIAN_DISTANCE = UTF8StringPointable.generateUTF8Pointable("euclidian distance");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE = UTF8StringPointable.generateUTF8Pointable("euclidean distance");
     private static final UTF8StringPointable MANHATTAN_FORMAT = UTF8StringPointable.generateUTF8Pointable("manhattan distance");
     private static final UTF8StringPointable COSINE_FORMAT = UTF8StringPointable.generateUTF8Pointable("cosine similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot product");
     public final static IFunctionDescriptorFactory FACTORY = VectorDistanceDescriptor::new;
-    public static final ATypeTag[] EXPECTED_INPUT_TAGS = { ARRAY, ARRAY, STRING };
+//    public static final ATypeTag[] EXPECTED_INPUT_TAGS = { ARRAY, ARRAY, STRING };
 
     private IAsterixListBuilder orderedListBuilder;
     @Override
@@ -96,67 +96,62 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
             @Override
             public IScalarEvaluator createScalarEvaluator(final IEvaluatorContext ctx) throws HyracksDataException {
                 return new AbstractBinaryScalarEvaluator(ctx, args, getIdentifier(), sourceLoc) {
+
                     final ScanCollectionDescriptor.ScanCollectionUnnestingFunctionFactory scanCollectionFactory1 =
                             new ScanCollectionDescriptor.ScanCollectionUnnestingFunctionFactory(args[0], sourceLoc, getIdentifier());
                     final ScanCollectionDescriptor.ScanCollectionUnnestingFunctionFactory scanCollectionFactory2 =
                             new ScanCollectionDescriptor.ScanCollectionUnnestingFunctionFactory(args[1], sourceLoc, getIdentifier());
                     private final IUnnestingEvaluator scanCollection1 = scanCollectionFactory1.createUnnestingEvaluator(ctx);
                     private final IUnnestingEvaluator scanCollection2 = scanCollectionFactory2.createUnnestingEvaluator(ctx);
-                    private StringBuilder stringBuilder = new StringBuilder();
-                    private final ByteArrayPointable byteArrayPtr = new ByteArrayPointable();
                     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
                     private final SingleFieldFrameTupleReference itemTuple = new SingleFieldFrameTupleReference();
                     private final IScalarEvaluator colEval =  new ColumnAccessEvalFactory(0).createScalarEvaluator(ctx);
+                    private final List<Double> vectorList0 = new ArrayList<>();
+                    private final List<Double> vectorList1 = new ArrayList<>();
+
                     @Override
                     public void evaluate(IFrameTupleReference tuple, IPointable result) throws HyracksDataException {
                         resultStorage.reset();
-//                        evaluators[0].evaluate(tuple, pointables[0]);
-//                        evaluators[1].evaluate(tuple, pointables[1]);
+                        evaluators[0].evaluate(tuple, pointables[0]);
+                        evaluators[1].evaluate(tuple, pointables[1]);
                         evaluators[2].evaluate(tuple, pointables[2]);
-
+                        boolean vectorCalSuccess = true;
                         final IPointable listItemOut = new VoidPointable();
                         scanCollection1.init(tuple);
-                        List<Double> vectorList0 = new ArrayList<>();
+                        vectorList0.clear();
+                        vectorList1.clear();
                         while (scanCollection1.step(listItemOut)) {
                             itemTuple.reset(listItemOut.getByteArray(), listItemOut.getStartOffset(),listItemOut.getLength());
-                             extractNumericVector(itemTuple, colEval,vectorList0);
+                             if(!extractNumericVector(itemTuple, colEval,vectorList0)){
+                                 vectorCalSuccess = false;
+                             }
                         }
-                        List<Double> vectorList1 = new ArrayList<>();
+//                        List<Double> vectorList1 = new ArrayList<>();
                         scanCollection2.init(tuple);
                         while (scanCollection2.step(listItemOut)) {
                             itemTuple.reset(listItemOut.getByteArray(), listItemOut.getStartOffset(),listItemOut.getLength());
-                            extractNumericVector(itemTuple, colEval,vectorList1);
+                            if(!extractNumericVector(itemTuple, colEval,vectorList1)){
+                                vectorCalSuccess = false;
+                            }
                         }
-//                        if (!acceptNullValues && valueTag == ATypeTag.NULL) {
-//                            returnNull = true;
-//                        }
-//                        if (returnNull) {
-//                            PointableHelper.setNull(result);
-//                            return;
-//                        }
+//                        System.out.println("Vector 1 size: " + vectorList0.size() + " Vector 2 size: " + vectorList1.size());
+//                        System.out.println("Vector 1: " + vectorList0);
+//                        System.out.println("Vector 2: " + vectorList1);
+
                         if (PointableHelper.checkAndSetMissingOrNull(result, pointables[0], pointables[1],pointables[2])) {
                             return;
                         }
-                        double distanceCal = Double.MAX_VALUE;
-                        //                            ATypeTag arg0Tag = VALUE_TYPE_MAPPING[pointables[0].getByteArray()[pointables[0]
-//                                    .getStartOffset()]];
-//                            ATypeTag arg1Tag = VALUE_TYPE_MAPPING[pointables[1].getByteArray()[pointables[1]
-//                                    .getStartOffset()]];
-                        ATypeTag arg2Tag = VALUE_TYPE_MAPPING[pointables[2].getByteArray()[pointables[2]
-                                .getStartOffset()]];
-//                            checkTypeMachingThrowsIfNot(EXPECTED_INPUT_TAGS, arg0Tag, arg1Tag, arg2Tag);
-
+                        double distanceCal = Float.MAX_VALUE;
                         formatPointable.set(pointables[2].getByteArray(), pointables[2].getStartOffset() + 1,
                                 pointables[2].getLength());
-                        boolean vectorCalSuccess = true;
-                        if (checkDimensionType(vectorList0, vectorList1)) {
+                        if (checkDimension(vectorList0, vectorList1) && vectorCalSuccess) {
                             double[] vector1 = vectorList0.stream().mapToDouble(Double::doubleValue).toArray();
                             double[] vector2 = vectorList1.stream().mapToDouble(Double::doubleValue).toArray();
                             if (MANHATTAN_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
                                 ManhattanDistance distance = new ManhattanDistance();
                                  distanceCal = distance.d(vector1, vector2);
 
-                            } else if (EUCLIDIAN_DISTANCE.ignoreCaseCompareTo(formatPointable) == 0) {
+                            } else if (EUCLIDEAN_DISTANCE.ignoreCaseCompareTo(formatPointable) == 0) {
                                 EuclideanDistance distance = new EuclideanDistance();
                                  distanceCal = distance.d(vector1, vector2);
 
@@ -166,14 +161,16 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
 
                             }
                             else if (DOT_PRODUCT_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
-                                double dotCal =  MathEx.dot(vector1,vector2);
-                                distanceCal = dotCal;
+                                distanceCal =  MathEx.dot(vector1,vector2);
                             }
                             else{
-                                vectorCalSuccess = false;
+                                throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc,funcId.getName(),
+                                        formatPointable.toString());
                             }
                         }
                         else {
+//                            System.out.println("Vector dimension mismatch or vector type mismatch" +
+//                                    vectorList0.size() +  vectorList1.size());
                             vectorCalSuccess = false;
                         }
                         try {
@@ -211,7 +208,7 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
 
     }
 
-    public boolean checkDimensionType(List<Double> vectorList0, List<Double> vectorList1)  {
+    public boolean checkDimension(List<Double> vectorList0, List<Double> vectorList1)  {
         if (vectorList0 == null || vectorList1 == null) {
             return false; // Return false if either list is null
         }
@@ -227,7 +224,7 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
      * @throws HyracksDataException If there is an error during extraction.
      */
 
-    public void extractNumericVector(IFrameTupleReference pointable,IScalarEvaluator colEval,List<Double> vector) throws HyracksDataException {
+    public boolean  extractNumericVector(IFrameTupleReference pointable,IScalarEvaluator colEval,List<Double> vector) throws HyracksDataException {
         IPointable inputVal = new VoidPointable();
         colEval.evaluate(pointable, inputVal);
         byte[] data = inputVal.getByteArray();
@@ -235,7 +232,7 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
 
         ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
         if (!typeTag.isNumericType()) {
-           return; // Return an empty array if the item type is not numeric
+           return false; // Return an empty array if the item type is not numeric
         }
             switch (typeTag) {
                 case TINYINT:
@@ -257,8 +254,9 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
                     vector.add(ADoubleSerializerDeserializer.getDouble(data, offset + 1));
                     break;
                 default:
-                    throw new HyracksDataException("Unsupported numeric type: " + typeTag);
+                    return false; // Return an empty array if the item type is not numeric
             }
+        return true; // Return an empty array if the item type is not numeric
     }
 
     }
