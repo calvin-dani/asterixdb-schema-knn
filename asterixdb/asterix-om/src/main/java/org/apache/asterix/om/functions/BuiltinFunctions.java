@@ -1870,6 +1870,7 @@ public class BuiltinFunctions {
         addFunction(SCALAR_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
+
         // Vector functions
         addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
