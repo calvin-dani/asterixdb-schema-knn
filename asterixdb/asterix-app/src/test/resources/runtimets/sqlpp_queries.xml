@@ -3227,6 +3227,18 @@
       </compilation-unit>
     </test-case>
   </test-group>
+  <test-group name = "vector">
+    <test-case FilePath="vector">
+      <compilation-unit name="func-knn">
+        <output-dir compare="Text">func-knn</output-dir>
+      </compilation-unit>
+    </test-case>
+    <test-case FilePath="vector">
+      <compilation-unit name="func-failure">
+       <expected-error>ASX0006: Invalid format for vector-distance in invalid_metric (in line 3, at column 28) [RuntimeDataException]</expected-error>
+      </compilation-unit>
+    </test-case>
+  </test-group>
   <test-group name="bitwise">
     <test-case FilePath="bitwise">
       <compilation-unit name="bit_and_01">
