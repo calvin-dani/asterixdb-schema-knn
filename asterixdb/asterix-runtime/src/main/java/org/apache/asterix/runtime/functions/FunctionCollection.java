@@ -529,6 +529,7 @@ import org.apache.asterix.runtime.evaluators.functions.ToObjectVarStrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.ToStringDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.TreatAsIntegerDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.UUIDDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.VectorDistanceDescriptor2;
 import org.apache.asterix.runtime.evaluators.functions.binary.BinaryConcatDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.binary.BinaryLengthDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.binary.FindBinaryDescriptor;
@@ -1326,6 +1327,7 @@ public final class FunctionCollection implements IFunctionCollection {
 
         // Vector functions
         fc.add(VectorDistanceDescriptor.FACTORY);
+        fc.add(VectorDistanceDescriptor2.FACTORY);
 
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
