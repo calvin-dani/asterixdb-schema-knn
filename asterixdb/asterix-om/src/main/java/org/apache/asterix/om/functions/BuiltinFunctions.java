@@ -1154,6 +1154,8 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier VECTOR_DISTANCE = FunctionConstants.newAsterix("vector-distance", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_TEMP =
             FunctionConstants.newAsterix("vector-distance-temp", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_VECTOR_API =
+            FunctionConstants.newAsterix("vector-distance-api", 3);
 
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
@@ -1875,7 +1877,7 @@ public class BuiltinFunctions {
         // Vector functions
         addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_TEMP, ADoubleTypeComputer.INSTANCE, true);
-
+        addFunction(VECTOR_DISTANCE_VECTOR_API, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);
