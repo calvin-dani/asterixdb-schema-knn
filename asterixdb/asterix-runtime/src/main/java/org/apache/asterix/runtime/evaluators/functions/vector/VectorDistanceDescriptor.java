@@ -19,12 +19,10 @@
 
 package org.apache.asterix.runtime.evaluators.functions.vector;
 
-
 import org.apache.asterix.common.annotations.MissingNullInOutFunction;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.functions.IFunctionDescriptorFactory;
 import org.apache.asterix.runtime.evaluators.base.AbstractScalarFunctionDynamicDescriptor;
-
 import org.apache.asterix.runtime.functions.FunctionTypeInferers;
 import org.apache.asterix.runtime.utils.DescriptorFactoryUtil;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
@@ -33,13 +31,12 @@ import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.api.context.IEvaluatorContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
-
-
 @MissingNullInOutFunction
 public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescriptor {
     private static final long serialVersionUID = 1L;
 
-    public final static IFunctionDescriptorFactory FACTORY = DescriptorFactoryUtil.createFactory(VectorDistanceDescriptor::new, FunctionTypeInferers.SET_ARGUMENTS_TYPE);
+    public final static IFunctionDescriptorFactory FACTORY =
+            DescriptorFactoryUtil.createFactory(VectorDistanceDescriptor::new, FunctionTypeInferers.SET_ARGUMENTS_TYPE);
 
     @Override
     public FunctionIdentifier getIdentifier() {
@@ -58,6 +55,5 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
         };
 
     }
-
 
 }
