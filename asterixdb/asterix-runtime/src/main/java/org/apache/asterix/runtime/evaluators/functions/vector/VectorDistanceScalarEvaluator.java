@@ -1,0 +1,188 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+package org.apache.asterix.runtime.evaluators.functions.vector;
+
+import org.apache.asterix.common.exceptions.ErrorCode;
+import org.apache.asterix.common.exceptions.RuntimeDataException;
+import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
+import org.apache.asterix.om.base.ADouble;
+import org.apache.asterix.om.base.AMutableDouble;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.types.BuiltinType;
+import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
+import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
+import org.apache.asterix.runtime.exceptions.TypeMismatchException;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
+import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
+import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
+import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
+import org.apache.hyracks.algebricks.runtime.evaluators.ConstantEvalFactory;
+import org.apache.hyracks.api.context.IEvaluatorContext;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.exceptions.SourceLocation;
+import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
+import org.apache.hyracks.data.std.primitive.VoidPointable;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
+import org.apache.hyracks.util.string.UTF8StringUtil;
+
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.Map;
+
+import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
+
+public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
+    private final ListAccessor[] listAccessor = new ListAccessor[2];
+    protected ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
+    protected DataOutput dataOutput = resultStorage.getDataOutput();
+    protected IPointable[] pointables;
+    protected IScalarEvaluator[] evaluators;
+    // Function ID, for error reporting.
+    protected final FunctionIdentifier funcId;
+    protected final SourceLocation sourceLoc;
+
+    private final UTF8StringPointable formatPointable = new UTF8StringPointable();
+
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
+            UTF8StringPointable.generateUTF8Pointable("euclidean distance");
+    private static final UTF8StringPointable MANHATTAN_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+    private static final UTF8StringPointable COSINE_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+    private static final UTF8StringPointable DOT_PRODUCT_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("dot product");
+
+    public final ISerializerDeserializer<ADouble> doubleSerde =
+            SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
+
+
+    public DistanceFunction func;
+
+    @FunctionalInterface
+    public interface DistanceFunction {
+        double apply(ListAccessor a, ListAccessor b) throws HyracksDataException;
+    }
+
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(
+            MANHATTAN_FORMAT.hash(), VectorDistanceCalculation::manhattan,
+            EUCLIDEAN_DISTANCE.hash(), VectorDistanceCalculation::euclidean,
+            COSINE_FORMAT.hash(), VectorDistanceCalculation::cosine,
+            DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation::dot
+    );
+
+    public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
+    //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
+    public final boolean[] isConstant = new boolean[3];
+
+    public VectorDistanceScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
+                                         FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+        pointables = new IPointable[evaluatorFactories.length];
+        evaluators = new IScalarEvaluator[evaluatorFactories.length];
+        for (int i = 0; i < evaluators.length; ++i) {
+            pointables[i] = new VoidPointable();
+            evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
+            if (evaluatorFactories[i] instanceof ConstantEvalFactory) {
+                // If the evaluator is a constant, we need to evaluate it to get the value.
+                // This is necessary for functions that require both arguments to be evaluated.
+                evaluators[i].evaluate(null, pointables[i]);
+                isConstant[i] = true;
+                if (i == 2) {
+                    formatPointable.set(pointables[2].getByteArray(), pointables[2].getStartOffset() + 1,
+                            pointables[2].getLength());
+                    func = DISTANCE_MAP.get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
+                    if (func == null) {
+                        throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(), formatPointable.toString());
+                    }
+                } else {
+                    listAccessorConstant[i] = new ListAccessor();
+
+                    if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()]).isListType()) {
+                        throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
+                                pointables[i].toString());
+                    }
+                    listAccessorConstant[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
+                }
+            }
+        }
+        this.funcId = funcId;
+        this.sourceLoc = sourceLoc;
+    }
+
+    @Override
+    public void evaluate(IFrameTupleReference tuple, IPointable result) throws HyracksDataException {
+        resultStorage.reset();
+        for (int i = 0; i < 2; i++) {
+            if (!isConstant[i]) {
+                listAccessor[i] = new ListAccessor();
+                evaluators[i].evaluate(tuple, pointables[i]);
+
+                if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()]).isListType()) {
+                    PointableHelper.setNull(result);
+                    return;
+                }
+
+                listAccessor[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
+            }
+
+        }
+
+        ListAccessor listAccessor1 = isConstant[0] ? listAccessorConstant[0] : listAccessor[0];
+        ListAccessor listAccessor2 = isConstant[1] ? listAccessorConstant[1] : listAccessor[1];
+
+
+        if (listAccessor1.size() != listAccessor2.size() || listAccessor1.size() == 0 || listAccessor2.size() == 0) {
+            PointableHelper.setNull(result);
+            return;
+        }
+
+
+        if (PointableHelper.checkAndSetMissingOrNull(result, pointables[0], pointables[1],
+                pointables[2])) {
+            PointableHelper.setNull(result);
+            return;
+        }
+        double distanceCal;
+        try {
+            distanceCal = func.apply(listAccessor1, listAccessor2);
+        } catch (HyracksDataException e) {
+            PointableHelper.setNull(result);
+            return;
+        }
+        try {
+            writeResult(distanceCal, dataOutput);
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+        result.set(resultStorage);
+    }
+
+    protected void writeResult(double distance, DataOutput dataOutput) throws IOException {
+        AMutableDouble aDouble = new AMutableDouble(-1);
+        aDouble.setValue(distance);
+        doubleSerde.serialize(aDouble, dataOutput);
+
+
+    }
+
+}
