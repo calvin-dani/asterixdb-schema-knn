@@ -9,20 +9,17 @@ import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeseriali
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
-import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
 import java.io.IOException;
-import java.util.List;
+
 
 public class VectorDistanceCalculation {
 
-
-//    // Euclidean Distance
+    //    // Euclidean Distance
     public static double euclidean(double[] a, double[] b) {
 //        checkDimensions(a, b);
         double sum = 0.0;
@@ -35,7 +32,8 @@ public class VectorDistanceCalculation {
 
     public static double euclidean(ListAccessor a, ListAccessor b) throws HyracksDataException {
 //        checkDimensions(a, b);
-
+        ATypeTag listType1 = a.getItemType();
+        ATypeTag listType2 = b.getItemType();
         IPointable tempVal1 = new VoidPointable();
         ArrayBackedValueStorage storage1  = new ArrayBackedValueStorage();
         IPointable tempVal2 = new VoidPointable();
@@ -47,8 +45,8 @@ public class VectorDistanceCalculation {
             for (int i = 0; i < a.size(); i++) {
                 a.getOrWriteItem(i, tempVal1, storage1);
                 b.getOrWriteItem(i, tempVal2, storage2);
-                l1 = extractNumericVector(tempVal1);
-                l2 = extractNumericVector(tempVal2);
+                l1 = extractNumericVector(tempVal1, listType1 );
+                l2 = extractNumericVector(tempVal2,listType2);
                 sum += Math.abs(l1 - l2);
                 double diff = l1 - l2;
                 sum += diff * diff;
@@ -74,7 +72,8 @@ public class VectorDistanceCalculation {
 
     public static double manhattan(ListAccessor a, ListAccessor b) throws HyracksDataException {
 //        checkDimensions(a, b);
-
+        ATypeTag listType1 = a.getItemType();
+        ATypeTag listType2 = b.getItemType();
           IPointable tempVal1 = new VoidPointable();
           ArrayBackedValueStorage storage1  = new ArrayBackedValueStorage();
           IPointable tempVal2 = new VoidPointable();
@@ -86,8 +85,8 @@ public class VectorDistanceCalculation {
             for (int i = 0; i < a.size(); i++) {
                 a.getOrWriteItem(i, tempVal1, storage1);
                 b.getOrWriteItem(i, tempVal2, storage2);
-                l1 = extractNumericVector(tempVal1);
-                l2 = extractNumericVector(tempVal2);
+                l1 = extractNumericVector(tempVal1, listType1 );
+                l2 = extractNumericVector(tempVal2,listType2);
                 sum += Math.abs(l1 - l2);
             }
             return sum;
@@ -114,7 +113,8 @@ public class VectorDistanceCalculation {
 
     public static double cosine(ListAccessor a, ListAccessor b) throws HyracksDataException {
 //        checkDimensions(a, b);
-
+        ATypeTag listType1 = a.getItemType();
+        ATypeTag listType2 = b.getItemType();
         IPointable tempVal1 = new VoidPointable();
         ArrayBackedValueStorage storage1  = new ArrayBackedValueStorage();
         IPointable tempVal2 = new VoidPointable();
@@ -126,8 +126,8 @@ public class VectorDistanceCalculation {
             for (int i = 0; i < a.size(); i++) {
                 a.getOrWriteItem(i, tempVal1, storage1);
                 b.getOrWriteItem(i, tempVal2, storage2);
-                l1 = extractNumericVector(tempVal1);
-                l2 = extractNumericVector(tempVal2);
+                l1 = extractNumericVector(tempVal1, listType1 );
+                l2 = extractNumericVector(tempVal2,listType2);
                 dot += l1 * l2;
                 normA +=l1 *l1;
                 normB +=l2 *l2;
@@ -144,7 +144,6 @@ public class VectorDistanceCalculation {
 
     // Dot Product
     public static double dot(double[] a, double[] b) {
-//        checkDimensions(a, b);
         double sum = 0.0;
         for (int i = 0; i < a.length; i++) {
             sum += a[i] * b[i];
@@ -154,8 +153,8 @@ public class VectorDistanceCalculation {
 
 
     public static double dot(ListAccessor a, ListAccessor b) throws HyracksDataException {
-//        checkDimensions(a, b);
-
+        ATypeTag listType1 = a.getItemType();
+        ATypeTag listType2 = b.getItemType();
         IPointable tempVal1 = new VoidPointable();
         ArrayBackedValueStorage storage1  = new ArrayBackedValueStorage();
         IPointable tempVal2 = new VoidPointable();
@@ -167,8 +166,8 @@ public class VectorDistanceCalculation {
             for (int i = 0; i < a.size(); i++) {
                 a.getOrWriteItem(i, tempVal1, storage1);
                 b.getOrWriteItem(i, tempVal2, storage2);
-                l1 = extractNumericVector(tempVal1);
-                l2 = extractNumericVector(tempVal2);
+                l1 = extractNumericVector(tempVal1, listType1 );
+                l2 = extractNumericVector(tempVal2,listType2);
                 sum += l1 * l2;
             }
             return sum;
@@ -178,44 +177,32 @@ public class VectorDistanceCalculation {
 
     }
 
-
-
-
-    public static double extractNumericVector(IPointable pointable )
+ static double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag)
             throws HyracksDataException {
-//        IPointable inputVal = new VoidPointable();
         byte[] data = pointable.getByteArray();
         int offset = pointable.getStartOffset();
+        if(derivedTypeTag.isNumericType()) {
+           return getValueFromTag(derivedTypeTag, data, offset);
+        } else if (derivedTypeTag == ATypeTag.ANY) {
+            ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            return getValueFromTag(typeTag, data, offset);
+        }
+        else {
+            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + derivedTypeTag);
+        }
+    }
 
-        ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
-        if (!typeTag.isNumericType()) {
-           throw new HyracksDataException("Expected numeric type, but found: " + typeTag);
-           // Return an empty array if the item type is not numeric
-        }
-        switch (typeTag) {
-            case TINYINT:
-                return AInt8SerializerDeserializer.getByte(data, offset + 1);
-            case SMALLINT:
-                return AInt16SerializerDeserializer.getShort(data, offset + 1);
-            case INTEGER:
-                return AInt32SerializerDeserializer.getInt(data, offset + 1);
-            case BIGINT:
-                return AInt64SerializerDeserializer.getLong(data, offset + 1);
-            case FLOAT:
-                return AFloatSerializerDeserializer.getFloat(data, offset + 1);
-            case DOUBLE:
-                return ADoubleSerializerDeserializer.getDouble(data, offset + 1);
-            default:
-                return 0 ; // Return an empty array if the item type is not numeric
-        }
-//        return true; // Return an empty array if the item type is not numeric
+    // TODO CALVIN DANI add a type derivation func to abstract.
+    public static double getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
+        return switch (typeTag) {
+            case TINYINT -> AInt8SerializerDeserializer.getByte(data, offset + 1);
+            case SMALLINT -> AInt16SerializerDeserializer.getShort(data, offset + 1);
+            case INTEGER -> AInt32SerializerDeserializer.getInt(data, offset + 1);
+            case BIGINT -> AInt64SerializerDeserializer.getLong(data, offset + 1);
+            case FLOAT -> AFloatSerializerDeserializer.getFloat(data, offset + 1);
+            case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+            default -> throw new HyracksDataException("Unsupported type tag: " + typeTag);
+        };
     }
 }
 
-
-// We get record function
-// We use the list accessor to the record
-// size check
-// what metric
-// parses the value [1,2,3] , [9,8,7] ===> 1 and 9
-// confirm data type of the array.
