@@ -19,17 +19,20 @@
 
 package org.apache.asterix.runtime.evaluators.functions.vector;
 
+import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
+
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.Map;
+
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.exceptions.RuntimeDataException;
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.base.ADouble;
 import org.apache.asterix.om.base.AMutableDouble;
-import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
-import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
-import org.apache.asterix.runtime.exceptions.TypeMismatchException;
 import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
@@ -45,12 +48,6 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
-
-import java.io.DataOutput;
-import java.io.IOException;
-import java.util.Map;
-
-import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
 public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
@@ -76,7 +73,6 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
     public final ISerializerDeserializer<ADouble> doubleSerde =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
 
-
     public DistanceFunction func;
 
     @FunctionalInterface
@@ -84,19 +80,17 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
         double apply(ListAccessor a, ListAccessor b) throws HyracksDataException;
     }
 
-    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(
-            MANHATTAN_FORMAT.hash(), VectorDistanceCalculation::manhattan,
-            EUCLIDEAN_DISTANCE.hash(), VectorDistanceCalculation::euclidean,
-            COSINE_FORMAT.hash(), VectorDistanceCalculation::cosine,
-            DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation::dot
-    );
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
+            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
+                    VectorDistanceCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculation::cosine,
+                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
     public final boolean[] isConstant = new boolean[3];
 
     public VectorDistanceScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
-                                         FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+            FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         for (int i = 0; i < evaluators.length; ++i) {
@@ -110,14 +104,17 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
                 if (i == 2) {
                     formatPointable.set(pointables[2].getByteArray(), pointables[2].getStartOffset() + 1,
                             pointables[2].getLength());
-                    func = DISTANCE_MAP.get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
+                    func = DISTANCE_MAP.get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(),
+                            formatPointable.getStartOffset()));
                     if (func == null) {
-                        throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(), formatPointable.toString());
+                        throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
+                                formatPointable.toString());
                     }
                 } else {
                     listAccessorConstant[i] = new ListAccessor();
 
-                    if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()]).isListType()) {
+                    if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()])
+                            .isListType()) {
                         throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
                                 pointables[i].toString());
                     }
@@ -137,7 +134,8 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
                 listAccessor[i] = new ListAccessor();
                 evaluators[i].evaluate(tuple, pointables[i]);
 
-                if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()]).isListType()) {
+                if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()])
+                        .isListType()) {
                     PointableHelper.setNull(result);
                     return;
                 }
@@ -150,15 +148,12 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
         ListAccessor listAccessor1 = isConstant[0] ? listAccessorConstant[0] : listAccessor[0];
         ListAccessor listAccessor2 = isConstant[1] ? listAccessorConstant[1] : listAccessor[1];
 
-
         if (listAccessor1.size() != listAccessor2.size() || listAccessor1.size() == 0 || listAccessor2.size() == 0) {
             PointableHelper.setNull(result);
             return;
         }
 
-
-        if (PointableHelper.checkAndSetMissingOrNull(result, pointables[0], pointables[1],
-                pointables[2])) {
+        if (PointableHelper.checkAndSetMissingOrNull(result, pointables[0], pointables[1], pointables[2])) {
             PointableHelper.setNull(result);
             return;
         }
@@ -181,7 +176,6 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
         AMutableDouble aDouble = new AMutableDouble(-1);
         aDouble.setValue(distance);
         doubleSerde.serialize(aDouble, dataOutput);
-
 
     }
 
