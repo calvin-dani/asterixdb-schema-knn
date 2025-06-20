@@ -144,7 +144,7 @@ public class VectorDistanceDescriptor4 extends AbstractScalarFunctionDynamicDesc
                                 pointables[2])) {
                             return;
                         }
-                        double distanceCal = Float.MAX_VALUE;
+                        double distanceCal = 0;
                         VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
                         formatPointable.set(pointables[2].getByteArray(), pointables[2].getStartOffset() + 1,
                                 pointables[2].getLength());
@@ -180,7 +180,6 @@ public class VectorDistanceDescriptor4 extends AbstractScalarFunctionDynamicDesc
                                 }
                                 distanceCal = Math.sqrt(sumSq);
 
-
                             } else if (COSINE_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
                                 double dot = 0.0;
                                 double norm1 = 0.0;
@@ -202,7 +201,6 @@ public class VectorDistanceDescriptor4 extends AbstractScalarFunctionDynamicDesc
                                 }
 
                                 distanceCal = dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
-
 
                             } else if (DOT_PRODUCT_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
                                 for (; i <= length - SPECIES.length(); i += SPECIES.length()) {
