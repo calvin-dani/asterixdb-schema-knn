@@ -50,6 +50,9 @@ import org.apache.asterix.runtime.evaluators.base.AbstractScalarFunctionDynamicD
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
 import org.apache.asterix.runtime.evaluators.functions.binary.AbstractBinaryScalarEvaluator;
 import org.apache.asterix.runtime.unnestingfunctions.std.ScanCollectionDescriptor;
+import org.apache.commons.math3.linear.ArrayRealVector;
+import org.apache.commons.math3.ml.distance.EuclideanDistance;
+import org.apache.commons.math3.ml.distance.ManhattanDistance;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -63,9 +66,7 @@ import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
-import smile.math.MathEx;
-import smile.math.distance.EuclideanDistance;
-import smile.math.distance.ManhattanDistance;
+
 
 @MissingNullInOutFunction
 public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescriptor {
@@ -154,25 +155,26 @@ public class VectorDistanceDescriptor extends AbstractScalarFunctionDynamicDescr
                             double[] vector2 = vectorList1.stream().mapToDouble(Double::doubleValue).toArray();
                             if (MANHATTAN_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
                                 ManhattanDistance distance = new ManhattanDistance();
-                                distanceCal = distance.d(vector1, vector2);
+                                distanceCal = distance.compute(vector1, vector2);
 
                             } else if (EUCLIDEAN_DISTANCE.ignoreCaseCompareTo(formatPointable) == 0) {
                                 EuclideanDistance distance = new EuclideanDistance();
-                                distanceCal = distance.d(vector1, vector2);
+                                distanceCal = distance.compute(vector1, vector2);
 
                             } else if (COSINE_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
-                                double dotCal = MathEx.dot(vector1, vector2);
-                                distanceCal = dotCal / (MathEx.norm2(vector1) * MathEx.norm2(vector2));
+                                ArrayRealVector v1 = new ArrayRealVector(vector1);
+                                ArrayRealVector v2 = new ArrayRealVector(vector2);
+                                distanceCal = v1.dotProduct(v2) / (v1.getNorm() * v2.getNorm());
 
                             } else if (DOT_PRODUCT_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
-                                distanceCal = MathEx.dot(vector1, vector2);
+                                ArrayRealVector v1 = new ArrayRealVector(vector1);
+                                ArrayRealVector v2 = new ArrayRealVector(vector2);
+                                distanceCal = v1.dotProduct(v2);
                             } else {
                                 throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
                                         formatPointable.toString());
                             }
                         } else {
-                            //                            System.out.println("Vector dimension mismatch or vector type mismatch" +
-                            //                                    vectorList0.size() +  vectorList1.size());
                             vectorCalSuccess = false;
                         }
                         try {
