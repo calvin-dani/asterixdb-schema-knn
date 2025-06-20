@@ -152,31 +152,41 @@ public class VectorDistanceDescriptor4 extends AbstractScalarFunctionDynamicDesc
                             double[] vector1 = vectorList0.stream().mapToDouble(Double::doubleValue).toArray();
                             double[] vector2 = vectorList1.stream().mapToDouble(Double::doubleValue).toArray();
                             int length = vector1.length;
+                            int i = 0;
                             if (MANHATTAN_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
-                                for (int i = 0; i < length; i += SPECIES.length()) {
+                                for (; i <= length - SPECIES.length(); i += SPECIES.length()) {
                                     var v1 = DoubleVector.fromArray(SPECIES, vector1, i);
                                     var v2 = DoubleVector.fromArray(SPECIES, vector2, i);
                                     var diff = v1.sub(v2).abs();
                                     distanceCal += diff.reduceLanes(VectorOperators.ADD);
                                 }
+                                // scalar fallback
+                                for (; i < length; i++) {
+                                    distanceCal += Math.abs(vector1[i] - vector2[i]);
+                                }
 
                             } else if (EUCLIDEAN_DISTANCE.ignoreCaseCompareTo(formatPointable) == 0) {
                                 double sumSq = 0.0;
-                                for (int i = 0; i < length; i += SPECIES.length()) {
+                                for (; i <= length - SPECIES.length(); i += SPECIES.length()) {
                                     var v1 = DoubleVector.fromArray(SPECIES, vector1, i);
                                     var v2 = DoubleVector.fromArray(SPECIES, vector2, i);
                                     var diff = v1.sub(v2);
                                     var sq = diff.mul(diff);
                                     sumSq += sq.reduceLanes(VectorOperators.ADD);
                                 }
+                                for (; i < length; i++) {
+                                    double diff = vector1[i] - vector2[i];
+                                    sumSq += diff * diff;
+                                }
                                 distanceCal = Math.sqrt(sumSq);
+
 
                             } else if (COSINE_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
                                 double dot = 0.0;
                                 double norm1 = 0.0;
                                 double norm2 = 0.0;
 
-                                for (int i = 0; i < length; i += SPECIES.length()) {
+                                for (; i <= length - SPECIES.length(); i += SPECIES.length()) {
                                     var v1 = DoubleVector.fromArray(SPECIES, vector1, i);
                                     var v2 = DoubleVector.fromArray(SPECIES, vector2, i);
 
@@ -185,13 +195,23 @@ public class VectorDistanceDescriptor4 extends AbstractScalarFunctionDynamicDesc
                                     norm2 += v2.mul(v2).reduceLanes(VectorOperators.ADD);
                                 }
 
+                                for (; i < length; i++) {
+                                    dot += vector1[i] * vector2[i];
+                                    norm1 += vector1[i] * vector1[i];
+                                    norm2 += vector2[i] * vector2[i];
+                                }
+
                                 distanceCal = dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
 
+
                             } else if (DOT_PRODUCT_FORMAT.ignoreCaseCompareTo(formatPointable) == 0) {
-                                for (int i = 0; i < length; i += SPECIES.length()) {
+                                for (; i <= length - SPECIES.length(); i += SPECIES.length()) {
                                     var v1 = DoubleVector.fromArray(SPECIES, vector1, i);
                                     var v2 = DoubleVector.fromArray(SPECIES, vector2, i);
                                     distanceCal += v1.mul(v2).reduceLanes(VectorOperators.ADD);
+                                }
+                                for (; i < length; i++) {
+                                    distanceCal += vector1[i] * vector2[i];
                                 }
                             } else {
                                 throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
