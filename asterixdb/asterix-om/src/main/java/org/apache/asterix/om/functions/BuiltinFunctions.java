@@ -1156,6 +1156,12 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("vector-distance-temp", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_VECTOR_API =
             FunctionConstants.newAsterix("vector-distance-api", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY =
+            FunctionConstants.newAsterix("vector-distance-arr", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_SMILEY =
+            FunctionConstants.newAsterix("vector-distance-smiley", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_COMMONS =
+            FunctionConstants.newAsterix("vector-distance-commons", 3);
 
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
@@ -1878,6 +1884,9 @@ public class BuiltinFunctions {
         addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_TEMP, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_VECTOR_API, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_COMMONS, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_SMILEY, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);
