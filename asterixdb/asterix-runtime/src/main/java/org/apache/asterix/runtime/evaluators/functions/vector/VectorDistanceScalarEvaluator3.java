@@ -129,7 +129,7 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
                     }
                     listAccessorConstant[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
                     try {
-                        primitiveArrayConstant[0] = createPrimitveList(listAccessorConstant[i]);
+                        primitiveArrayConstant[i] = createPrimitveList(listAccessorConstant[i]);
                     } catch (IOException e) {
                         throw new HyracksDataException("Error creating primitive list from constant vector", e);
                     }
@@ -197,9 +197,9 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
 
     protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
-        if (!typeTag.isNumericType()) {
-            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
-        }
+//        if (!typeTag.isNumericType()) {
+//            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
+//        }
         double[] primitiveArray = new double[listAccessor.size()];
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
