@@ -34,9 +34,12 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class VectorDistanceCalculation {
-
+    private static final Logger LOGGER = LogManager.getLogger();
     //    // Euclidean Distance
     public static double euclidean(double[] a, double[] b) {
         //        checkDimensions(a, b);

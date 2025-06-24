@@ -50,6 +50,9 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.DataOutput;
 import java.io.IOException;
@@ -66,7 +69,7 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
     // Function ID, for error reporting.
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
-
+    private static final Logger LOGGER = LogManager.getLogger();
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
@@ -177,7 +180,10 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
                 PointableHelper.setNull(result);
                 return;
             }
+            long startTime = System.nanoTime();
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
+            long endTime = System.nanoTime();
+            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;
