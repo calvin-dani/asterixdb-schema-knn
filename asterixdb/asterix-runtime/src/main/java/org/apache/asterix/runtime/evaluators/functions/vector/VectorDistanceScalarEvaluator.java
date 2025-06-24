@@ -48,6 +48,9 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
@@ -58,6 +61,9 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
     // Function ID, for error reporting.
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
+
+    private static final Logger LOGGER = LogManager.getLogger();
+
 
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
@@ -159,7 +165,10 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
         }
         double distanceCal;
         try {
+            long startTime = System.nanoTime();
             distanceCal = func.apply(listAccessor1, listAccessor2);
+            long endTime = System.nanoTime();
+            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (HyracksDataException e) {
             PointableHelper.setNull(result);
             return;
