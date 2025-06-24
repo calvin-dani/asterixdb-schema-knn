@@ -1158,6 +1158,12 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("vector-distance-api", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY =
             FunctionConstants.newAsterix("vector-distance-arr", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_256 =
+            FunctionConstants.newAsterix("vector-distance-256", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_512 =
+            FunctionConstants.newAsterix("vector-distance-512", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_1028 =
+            FunctionConstants.newAsterix("vector-distance-1028", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_SMILEY =
             FunctionConstants.newAsterix("vector-distance-smiley", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_COMMONS =
