@@ -646,6 +646,9 @@ import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDesc
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor3;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor5;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor6;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor7;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor8;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor9;
 import org.apache.asterix.runtime.runningaggregates.std.DenseRankRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.NtileRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.PercentRankRunningAggregateDescriptor;
@@ -1334,6 +1337,9 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(VectorDistanceDescriptor3.FACTORY);
         fc.add(VectorDistanceDescriptor5.FACTORY);
         fc.add(VectorDistanceDescriptor6.FACTORY);
+        fc.add(VectorDistanceDescriptor7.FACTORY);
+        fc.add(VectorDistanceDescriptor8.FACTORY);
+        fc.add(VectorDistanceDescriptor9.FACTORY);
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
         fc.add(IsArrayDescriptor.FACTORY);
