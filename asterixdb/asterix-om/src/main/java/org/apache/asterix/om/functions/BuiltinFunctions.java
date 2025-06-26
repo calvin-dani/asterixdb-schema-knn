@@ -1891,9 +1891,9 @@ public class BuiltinFunctions {
         addFunction(VECTOR_DISTANCE_TEMP, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_VECTOR_API, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_256,ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_512,ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_1028,ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_256, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_512, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_1028, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY_COMMONS, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY_SMILEY, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
