@@ -56,9 +56,6 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
@@ -69,7 +66,7 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
     // Function ID, for error reporting.
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
-    private static final Logger LOGGER = LogManager.getLogger();
+    //    private static final Logger LOGGER = LogManager.getLogger();
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
@@ -181,7 +178,7 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
             long startTime = System.nanoTime();
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
             long endTime = System.nanoTime();
-            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
+            //            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;
@@ -203,9 +200,9 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
 
     protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
-//        if (!typeTag.isNumericType()) {
-//            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
-//        }
+        //        if (!typeTag.isNumericType()) {
+        //            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
+        //        }
         double[] primitiveArray = new double[listAccessor.size()];
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
