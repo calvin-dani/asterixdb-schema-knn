@@ -42,6 +42,7 @@ import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
 import org.apache.asterix.runtime.utils.VectorDistanceCalculation4;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculation5;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -56,9 +57,10 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+
+//import org.apache.logging.log4j.Level;
+//import org.apache.logging.log4j.LogManager;
+//import org.apache.logging.log4j.Logger;
 
 public class VectorDistanceScalarEvaluator5 implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
@@ -80,7 +82,7 @@ public class VectorDistanceScalarEvaluator5 implements IScalarEvaluator {
             UTF8StringPointable.generateUTF8Pointable("cosine similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT =
             UTF8StringPointable.generateUTF8Pointable("dot product");
-    private static final Logger LOGGER = LogManager.getLogger();
+    //    private static final Logger LOGGER = LogManager.getLogger();
     public final ISerializerDeserializer<ADouble> doubleSerde =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
 
@@ -92,9 +94,9 @@ public class VectorDistanceScalarEvaluator5 implements IScalarEvaluator {
     }
 
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculation4::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceCalculation4::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculation4::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation4::dot);
+            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculation5::manhattan, EUCLIDEAN_DISTANCE.hash(),
+                    VectorDistanceCalculation5::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculation5::cosine,
+                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation5::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
@@ -181,7 +183,7 @@ public class VectorDistanceScalarEvaluator5 implements IScalarEvaluator {
             long startTime = System.nanoTime();
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
             long endTime = System.nanoTime();
-            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
+            //            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;
@@ -203,9 +205,9 @@ public class VectorDistanceScalarEvaluator5 implements IScalarEvaluator {
 
     protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
-//        if (!typeTag.isNumericType()) {
-//            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
-//        }
+        //        if (!typeTag.isNumericType()) {
+        //            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
+        //        }
         double[] primitiveArray = new double[listAccessor.size()];
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
