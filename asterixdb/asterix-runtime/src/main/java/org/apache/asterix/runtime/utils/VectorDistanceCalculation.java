@@ -34,25 +34,13 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+
 
 public class VectorDistanceCalculation {
-    private static final Logger LOGGER = LogManager.getLogger();
 
-    //    // Euclidean Distance
-    public static double euclidean(double[] a, double[] b) {
-        //        checkDimensions(a, b);
-        double sum = 0.0;
-        for (int i = 0; i < a.length; i++) {
-            double diff = a[i] - b[i];
-            sum += diff * diff;
-        }
-        return Math.sqrt(sum);
-    }
+    //    Euclidean Distance
 
     public static double euclidean(ListAccessor a, ListAccessor b) throws HyracksDataException {
-        //        checkDimensions(a, b);
         ATypeTag listType1 = a.getItemType();
         ATypeTag listType2 = b.getItemType();
         IPointable tempVal1 = new VoidPointable();
@@ -80,17 +68,8 @@ public class VectorDistanceCalculation {
     }
 
     // Manhattan Distance
-    public static double manhattan(double[] a, double[] b) {
-        //        checkDimensions(a, b);
-        double sum = 0.0;
-        for (int i = 0; i < a.length; i++) {
-            sum += Math.abs(a[i] - b[i]);
-        }
-        return sum;
-    }
 
     public static double manhattan(ListAccessor a, ListAccessor b) throws HyracksDataException {
-        //        checkDimensions(a, b);
         ATypeTag listType1 = a.getItemType();
         ATypeTag listType2 = b.getItemType();
         IPointable tempVal1 = new VoidPointable();
@@ -116,22 +95,8 @@ public class VectorDistanceCalculation {
     }
 
     // Cosine Similarity
-    public static double cosine(double[] a, double[] b) {
-        //        checkDimensions(a, b);
-        double dot = 0.0, normA = 0.0, normB = 0.0;
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        if (normA == 0.0 || normB == 0.0) {
-            return 0.0; // or throw exception for zero vector
-        }
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-    }
 
     public static double cosine(ListAccessor a, ListAccessor b) throws HyracksDataException {
-        //        checkDimensions(a, b);
         ATypeTag listType1 = a.getItemType();
         ATypeTag listType2 = b.getItemType();
         IPointable tempVal1 = new VoidPointable();
@@ -162,13 +127,6 @@ public class VectorDistanceCalculation {
     }
 
     // Dot Product
-    public static double dot(double[] a, double[] b) {
-        double sum = 0.0;
-        for (int i = 0; i < a.length; i++) {
-            sum += a[i] * b[i];
-        }
-        return sum;
-    }
 
     public static double dot(ListAccessor a, ListAccessor b) throws HyracksDataException {
         ATypeTag listType1 = a.getItemType();
@@ -208,7 +166,6 @@ public class VectorDistanceCalculation {
         }
     }
 
-    // TODO CALVIN DANI add a type derivation func to abstract.
     public static double getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
         return switch (typeTag) {
             case TINYINT -> AInt8SerializerDeserializer.getByte(data, offset + 1);

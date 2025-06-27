@@ -41,6 +41,7 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
+import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
@@ -57,7 +58,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
-public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
+public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
     protected ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
     protected DataOutput dataOutput = resultStorage.getDataOutput();
@@ -66,7 +67,6 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
     // Function ID, for error reporting.
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
-    //    private static final Logger LOGGER = LogManager.getLogger();
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
@@ -89,21 +89,18 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
     }
 
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculation::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation::dot);
+            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
+                    VectorDistanceArrCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
+                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
-    //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceScalarEvaluator8(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
+    public VectorDistanceArrScalarEvaluator (IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
             FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
-        primitiveArrayConstant[0] = new double[1028];
-        primitiveArrayConstant[1] = new double[1028];
         for (int i = 0; i < evaluators.length; ++i) {
             pointables[i] = new VoidPointable();
             evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
@@ -131,8 +128,7 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
                     }
                     listAccessorConstant[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
                     try {
-                        primitiveArrayConstant[i] =
-                                createPrimitveList(listAccessorConstant[i], primitiveArrayConstant[i]);
+                        primitiveArrayConstant[i] = createPrimitveList(listAccessorConstant[i]);
                     } catch (IOException e) {
                         throw new HyracksDataException("Error creating primitive list from constant vector", e);
                     }
@@ -166,10 +162,8 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
         ListAccessor listAccessor2 = isConstant[1] ? listAccessorConstant[1] : listAccessor[1];
         double distanceCal;
         try {
-            double[] primitiveArray1 = isConstant[0] ? primitiveArrayConstant[0]
-                    : createPrimitveList(listAccessor1, primitiveArrayConstant[0]);
-            double[] primitiveArray2 = isConstant[1] ? primitiveArrayConstant[1]
-                    : createPrimitveList(listAccessor2, primitiveArrayConstant[1]);
+            double[] primitiveArray1 = isConstant[0] ? primitiveArrayConstant[0] : createPrimitveList(listAccessor1);
+            double[] primitiveArray2 = isConstant[1] ? primitiveArrayConstant[1] : createPrimitveList(listAccessor2);
             if (listAccessor1.size() != listAccessor2.size() || listAccessor1.size() == 0
                     || listAccessor2.size() == 0) {
                 PointableHelper.setNull(result);
@@ -180,10 +174,7 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
                 PointableHelper.setNull(result);
                 return;
             }
-            long startTime = System.nanoTime();
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
-            long endTime = System.nanoTime();
-            //            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;
@@ -203,11 +194,9 @@ public class VectorDistanceScalarEvaluator8 implements IScalarEvaluator {
 
     }
 
-    protected double[] createPrimitveList(ListAccessor listAccessor, double[] primitiveArray) throws IOException {
+    protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
-        //        if (!typeTag.isNumericType()) {
-        //            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
-        //        }
+        double[] primitiveArray = new double[listAccessor.size()];
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
         for (int i = 0; i < listAccessor.size(); i++) {
