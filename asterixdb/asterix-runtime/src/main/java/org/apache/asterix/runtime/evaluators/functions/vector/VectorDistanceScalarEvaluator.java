@@ -59,7 +59,6 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
 
-
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =

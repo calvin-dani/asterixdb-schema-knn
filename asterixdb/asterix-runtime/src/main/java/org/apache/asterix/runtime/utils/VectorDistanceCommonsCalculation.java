@@ -23,7 +23,6 @@ import org.apache.commons.math3.linear.ArrayRealVector;
 import org.apache.commons.math3.ml.distance.EuclideanDistance;
 import org.apache.commons.math3.ml.distance.ManhattanDistance;
 
-
 public class VectorDistanceCommonsCalculation {
 
     //   Euclidean Distance
@@ -34,7 +33,6 @@ public class VectorDistanceCommonsCalculation {
         return Math.sqrt(sum);
     }
 
-
     // Manhattan Distance
     public static double manhattan(double[] a, double[] b) {
         double distanceCal = 0.0;
@@ -43,7 +41,6 @@ public class VectorDistanceCommonsCalculation {
         return distanceCal;
     }
 
-
     // Cosine Similarity
     public static double cosine(double[] a, double[] b) {
         ArrayRealVector v1 = new ArrayRealVector(a);
@@ -51,13 +48,11 @@ public class VectorDistanceCommonsCalculation {
         return v1.dotProduct(v2) / (v1.getNorm() * v2.getNorm());
     }
 
-
     // Dot Product
     public static double dot(double[] a, double[] b) {
         ArrayRealVector v1 = new ArrayRealVector(a);
         ArrayRealVector v2 = new ArrayRealVector(b);
         return v1.dotProduct(v2);
     }
-
 
 }
