@@ -31,7 +31,6 @@ public class VectorDistanceCalculationSMILE {
         return distance.d(a, b);
     }
 
-
     // Manhattan Distance
     public static double manhattan(double[] a, double[] b) {
         ManhattanDistance distance = new ManhattanDistance();

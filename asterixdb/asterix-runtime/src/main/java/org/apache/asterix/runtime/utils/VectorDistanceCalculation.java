@@ -35,7 +35,6 @@ import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
-
 public class VectorDistanceCalculation {
 
     //    Euclidean Distance

@@ -19,22 +19,6 @@
 
 package org.apache.asterix.runtime.utils;
 
-import java.io.IOException;
-
-import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.types.EnumDeserializer;
-import org.apache.asterix.runtime.evaluators.common.ListAccessor;
-import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.api.IPointable;
-import org.apache.hyracks.data.std.primitive.VoidPointable;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
@@ -79,7 +63,6 @@ public class VectorDistanceAPICalculation {
         return sum;
     }
 
-
     // Cosine Similarity
     public static double cosine(double[] a, double[] b) {
         //        checkDimensions(a, b);
@@ -105,7 +88,6 @@ public class VectorDistanceAPICalculation {
         return dot / (Math.sqrt(norm1) * Math.sqrt(norm2));
     }
 
-
     // Dot Product
     public static double dot(double[] a, double[] b) {
         int i = 0;
@@ -120,6 +102,5 @@ public class VectorDistanceAPICalculation {
         }
         return sum;
     }
-
 
 }

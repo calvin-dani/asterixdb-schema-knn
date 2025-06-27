@@ -101,8 +101,9 @@ public class VectorDistanceAPIScalarEvaluator implements IScalarEvaluator {
     //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceAPIScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
-            FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+    public VectorDistanceAPIScalarEvaluator(IEvaluatorContext context,
+            final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
+            throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         for (int i = 0; i < evaluators.length; ++i) {

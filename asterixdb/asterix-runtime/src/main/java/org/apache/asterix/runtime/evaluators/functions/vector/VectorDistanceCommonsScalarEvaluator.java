@@ -87,17 +87,18 @@ public class VectorDistanceCommonsScalarEvaluator implements IScalarEvaluator {
         double apply(double[] a, double[] b) throws HyracksDataException;
     }
 
-    private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCommonsCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceCommonsCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceCommonsCalculation::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCommonsCalculation::dot);
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(MANHATTAN_FORMAT.hash(),
+            VectorDistanceCommonsCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
+            VectorDistanceCommonsCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceCommonsCalculation::cosine,
+            DOT_PRODUCT_FORMAT.hash(), VectorDistanceCommonsCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceCommonsScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
-            FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+    public VectorDistanceCommonsScalarEvaluator(IEvaluatorContext context,
+            final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
+            throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         for (int i = 0; i < evaluators.length; ++i) {
