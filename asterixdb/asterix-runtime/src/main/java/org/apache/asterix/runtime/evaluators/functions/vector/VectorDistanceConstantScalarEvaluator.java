@@ -97,8 +97,9 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
     public double[][] primitiveArrayConstant = new double[2][];
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceConstantScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
-            FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+    public VectorDistanceConstantScalarEvaluator(IEvaluatorContext context,
+            final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
+            throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         primitiveArrayConstant[0] = new double[1028];

@@ -36,7 +36,7 @@ public class VectorDistanceAPIDescriptor extends AbstractScalarFunctionDynamicDe
     private static final long serialVersionUID = 1L;
 
     public final static IFunctionDescriptorFactory FACTORY = DescriptorFactoryUtil
-            .createFactory(VectorDistanceAPIDescriptor ::new, FunctionTypeInferers.SET_ARGUMENTS_TYPE);
+            .createFactory(VectorDistanceAPIDescriptor::new, FunctionTypeInferers.SET_ARGUMENTS_TYPE);
 
     @Override
     public FunctionIdentifier getIdentifier() {

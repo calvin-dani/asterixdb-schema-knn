@@ -1158,10 +1158,6 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("vector-distance-api", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY =
             FunctionConstants.newAsterix("vector-distance-arr", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_256 =
-            FunctionConstants.newAsterix("vector-distance-256", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_512 =
-            FunctionConstants.newAsterix("vector-distance-512", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
             FunctionConstants.newAsterix("vector-distance-constant", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_SMILE =
@@ -1891,11 +1887,9 @@ public class BuiltinFunctions {
         addFunction(VECTOR_DISTANCE_TEMP, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_VECTOR_API, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_256, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_512, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_1028, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY_COMMONS, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_SMILEY, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_SMILE, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);

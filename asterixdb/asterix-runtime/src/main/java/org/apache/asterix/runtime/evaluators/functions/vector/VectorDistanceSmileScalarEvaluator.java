@@ -57,7 +57,6 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
-
 public class VectorDistanceSmileScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
     protected ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
@@ -88,17 +87,18 @@ public class VectorDistanceSmileScalarEvaluator implements IScalarEvaluator {
         double apply(double[] a, double[] b) throws HyracksDataException;
     }
 
-    private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculationSMILE::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceCalculationSMILE::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculationSMILE::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculationSMILE::dot);
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(MANHATTAN_FORMAT.hash(),
+            VectorDistanceCalculationSMILE::manhattan, EUCLIDEAN_DISTANCE.hash(),
+            VectorDistanceCalculationSMILE::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculationSMILE::cosine,
+            DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculationSMILE::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceSmileScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
-            FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+    public VectorDistanceSmileScalarEvaluator(IEvaluatorContext context,
+            final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
+            throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         for (int i = 0; i < evaluators.length; ++i) {

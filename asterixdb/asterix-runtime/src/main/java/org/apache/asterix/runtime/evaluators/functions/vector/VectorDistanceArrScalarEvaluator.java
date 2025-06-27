@@ -42,7 +42,6 @@ import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
 import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
-import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -97,8 +96,9 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
     public double[][] primitiveArrayConstant = new double[2][];
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceArrScalarEvaluator (IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
-            FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
+    public VectorDistanceArrScalarEvaluator(IEvaluatorContext context,
+            final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
+            throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         for (int i = 0; i < evaluators.length; ++i) {

@@ -50,7 +50,7 @@ public class VectorDistanceArrDescriptor extends AbstractScalarFunctionDynamicDe
 
             @Override
             public IScalarEvaluator createScalarEvaluator(final IEvaluatorContext ctx) throws HyracksDataException {
-                return new VectorDistanceArrScalarEvaluator (ctx, args, getIdentifier(), sourceLoc);
+                return new VectorDistanceArrScalarEvaluator(ctx, args, getIdentifier(), sourceLoc);
             }
         };
 
