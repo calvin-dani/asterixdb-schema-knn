@@ -41,7 +41,7 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
-import org.apache.asterix.runtime.utils.VectorDistanceCalculation2;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculationSMILE;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -57,7 +57,8 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
-public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
+
+public class VectorDistanceSmileScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
     protected ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
     protected DataOutput dataOutput = resultStorage.getDataOutput();
@@ -66,7 +67,6 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
     // Function ID, for error reporting.
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
-    //    private static final Logger LOGGER = LogManager.getLogger();
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
@@ -89,16 +89,15 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
     }
 
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculation2::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceCalculation2::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculation2::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation2::dot);
+            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculationSMILE::manhattan, EUCLIDEAN_DISTANCE.hash(),
+                    VectorDistanceCalculationSMILE::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculationSMILE::cosine,
+                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculationSMILE::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
-    //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceScalarEvaluator3(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
+    public VectorDistanceSmileScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
             FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
@@ -175,10 +174,7 @@ public class VectorDistanceScalarEvaluator3 implements IScalarEvaluator {
                 PointableHelper.setNull(result);
                 return;
             }
-            long startTime = System.nanoTime();
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
-            long endTime = System.nanoTime();
-            //            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;

@@ -59,7 +59,6 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
 
-    //    private static final Logger LOGGER = LogManager.getLogger();
 
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
@@ -88,7 +87,6 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
                     DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
-    //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
     public final boolean[] isConstant = new boolean[3];
 
     public VectorDistanceScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
@@ -161,10 +159,7 @@ public class VectorDistanceScalarEvaluator implements IScalarEvaluator {
         }
         double distanceCal;
         try {
-            long startTime = System.nanoTime();
             distanceCal = func.apply(listAccessor1, listAccessor2);
-            long endTime = System.nanoTime();
-            //            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (HyracksDataException e) {
             PointableHelper.setNull(result);
             return;

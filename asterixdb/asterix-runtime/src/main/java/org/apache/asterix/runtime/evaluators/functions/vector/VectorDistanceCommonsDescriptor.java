@@ -32,15 +32,15 @@ import org.apache.hyracks.api.context.IEvaluatorContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 @MissingNullInOutFunction
-public class VectorDistanceDescriptor8 extends AbstractScalarFunctionDynamicDescriptor {
+public class VectorDistanceCommonsDescriptor extends AbstractScalarFunctionDynamicDescriptor {
     private static final long serialVersionUID = 1L;
 
     public final static IFunctionDescriptorFactory FACTORY = DescriptorFactoryUtil
-            .createFactory(VectorDistanceDescriptor8::new, FunctionTypeInferers.SET_ARGUMENTS_TYPE);
+            .createFactory(VectorDistanceCommonsDescriptor::new, FunctionTypeInferers.SET_ARGUMENTS_TYPE);
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.VECTOR_DISTANCE_ARRAY_512;
+        return BuiltinFunctions.VECTOR_DISTANCE_ARRAY_COMMONS;
     }
 
     @Override
@@ -50,7 +50,7 @@ public class VectorDistanceDescriptor8 extends AbstractScalarFunctionDynamicDesc
 
             @Override
             public IScalarEvaluator createScalarEvaluator(final IEvaluatorContext ctx) throws HyracksDataException {
-                return new VectorDistanceScalarEvaluator7(ctx, args, getIdentifier(), sourceLoc);
+                return new VectorDistanceCommonsScalarEvaluator(ctx, args, getIdentifier(), sourceLoc);
             }
         };
 

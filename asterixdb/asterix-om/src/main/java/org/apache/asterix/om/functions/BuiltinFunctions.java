@@ -1162,10 +1162,10 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("vector-distance-256", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_512 =
             FunctionConstants.newAsterix("vector-distance-512", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_1028 =
-            FunctionConstants.newAsterix("vector-distance-1028", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_SMILEY =
-            FunctionConstants.newAsterix("vector-distance-smiley", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
+            FunctionConstants.newAsterix("vector-distance-constant", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_SMILE =
+            FunctionConstants.newAsterix("vector-distance-smile", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_COMMONS =
             FunctionConstants.newAsterix("vector-distance-commons", 3);
 
