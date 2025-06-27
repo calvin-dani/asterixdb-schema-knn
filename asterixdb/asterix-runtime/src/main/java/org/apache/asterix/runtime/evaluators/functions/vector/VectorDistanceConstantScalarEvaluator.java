@@ -41,7 +41,7 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
-import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
+import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -57,7 +57,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
-public class VectorDistanceScalarEvaluator7 implements IScalarEvaluator {
+public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
     protected ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
     protected DataOutput dataOutput = resultStorage.getDataOutput();
@@ -66,7 +66,7 @@ public class VectorDistanceScalarEvaluator7 implements IScalarEvaluator {
     // Function ID, for error reporting.
     protected final FunctionIdentifier funcId;
     protected final SourceLocation sourceLoc;
-
+    //    private static final Logger LOGGER = LogManager.getLogger();
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
@@ -77,7 +77,7 @@ public class VectorDistanceScalarEvaluator7 implements IScalarEvaluator {
             UTF8StringPointable.generateUTF8Pointable("cosine similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT =
             UTF8StringPointable.generateUTF8Pointable("dot product");
-    //    private static final Logger LOGGER = LogManager.getLogger();
+
     public final ISerializerDeserializer<ADouble> doubleSerde =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
 
@@ -89,21 +89,20 @@ public class VectorDistanceScalarEvaluator7 implements IScalarEvaluator {
     }
 
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceCalculation::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceCalculation::dot);
+            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
+                    VectorDistanceArrCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
+                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
-    //    private final ListAccessor listAccessorConstant2 = new ListAccessor();
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceScalarEvaluator7(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
+    public VectorDistanceConstantScalarEvaluator(IEvaluatorContext context, final IScalarEvaluatorFactory[] evaluatorFactories,
             FunctionIdentifier funcId, SourceLocation sourceLoc) throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
-        primitiveArrayConstant[0] = new double[512];
-        primitiveArrayConstant[1] = new double[512];
+        primitiveArrayConstant[0] = new double[1028];
+        primitiveArrayConstant[1] = new double[1028];
         for (int i = 0; i < evaluators.length; ++i) {
             pointables[i] = new VoidPointable();
             evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
@@ -180,10 +179,7 @@ public class VectorDistanceScalarEvaluator7 implements IScalarEvaluator {
                 PointableHelper.setNull(result);
                 return;
             }
-            long startTime = System.nanoTime();
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
-            long endTime = System.nanoTime();
-            //            LOGGER.log(Level.ALL, STR."Start of euclidean distance calculation \{endTime - startTime}");
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;
