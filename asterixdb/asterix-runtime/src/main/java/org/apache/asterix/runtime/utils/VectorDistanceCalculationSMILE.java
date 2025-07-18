@@ -24,17 +24,18 @@ import smile.math.distance.EuclideanDistance;
 import smile.math.distance.ManhattanDistance;
 
 public class VectorDistanceCalculationSMILE {
+    private static final EuclideanDistance EUCLIDEAN_DISTANCE = new EuclideanDistance();
+    private static final ManhattanDistance MANHATTAN_DISTANCE = new ManhattanDistance();
+
 
     // Euclidean Distance
     public static double euclidean(double[] a, double[] b) {
-        EuclideanDistance distance = new EuclideanDistance();
-        return distance.d(a, b);
+        return EUCLIDEAN_DISTANCE.d(a, b);
     }
 
     // Manhattan Distance
     public static double manhattan(double[] a, double[] b) {
-        ManhattanDistance distance = new ManhattanDistance();
-        return distance.d(a, b);
+        return MANHATTAN_DISTANCE.d(a, b);
     }
 
     // Cosine Similarity

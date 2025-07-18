@@ -24,21 +24,16 @@ import org.apache.commons.math3.ml.distance.EuclideanDistance;
 import org.apache.commons.math3.ml.distance.ManhattanDistance;
 
 public class VectorDistanceCommonsCalculation {
-
+    private static final EuclideanDistance euclidean_distance = new EuclideanDistance();
+    private static final ManhattanDistance manhattan_distance = new ManhattanDistance();
     //   Euclidean Distance
     public static double euclidean(double[] a, double[] b) {
-        double sum = 0.0;
-        EuclideanDistance distance = new EuclideanDistance();
-        sum = distance.compute(a, b);
-        return Math.sqrt(sum);
+        return Math.sqrt(euclidean_distance.compute(a, b));
     }
 
     // Manhattan Distance
     public static double manhattan(double[] a, double[] b) {
-        double distanceCal = 0.0;
-        ManhattanDistance distance = new ManhattanDistance();
-        distanceCal = distance.compute(a, b);
-        return distanceCal;
+        return manhattan_distance.compute(a, b);
     }
 
     // Cosine Similarity
