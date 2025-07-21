@@ -159,9 +159,7 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
 
                 listAccessor[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
             }
-
         }
-
         ListAccessor listAccessor1 = isConstant[0] ? listAccessorConstant[0] : listAccessor[0];
         ListAccessor listAccessor2 = isConstant[1] ? listAccessorConstant[1] : listAccessor[1];
         double distanceCal;
@@ -170,22 +168,12 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
                     : createPrimitveList(listAccessor1, primitiveArrayConstant[0]);
             double[] primitiveArray2 = isConstant[1] ? primitiveArrayConstant[1]
                     : createPrimitveList(listAccessor2, primitiveArrayConstant[1]);
-            if (listAccessor1.size() != listAccessor2.size() || listAccessor1.size() == 0
-                    || listAccessor2.size() == 0) {
-                PointableHelper.setNull(result);
-                return;
-            }
-
-            if (PointableHelper.checkAndSetMissingOrNull(result, pointables[0], pointables[1], pointables[2])) {
+            if (listAccessor1.size() != listAccessor2.size() || listAccessor1.size() == 0 || listAccessor2.size() == 0
+                    || PointableHelper.checkAndSetMissingOrNull(result, pointables[0], pointables[1], pointables[2])) {
                 PointableHelper.setNull(result);
                 return;
             }
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
-        } catch (IOException e) {
-            PointableHelper.setNull(result);
-            return;
-        }
-        try {
             writeResult(distanceCal, dataOutput);
         } catch (IOException e) {
             throw HyracksDataException.create(e);
@@ -202,9 +190,6 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
 
     protected double[] createPrimitveList(ListAccessor listAccessor, double[] primitiveArray) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
-        //        if (!typeTag.isNumericType()) {
-        //            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + typeTag);
-        //        }
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
         for (int i = 0; i < listAccessor.size(); i++) {

@@ -175,17 +175,12 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                 return;
             }
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
-
-        } catch (IOException e) {
-            PointableHelper.setNull(result);
-            return;
-        }
-        try {
             if (Double.isNaN(distanceCal)) {
                 PointableHelper.setNull(result);
                 return;
             }
             writeResult(distanceCal, dataOutput);
+
         } catch (IOException e) {
             throw HyracksDataException.create(e);
         }
@@ -225,7 +220,6 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
         }
     }
 
-    // TODO CALVIN DANI add a type derivation func to abstract.
     protected double getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
         return switch (typeTag) {
             case TINYINT -> AInt8SerializerDeserializer.getByte(data, offset + 1);
