@@ -1151,19 +1151,9 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("get-overlapping-interval", 2);
 
     //Vector functions
-    public static final FunctionIdentifier VECTOR_DISTANCE = FunctionConstants.newAsterix("vector-distance", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_TEMP =
-            FunctionConstants.newAsterix("vector-distance-temp", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_VECTOR_API =
-            FunctionConstants.newAsterix("vector-distance-api", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY =
-            FunctionConstants.newAsterix("vector-distance-arr", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY = FunctionConstants.newAsterix("vector-distance", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
             FunctionConstants.newAsterix("vector-distance-constant", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_SMILE =
-            FunctionConstants.newAsterix("vector-distance-smile", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_COMMONS =
-            FunctionConstants.newAsterix("vector-distance-commons", 3);
 
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
@@ -1883,13 +1873,8 @@ public class BuiltinFunctions {
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
 
         // Vector functions
-        addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_TEMP, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_VECTOR_API, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_COMMONS, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_ARRAY_SMILE, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);

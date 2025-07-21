@@ -175,11 +175,16 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                 return;
             }
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
+
         } catch (IOException e) {
             PointableHelper.setNull(result);
             return;
         }
         try {
+            if (Double.isNaN(distanceCal)) {
+                PointableHelper.setNull(result);
+                return;
+            }
             writeResult(distanceCal, dataOutput);
         } catch (IOException e) {
             throw HyracksDataException.create(e);
@@ -189,6 +194,7 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
 
     protected void writeResult(double distance, DataOutput dataOutput) throws IOException {
         AMutableDouble aDouble = new AMutableDouble(-1);
+
         aDouble.setValue(distance);
         doubleSerde.serialize(aDouble, dataOutput);
 

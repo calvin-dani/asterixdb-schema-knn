@@ -49,7 +49,7 @@ public class VectorDistanceArrCalculation {
             normB += b[i] * b[i];
         }
         if (normA == 0.0 || normB == 0.0) {
-            return 0.0; // or throw exception for zero vector
+            return Float.NaN; // or throw exception for zero vector
         }
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
