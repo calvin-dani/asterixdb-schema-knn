@@ -45,20 +45,6 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
       </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.10.1</version>
-        <configuration>
-          <release>21</release>
-          <enablePreview>true</enablePreview>
-          <compilerArgs>
-            <arg>--enable-preview</arg>
-            <arg>--add-modules</arg>
-            <arg>jdk.incubator.vector</arg>
-          </compilerArgs>
-        </configuration>
-      </plugin>
     </plugins>
   </build>
   <dependencies>
@@ -183,16 +169,6 @@
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-column</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.github.haifengl</groupId>
-      <artifactId>smile-core</artifactId>
-      <version>4.3.0</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.commons</groupId>
-      <artifactId>commons-math3</artifactId>
-      <version>3.6.1</version>
     </dependency>
   </dependencies>
 </project>
