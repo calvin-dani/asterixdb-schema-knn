@@ -641,12 +641,8 @@ import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYear2Descr
 import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYearDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationGreaterThanComparatorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationLessThanComparatorDescriptor;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceAPIDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrDescriptor;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceCommonsDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceConstantDescriptor;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceDescriptor;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceSmileDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.DenseRankRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.NtileRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.PercentRankRunningAggregateDescriptor;
@@ -1330,11 +1326,7 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(DurationFromIntervalDescriptor.FACTORY);
 
         // Vector functions
-        fc.add(VectorDistanceDescriptor.FACTORY);
         fc.add(VectorDistanceArrDescriptor.FACTORY);
-        fc.add(VectorDistanceSmileDescriptor.FACTORY);
-        fc.add(VectorDistanceAPIDescriptor.FACTORY);
-        fc.add(VectorDistanceCommonsDescriptor.FACTORY);
         fc.add(VectorDistanceConstantDescriptor.FACTORY);
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
