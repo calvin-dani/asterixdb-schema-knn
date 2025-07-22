@@ -23,6 +23,7 @@ import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Map;
 
 import org.apache.asterix.common.exceptions.ErrorCode;
@@ -174,6 +175,10 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
                 return;
             }
             distanceCal = func.apply(primitiveArray1, primitiveArray2);
+            if (Double.isNaN(distanceCal)) {
+                PointableHelper.setNull(result);
+                return;
+            }
             writeResult(distanceCal, dataOutput);
         } catch (IOException e) {
             throw HyracksDataException.create(e);
@@ -192,6 +197,7 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
         ATypeTag typeTag = listAccessor.getItemType();
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+        Arrays.fill(primitiveArray, 0.0);
         for (int i = 0; i < listAccessor.size(); i++) {
             listAccessor.getOrWriteItem(i, tempVal, storage);
             primitiveArray[i] = extractNumericVector(tempVal, typeTag);
@@ -221,7 +227,7 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
             case BIGINT -> AInt64SerializerDeserializer.getLong(data, offset + 1);
             case FLOAT -> AFloatSerializerDeserializer.getFloat(data, offset + 1);
             case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
-            default -> throw new HyracksDataException("Unsupported type tag: " + typeTag);
+            default -> Float.NaN;
         };
     }
 

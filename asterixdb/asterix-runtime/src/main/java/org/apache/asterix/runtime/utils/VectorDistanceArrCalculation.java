@@ -28,6 +28,9 @@ public class VectorDistanceArrCalculation {
             double diff = a[i] - b[i];
             sum += diff * diff;
         }
+        if (Double.isNaN(sum)) {
+            return Double.NaN; // Handle NaN case
+        }
         return Math.sqrt(sum);
     }
 
@@ -36,6 +39,9 @@ public class VectorDistanceArrCalculation {
         double sum = 0.0;
         for (int i = 0; i < a.length; i++) {
             sum += Math.abs(a[i] - b[i]);
+        }
+        if (Double.isNaN(sum)) {
+            return Double.NaN; // Handle NaN case
         }
         return sum;
     }
@@ -48,7 +54,7 @@ public class VectorDistanceArrCalculation {
             normA += a[i] * a[i];
             normB += b[i] * b[i];
         }
-        if (normA == 0.0 || normB == 0.0) {
+        if (normA == 0.0 || normB == 0.0 || Double.isNaN(normA) || Double.isNaN(normB) || Double.isNaN(dot)) {
             return Float.NaN; // or throw exception for zero vector
         }
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
@@ -59,6 +65,9 @@ public class VectorDistanceArrCalculation {
         double sum = 0.0;
         for (int i = 0; i < a.length; i++) {
             sum += a[i] * b[i];
+        }
+        if (Double.isNaN(sum)) {
+            return Double.NaN; // Handle NaN case
         }
         return sum;
     }
