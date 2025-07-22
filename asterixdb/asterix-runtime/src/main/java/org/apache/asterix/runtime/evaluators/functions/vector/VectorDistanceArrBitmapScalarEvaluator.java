@@ -41,7 +41,8 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.PointableHelper;
-import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
+import org.apache.asterix.runtime.utils.VectorBitmapDistanceArrCalculation;
+import org.apache.asterix.runtime.utils.VectorWithBitmap;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -57,7 +58,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
-public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
+public class VectorDistanceArrBitmapScalarEvaluator implements IScalarEvaluator {
     private final ListAccessor[] listAccessor = new ListAccessor[2];
     protected ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
     protected DataOutput dataOutput = resultStorage.getDataOutput();
@@ -84,19 +85,21 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
 
     @FunctionalInterface
     public interface DistanceFunction {
-        double apply(double[] a, double[] b) throws HyracksDataException;
+        double apply(VectorWithBitmap a, VectorWithBitmap b) throws HyracksDataException;
     }
 
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceArrCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
-                    DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
+            Map.of(MANHATTAN_FORMAT.hash(), VectorBitmapDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
+                    VectorBitmapDistanceArrCalculation::euclidean, COSINE_FORMAT.hash(),
+                    VectorBitmapDistanceArrCalculation::cosine, DOT_PRODUCT_FORMAT.hash(),
+                    VectorBitmapDistanceArrCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
+    public VectorWithBitmap[] vecBitmapConstant = new VectorWithBitmap[2];
     public final boolean[] isConstant = new boolean[3];
 
-    public VectorDistanceArrScalarEvaluator(IEvaluatorContext context,
+    public VectorDistanceArrBitmapScalarEvaluator(IEvaluatorContext context,
             final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
             throws HyracksDataException {
         pointables = new IPointable[evaluatorFactories.length];
@@ -128,7 +131,7 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                     }
                     listAccessorConstant[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
                     try {
-                        primitiveArrayConstant[i] = createPrimitveList(listAccessorConstant[i]);
+                        vecBitmapConstant[i] = createPrimitveList(listAccessorConstant[i]);
                     } catch (IOException e) {
                         throw new HyracksDataException("Error creating primitive list from constant vector", e);
                     }
@@ -162,8 +165,8 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
         ListAccessor listAccessor2 = isConstant[1] ? listAccessorConstant[1] : listAccessor[1];
         double distanceCal;
         try {
-            double[] primitiveArray1 = isConstant[0] ? primitiveArrayConstant[0] : createPrimitveList(listAccessor1);
-            double[] primitiveArray2 = isConstant[1] ? primitiveArrayConstant[1] : createPrimitveList(listAccessor2);
+            VectorWithBitmap vecBitmap1 = isConstant[0] ? vecBitmapConstant[0] : createPrimitveList(listAccessor1);
+            VectorWithBitmap vecBitmap2 = isConstant[1] ? vecBitmapConstant[1] : createPrimitveList(listAccessor2);
             if (listAccessor1.size() != listAccessor2.size() || listAccessor1.size() == 0
                     || listAccessor2.size() == 0) {
                 PointableHelper.setNull(result);
@@ -174,7 +177,7 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                 PointableHelper.setNull(result);
                 return;
             }
-            distanceCal = func.apply(primitiveArray1, primitiveArray2);
+            distanceCal = func.apply(vecBitmap1, vecBitmap2);
             if (Double.isNaN(distanceCal)) {
                 PointableHelper.setNull(result);
                 return;
@@ -195,16 +198,20 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
 
     }
 
-    protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
+    protected VectorWithBitmap createPrimitveList(ListAccessor listAccessor) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
         double[] primitiveArray = new double[listAccessor.size()];
+        long[] bitmap = new long[(listAccessor.size() + 63) / 64];
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
         for (int i = 0; i < listAccessor.size(); i++) {
             listAccessor.getOrWriteItem(i, tempVal, storage);
             primitiveArray[i] = extractNumericVector(tempVal, typeTag);
+            if (primitiveArray[i] != 0.0) {
+                bitmap[i / 64] |= (1L << (i % 64));
+            }
         }
-        return primitiveArray;
+        return new VectorWithBitmap(primitiveArray, bitmap);
     }
 
     protected double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws HyracksDataException {
