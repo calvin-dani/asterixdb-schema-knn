@@ -203,12 +203,12 @@ public class VectorDistanceConstantBitmapScalarEvaluator implements IScalarEvalu
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
         Arrays.fill(vecBitmapConstant.values, 0.0);
-        Arrays.fill(vecBitmapConstant.bitmap, 0L);
+        vecBitmapConstant.bitset.clear();
         for (int i = 0; i < listAccessor.size(); i++) {
             listAccessor.getOrWriteItem(i, tempVal, storage);
             vecBitmapConstant.values[i] = extractNumericVector(tempVal, typeTag);
             if (vecBitmapConstant.values[i] != 0.0) {
-                vecBitmapConstant.bitmap[i / 64] |= (1L << (i % 64));
+                vecBitmapConstant.bitset.set(i);
             }
         }
         return vecBitmapConstant;

@@ -23,6 +23,7 @@ import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.BitSet;
 import java.util.Map;
 
 import org.apache.asterix.common.exceptions.ErrorCode;
@@ -201,17 +202,17 @@ public class VectorDistanceArrBitmapScalarEvaluator implements IScalarEvaluator 
     protected VectorWithBitmap createPrimitveList(ListAccessor listAccessor) throws IOException {
         ATypeTag typeTag = listAccessor.getItemType();
         double[] primitiveArray = new double[listAccessor.size()];
-        long[] bitmap = new long[(listAccessor.size() + 63) / 64];
+        BitSet bitmapSet = new BitSet(listAccessor.size());
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
         for (int i = 0; i < listAccessor.size(); i++) {
             listAccessor.getOrWriteItem(i, tempVal, storage);
             primitiveArray[i] = extractNumericVector(tempVal, typeTag);
             if (primitiveArray[i] != 0.0) {
-                bitmap[i / 64] |= (1L << (i % 64));
+                bitmapSet.set(i);
             }
         }
-        return new VectorWithBitmap(primitiveArray, bitmap);
+        return new VectorWithBitmap(primitiveArray, bitmapSet);
     }
 
     protected double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws HyracksDataException {

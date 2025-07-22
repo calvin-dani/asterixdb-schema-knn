@@ -19,34 +19,20 @@
 
 package org.apache.asterix.runtime.utils;
 
+import java.util.BitSet;
+
 public class VectorWithBitmap {
     public final double[] values;
-    public final long[] bitmap;
+    public final BitSet bitset;
 
-    public VectorWithBitmap(double[] values, long[] bitmap) {
+    public VectorWithBitmap(double[] values, BitSet bitset) {
         this.values = values;
-        this.bitmap = bitmap;
+        this.bitset = bitset;
     }
 
     public VectorWithBitmap() {
         this.values = new double[1024];
-        this.bitmap = new long[16];;
+        this.bitset = new BitSet(1024);
     }
 
-    public interface DoublePairConsumer {
-        void apply(int index, double aVal, double bVal);
-    }
-
-    public void forEachNonZeroPair(VectorWithBitmap other, DoublePairConsumer consumer) {
-        int wordCount = bitmap.length;
-        for (int w = 0; w < wordCount; w++) {
-            long active = this.bitmap[w] & other.bitmap[w];
-            while (active != 0) {
-                int bit = Long.numberOfTrailingZeros(active);
-                int index = w * 64 + bit;
-                consumer.apply(index, this.values[index], other.values[index]);
-                active &= ~(1L << bit); // clear bit
-            }
-        }
-    }
 }

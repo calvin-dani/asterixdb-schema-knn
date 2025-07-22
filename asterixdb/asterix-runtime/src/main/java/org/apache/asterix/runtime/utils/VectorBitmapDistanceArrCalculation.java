@@ -19,58 +19,77 @@
 
 package org.apache.asterix.runtime.utils;
 
+import java.util.BitSet;
+
 public class VectorBitmapDistanceArrCalculation {
 
+
     public static double euclidean(VectorWithBitmap a, VectorWithBitmap b) {
-        final double[] sum = new double[1];
-        a.forEachNonZeroPair(b, (i, va, vb) -> {
-            double d = va - vb;
-            sum[0] += d * d;
-        });
-        if (Double.isNaN(sum[0])) {
+        double sum = 0.0;
+        BitSet union = (BitSet) a.bitset.clone();
+        union.or(b.bitset); // union of non-zero indices
+        for (int i = union.nextSetBit(0); i >= 0; i = union.nextSetBit(i + 1)) {
+            double diff = a.values[i] - b.values[i];
+            sum += diff * diff;
+        }
+        if (Double.isNaN(sum)) {
             return Double.NaN; // Handle NaN case
         }
-        return Math.sqrt(sum[0]);
+        return Math.sqrt(sum);
     }
 
     public static double manhattan(VectorWithBitmap a, VectorWithBitmap b) {
-        final double[] sum = new double[1];
-        a.forEachNonZeroPair(b, (i, va, vb) -> {
-            sum[0] += Math.abs(va - vb);
-        });
-        if (Double.isNaN(sum[0])) {
+        double sum = 0.0;
+        BitSet union = (BitSet) a.bitset.clone();
+        union.or(b.bitset);
+
+        for (int i = union.nextSetBit(0); i >= 0; i = union.nextSetBit(i + 1)) {
+            sum += Math.abs(a.values[i] - b.values[i]);
+        }
+        if (Double.isNaN(sum)) {
             return Double.NaN; // Handle NaN case
         }
-        return sum[0];
+        return sum;
     }
 
-    public static double cosine(VectorWithBitmap a, VectorWithBitmap b) {
-        final double[] dot = new double[1];
-        final double[] normA = new double[1];
-        final double[] normB = new double[1];
+       public static double cosine(VectorWithBitmap a, VectorWithBitmap b) {
+        double dot = 0.0, normA = 0.0, normB = 0.0;
 
-        a.forEachNonZeroPair(b, (i, va, vb) -> {
-            dot[0] += va * vb;
-            normA[0] += va * va;
-            normB[0] += vb * vb;
-        });
+        BitSet common = (BitSet) a.bitset.clone();
+        common.and(b.bitset);
 
-        if (normA[0] == 0 || normB[0] == 0 || Double.isNaN(normA[0]) || Double.isNaN(normB[0])
-                || Double.isNaN(dot[0])) {
+        for (int i = common.nextSetBit(0); i >= 0; i = common.nextSetBit(i + 1)) {
+            dot += a.values[i] * b.values[i];
+        }
+
+        for (int i = a.bitset.nextSetBit(0); i >= 0; i = a.bitset.nextSetBit(i + 1)) {
+            normA += a.values[i] * a.values[i];
+        }
+
+        for (int i = b.bitset.nextSetBit(0); i >= 0; i = b.bitset.nextSetBit(i + 1)) {
+            normB += b.values[i] * b.values[i];
+        }
+
+        if (normA == 0 || normB == 0 || Double.isNaN(normA) || Double.isNaN(normB) || Double.isNaN(dot)) {
             return Double.NaN;
         }
-        return dot[0] / (Math.sqrt(normA[0]) * Math.sqrt(normB[0]));
+
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
+
     public static double dot(VectorWithBitmap a, VectorWithBitmap b) {
-        final double[] sum = new double[1];
-        a.forEachNonZeroPair(b, (i, va, vb) -> {
-            sum[0] += va * vb;
-        });
-        if (Double.isNaN(sum[0])) {
+        double sum = 0.0;
+        BitSet common = (BitSet) a.bitset.clone();
+        common.and(b.bitset); // intersection = positions where both are non-zero
+
+        for (int i = common.nextSetBit(0); i >= 0; i = common.nextSetBit(i + 1)) {
+            sum += a.values[i] * b.values[i];
+        }
+        if (Double.isNaN(sum)) {
             return Double.NaN; // Handle NaN case
         }
-        return sum[0];
+        return sum;
     }
 
 }
