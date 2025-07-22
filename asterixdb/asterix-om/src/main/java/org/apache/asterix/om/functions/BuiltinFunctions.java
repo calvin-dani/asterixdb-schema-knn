@@ -1154,10 +1154,6 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY = FunctionConstants.newAsterix("vector-distance", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
             FunctionConstants.newAsterix("vector-distance-constant", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_BITMAP_ARRAY =
-            FunctionConstants.newAsterix("vector-distance-bm", 3);
-    public static final FunctionIdentifier VECTOR_DISTANCE_BITMAP_ARRAY_CONSTANT =
-            FunctionConstants.newAsterix("vector-distance-constant-bm", 3);
 
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
@@ -1879,8 +1875,7 @@ public class BuiltinFunctions {
         // Vector functions
         addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_BITMAP_ARRAY, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE_BITMAP_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
+
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);
