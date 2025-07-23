@@ -70,14 +70,20 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
     //    private static final Logger LOGGER = LogManager.getLogger();
     private final UTF8StringPointable formatPointable = new UTF8StringPointable();
 
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 =
+            UTF8StringPointable.generateUTF8Pointable("l2");
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
-            UTF8StringPointable.generateUTF8Pointable("euclidean distance");
+            UTF8StringPointable.generateUTF8Pointable("euclidean");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2_SQUARED =
+            UTF8StringPointable.generateUTF8Pointable("l2_squared");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
+            UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable MANHATTAN_FORMAT =
             UTF8StringPointable.generateUTF8Pointable("manhattan distance");
     private static final UTF8StringPointable COSINE_FORMAT =
             UTF8StringPointable.generateUTF8Pointable("cosine similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("dot product");
+            UTF8StringPointable.generateUTF8Pointable("dot");
 
     public final ISerializerDeserializer<ADouble> doubleSerde =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADOUBLE);
@@ -90,9 +96,14 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
     }
 
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(),
-                    VectorDistanceArrCalculation::euclidean, COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
+            Map.of(MANHATTAN_FORMAT.hash(), VectorDistanceArrCalculation::manhattan,
+                    EUCLIDEAN_DISTANCE.hash(), VectorDistanceArrCalculation::euclidean,
+                    EUCLIDEAN_DISTANCE_L2.hash(), VectorDistanceArrCalculation::euclidean,
+                    EUCLIDEAN_DISTANCE_SQUARED.hash(), VectorDistanceArrCalculation::euclidean_squared,
+                    EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), VectorDistanceArrCalculation::euclidean_squared,
+                    COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
                     DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
+
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];

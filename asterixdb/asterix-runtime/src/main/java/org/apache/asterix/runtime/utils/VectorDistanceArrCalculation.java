@@ -34,6 +34,18 @@ public class VectorDistanceArrCalculation {
         return Math.sqrt(sum);
     }
 
+    public static double euclidean_squared(double[] a, double[] b) {
+        double sum = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            double diff = a[i] - b[i];
+            sum += diff * diff;
+        }
+        if (Double.isNaN(sum)) {
+            return Double.NaN; // Handle NaN case
+        }
+        return sum;
+    }
+
     // Manhattan Distance
     public static double manhattan(double[] a, double[] b) {
         double sum = 0.0;
