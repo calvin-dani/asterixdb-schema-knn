@@ -166,6 +166,13 @@ public class CommonFunctionMapUtil {
         addFunctionMapping("variance_samp", "var_samp");
         addFunctionMapping("variance_pop", "var_pop");
 
+        //Vector functions
+        addFunctionMapping("l2_distance", "euclidean-distance");
+        addFunctionMapping("l2_squared_distance", "euclidean-squared-distance");
+        addFunctionMapping("cosine_distance", "cosine-distance");
+        addFunctionMapping("dot_product", "dot-product");
+
+
         // OGC SFA geospatial function aliases.
         // Many GIS dialects use CamelCase (e.g. ST_IsEmpty) which lowercases to
         // compressed forms like st_isempty; these don't normalize to the canonical

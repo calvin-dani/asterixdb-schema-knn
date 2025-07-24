@@ -690,6 +690,7 @@
           <excludeSubProjects>true</excludeSubProjects>
           <excludes combine.children="append">
             <exclude>**/*.iml</exclude>
+            <exclude>**/target/**</exclude>
           </excludes>
         </configuration>
       </plugin>
