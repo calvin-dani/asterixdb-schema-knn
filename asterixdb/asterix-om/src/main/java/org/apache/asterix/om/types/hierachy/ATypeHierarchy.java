@@ -148,6 +148,19 @@ public class ATypeHierarchy {
         return tagHierarchy1.equals(tagHierarchy2) && !useListDomain;
     }
 
+    public static ATypeTag getCommonNumericType(ATypeTag t1, ATypeTag t2) {
+        if (t1 == t2) {
+            return t1;
+        }
+        if (ATypeHierarchy.canPromote(t1, t2)) {
+            return t2; // t2 is wider
+        }
+        if (ATypeHierarchy.canPromote(t2, t1)) {
+            return t1; // t1 is wider
+        }
+        return ATypeTag.NULL; // or throw: incompatible types
+    }
+
     private static void addPromotionRule(ATypeTag type1, ATypeTag type2, ITypeConvertComputer promoteComputer) {
         int index = type1.ordinal() * ATypeTag.TYPE_COUNT + type2.ordinal();
         typePromotionHierachyMap.set(index);
