@@ -1168,6 +1168,15 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier GET_OVERLAPPING_INTERVAL =
             FunctionConstants.newAsterix("get-overlapping-interval", 2);
 
+    //Vector functions
+    public static final FunctionIdentifier EUCLIDEAN_DISTANCE_ARRAY =
+            FunctionConstants.newAsterix("euclidean-distance", 2);
+    //    public static final FunctionIdentifier L2_DISTANCE_ARRAY = FunctionConstants.newAsterix("l2-distance", 2);
+    public static final FunctionIdentifier EUCLIDEAN_SQ_DISTANCE_ARRAY =
+            FunctionConstants.newAsterix("euclidean-squared-distance", 2);
+    public static final FunctionIdentifier COSINE_DISTANCE_ARRAY = FunctionConstants.newAsterix("cosine-distance", 2);
+    public static final FunctionIdentifier DOT_DISTANCE_ARRAY = FunctionConstants.newAsterix("dot-distance", 2);
+
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
             FunctionConstants.newAsterix("unix-time-from-date-in-days", 1);
@@ -1888,6 +1897,12 @@ public class BuiltinFunctions {
         addFunction(SCALAR_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
+
+        // Vector functions
+        addFunction(EUCLIDEAN_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(EUCLIDEAN_SQ_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(COSINE_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(DOT_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
 
         // Window functions
 

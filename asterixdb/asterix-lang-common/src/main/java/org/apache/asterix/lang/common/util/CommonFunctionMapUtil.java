@@ -165,6 +165,11 @@ public class CommonFunctionMapUtil {
         addFunctionMapping("variance", "var_samp");
         addFunctionMapping("variance_samp", "var_samp");
         addFunctionMapping("variance_pop", "var_pop");
+
+        //Vector functions
+        addFunctionMapping("l2_distance", "euclidean-distance");
+        addFunctionMapping("l2_squared_distance", "euclidean-squared-distance");
+
     }
 
     private CommonFunctionMapUtil() {
