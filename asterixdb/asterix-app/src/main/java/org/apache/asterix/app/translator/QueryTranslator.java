@@ -264,6 +264,7 @@ import org.apache.asterix.translator.util.ValidateUtil;
 import org.apache.asterix.utils.DataverseUtil;
 import org.apache.asterix.utils.FeedOperations;
 import org.apache.asterix.utils.FlushDatasetUtil;
+import org.apache.asterix.utils.StorageUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableBoolean;
@@ -298,6 +299,7 @@ import org.apache.hyracks.control.common.controllers.CCConfig;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDropOperatorDescriptor.DropOption;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LSMTreeIndexInsertUpdateDeleteOperatorDescriptor;
+import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexFileManager;
 import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.TokenizerCategory;
 import org.apache.hyracks.util.LogRedactionUtil;
 import org.apache.logging.log4j.Level;
@@ -5137,7 +5139,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             if (opStats == null || opStats.size() == 0) {
                 throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_STATE, "", sourceLoc);
             }
-            DatasetStreamStats stats = new DatasetStreamStats(opStats.get(0));
+            long datasetCompressedTreeSize = StorageUtil.getCollectionDataSize(appCtx, databaseName, dataverseName,
+                    datasetName, datasetName, AbstractLSMIndexFileManager.BTREE_SUFFIX);
+            DatasetStreamStats stats = new DatasetStreamStats(opStats.get(0), datasetCompressedTreeSize);
 
             Index.SampleIndexDetails newIndexDetailsFinal = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
                     dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget,

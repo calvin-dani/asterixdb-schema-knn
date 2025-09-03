@@ -33,7 +33,6 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.BTree;
 import org.apache.hyracks.storage.am.btree.impls.BTree.BTreeAccessor;
 import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
-import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndex;
@@ -231,7 +230,22 @@ public class LSMBTree extends AbstractLSMIndex implements ITreeIndex {
         ISearchPredicate pred = new RangePredicate(null, null, true, true, comp, comp);
         ctx.getSearchInitialState().reset(pred, operationalComponents);
         ctx.getSearchInitialState().setDiskComponentScan(true);
-        ((LSMBTreeSearchCursor) cursor).open(ctx.getSearchInitialState(), pred);
+        cursor.open(ctx.getSearchInitialState(), pred);
+    }
+
+    @Override
+    public void scanDiskComponentsForSample(ILSMIndexOperationContext ictx, IIndexCursor cursor)
+            throws HyracksDataException {
+        if (!isPrimaryIndex()) {
+            throw HyracksDataException.create(ErrorCode.DISK_COMPONENT_SCAN_NOT_ALLOWED_FOR_SECONDARY_INDEX);
+        }
+        LSMBTreeOpContext ctx = (LSMBTreeOpContext) ictx;
+        List<ILSMComponent> operationalComponents = ctx.getComponentHolder();
+        MultiComparator comp = MultiComparator.create(getComparatorFactories());
+        ISearchPredicate pred = new RangePredicate(null, null, true, true, comp, comp);
+        ctx.getSearchInitialState().reset(pred, operationalComponents);
+        ctx.getSearchInitialState().setScanForSamples(true);
+        cursor.open(ctx.getSearchInitialState(), pred);
     }
 
     @Override
@@ -398,10 +412,9 @@ public class LSMBTree extends AbstractLSMIndex implements ITreeIndex {
     public LSMBTreeOpContext createOpContext(IIndexAccessParameters iap) {
         int numBloomFilterKeyFields = hasBloomFilter
                 ? ((LSMBTreeWithBloomFilterDiskComponentFactory) componentFactory).getBloomFilterKeyFields().length : 0;
-        return new LSMBTreeOpContext(this, memoryComponents, insertLeafFrameFactory, deleteLeafFrameFactory,
-                (IExtendedModificationOperationCallback) iap.getModificationCallback(),
-                iap.getSearchOperationCallback(), numBloomFilterKeyFields, getTreeFields(), getFilterFields(),
-                getHarness(), getFilterCmpFactories(), tracer);
+        return new LSMBTreeOpContext(this, memoryComponents, insertLeafFrameFactory, deleteLeafFrameFactory, iap,
+                numBloomFilterKeyFields, getTreeFields(), getFilterFields(), getHarness(), getFilterCmpFactories(),
+                tracer);
     }
 
     @Override
@@ -498,5 +511,9 @@ public class LSMBTree extends AbstractLSMIndex implements ITreeIndex {
 
     protected ICursorFactory getCursorFactory() {
         return cursorFactory;
+    }
+
+    public LSMIndexSampleCursor createSampleCollectorCursor(ILSMIndexOperationContext opContext) {
+        return new LSMIndexSampleCursor(opContext);
     }
 }

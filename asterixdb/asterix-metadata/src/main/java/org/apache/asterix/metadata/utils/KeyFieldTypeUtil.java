@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
@@ -130,6 +131,18 @@ public class KeyFieldTypeUtil {
      */
     public static List<Pair<IAType, Boolean>> getBTreeIndexKeyTypes(Index index, ARecordType recordType,
             ARecordType metaRecordType) throws AlgebricksException {
+        if (index.getIndexType() == DatasetConfig.IndexType.SAMPLE) {
+            Index.SampleIndexDetails indexDetails = (Index.SampleIndexDetails) index.getIndexDetails();
+            List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
+            List<Pair<IAType, Boolean>> indexKeyTypes = new ArrayList<>();
+            for (int i = 0; i < indexDetails.getKeyFieldNames().size(); i++) {
+                Pair<IAType, Boolean> keyPairType = Index.getNonNullableOpenFieldType(index,
+                        indexDetails.getKeyFieldTypes().get(i), indexDetails.getKeyFieldNames().get(i),
+                        chooseSource(keySourceIndicators, i, recordType, metaRecordType));
+                indexKeyTypes.add(keyPairType);
+            }
+            return indexKeyTypes;
+        }
         Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
         List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
         List<Pair<IAType, Boolean>> indexKeyTypes = new ArrayList<>();

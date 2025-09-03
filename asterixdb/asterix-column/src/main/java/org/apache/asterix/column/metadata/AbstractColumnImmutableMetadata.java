@@ -34,7 +34,7 @@ public abstract class AbstractColumnImmutableMetadata extends AbstractColumnMeta
     }
 
     @Override
-    public final IValueReference serializeColumnsMetadata() {
+    public IValueReference serializeColumnsMetadata() {
         return serializedMetadata;
     }
 

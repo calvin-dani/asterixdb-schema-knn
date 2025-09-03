@@ -48,6 +48,7 @@ import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -340,8 +341,9 @@ public abstract class TreeIndexTestUtils {
                 filtered ? new ArrayTupleBuilder(fieldCount + 1) : new ArrayTupleBuilder(fieldCount);
         ArrayTupleReference tuple = new ArrayTupleReference();
         // Perform bulk load.
-        IIndexBulkLoader bulkLoader =
-                ctx.getIndex().createBulkLoader(0.7f, false, numTuples, false, NoOpPageWriteCallback.INSTANCE);
+        // todo: add a concrete statsAccumulator, and assert the insert count
+        IIndexBulkLoader bulkLoader = ctx.getIndex().createBulkLoader(0.7f, false, numTuples, false,
+                NoOpPageWriteCallback.INSTANCE, NoOpStatsAccumulator.INSTANCE);
         int c = 1;
         for (CheckTuple checkTuple : checkTuples) {
             if (LOGGER.isInfoEnabled()) {

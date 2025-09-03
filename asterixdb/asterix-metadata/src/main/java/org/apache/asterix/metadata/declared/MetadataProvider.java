@@ -446,6 +446,10 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         return MetadataManagerUtil.findDataSource(appCtx.getClusterStateManager(), mdTxnCtx, id);
     }
 
+    public SampleDataSource findSampleDataSource(DataSourceId id, String sampleIndex) throws AlgebricksException {
+        return MetadataManagerUtil.findSampleDataSource(appCtx.getClusterStateManager(), mdTxnCtx, sampleIndex, id);
+    }
+
     public DataSource lookupSourceInMetadata(DataSourceId aqlId) throws AlgebricksException {
         return MetadataManagerUtil.lookupSourceInMetadata(appCtx.getClusterStateManager(), mdTxnCtx, aqlId);
     }

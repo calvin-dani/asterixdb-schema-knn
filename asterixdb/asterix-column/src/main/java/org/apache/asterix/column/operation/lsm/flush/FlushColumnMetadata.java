@@ -68,6 +68,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 
 /**
+ * There is always one flush in one storage partition at a time.
  * Flush column metadata belongs to a flushing {@link ILSMMemoryComponent}
  * The schema here is mutable and can change according to the flushed records
  */

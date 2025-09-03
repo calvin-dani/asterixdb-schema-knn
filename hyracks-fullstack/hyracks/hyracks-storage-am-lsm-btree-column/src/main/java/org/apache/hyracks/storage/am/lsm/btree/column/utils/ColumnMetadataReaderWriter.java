@@ -18,6 +18,8 @@
  */
 package org.apache.hyracks.storage.am.lsm.btree.column.utils;
 
+import static org.apache.hyracks.storage.am.lsm.common.impls.DiskComponentMetadata.STATS_KEY;
+
 import org.apache.hyracks.api.compression.ICompressorDecompressor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
@@ -28,7 +30,7 @@ import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnManager;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm.LSMColumnBTree;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 import org.apache.hyracks.storage.common.compression.SnappyCompressorDecompressor;
 import org.apache.hyracks.util.annotations.ThreadSafe;
 import org.apache.logging.log4j.LogManager;
@@ -84,6 +86,17 @@ final class ColumnMetadataReaderWriter {
             LOGGER.debug("Writing large column metadata of size {} bytes", requiredLength);
             writeChunks(metadata, componentMetadata);
         }
+    }
+
+    /**
+     * write the column statistics to the component metadata.
+     * @param columnStats
+     * @param componentMetadata
+     * @throws HyracksDataException
+     */
+    public void writeColumnStats(IValueReference columnStats, IComponentMetadata componentMetadata)
+            throws HyracksDataException {
+        componentMetadata.put(STATS_KEY, columnStats);
     }
 
     /**

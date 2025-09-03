@@ -55,10 +55,10 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
             IIndexDataflowHelperFactory priamryIndexDataflowHelperFactory, IHyracksTaskContext ctx, int partition,
             int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, RecordDescriptor recDesc, BulkLoadUsage usage, int datasetId,
-            ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap)
-            throws HyracksDataException {
+            ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap,
+            boolean sampleLoader) throws HyracksDataException {
         super(indexDataflowHelperFactory, ctx, partition, fieldPermutation, fillFactor, verifyInput, numElementsHint,
-                checkIfEmptyIndex, recDesc, tupleFilterFactory, partitionerFactory, partitionsMap);
+                checkIfEmptyIndex, recDesc, tupleFilterFactory, partitionerFactory, partitionsMap, sampleLoader);
 
         if (priamryIndexDataflowHelperFactory != null) {
             primaryIndexHelpers = new IIndexDataflowHelper[partitions.length];

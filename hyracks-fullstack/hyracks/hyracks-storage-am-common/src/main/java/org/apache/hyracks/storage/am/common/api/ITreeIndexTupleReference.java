@@ -31,4 +31,8 @@ public interface ITreeIndexTupleReference extends ITupleReference {
     public void resetByTupleIndex(ITreeIndexFrame frame, int tupleIndex);
 
     public int getTupleSize();
+
+    default boolean isAntimatter() {
+        return false;
+    }
 }

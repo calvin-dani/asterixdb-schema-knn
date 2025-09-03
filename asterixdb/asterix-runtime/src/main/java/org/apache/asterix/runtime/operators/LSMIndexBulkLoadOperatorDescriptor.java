@@ -44,6 +44,7 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
     protected final BulkLoadUsage usage;
 
     protected final int datasetId;
+    private boolean sampleLoader;
 
     public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
@@ -58,12 +59,26 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
         this.datasetId = datasetId;
     }
 
+    public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
+            int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, IIndexDataflowHelperFactory indexHelperFactory,
+            IIndexDataflowHelperFactory primaryIndexHelperFactory, BulkLoadUsage usage, int datasetId,
+            ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap,
+            boolean sampleLoader) {
+        super(spec, outRecDesc, fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
+                indexHelperFactory, tupleFilterFactory, partitionerFactory, partitionsMap);
+        this.primaryIndexHelperFactory = primaryIndexHelperFactory;
+        this.usage = usage;
+        this.datasetId = datasetId;
+        this.sampleLoader = sampleLoader;
+    }
+
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         return new LSMIndexBulkLoadOperatorNodePushable(indexHelperFactory, primaryIndexHelperFactory, ctx, partition,
                 fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
                 recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0), usage, datasetId,
-                tupleFilterFactory, partitionerFactory, partitionsMap);
+                tupleFilterFactory, partitionerFactory, partitionsMap, sampleLoader);
     }
 }
