@@ -46,6 +46,12 @@ public class VectorDistanceArrCalculation {
         return sum;
     }
 
+    public static double faissL2(float[] a, float[] b) {
+        float[] kmeancentroid = FaissWrapper.trainAndGetCentroids(1, 10, a, 49);
+        System.out.println("kmeancentroid: " + kmeancentroid);
+        return FaissWrapper.l2sqr(a, b);
+    }
+
     // Manhattan Distance
     public static double manhattan(double[] a, double[] b) {
         double sum = 0.0;

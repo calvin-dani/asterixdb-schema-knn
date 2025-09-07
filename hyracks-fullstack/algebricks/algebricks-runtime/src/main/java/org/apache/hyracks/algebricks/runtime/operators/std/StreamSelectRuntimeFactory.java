@@ -137,6 +137,8 @@ public class StreamSelectRuntimeFactory extends AbstractOneInputOneOutputRuntime
             tAccess.reset(buffer);
             int nTuple = tAccess.getTupleCount();
             for (int t = 0; t < nTuple; t++) {
+                System.err.println("Stre" +
+                        "amSelectRuntime.nextFrame: processing tuple " + t);
                 tRef.reset(tAccess, t);
                 eval.evaluate(tRef, p);
                 if (bbi.getBooleanValue(p.getByteArray(), p.getStartOffset(), p.getLength())) {

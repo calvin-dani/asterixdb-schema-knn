@@ -101,6 +101,7 @@ import org.apache.asterix.lang.common.statement.FunctionDropStatement;
 import org.apache.asterix.lang.common.statement.IndexDropStatement;
 import org.apache.asterix.lang.common.statement.InsertStatement;
 import org.apache.asterix.lang.common.statement.InternalDetailsDecl;
+import org.apache.asterix.lang.common.statement.KmeansStatement;
 import org.apache.asterix.lang.common.statement.LibraryDropStatement;
 import org.apache.asterix.lang.common.statement.LoadStatement;
 import org.apache.asterix.lang.common.statement.NodeGroupDropStatement;
@@ -1031,6 +1032,14 @@ public abstract class FormatPrintVisitor implements ILangVisitor<Void, Integer> 
     @Override
     public Void visit(AnalyzeStatement as, Integer step) throws CompilationException {
         out.print(skip(step) + "analyze dataset ");
+        out.print(generateFullName(as.getDataverseName(), as.getDatasetName()));
+        out.println(SEMICOLON);
+        return null;
+    }
+
+    @Override
+    public Void visit(KmeansStatement as, Integer step) throws CompilationException {
+        out.print(skip(step) + "kmeans dataset ");
         out.print(generateFullName(as.getDataverseName(), as.getDatasetName()));
         out.println(SEMICOLON);
         return null;
