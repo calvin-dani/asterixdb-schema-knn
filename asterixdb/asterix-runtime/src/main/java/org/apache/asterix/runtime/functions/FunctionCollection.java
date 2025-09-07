@@ -550,6 +550,7 @@ import org.apache.asterix.runtime.evaluators.functions.bitwise.BitTestWithoutAll
 import org.apache.asterix.runtime.evaluators.functions.bitwise.BitXorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.bitwise.IsBitSetWithAllFlagDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.bitwise.IsBitSetWithoutAllFlagDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.kmeans.KmeanFaissArrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.AccessFieldDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.AccessNestedFieldDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.FieldAccessByIndexDescriptor;
@@ -1328,6 +1329,8 @@ public final class FunctionCollection implements IFunctionCollection {
         // Vector functions
         fc.add(VectorDistanceArrDescriptor.FACTORY);
         fc.add(VectorDistanceConstantDescriptor.FACTORY);
+
+        fc.add(KmeanFaissArrDescriptor.FACTORY);
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
         fc.add(IsArrayDescriptor.FACTORY);

@@ -132,6 +132,7 @@ import org.apache.asterix.lang.common.literal.TrueLiteral;
 import org.apache.asterix.lang.common.parser.ScopeChecker;
 import org.apache.asterix.lang.common.statement.AdapterDropStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeStatement;
+import org.apache.asterix.lang.common.statement.KmeansStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeDropStatement;
 import org.apache.asterix.lang.common.statement.CompactStatement;
 import org.apache.asterix.lang.common.statement.ConnectFeedStatement;
@@ -1028,6 +1029,7 @@ Statement SingleStatement() throws ParseException:
     | stmt = ConnectionStatement()
     | stmt = CompactStatement()
     | stmt = AnalyzeStatement()
+    | stmt = KmeansStatement()
     | stmt = Query()
   )
   {
@@ -3137,6 +3139,23 @@ Statement AnalyzeStatement() throws ParseException:
   }
 }
 
+Statement KmeansStatement() throws ParseException:
+{
+  Token startToken = null;
+  Statement stmt = null;
+  Pair<Namespace,Identifier> nameComponents = null;
+}
+{
+  <KMEANS> { startToken = token; } DatasetToken() nameComponents = QualifiedName()
+  (
+    stmt = AnalyzeDatasetDropStatement(startToken, nameComponents.first, nameComponents.second)
+    | stmt = KmeansDatasetStatement(startToken, nameComponents.first, nameComponents.second)
+  )
+  {
+    return stmt;
+  }
+}
+
 Statement AnalyzeDatasetStatement(Token startToken, Namespace namespace, Identifier identifier) throws ParseException:
 {
   RecordConstructor withRecord = null;
@@ -3146,6 +3165,22 @@ Statement AnalyzeDatasetStatement(Token startToken, Namespace namespace, Identif
   {
     try {
     AnalyzeStatement stmt = new AnalyzeStatement(namespace, identifier.getValue(), withRecord);
+    return addSourceLocation(stmt, startToken);
+    } catch (CompilationException e) {
+       throw new SqlppParseException(getSourceLocation(startToken), e.getMessage());
+    }
+  }
+}
+
+Statement KmeansDatasetStatement(Token startToken, Namespace namespace, Identifier identifier) throws ParseException:
+{
+  RecordConstructor withRecord = null;
+}
+{
+  ( <WITH> withRecord = RecordConstructor() )?
+  {
+    try {
+    KmeansStatement stmt = new KmeansStatement(namespace, identifier.getValue(), withRecord);
     return addSourceLocation(stmt, startToken);
     } catch (CompilationException e) {
        throw new SqlppParseException(getSourceLocation(startToken), e.getMessage());
@@ -5997,6 +6032,7 @@ TOKEN [IGNORE_CASE]:
   <ADAPTER: "adapter">
   | <ALL : "all">
   | <ANALYZE: "analyze">
+  | <KMEANS: "kmeans">
   | <AND : "and">
   | <ANY : "any">
   | <APPLY : "apply">

@@ -21,23 +21,37 @@ package org.apache.asterix.metadata.utils;
 
 import static org.apache.asterix.om.utils.ProjectionFiltrationTypeUtil.ALL_FIELDS_TYPE;
 
+import java.io.DataOutput;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
+import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.config.OptimizationConfUtil;
 import org.apache.asterix.common.utils.StorageConstants;
+import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.metadata.entities.InternalDatasetDetails;
 import org.apache.asterix.om.base.AInt32;
+import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.constants.AsterixConstantValue;
+import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.functions.IFunctionDescriptor;
+import org.apache.asterix.om.functions.IFunctionManager;
+import org.apache.asterix.om.typecomputer.impl.TypeComputeUtils;
+import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
+import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
-import org.apache.asterix.runtime.aggregates.collections.FirstElementEvalFactory;
+import org.apache.asterix.om.types.IAType;
+import org.apache.asterix.runtime.aggregates.cluster.KmeansClusterEvalFactory;
 import org.apache.asterix.runtime.evaluators.comparisons.GreaterThanDescriptor;
 import org.apache.asterix.runtime.operators.DatasetStreamStatsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor;
@@ -48,10 +62,9 @@ import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConst
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator;
+import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.jobgen.impl.ConnectorPolicyAssignmentPolicy;
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
-import org.apache.hyracks.algebricks.data.INormalizedKeyComputerFactoryProvider;
 import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
 import org.apache.hyracks.algebricks.data.ITypeTraitProvider;
 import org.apache.hyracks.algebricks.runtime.base.IAggregateEvaluatorFactory;
@@ -59,27 +72,26 @@ import org.apache.hyracks.algebricks.runtime.base.IPushRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.base.IRunningAggregateEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
-import org.apache.hyracks.algebricks.runtime.operators.aggreg.SimpleAlgebricksAccumulatingAggregatorFactory;
+import org.apache.hyracks.algebricks.runtime.operators.aggreg.AggregateRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.aggrun.RunningAggregateRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.base.SinkRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.meta.AlgebricksMetaOperatorDescriptor;
+import org.apache.hyracks.algebricks.runtime.operators.std.AssignRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.std.StreamProjectRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.std.StreamSelectRuntimeFactory;
 import org.apache.hyracks.api.dataflow.IOperatorDescriptor;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.IBinaryHashFunctionFactory;
-import org.apache.hyracks.api.dataflow.value.INormalizedKeyComputerFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
-import org.apache.hyracks.dataflow.std.group.AbstractAggregatorDescriptorFactory;
-import org.apache.hyracks.dataflow.std.group.sort.SortGroupByOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.build.IndexBuilderFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexCreateOperatorDescriptor;
@@ -108,6 +120,7 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
     private ARecordType itemType;
     private ARecordType metaType;
     private RecordDescriptor recordDesc;
+    private int secondayKeys;
     private IBinaryComparatorFactory[] comparatorFactories;
     private IFileSplitProvider fileSplitProvider;
     private AlgebricksPartitionConstraint partitionConstraint;
@@ -116,12 +129,30 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
     private int groupbyNumFrames;
     private int[][] computeStorageMap;
     private int numPartitions;
+    protected ITypeTraits[] secondaryTypeTraits;
+    protected List<String> filterFieldName;
+    protected RecordDescriptor primaryRecDesc;
+    private int numPrimaryKeys;
+    private int numFilterFields;
+    protected IScalarEvaluatorFactory[] secondaryFieldAccessEvalFactories;
+    protected boolean anySecondaryKeyIsNullable = false;
+    protected IBinaryComparatorFactory[] secondaryComparatorFactories;
+    protected int[] secondaryBloomFilterKeyFields;
+    protected final ARecordType enforcedItemType;
+    protected final ARecordType enforcedMetaType;
+    protected RecordDescriptor secondaryRecDesc;
+    protected RecordDescriptor enforcedRecDesc;
+    protected IBinaryComparatorFactory[] primaryComparatorFactories;
+
 
     protected SampleOperationsHelper(Dataset dataset, Index sampleIdx, MetadataProvider metadataProvider,
-            SourceLocation sourceLoc) {
+            SourceLocation sourceLoc) throws AlgebricksException {
         this.dataset = dataset;
         this.sampleIdx = sampleIdx;
         this.metadataProvider = metadataProvider;
+        Pair<ARecordType, ARecordType> enforcedTypes = getEnforcedType(sampleIdx, itemType, metaType);
+        this.enforcedItemType = enforcedTypes.first;
+        this.enforcedMetaType = enforcedTypes.second;
         this.sourceLoc = sourceLoc;
     }
 
@@ -132,9 +163,22 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         metaType = DatasetUtil.getMetaType(metadataProvider, dataset);
         itemType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(itemType, metaType, dataset);
 
+        numPrimaryKeys = dataset.getPrimaryKeys().size();
+        if (dataset.getDatasetType() == DatasetConfig.DatasetType.INTERNAL) {
+            filterFieldName = DatasetUtil.getFilterField(dataset);
+            if (filterFieldName != null) {
+                numFilterFields = 1;
+            } else {
+                numFilterFields = 0;
+            }
+
+        }
+
         recordDesc = dataset.getPrimaryRecordDescriptor(metadataProvider);
         comparatorFactories = dataset.getPrimaryComparatorFactories(metadataProvider, itemType, metaType);
         groupbyNumFrames = getGroupByNumFrames(metadataProvider, sourceLoc);
+
+        secondayKeys = ((ArrayList) ((Index.SampleIndexDetails) sampleIdx.getIndexDetails()).getKeyFieldNames()).size();
 
         // make sure to always use the dataset + index to get the partitioning properties
         // this is because in some situations the nodegroup of the passed dataset is different from the index
@@ -150,6 +194,7 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
                 DatasetUtil.getMergePolicyFactory(dataset, metadataProvider.getMetadataTxnContext());
         mergePolicyFactory = compactionInfo.first;
         mergePolicyProperties = compactionInfo.second;
+
     }
 
     @Override
@@ -232,7 +277,7 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         raggSerdes[0] = serdeProvider.getSerializerDeserializer(raggSlotType);
         raggSerdes[1] = serdeProvider.getSerializerDeserializer(raggCounterType);
         System.arraycopy(recordDesc.getFields(), 0, raggSerdes, 2, nFields);
-
+        // Create a manual descriptor
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
         ITypeTraits[] raggTraits = new ITypeTraits[nFields + 2];
         raggTraits[0] = typeTraitProvider.getTypeTrait(raggSlotType);
@@ -263,61 +308,83 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
 
-        // (running agg + select) ---> group-by
-        int[] groupFields = new int[] { 0 }; // [slot]
-        int[] sortFields = new int[] { 0, 1 }; // [slot, counter]
-        OrderOperator.IOrder sortSlotOrder = OrderOperator.ASC_ORDER;
-        OrderOperator.IOrder sortCounterOrder = OrderOperator.DESC_ORDER;
-        IBinaryComparatorFactoryProvider comparatorFactoryProvider = format.getBinaryComparatorFactoryProvider();
-        IBinaryComparatorFactory[] raggCmpFactories = {
-                comparatorFactoryProvider.getBinaryComparatorFactory(raggSlotType,
-                        sortSlotOrder.getKind() == OrderOperator.IOrder.OrderKind.ASC),
-                comparatorFactoryProvider.getBinaryComparatorFactory(raggCounterType,
-                        sortCounterOrder.getKind() == OrderOperator.IOrder.OrderKind.ASC) };
+        // | ragg slot output | ragg counter output | PK | Record | ----> project op
 
-        INormalizedKeyComputerFactoryProvider normKeyProvider = format.getNormalizedKeyComputerFactoryProvider();
-        INormalizedKeyComputerFactory[] normKeyFactories = {
-                normKeyProvider.getNormalizedKeyComputerFactory(raggSlotType,
-                        sortSlotOrder.getKind() == OrderOperator.IOrder.OrderKind.ASC),
-                normKeyProvider.getNormalizedKeyComputerFactory(raggCounterType,
-                        sortCounterOrder.getKind() == OrderOperator.IOrder.OrderKind.ASC) };
 
-        // agg = [counter, .. original columns ..]
-        IAggregateEvaluatorFactory[] aggFactories = new IAggregateEvaluatorFactory[nFields + 1];
-        for (int i = 0; i < aggFactories.length; i++) {
-            aggFactories[i] = new FirstElementEvalFactory(
-                    new IScalarEvaluatorFactory[] { new ColumnAccessEvalFactory(1 + i) }, false, sourceLoc);
-        }
-        AbstractAggregatorDescriptorFactory aggregatorFactory =
-                new SimpleAlgebricksAccumulatingAggregatorFactory(aggFactories, groupFields);
+        BuiltinType embeddingType = BuiltinType.ANY;
+//        ISerializerDeserializer[] rembeddingSerde = new ISerializerDeserializer[1];
+        ISerializerDeserializer[] rembeddingSerde = new ISerializerDeserializer[nFields+1];
+        rembeddingSerde[0] = serdeProvider.getSerializerDeserializer(embeddingType);
+        System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 1, nFields);
+//        ITypeTraits[] rembeddingTraits = new ITypeTraits[1];
+        ITypeTraits[] rembeddingTraits = new ITypeTraits[nFields+1];
+        rembeddingTraits[0] = typeTraitProvider.getTypeTrait(embeddingType);
+        System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 1, nFields);
+        RecordDescriptor rembeddingRecordDesc = new RecordDescriptor(rembeddingSerde, rembeddingTraits);
 
-        targetOp = new SortGroupByOperatorDescriptor(spec, groupbyNumFrames, sortFields, groupFields, normKeyFactories,
-                raggCmpFactories, aggregatorFactory, aggregatorFactory, raggRecordDesc, raggRecordDesc, false);
+
+
+        secondaryFieldAccessEvalFactories = new IScalarEvaluatorFactory[1];
+        List<String> embedddingListName = Arrays.asList("embedding");
+        IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(itemType, 3, embedddingListName);
+        secondaryFieldAccessEvalFactories[0] =
+                createFieldCast(secFieldAccessor, false, null, itemType, new AOrderedListType(BuiltinType.AINT64,"embedding"));
+        // primary index ----> cast assign op (produces the secondary index entry)
+        targetOp = createAssignOp(spec, secondayKeys, raggRecordDesc,rembeddingRecordDesc);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
 
-        // group by --> project (remove ragg fields)
-        int[] projectColumns = new int[nFields];
-        for (int i = 0; i < nFields; i++) {
-            projectColumns[i] = 2 + i;
-        }
-        StreamProjectRuntimeFactory projectRuntimeFactory = new StreamProjectRuntimeFactory(projectColumns);
-        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1, new IPushRuntimeFactory[] { projectRuntimeFactory },
-                new RecordDescriptor[] { recordDesc });
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        sourceOp = targetOp;
+        // | embedding | PK | Record | ----> project op
+
+
+
+        BuiltinType aggType = BuiltinType.AINT64;
+        ISerializerDeserializer[] aggSerde = new ISerializerDeserializer[1];
+        aggSerde[0] = serdeProvider.getSerializerDeserializer(aggType);
+        ITypeTraits[] aggTraits = new ITypeTraits[1];
+        aggTraits[0] = typeTraitProvider.getTypeTrait(aggType);
+        RecordDescriptor aggRecordDesc = new RecordDescriptor(aggSerde, aggTraits);
+
+        secFieldAccessor = createFieldAccessor(itemType, 0, embedddingListName);
+        secondaryFieldAccessEvalFactories[0] =
+                createFieldCast(secFieldAccessor, false, null, itemType, new ARecordType("embedding",
+                        new String[] { "embedding" }, new IAType[] { new AOrderedListType(BuiltinType.AINT64, "embedding") },
+                        false));
+
+
+        IAggregateEvaluatorFactory kmeansClusterFactory = new KmeansClusterEvalFactory( new IScalarEvaluatorFactory[] { new ColumnAccessEvalFactory(0) }, false, sourceLoc);
+                AggregateRuntimeFactory aggRuntimeFactory =
+                        new AggregateRuntimeFactory(new IAggregateEvaluatorFactory[]{kmeansClusterFactory});
+                targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1,
+                        new IPushRuntimeFactory[] { aggRuntimeFactory },
+                        new RecordDescriptor[] { rembeddingRecordDesc, aggRecordDesc });
+                spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+                sourceOp = targetOp;
+
+        // | 1 | ----> project op
+
+        // operation Sampled data -> project -> embedding -> faiss -> centroids -> NCs average centroids.
+        //  1. framework allows loading job.
+        // 2. Seperate jobs for sampling training index and another job to scan data.
+        // 3, branching to scan data and branch to load the data after rescanning.
+        // 4. Not use aggregate framework and use a new operator.
+        // 5. similar to join operator probe
+        // 6. infer filed name from query and access by fieldname or index based on schema difiition.
+        // 7. Explore glenns work on loop hyracks. 
+        // bulk load operation
+
 
         // project ---> bulk load op
-        targetOp = createTreeIndexBulkLoadOp(spec, columns, dataflowHelperFactory,
-                StorageConstants.DEFAULT_TREE_FILL_FACTOR, sampleCardinalityTarget);
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        sourceOp = targetOp;
+//                targetOp = createTreeIndexBulkLoadOp(spec, columns, dataflowHelperFactory,
+//                        StorageConstants.DEFAULT_TREE_FILL_FACTOR, sampleCardinalityTarget);
+//                spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//                sourceOp = targetOp;
 
-        // bulk load op ----> sink op
+        //        // bulk load op ----> sink op
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
         sinkRuntimeFactory.setSourceLocation(sourceLoc);
         targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0, new IPushRuntimeFactory[] { sinkRuntimeFactory },
-                new RecordDescriptor[] { recordDesc });
+                new RecordDescriptor[] { aggRecordDesc });
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         spec.addRoot(targetOp);
@@ -382,4 +449,128 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
                 metadataProvider.getApplicationContext().getCompilerProperties(), metadataProvider.getConfig(),
                 sourceLoc);
     }
+
+
+    protected IScalarEvaluatorFactory createFieldAccessor(ARecordType recordType, int recordColumn,
+                                                          List<String> fieldName) throws AlgebricksException {
+        IFunctionManager funManger = metadataProvider.getFunctionManager();
+        IDataFormat dataFormat = metadataProvider.getDataFormat();
+        return dataFormat.getFieldAccessEvaluatorFactory(funManger, recordType, fieldName, recordColumn, sourceLoc);
+    }
+
+    protected AlgebricksMetaOperatorDescriptor createAssignOp(JobSpecification spec, int numSecondaryKeyFields,
+                                                              RecordDescriptor prevOpRecDesc, RecordDescriptor nextOpRecDesc) throws AlgebricksException {
+//        int numFilterFields = 0;
+//        int[] outColumns = new int[numSecondaryKeyFields + numFilterFields];
+//        int[] projectionList = new int[numSecondaryKeyFields + numPrimaryKeys + numFilterFields];
+//        for (int i = 0; i < numSecondaryKeyFields + numFilterFields; i++) {
+//            outColumns[i] = numPrimaryKeys + i;
+//        }
+//        int projCount = 0;
+//        for (int i = 0; i < numSecondaryKeyFields; i++) {
+//            projectionList[projCount++] = numPrimaryKeys + i;
+//        }
+//        for (int i = 0; i < numPrimaryKeys; i++) {
+//            projectionList[projCount++] = i;
+//        }
+//        if (numFilterFields > 0) {
+//            projectionList[projCount] = numPrimaryKeys + numSecondaryKeyFields;
+//        }
+//
+//        int[] outColumns = new int[1];
+//        int[] projectionList = new int[1];
+//        outColumns[0] = 1; // [slot]
+//        projectionList[0] = 1; // [slot]
+        int[] outColumns = new int[]{0}; // [slot]
+        int[] projectionList = {0,2,3}; // [slot]
+        IScalarEvaluatorFactory[] sefs = new IScalarEvaluatorFactory[secondaryFieldAccessEvalFactories.length];
+        System.arraycopy(secondaryFieldAccessEvalFactories, 0, sefs, 0, secondaryFieldAccessEvalFactories.length);
+//        AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
+        AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
+        assign.setSourceLocation(sourceLoc);
+        // TDOO CALVIN Change the record descroptor.
+        AlgebricksMetaOperatorDescriptor asterixAssignOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1,
+                new IPushRuntimeFactory[] { assign }, new RecordDescriptor[] { prevOpRecDesc, nextOpRecDesc });
+        asterixAssignOp.setSourceLocation(sourceLoc);
+        // not needed.
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, asterixAssignOp,
+                getSecondaryPartitionConstraint());
+        return asterixAssignOp;
+    }
+
+    private static Pair<ARecordType, ARecordType> getEnforcedType(Index index, ARecordType aRecordType,
+                                                                  ARecordType metaRecordType) throws AlgebricksException {
+        return index.getIndexDetails().isOverridingKeyFieldTypes()
+                ? TypeUtil.createEnforcedType(aRecordType, metaRecordType, Collections.singletonList(index))
+                : new Pair<>(null, null);
+    }
+
+
+    protected IScalarEvaluatorFactory createFieldCast(IScalarEvaluatorFactory fieldEvalFactory,
+                                                      boolean isOverridingKeyFieldTypes, IAType enforcedRecordType, ARecordType recordType, IAType targetType)
+            throws AlgebricksException {
+
+
+        IFunctionManager funManger = metadataProvider.getFunctionManager();
+        IDataFormat dataFormat = metadataProvider.getDataFormat();
+        if (ATypeTag.ANY.equals(targetType.getTypeTag())) {
+            // this is to ensure records and lists values are in the open format
+            IScalarEvaluatorFactory[] castArg = new IScalarEvaluatorFactory[] { fieldEvalFactory };
+            return createCastFunction(targetType, BuiltinType.ANY, true, sourceLoc).createEvaluatorFactory(castArg);
+        }
+
+        // check IndexUtil.castDefaultNull(index), too, because we always want to cast even if the overriding type is
+        // the same as the overridden type (this is for the case where overriding the type of closed field is allowed)
+        // e.g. field "a" is a string in the dataset ds; CREATE INDEX .. ON ds(a:string) CAST (DEFAULT NULL)
+        boolean castIndexedField = isOverridingKeyFieldTypes
+                && (!enforcedRecordType.equals(recordType) || IndexUtil.castDefaultNull(sampleIdx));
+        if (!castIndexedField) {
+            return fieldEvalFactory;
+        }
+
+        IScalarEvaluatorFactory castFieldEvalFactory;
+        if (IndexUtil.castDefaultNull(sampleIdx)) {
+            castFieldEvalFactory = createConstructorFunction(funManger, dataFormat, fieldEvalFactory, targetType);
+        } else if (sampleIdx.isEnforced()) {
+            IScalarEvaluatorFactory[] castArg = new IScalarEvaluatorFactory[] { fieldEvalFactory };
+            castFieldEvalFactory =
+                    createCastFunction(targetType, BuiltinType.ANY, true, sourceLoc).createEvaluatorFactory(castArg);
+        } else {
+            IScalarEvaluatorFactory[] castArg = new IScalarEvaluatorFactory[] { fieldEvalFactory };
+            castFieldEvalFactory =
+                    createCastFunction(targetType, BuiltinType.ANY, false, sourceLoc).createEvaluatorFactory(castArg);
+        }
+        return castFieldEvalFactory;
+    }
+
+    protected IFunctionDescriptor createCastFunction(IAType targetType, IAType inputType, boolean strictCast,
+                                                     SourceLocation sourceLoc) throws AlgebricksException {
+        IFunctionDescriptor castFuncDesc = metadataProvider.getFunctionManager()
+                .lookupFunction(strictCast ? BuiltinFunctions.CAST_TYPE : BuiltinFunctions.CAST_TYPE_LAX, sourceLoc);
+        castFuncDesc.setSourceLocation(sourceLoc);
+        castFuncDesc.setImmutableStates(targetType, inputType);
+        return castFuncDesc;
+    }
+
+    protected IScalarEvaluatorFactory createConstructorFunction(IFunctionManager funManager, IDataFormat dataFormat,
+                                                                IScalarEvaluatorFactory fieldEvalFactory, IAType fieldType) throws AlgebricksException {
+        IAType targetType = TypeComputeUtils.getActualType(fieldType);
+        Pair<FunctionIdentifier, IAObject> constructorWithFmt =
+                IndexUtil.getTypeConstructorDefaultNull(sampleIdx, targetType, sourceLoc);
+        FunctionIdentifier typeConstructorFun = constructorWithFmt.first;
+        IFunctionDescriptor typeConstructor = funManager.lookupFunction(typeConstructorFun, sourceLoc);
+        IScalarEvaluatorFactory[] args;
+        // add the format argument if specified
+        if (constructorWithFmt.second != null) {
+            IScalarEvaluatorFactory fmtEvalFactory =
+                    dataFormat.getConstantEvalFactory(new AsterixConstantValue(constructorWithFmt.second));
+            args = new IScalarEvaluatorFactory[] { fieldEvalFactory, fmtEvalFactory };
+        } else {
+            args = new IScalarEvaluatorFactory[] { fieldEvalFactory };
+        }
+        typeConstructor.setSourceLocation(sourceLoc);
+        return typeConstructor.createEvaluatorFactory(args);
+    }
+
+
 }

@@ -76,6 +76,7 @@ import org.apache.asterix.lang.common.statement.FunctionDecl;
 import org.apache.asterix.lang.common.statement.FunctionDropStatement;
 import org.apache.asterix.lang.common.statement.IndexDropStatement;
 import org.apache.asterix.lang.common.statement.InsertStatement;
+import org.apache.asterix.lang.common.statement.KmeansStatement;
 import org.apache.asterix.lang.common.statement.LibraryDropStatement;
 import org.apache.asterix.lang.common.statement.LoadStatement;
 import org.apache.asterix.lang.common.statement.NodeGroupDropStatement;
@@ -223,6 +224,8 @@ public interface ILangVisitor<R, T> {
     R visit(SynonymDropStatement del, T arg) throws CompilationException;
 
     R visit(AnalyzeStatement as, T arg) throws CompilationException;
+
+    R visit(KmeansStatement as, T arg) throws CompilationException;
 
     R visit(AnalyzeDropStatement as, T step) throws CompilationException;
 
