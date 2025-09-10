@@ -20,7 +20,6 @@
 package org.apache.hyracks.dataflow.common.data.accessors;
 
 import org.apache.hyracks.api.comm.IFrameTupleAccessor;
-import org.apache.hyracks.dataflow.common.utils.FrameDebugUtils;
 
 public class FrameTupleReference implements IFrameTupleReference {
     protected IFrameTupleAccessor fta;

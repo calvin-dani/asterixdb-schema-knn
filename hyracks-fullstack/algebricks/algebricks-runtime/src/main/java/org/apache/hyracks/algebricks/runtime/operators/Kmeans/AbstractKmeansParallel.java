@@ -1,4 +1,27 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.hyracks.algebricks.runtime.operators.Kmeans;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
 
 import org.apache.hyracks.algebricks.runtime.base.IRunningAggregateEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IRunningAggregateEvaluatorFactory;
@@ -12,11 +35,6 @@ import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
 
 public abstract class AbstractKmeansParallel<T extends IRunningAggregateEvaluator>
         extends AbstractOneInputOneOutputOneFramePushRuntime {
@@ -32,8 +50,8 @@ public abstract class AbstractKmeansParallel<T extends IRunningAggregateEvaluato
     private boolean isFirst;
 
     public AbstractKmeansParallel(int[] projectionColumns, int[] runningAggOutColumns,
-                                               IRunningAggregateEvaluatorFactory[] runningAggFactories, Class<T> runningAggEvalClass,
-                                               IHyracksTaskContext ctx) {
+            IRunningAggregateEvaluatorFactory[] runningAggFactories, Class<T> runningAggEvalClass,
+            IHyracksTaskContext ctx) {
         this.ctx = new EvaluatorContext(ctx);
         this.projectionColumns = projectionColumns;
         this.runningAggFactories = runningAggFactories;
@@ -67,14 +85,14 @@ public abstract class AbstractKmeansParallel<T extends IRunningAggregateEvaluato
         }
     }
 
-
     protected void kmeansinit() {
         Random baseRand = new Random();
         long seed = baseRand.nextInt();
         List<double[]> data = new ArrayList<>();
         int n = data.size();
-        int k  = 5; // number of clusters
-        if (n == 0) throw new IllegalArgumentException("No samples available from data.");
+        int k = 5; // number of clusters
+        if (n == 0)
+            throw new IllegalArgumentException("No samples available from data.");
         double[] costs = new double[n];
         Arrays.fill(costs, Double.POSITIVE_INFINITY);
         int initializationSteps = 5;
@@ -96,9 +114,9 @@ public abstract class AbstractKmeansParallel<T extends IRunningAggregateEvaluato
             // Update costs: for each point, keep minimum squared distance to any new center
             for (int i = 0; i < n; i++) {
                 for (double[] center : newCenters) {
-//                    double d = distanceFunction.distance(data.get(i), center);
-//                    if (d < costs[i]) costs[i] = d;
-//                }
+                    //                    double d = distanceFunction.distance(data.get(i), center);
+                    //                    if (d < costs[i]) costs[i] = d;
+                    //                }
                 }
                 double sumCosts = Arrays.stream(costs).sum();
 
@@ -133,7 +151,7 @@ public abstract class AbstractKmeansParallel<T extends IRunningAggregateEvaluato
     }
 
     protected void produceTuple(ArrayTupleBuilder tb, IFrameTupleAccessor accessor, int tIndex,
-                                FrameTupleReference tupleRef) throws HyracksDataException {
+            FrameTupleReference tupleRef) throws HyracksDataException {
         tb.reset();
         for (int f = 0; f < projectionColumns.length; f++) {
             int k = projectionToOutColumns[f];

@@ -18,15 +18,54 @@
  */
 package org.apache.asterix.runtime.operators;
 
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
 
 public class CentroidsState extends AbstractStateObject {
+    private List<float[]> centroids;
 
     public CentroidsState(JobId jobId, UUID objectId) {
         super(jobId, objectId);
-        // centroids object
+        this.centroids = new ArrayList<>();
+    }
+
+    public List<float[]> getCentroids() {
+        return centroids;
+    }
+
+    public void addCentroid(float[] centroid) {
+        centroids.add(centroid);
+    }
+
+    @Override
+    public void toBytes(DataOutput out) throws IOException {
+        out.writeInt(centroids.size());
+        for (float[] c : centroids) {
+            out.writeInt(c.length);
+            for (float v : c) {
+                out.writeFloat(v);
+            }
+        }
+    }
+
+    @Override
+    public void fromBytes(DataInput in) throws IOException {
+        int size = in.readInt();
+        centroids = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            int len = in.readInt();
+            float[] c = new float[len];
+            for (int j = 0; j < len; j++) {
+                c[j] = in.readFloat();
+            }
+            centroids.add(c);
+        }
     }
 }

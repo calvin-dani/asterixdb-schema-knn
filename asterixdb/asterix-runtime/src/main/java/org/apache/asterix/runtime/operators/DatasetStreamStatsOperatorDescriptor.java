@@ -98,7 +98,7 @@ public final class DatasetStreamStatsOperatorDescriptor extends AbstractSingleAc
 
             @Override
             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-                fta.reset(buffer);
+                fta.reset(buffer, " DATASET STREAM STATS " + partition);
                 computeStats();
                 FrameUtils.flushFrame(buffer, writer);
             }

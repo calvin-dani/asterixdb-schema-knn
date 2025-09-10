@@ -271,13 +271,10 @@ import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.common.utils.Triple;
 import org.apache.hyracks.algebricks.core.algebra.base.Counter;
-import org.apache.hyracks.algebricks.core.algebra.base.ILogicalExpression;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalPlan;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalOperatorTag;
-import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCallExpression.FunctionKind;
-import org.apache.hyracks.algebricks.core.algebra.expressions.VariableReferenceExpression;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
 import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
@@ -5131,7 +5128,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
             // #. flush dataset
             FlushDatasetUtil.flushDataset(hcc, metadataProvider, databaseName, dataverseName, datasetName);
-//
+            //
             mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
             bActiveTxn = true;
             metadataProvider.setMetadataTxnContext(mdTxnCtx);
@@ -5140,14 +5137,13 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, newIndexPendingAdd, metadataProvider, sourceLoc);
             MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
             bActiveTxn = false;
-//
-//            List<IOperatorStats> opStats
+            //
+            //            List<IOperatorStats> opStats
             Pair<JobId, List<IOperatorStats>> pair = runJob(hcc, spec, jobFlags,
                     Collections.singletonList(SampleOperationsHelper.DATASET_STATS_OPERATOR_NAME));
 
             //1. Analyze statment - update (no res) , Sample query - issued by CBO (res)
             //2. DistributeResultOperator DistributeResultOperator to be used.
-
 
             ResultSetId resultSetId = new ResultSetId(metadataProvider.getResultSetIdCounter().getAndInc());
             ResultSetSinkId rssId = new ResultSetSinkId(resultSetId);
@@ -5159,13 +5155,13 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             ISerializerDeserializer[] aggSerde = new ISerializerDeserializer[1];
             IDataFormat format = metadataProvider.getDataFormat();
             ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
-            resultSerdeList.add( serdeProvider.getSerializerDeserializer(aggType));
+            resultSerdeList.add(serdeProvider.getSerializerDeserializer(aggType));
 
-//            FrameManager frameManager = new FrameManager(queryOptCtx.getPhysicalOptimizationConfig().getFrameSize());
+            //            FrameManager frameManager = new FrameManager(queryOptCtx.getPhysicalOptimizationConfig().getFrameSize());
             //metadataprived
             FrameManager frameManager = new FrameManager(10);
             IFrame frame = new VSizeFrame(frameManager);
-//            metadataProvide
+            //            metadataProvide
 
             FrameTupleAccessor fta = new FrameTupleAccessor(null);
             ByteArrayAccessibleInputStream bais = new ByteArrayAccessibleInputStream(frame.getBuffer().array(), 0, 0);
@@ -5197,7 +5193,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             }
             // TODO CALVIN DANI COMPARE with BTREE
             DatasetStreamStats stats = new DatasetStreamStats(pair.second.get(0));
-////
+            ////
             Index.SampleIndexDetails newIndexDetailsFinal = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
                     dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget,
                     stats.getCardinality(), stats.getAvgTupleSize(), sampleSeed, stats.getIndexesStats());

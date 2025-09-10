@@ -1,84 +1,175 @@
- /*
-  * Licensed to the Apache Software Foundation (ASF) under one
-  * or more contributor license agreements.  See the NOTICE file
-  * distributed with this work for additional information
-  * regarding copyright ownership.  The ASF licenses this file
-  * to you under the Apache License, Version 2.0 (the
-  * "License"); you may not use this file except in compliance
-  * with the License.  You may obtain a copy of the License at
-  *
-  *   http://www.apache.org/licenses/LICENSE-2.0
-  *
-  * Unless required by applicable law or agreed to in writing,
-  * software distributed under the License is distributed on an
-  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-  * KIND, either express or implied.  See the License for the
-  * specific language governing permissions and limitations
-  * under the License.
-  */
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 
- package org.apache.asterix.runtime.operators;
+package org.apache.asterix.runtime.operators;
 
- import java.nio.ByteBuffer;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
- import org.apache.hyracks.api.context.IHyracksTaskContext;
- import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
- import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
- import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
- import org.apache.hyracks.api.exceptions.HyracksDataException;
- import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
- import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
- import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
+import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
+import org.apache.hyracks.api.comm.VSizeFrame;
+import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
+import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.data.std.primitive.VoidPointable;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
+import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
+import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
+import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
+import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 
- public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
+public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
-     private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
+    private final RecordDescriptor centroidDesc;
+    private FrameTupleAccessor fta;
+    private FrameTupleReference ftr;
+    private IScalarEvaluatorFactory args;
+    private ListAccessor listAccessorConstant;
+    private List<float[]> accumulator;
+    private ArrayTupleBuilder tupleBuilder;
+    private FrameTupleAppender appender;
 
-     public MergeCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc) {
-         super(spec, 1, 1);
-         outRecDescs[0] = rDesc;
-     }
+    public MergeCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+            RecordDescriptor centroidDesc, IScalarEvaluatorFactory args) {
+        super(spec, 1, 1);
+        outRecDescs[0] = rDesc;
+        this.centroidDesc = centroidDesc;
+        this.args = args;
+    }
 
-     @Override
-     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
-                                                    IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
+    @Override
+    public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
+            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
 
-         return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
+        return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
 
-             int i = 4;
+            int i = 4;
+            IScalarEvaluator eval;
+            VoidPointable inputVal = new VoidPointable();
+            FrameTupleAppender appender;
+            @Override
+            public void open() throws HyracksDataException {
+                writer.open();
+                appender = new FrameTupleAppender(new VSizeFrame(ctx));
+                //                fta = new FrameTupleAccessor(centroidDesc);
+                //                ftr = new FrameTupleReference();
+                //                eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+                listAccessorConstant = new ListAccessor();
+                accumulator = new ArrayList<>();
+                tupleBuilder = new ArrayTupleBuilder(1);
+                appender = new FrameTupleAppender(new VSizeFrame(ctx));
+            }
 
-             @Override
-             public void open() throws HyracksDataException {
-                 writer.open();
-             }
+            @Override
+            public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+                // merge
 
-             @Override
-             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-                 // merge
+                try {
+                    System.err.println("Merging frame ");
+                    List<float[]> floats = deserializeFloatList(buffer.array());
+                    System.err.println("to merge centroids size " + floats.size());
+                    accumulator.addAll(floats);
+                    System.err.println("merged centroids size " + accumulator.size());
+                    FrameUtils.appendToWriter(writer, appender, tupleBuilder.getFieldEndOffsets(),
+                            tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                    // TODO CALVIN DANI: check the API and correct design?
+                    appender.write(writer, true);
+                    System.err.println("Merged frame ");
 
-                 // broadcast when received from all partitions
-                 System.err.println(i + " partitions remaining");
-                 i--;
-                 if (i <= 0) {
-                     writer.nextFrame(buffer);
-                     i = 4;
-                 }
-             }
+                } catch (Exception e) {
+                    System.err.println("failed to merge frame " + e.getMessage());
+                }
 
-             @Override
-             public void fail() throws HyracksDataException {
-                 writer.fail();
-             }
+            }
 
-             @Override
-             public void flush() throws HyracksDataException {
-                 writer.flush();
-             }
+            public static byte[] serializeFloatList(List<float[]> floatList) throws IOException {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream dos = new DataOutputStream(baos);
+                dos.writeInt(floatList.size());
+                for (float[] arr : floatList) {
+                    dos.writeInt(arr.length);
+                    for (float f : arr) {
+                        dos.writeFloat(f);
+                    }
+                }
+                dos.flush();
+                return baos.toByteArray();
+            }
 
-             @Override
-             public void close() throws HyracksDataException {
-                 writer.close();
-             }
-         };
-     }
- }
+            // Deserialization
+            public static List<float[]> deserializeFloatList(byte[] bytes) throws IOException {
+                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
+                int numArrays = dis.readInt();
+                List<float[]> result = new ArrayList<>(numArrays);
+                for (int i = 0; i < numArrays; i++) {
+                    int arrLen = dis.readInt();
+                    float[] arr = new float[arrLen];
+                    for (int j = 0; j < arrLen; j++) {
+                        arr[j] = dis.readFloat();
+                    }
+                    result.add(arr);
+                }
+                return result;
+            }
+
+            @Override
+            public void fail() throws HyracksDataException {
+                writer.fail();
+            }
+
+            @Override
+            public void flush() throws HyracksDataException {
+                writer.flush();
+            }
+
+            @Override
+            public void close() throws HyracksDataException {
+                try {
+                    System.err.println("sending merged centroids " + accumulator.size());
+                    byte[] serialized = serializeFloatList(accumulator);
+                    tupleBuilder.addField(serialized, 0, serialized.length);
+
+                    // 3. Write tuple to frame
+                    FrameUtils.appendToWriter(writer, appender, tupleBuilder.getFieldEndOffsets(),
+                            tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                    appender.write(writer, true);
+                    System.err.println("sent merged centroids " + accumulator.size());
+                    //                 writer.nextFrame(buffer);
+                } catch (Exception e) {
+                } finally {
+                    writer.close();
+                }
+            }
+        };
+    }
+}
