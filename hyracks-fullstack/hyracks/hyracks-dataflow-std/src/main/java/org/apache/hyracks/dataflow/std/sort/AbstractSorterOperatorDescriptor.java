@@ -46,7 +46,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-public abstract class   AbstractSorterOperatorDescriptor extends AbstractOperatorDescriptor {
+public abstract class AbstractSorterOperatorDescriptor extends AbstractOperatorDescriptor {
 
     private static final Logger LOGGER = LogManager.getLogger();
     private static final long serialVersionUID = 1L;

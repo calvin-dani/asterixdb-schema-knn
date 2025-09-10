@@ -19,6 +19,15 @@
 
 package org.apache.asterix.metadata.utils;
 
+import static org.apache.asterix.om.utils.ProjectionFiltrationTypeUtil.ALL_FIELDS_TYPE;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.config.OptimizationConfUtil;
@@ -88,15 +97,6 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import static org.apache.asterix.om.utils.ProjectionFiltrationTypeUtil.ALL_FIELDS_TYPE;
-
 /**
  * Utility class for sampling operations.
  * <p>
@@ -140,9 +140,8 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
     protected RecordDescriptor enforcedRecDesc;
     protected IBinaryComparatorFactory[] primaryComparatorFactories;
 
-
     protected KmeansOperationsHelper(Dataset dataset, Index sampleIdx, MetadataProvider metadataProvider,
-                                     SourceLocation sourceLoc) throws AlgebricksException {
+            SourceLocation sourceLoc) throws AlgebricksException {
         this.dataset = dataset;
         this.sampleIdx = sampleIdx;
         this.metadataProvider = metadataProvider;
@@ -191,7 +190,7 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
         mergePolicyFactory = compactionInfo.first;
         mergePolicyProperties = compactionInfo.second;
 
-//        setSecondaryRecDescAndComparators();
+        //        setSecondaryRecDescAndComparators();
     }
 
     @Override
@@ -283,7 +282,6 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
 
         RecordDescriptor raggRecordDesc = new RecordDescriptor(raggSerdes, raggTraits);
 
-
         IRunningAggregateEvaluatorFactory raggSlotEvalFactory =
                 new SampleSlotRunningAggregateFunctionFactory(sampleCardinalityTarget, sampleSeed);
         IRunningAggregateEvaluatorFactory raggCounterEvalFactory = TidRunningAggregateDescriptor.FACTORY
@@ -306,30 +304,29 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
 
-//        int[] projectColumns = new int[nFields];
-//                projectColumns[0] = 1; // [slot]
-//        for (int i = 0; i < nFields; i++) {
-//            projectColumns[i] = 2 + i;
-//        }
-
+        //        int[] projectColumns = new int[nFields];
+        //                projectColumns[0] = 1; // [slot]
+        //        for (int i = 0; i < nFields; i++) {
+        //            projectColumns[i] = 2 + i;
+        //        }
 
         BuiltinType embeddingType = BuiltinType.ANY;
         ISerializerDeserializer[] rembeddingSerde = new ISerializerDeserializer[1];
         rembeddingSerde[0] = serdeProvider.getSerializerDeserializer(embeddingType);
-//        System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 4, 1);
+        //        System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 4, 1);
         ITypeTraits[] rembeddingTraits = new ITypeTraits[1];
         rembeddingTraits[0] = typeTraitProvider.getTypeTrait(embeddingType);
-//        System.arraycopy(recordDesc.getTypeTraits(), 0, rembeddingTraits, 4, 1);
+        //        System.arraycopy(recordDesc.getTypeTraits(), 0, rembeddingTraits, 4, 1);
 
         RecordDescriptor rembeddingRecordDesc = new RecordDescriptor(rembeddingSerde, rembeddingTraits);
 
         BuiltinType aggType = BuiltinType.AINT64;
         ISerializerDeserializer[] aggSerde = new ISerializerDeserializer[1];
         aggSerde[0] = serdeProvider.getSerializerDeserializer(aggType);
-//        System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 4, 1);
+        //        System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 4, 1);
         ITypeTraits[] aggTraits = new ITypeTraits[1];
         aggTraits[0] = typeTraitProvider.getTypeTrait(aggType);
-//        System.arraycopy(recordDesc.getTypeTraits(), 0, rembeddingTraits, 4, 1);
+        //        System.arraycopy(recordDesc.getTypeTraits(), 0, rembeddingTraits, 4, 1);
 
         RecordDescriptor aggRecordDesc = new RecordDescriptor(aggSerde, aggTraits);
 
@@ -337,37 +334,36 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
         List<String> embedddingListName = Arrays.asList("embedding");
         // TODO CALVIN DANI : AFTER PIPELINE fix the recordcolumns
         IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(itemType, 3, embedddingListName);
-        secondaryFieldAccessEvalFactories[0] =
-                createFieldCast(secFieldAccessor, false, null, itemType, new AOrderedListType(BuiltinType.AINT64,"embedding"));
+        secondaryFieldAccessEvalFactories[0] = createFieldCast(secFieldAccessor, false, null, itemType,
+                new AOrderedListType(BuiltinType.AINT64, "embedding"));
         // primary index ----> cast assign op (produces the secondary index entry)
-        targetOp = createAssignOp(spec, secondayKeys, raggRecordDesc,rembeddingRecordDesc);
+        targetOp = createAssignOp(spec, secondayKeys, raggRecordDesc, rembeddingRecordDesc);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
 
-
-//        int[] projectColumns = new int[nFields];
-//        projectColumns[0] = 0; // [slot]
-//        StreamProjectRuntimeFactory projectRuntimeFactory = new StreamProjectRuntimeFactory(projectColumns);
-//        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1, new IPushRuntimeFactory[] { projectRuntimeFactory },
-//                new RecordDescriptor[] { recordDesc });
-//        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-//        sourceOp = targetOp;
-//
-//        List<String> embedddingListName = Arrays.asList("embedding");
-//        IScalarEvaluatorFactory[] secFieldAccessor = new IScalarEvaluatorFactory[1];
-//        secFieldAccessor[0] = createFieldAccessor(itemType, 1, embedddingListName);
-//
-//        IScalarEvaluatorFactory[] sefs = new IScalarEvaluatorFactory[1];
-//        System.arraycopy(secondaryFieldAccessEvalFactories, 0, sefs, 0, secondaryFieldAccessEvalFactories.length);
-//        int[] outColumns = new int[] { 1 }; // [slot]
-//        int[] projectionList = new int[] { 1 }; // [slot]
-//        AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
-//        assign.setSourceLocation(sourceLoc);
-//        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1, new IPushRuntimeFactory[] { assign },
-//                new RecordDescriptor[] { recordDesc });
-//        targetOp.setSourceLocation(sourceLoc);
-//        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-//        sourceOp = targetOp;
+        //        int[] projectColumns = new int[nFields];
+        //        projectColumns[0] = 0; // [slot]
+        //        StreamProjectRuntimeFactory projectRuntimeFactory = new StreamProjectRuntimeFactory(projectColumns);
+        //        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1, new IPushRuntimeFactory[] { projectRuntimeFactory },
+        //                new RecordDescriptor[] { recordDesc });
+        //        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        //        sourceOp = targetOp;
+        //
+        //        List<String> embedddingListName = Arrays.asList("embedding");
+        //        IScalarEvaluatorFactory[] secFieldAccessor = new IScalarEvaluatorFactory[1];
+        //        secFieldAccessor[0] = createFieldAccessor(itemType, 1, embedddingListName);
+        //
+        //        IScalarEvaluatorFactory[] sefs = new IScalarEvaluatorFactory[1];
+        //        System.arraycopy(secondaryFieldAccessEvalFactories, 0, sefs, 0, secondaryFieldAccessEvalFactories.length);
+        //        int[] outColumns = new int[] { 1 }; // [slot]
+        //        int[] projectionList = new int[] { 1 }; // [slot]
+        //        AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
+        //        assign.setSourceLocation(sourceLoc);
+        //        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1, new IPushRuntimeFactory[] { assign },
+        //                new RecordDescriptor[] { recordDesc });
+        //        targetOp.setSourceLocation(sourceLoc);
+        //        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        //        sourceOp = targetOp;
 
         //        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, asterixAssignOp,
         //                primaryPartitionConstraint);
@@ -383,22 +379,21 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
         //        test = metadataProvider.getDataFormat().getFieldAccessEvaluatorFactory(
         //                metadataProvider.getFunctionManager(), recordDesc.getFields()[1],
         //                [1], 1, sourceLoc);
-//        IAggregateEvaluatorFactory kmeansClusterFactory = new KmeansClusterEvalFactory( new IScalarEvaluatorFactory[] { new FieldAccessByNameEvalFactory(new ColumnAccessEvalFactory(1), new ) }, false, sourceLoc);
+        //        IAggregateEvaluatorFactory kmeansClusterFactory = new KmeansClusterEvalFactory( new IScalarEvaluatorFactory[] { new FieldAccessByNameEvalFactory(new ColumnAccessEvalFactory(1), new ) }, false, sourceLoc);
         // To confirm
         secFieldAccessor = createFieldAccessor(itemType, 0, embedddingListName);
-        secondaryFieldAccessEvalFactories[0] =
-                createFieldCast(secFieldAccessor, false, null, itemType, new ARecordType("embedding",
-                        new String[] { "embedding" }, new IAType[] { new AOrderedListType(BuiltinType.AINT64, "embedding") },
-                        false));
+        secondaryFieldAccessEvalFactories[0] = createFieldCast(secFieldAccessor, false, null, itemType,
+                new ARecordType("embedding", new String[] { "embedding" },
+                        new IAType[] { new AOrderedListType(BuiltinType.AINT64, "embedding") }, false));
 
-        IAggregateEvaluatorFactory kmeansClusterFactory = new KmeansClusterEvalFactory( new IScalarEvaluatorFactory[] { new ColumnAccessEvalFactory(0) }, false, sourceLoc);
-                AggregateRuntimeFactory aggRuntimeFactory =
-                        new AggregateRuntimeFactory(new IAggregateEvaluatorFactory[]{kmeansClusterFactory});
-                targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1,
-                        new IPushRuntimeFactory[] { aggRuntimeFactory },
-                        new RecordDescriptor[] { rembeddingRecordDesc, aggRecordDesc });
-                spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-                sourceOp = targetOp;
+        IAggregateEvaluatorFactory kmeansClusterFactory = new KmeansClusterEvalFactory(
+                new IScalarEvaluatorFactory[] { new ColumnAccessEvalFactory(0) }, false, sourceLoc);
+        AggregateRuntimeFactory aggRuntimeFactory =
+                new AggregateRuntimeFactory(new IAggregateEvaluatorFactory[] { kmeansClusterFactory });
+        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 1, new IPushRuntimeFactory[] { aggRuntimeFactory },
+                new RecordDescriptor[] { rembeddingRecordDesc, aggRecordDesc });
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        sourceOp = targetOp;
 
         // (running agg + select) ---> group-by
         //        int[] groupFields = new int[] { 0 }; // [slot]
@@ -487,31 +482,31 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
     }
 
     protected AlgebricksMetaOperatorDescriptor createAssignOp(JobSpecification spec, int numSecondaryKeyFields,
-                                                              RecordDescriptor prevOpRecDesc, RecordDescriptor nextOpRecDesc) throws AlgebricksException {
+            RecordDescriptor prevOpRecDesc, RecordDescriptor nextOpRecDesc) throws AlgebricksException {
         int numFilterFields = 0;
-//        int[] outColumns = new int[numSecondaryKeyFields + numFilterFields];
-//        int[] projectionList = new int[numSecondaryKeyFields + numPrimaryKeys + numFilterFields];
-//        for (int i = 0; i < numSecondaryKeyFields + numFilterFields; i++) {
-//            outColumns[i] = numPrimaryKeys + i;
-//        }
-//        int projCount = 0;
-//        for (int i = 0; i < numSecondaryKeyFields; i++) {
-//            projectionList[projCount++] = numPrimaryKeys + i;
-//        }
-//        for (int i = 0; i < numPrimaryKeys; i++) {
-//            projectionList[projCount++] = i;
-//        }
-//        if (numFilterFields > 0) {
-//            projectionList[projCount] = numPrimaryKeys + numSecondaryKeyFields;
-//        }
-//
+        //        int[] outColumns = new int[numSecondaryKeyFields + numFilterFields];
+        //        int[] projectionList = new int[numSecondaryKeyFields + numPrimaryKeys + numFilterFields];
+        //        for (int i = 0; i < numSecondaryKeyFields + numFilterFields; i++) {
+        //            outColumns[i] = numPrimaryKeys + i;
+        //        }
+        //        int projCount = 0;
+        //        for (int i = 0; i < numSecondaryKeyFields; i++) {
+        //            projectionList[projCount++] = numPrimaryKeys + i;
+        //        }
+        //        for (int i = 0; i < numPrimaryKeys; i++) {
+        //            projectionList[projCount++] = i;
+        //        }
+        //        if (numFilterFields > 0) {
+        //            projectionList[projCount] = numPrimaryKeys + numSecondaryKeyFields;
+        //        }
+        //
         int[] outColumns = new int[1];
         int[] projectionList = new int[1];
         outColumns[0] = 1; // [slot]
         projectionList[0] = 1; // [slot]
         IScalarEvaluatorFactory[] sefs = new IScalarEvaluatorFactory[secondaryFieldAccessEvalFactories.length];
         System.arraycopy(secondaryFieldAccessEvalFactories, 0, sefs, 0, secondaryFieldAccessEvalFactories.length);
-//        AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
+        //        AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
         AssignRuntimeFactory assign = new AssignRuntimeFactory(outColumns, sefs, projectionList);
         assign.setSourceLocation(sourceLoc);
         // TDOO CALVIN Change the record descroptor.
@@ -525,7 +520,7 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
     }
 
     private static Pair<ARecordType, ARecordType> getEnforcedType(Index index, ARecordType aRecordType,
-                                                                  ARecordType metaRecordType) throws AlgebricksException {
+            ARecordType metaRecordType) throws AlgebricksException {
         return index.getIndexDetails().isOverridingKeyFieldTypes()
                 ? TypeUtil.createEnforcedType(aRecordType, metaRecordType, Collections.singletonList(index))
                 : new Pair<>(null, null);
@@ -636,9 +631,8 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
     }
 
     protected IScalarEvaluatorFactory createFieldCast(IScalarEvaluatorFactory fieldEvalFactory,
-                                                      boolean isOverridingKeyFieldTypes, IAType enforcedRecordType, ARecordType recordType, IAType targetType)
+            boolean isOverridingKeyFieldTypes, IAType enforcedRecordType, ARecordType recordType, IAType targetType)
             throws AlgebricksException {
-
 
         IFunctionManager funManger = metadataProvider.getFunctionManager();
         IDataFormat dataFormat = metadataProvider.getDataFormat();
@@ -673,7 +667,7 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
     }
 
     protected IFunctionDescriptor createCastFunction(IAType targetType, IAType inputType, boolean strictCast,
-                                                     SourceLocation sourceLoc) throws AlgebricksException {
+            SourceLocation sourceLoc) throws AlgebricksException {
         IFunctionDescriptor castFuncDesc = metadataProvider.getFunctionManager()
                 .lookupFunction(strictCast ? BuiltinFunctions.CAST_TYPE : BuiltinFunctions.CAST_TYPE_LAX, sourceLoc);
         castFuncDesc.setSourceLocation(sourceLoc);
@@ -682,7 +676,7 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
     }
 
     protected IScalarEvaluatorFactory createConstructorFunction(IFunctionManager funManager, IDataFormat dataFormat,
-                                                                IScalarEvaluatorFactory fieldEvalFactory, IAType fieldType) throws AlgebricksException {
+            IScalarEvaluatorFactory fieldEvalFactory, IAType fieldType) throws AlgebricksException {
         IAType targetType = TypeComputeUtils.getActualType(fieldType);
         Pair<FunctionIdentifier, IAObject> constructorWithFmt =
                 IndexUtil.getTypeConstructorDefaultNull(sampleIdx, targetType, sourceLoc);

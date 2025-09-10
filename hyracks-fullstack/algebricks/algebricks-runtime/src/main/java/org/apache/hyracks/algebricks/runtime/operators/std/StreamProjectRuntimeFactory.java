@@ -71,8 +71,7 @@ public class StreamProjectRuntimeFactory extends AbstractOneInputOneOutputRuntim
                     int t = 0;
                     if (nTuple > 1) {
                         for (; t < nTuple - 1; t++) {
-                            System.err.println("Stre" +
-                                    "am Project runtime.nextFrame: processing tuple " + t);
+                            System.err.println("Stre" + "am Project runtime.nextFrame: processing tuple " + t);
                             appendProjectionToFrame(t, projectionList);
                         }
                     }
