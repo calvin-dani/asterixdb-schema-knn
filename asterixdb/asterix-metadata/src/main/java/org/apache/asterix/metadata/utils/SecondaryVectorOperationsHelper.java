@@ -36,8 +36,8 @@ import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.CandidateCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.InitCentroidOperatorDescriptor;
-import org.apache.asterix.runtime.operators.MergeCentroids2OperatorDescriptor;
 import org.apache.asterix.runtime.operators.MergeCentroidsOperatorDescriptor;
+import org.apache.asterix.runtime.operators.ReduceCandidateCentroidsKOperatorDescriptor;
 import org.apache.asterix.runtime.operators.StoreMergedCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -172,9 +172,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // candidate centroids -(broadcast-1)> merge centroids
         sourceOp = targetOp;
-//        MergeCentroids2OperatorDescriptor merge =
-//                new MergeCentroids2OperatorDescriptor(spec, secondaryRecDesc, rd, new ColumnAccessEvalFactory(0),
-//                        centroidsUUID);
+        //        MergeCentroids2OperatorDescriptor merge =
+        //                new MergeCentroids2OperatorDescriptor(spec, secondaryRecDesc, rd, new ColumnAccessEvalFactory(0),
+        //                        centroidsUUID);
         MergeCentroidsOperatorDescriptor merge =
                 new MergeCentroidsOperatorDescriptor(spec, secondaryRecDesc, rd, new ColumnAccessEvalFactory(0));
         targetOp = merge;
@@ -184,12 +184,20 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // merge centroids -(broadcast-N)> store merged centroids
         sourceOp = targetOp;
-        StoreMergedCentroidsOperatorDescriptor storeMerged =
-                new StoreMergedCentroidsOperatorDescriptor(spec, secondaryRecDesc, centroidsUUID, permitUUID);
+        StoreMergedCentroidsOperatorDescriptor storeMerged = new StoreMergedCentroidsOperatorDescriptor(spec,
+                secondaryRecDesc, centroidsUUID, permitUUID, sampleUUID, new ColumnAccessEvalFactory(0));
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, storeMerged,
                 primaryPartitionConstraint);
         targetOp = storeMerged;
         spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+        sourceOp = targetOp;
+        ReduceCandidateCentroidsKOperatorDescriptor reduce =
+                new ReduceCandidateCentroidsKOperatorDescriptor(spec, secondaryRecDesc, centroidsUUID, permitUUID);
+        targetOp = reduce;
+        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, merge,
+                metadataProvider.getClusterLocations().getLocations()[0]);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         // store merged centroids -> sink op
         sourceOp = targetOp;

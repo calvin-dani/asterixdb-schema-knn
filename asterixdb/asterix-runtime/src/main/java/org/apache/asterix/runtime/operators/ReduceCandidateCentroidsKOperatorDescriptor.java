@@ -1,0 +1,280 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+package org.apache.asterix.runtime.operators;
+
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
+import java.util.UUID;
+
+import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
+import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
+import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+
+public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
+
+    private static final long serialVersionUID = 1L;
+
+    private final UUID centroidsUUID;
+    private final UUID permitUUID;
+    private final int dimensions = 1;
+    private final int n = 55;
+    float[] accumulatedWeights;
+
+    public ReduceCandidateCentroidsKOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+            UUID centroidsUUID, UUID permitUUID) {
+        super(spec, 1, 1);
+        this.centroidsUUID = centroidsUUID;
+        this.permitUUID = permitUUID;
+        outRecDescs[0] = rDesc;
+        accumulatedWeights = new float[n];
+    }
+
+    @Override
+    public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
+            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
+
+        return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
+
+            @Override
+            public void open() throws HyracksDataException {
+                writer.open();
+            }
+
+            @Override
+            public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+                try {
+                    System.err.println(
+                            "Storing merged centroids partiton: " + partition + " total n partiton : " + nPartitions);
+                    List<Float> weights = deserializeWeight(buffer.array());
+                    for (int i = 0; i < weights.size(); i++) {
+                        accumulatedWeights[i] += weights.get(i);
+                    }
+                    CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
+                    System.err.println("taking the next permit");
+
+                } catch (Exception e) {
+                }
+
+            }
+
+            @Override
+            public void fail() throws HyracksDataException {
+                writer.fail();
+            }
+
+            @Override
+            public void flush() throws HyracksDataException {
+                writer.flush();
+            }
+
+            @Override
+            public void close() throws HyracksDataException {
+                CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
+                System.err.println("CLOSING STORE MERGED CENTROIDS");
+                System.err.println("current centroids  " + currentCentroids.getCentroids().toString());
+                // compute weights and send to next writer
+
+                try {
+                    int dimensions = 1;
+                    int k = 2;
+                    int n = currentCentroids.getCentroids().size();
+                    float[][] centers = new float[k][dimensions];
+                    List<float[]> points = currentCentroids.getCentroids();
+                    double[] costArray = new double[currentCentroids.getCentroids().size()];
+
+                    Random rand = new Random();
+                    int maxIterations = 10;
+                    // Pick first center
+                    int idx = pickWeightedIndex(rand, points, accumulatedWeights);
+                    centers[0] = Arrays.copyOf(points.get(idx), dimensions);
+
+                    // Initialize costArray
+                    for (int i = 0; i < n; i++) {
+                        costArray[i] = fastSquaredDistance(points.get(i), centers[0]);
+                    }
+
+                    for (int i = 1; i < k; i++) {
+                        double sum = 0.0;
+                        for (int j = 0; j < n; j++) {
+                            sum += costArray[j] * accumulatedWeights[j];
+                        }
+                        double r = rand.nextDouble() * sum;
+                        double cumulativeScore = 0.0;
+                        int j = 0;
+                        while (j < n && cumulativeScore < r) {
+                            cumulativeScore += accumulatedWeights[j] * costArray[j];
+                            j++;
+                        }
+                        if (j == 0) {
+                            centers[i] = Arrays.copyOf(points.get(0), dimensions);
+                        } else {
+                            centers[i] = Arrays.copyOf(points.get(j - 1), dimensions);
+                        }
+                        // Update costArray
+                        for (int p = 0; p < n; p++) {
+                            costArray[p] = Math.min(fastSquaredDistance(points.get(p), centers[i]), costArray[p]);
+                        }
+                    }
+
+                    int[] oldClosest = new int[n];
+                    Arrays.fill(oldClosest, -1);
+                    int iteration = 0;
+                    boolean moved = true;
+                    while (moved && iteration < maxIterations) {
+                        moved = false;
+                        double[] counts = new double[k];
+                        float[][] sums = new float[k][dimensions];
+                        for (int i = 0; i < n; i++) {
+                            int index = findClosest(centers, points.get(i));
+                            addWeighted(sums[index], points.get(i), accumulatedWeights[i]);
+                            counts[index] += accumulatedWeights[i];
+                            if (index != oldClosest[i]) {
+                                moved = true;
+                                oldClosest[i] = index;
+                            }
+                        }
+                        // Update centers
+                        for (int j = 0; j < k; j++) {
+                            if (counts[j] == 0.0) {
+                                centers[j] = Arrays.copyOf(points.get(rand.nextInt(n)), dimensions);
+                            } else {
+                                scale(sums[j], 1.0 / counts[j]);
+                                centers[j] = Arrays.copyOf(sums[j], dimensions);
+                            }
+                        }
+                        iteration++;
+                    }
+
+                    for (float[] f : centers) {
+                        System.err.println("final centroids " + Arrays.toString(f));
+                        currentCentroids.addCentroid(f);
+                    }
+                    ctx.setStateObject(currentCentroids);
+
+                } catch (Exception e) {
+                }
+
+                writer.close();
+            }
+
+            // Deserialization
+            public static List<float[]> deserializeFloatList(byte[] bytes) throws IOException {
+                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
+                int numArrays = dis.readInt();
+                StringBuilder sb = new StringBuilder();
+                sb.append("numArrays ");
+                sb.append(numArrays);
+                List<float[]> result = new ArrayList<>(numArrays);
+                for (int i = 0; i < numArrays; i++) {
+                    int arrLen = dis.readInt();
+                    sb.append("| arrLen ");
+                    sb.append(arrLen);
+                    sb.append('[');
+                    float[] arr = new float[arrLen];
+                    for (int j = 0; j < arrLen; j++) {
+                        arr[j] = dis.readFloat();
+                        sb.append(arr[j]);
+                        if (j < arrLen - 1) {
+                            sb.append(',');
+                        }
+                    }
+                    sb.append(']');
+                    result.add(arr);
+                }
+                System.err.println("merging centroids " + sb.toString());
+
+                return result;
+            }
+
+            public static List<Float> deserializeWeight(byte[] bytes) throws IOException {
+                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
+                List<Float> floatList = new ArrayList<>();
+                //                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes));
+                int size = dis.readInt();
+                for (int i = 0; i < size; i++) {
+                    floatList.add(dis.readFloat());
+                }
+                return floatList;
+            }
+
+            private int pickWeightedIndex(Random rand, List<float[]> data, float[] weights) {
+                float sum = 0f;
+                for (float w : weights) {
+                    sum += w;
+                }
+                double r = rand.nextDouble() * sum;
+                double curWeight = 0.0;
+                int i = 0;
+                while (i < data.size() && curWeight < r) {
+                    curWeight += weights[i];
+                    i++;
+                }
+                return Math.max(0, i - 1);
+            }
+
+            private double fastSquaredDistance(float[] a, float[] b) {
+                double sum = 0.0;
+                for (int i = 0; i < a.length; i++) {
+                    double diff = a[i] - b[i];
+                    sum += diff * diff;
+                }
+                return sum;
+            }
+
+            private int findClosest(float[][] centers, float[] point) {
+                int best = 0;
+                double bestDist = fastSquaredDistance(centers[0], point);
+                for (int i = 1; i < centers.length; i++) {
+                    double dist = fastSquaredDistance(centers[i], point);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = i;
+                    }
+                }
+                return best;
+            }
+
+            private void addWeighted(float[] sum, float[] point, double weight) {
+                for (int i = 0; i < sum.length; i++) {
+                    sum[i] += point[i] * weight;
+                }
+            }
+
+            private void scale(float[] vec, double factor) {
+                for (int i = 0; i < vec.length; i++) {
+                    vec[i] *= factor;
+                }
+            }
+
+        };
+
+    }
+}

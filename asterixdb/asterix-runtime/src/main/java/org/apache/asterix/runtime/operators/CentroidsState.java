@@ -41,6 +41,11 @@ public class CentroidsState extends AbstractStateObject {
     }
 
     public void addCentroid(float[] centroid) {
+        for (float[] existing : centroids) {
+            if (java.util.Arrays.equals(existing, centroid)) {
+                return; // Duplicate found, do not add
+            }
+        }
         centroids.add(centroid);
     }
 

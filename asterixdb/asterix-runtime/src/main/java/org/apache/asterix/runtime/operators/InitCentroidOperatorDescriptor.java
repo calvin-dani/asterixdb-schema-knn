@@ -22,6 +22,7 @@ package org.apache.asterix.runtime.operators;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
+import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -38,10 +39,13 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
+import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+
+import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
 public final class InitCentroidOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
@@ -100,7 +104,27 @@ public final class InitCentroidOperatorDescriptor extends AbstractSingleActivity
                 }
                 System.err.println("INIT CENTROID writing frame to materialized sample tuple count "
                         + fta.getTupleCount() + " partition " + partition);
+                fta.reset(buffer, " BEFORE WRITING TO  " + partition);
+
+
+                IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+                VoidPointable inputVal = new VoidPointable();
+                int tupleCount = fta.getTupleCount();
+                for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
+                    ftr.reset(fta, tupleIndex);
+                    eval.evaluate(ftr, inputVal);
+                    ListAccessor listAccessorConstant = new ListAccessor();
+                    System.err.println("debugging before writing deserializer  " + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]) + " partition" + partition + " tuple index " + tupleIndex);
+                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                        continue;
+                    }
+                }
+
+
                 materializedSample.appendFrame(buffer);
+
+
+
             }
 
             @Override
@@ -117,6 +141,31 @@ public final class InitCentroidOperatorDescriptor extends AbstractSingleActivity
             public void close() throws HyracksDataException {
                 if (materializedSample != null) {
                     materializedSample.close();
+
+//                    GeneratedRunFileReader in = materializedSample.creatReader();
+//                    in.open();
+//                    VoidPointable inputVal = new VoidPointable();
+//                    IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+//                    VSizeFrame vSizeFrame = new VSizeFrame(ctx);
+//                    vSizeFrame.reset();
+//                    while (in.nextFrame(vSizeFrame)) {
+//                        fta.reset(vSizeFrame.getBuffer(), " READING partition " + partition);
+//                        int tupleCount = fta.getTupleCount();
+//                        for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
+//                            ftr.reset(fta, tupleIndex);
+//                            eval.evaluate(ftr, inputVal);
+//                            ListAccessor listAccessorConstant = new ListAccessor();
+//                            System.err.println("debugging reading after writing deserializer  " + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]) + " partition" + partition + " tuple index " + tupleIndex);
+//                            if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+//                                continue;
+//                            }
+//                        }
+//                    }
+
+//                    in.close();
+
+
+
                     ctx.setStateObject(materializedSample);
                 }
                 writer.close();
