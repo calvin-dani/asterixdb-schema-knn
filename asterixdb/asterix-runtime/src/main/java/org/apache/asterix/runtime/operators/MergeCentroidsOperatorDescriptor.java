@@ -26,6 +26,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
@@ -40,10 +41,8 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
-import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
-import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 
@@ -51,13 +50,9 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
 
     private static final long serialVersionUID = 1L;
     private final RecordDescriptor centroidDesc;
-    private FrameTupleAccessor fta;
-    private FrameTupleReference ftr;
     private IScalarEvaluatorFactory args;
     private ListAccessor listAccessorConstant;
     private List<float[]> accumulator;
-    private ArrayTupleBuilder tupleBuilder;
-    private FrameTupleAppender appender;
 
     public MergeCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
             RecordDescriptor centroidDesc, IScalarEvaluatorFactory args) {
@@ -77,16 +72,13 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
             IScalarEvaluator eval;
             VoidPointable inputVal = new VoidPointable();
             FrameTupleAppender appender;
+
             @Override
             public void open() throws HyracksDataException {
                 writer.open();
                 appender = new FrameTupleAppender(new VSizeFrame(ctx));
-                //                fta = new FrameTupleAccessor(centroidDesc);
-                //                ftr = new FrameTupleReference();
-                //                eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
                 listAccessorConstant = new ListAccessor();
                 accumulator = new ArrayList<>();
-                tupleBuilder = new ArrayTupleBuilder(1);
                 appender = new FrameTupleAppender(new VSizeFrame(ctx));
             }
 
@@ -97,12 +89,15 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                 try {
                     System.err.println("Merging frame ");
                     List<float[]> floats = deserializeFloatList(buffer.array());
-                    System.err.println("to merge centroids size " + floats.size());
+                    //                    System.err.println("to merge centroids size " + floats.size());
                     accumulator.addAll(floats);
-                    System.err.println("merged centroids size " + accumulator.size());
+                    //                    System.err.println("merged centroids size " + accumulator.size());
+                    byte[] serialized = serializeFloatList(accumulator);
+                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1);
+                    tupleBuilder.addField(serialized, 0, serialized.length);
                     FrameUtils.appendToWriter(writer, appender, tupleBuilder.getFieldEndOffsets(),
                             tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
-                    // TODO CALVIN DANI: check the API and correct design?
+//                    // TODO CALVIN DANI: check the API and correct design?
                     appender.write(writer, true);
                     System.err.println("Merged frame ");
 
@@ -115,13 +110,20 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
             public static byte[] serializeFloatList(List<float[]> floatList) throws IOException {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(baos);
+                StringBuilder sb = new StringBuilder();
+                sb.append("merged serializing centroids ");
                 dos.writeInt(floatList.size());
+                sb.append("numArrays ");
+                sb.append(floatList.size());
+                sb.append(" | ");
                 for (float[] arr : floatList) {
+                    sb.append(Arrays.toString(arr));
                     dos.writeInt(arr.length);
                     for (float f : arr) {
                         dos.writeFloat(f);
                     }
                 }
+                System.err.println(sb.toString());
                 dos.flush();
                 return baos.toByteArray();
             }
@@ -130,15 +132,28 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
             public static List<float[]> deserializeFloatList(byte[] bytes) throws IOException {
                 DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
                 int numArrays = dis.readInt();
+                StringBuilder sb = new StringBuilder();
+                sb.append("numArrays ");
+                sb.append(numArrays);
                 List<float[]> result = new ArrayList<>(numArrays);
                 for (int i = 0; i < numArrays; i++) {
                     int arrLen = dis.readInt();
+                    sb.append("| arrLen ");
+                    sb.append(arrLen);
+                    sb.append('[');
                     float[] arr = new float[arrLen];
                     for (int j = 0; j < arrLen; j++) {
                         arr[j] = dis.readFloat();
+                        sb.append(arr[j]);
+                        if (j < arrLen - 1) {
+                            sb.append(',');
+                        }
                     }
+                    sb.append(']');
                     result.add(arr);
                 }
+                System.err.println("merging centroids " + sb.toString());
+
                 return result;
             }
 
@@ -155,8 +170,9 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
             @Override
             public void close() throws HyracksDataException {
                 try {
-                    System.err.println("sending merged centroids " + accumulator.size());
+                    //                    System.err.println("sending merged centroids " + accumulator.toString());
                     byte[] serialized = serializeFloatList(accumulator);
+                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1);
                     tupleBuilder.addField(serialized, 0, serialized.length);
 
                     // 3. Write tuple to frame
@@ -164,7 +180,7 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                             tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
                     appender.write(writer, true);
                     System.err.println("sent merged centroids " + accumulator.size());
-                    //                 writer.nextFrame(buffer);
+
                 } catch (Exception e) {
                 } finally {
                     writer.close();

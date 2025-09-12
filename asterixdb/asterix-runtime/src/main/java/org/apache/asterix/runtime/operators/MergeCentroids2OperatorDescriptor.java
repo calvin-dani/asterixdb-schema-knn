@@ -32,6 +32,7 @@ import java.util.UUID;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
+import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.ActivityId;
 import org.apache.hyracks.api.dataflow.IActivityGraphBuilder;
@@ -60,9 +61,7 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
     private FrameTupleReference ftr;
     private IScalarEvaluatorFactory args;
     private ListAccessor listAccessorConstant;
-//    private List<float[]> accumulator;
-    private ArrayTupleBuilder tupleBuilder;
-    private FrameTupleAppender appender;
+    //    private List<float[]> accumulator;
 
     public MergeCentroids2OperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
             RecordDescriptor centroidDesc, IScalarEvaluatorFactory args, UUID centroidsUUID) {
@@ -71,7 +70,7 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
         this.centroidDesc = centroidDesc;
         this.args = args;
         this.centroidsUUID = centroidsUUID;
-//        accumulator = new ArrayList<>();
+        //        accumulator = new ArrayList<>();
     }
 
     @Override
@@ -92,6 +91,9 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
     protected class MergeCentroidsActivity extends AbstractActivityNode {
         private static final long serialVersionUID = 1L;
 
+        private ArrayTupleBuilder tupleBuilder;
+        private FrameTupleAppender appender;
+
         protected MergeCentroidsActivity(ActivityId id) {
             super(id);
         }
@@ -106,7 +108,10 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
 
                 @Override
                 public void open() throws HyracksDataException {
-                                        state = (CentroidsState) ctx.getStateObject(centroidsUUID);
+                    writer.open();
+                    appender = new FrameTupleAppender(new VSizeFrame(ctx));
+                    tupleBuilder = new ArrayTupleBuilder(1);
+                    state = (CentroidsState) ctx.getStateObject(centroidsUUID);
                     //                    eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
                     //                    inputVal = new VoidPointable();
                     //                    fta = new FrameTupleAccessor(outRecDescs[0]);
@@ -123,9 +128,13 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
                         List<float[]> floats = deserializeFloatList(buffer.array());
                         System.err.println("to merge centroids size " + floats.size());
                         state.getCentroids().addAll(floats);
-//                        accumulator.addAll(floats);
+                        //                        accumulator.addAll(floats);
+                        FrameUtils.appendToWriter(writer, appender, tupleBuilder.getFieldEndOffsets(),
+                                tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                        // TODO CALVIN DANI: check the API and correct design?
+                        appender.write(writer, true);
                         System.err.println("merged centroids size " + state.getCentroids().size());
-//                                            writer.nextFrame(buffer);
+                        //                                            writer.nextFrame(buffer);
                         System.err.println("Merged 2 frame ");
 
                     } catch (Exception e) {
@@ -145,7 +154,6 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
                 public void fail() throws HyracksDataException {
                     System.err.println("FAILED frame ");
                 }
-
 
                 // Deserialization
                 public static List<float[]> deserializeFloatList(byte[] bytes) throws IOException {
@@ -168,6 +176,8 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
 
     protected class SendCandidatesCentroidsActivity extends AbstractActivityNode {
         private static final long serialVersionUID = 1L;
+        private ArrayTupleBuilder tupleBuilder;
+        private FrameTupleAppender appender;
 
         protected SendCandidatesCentroidsActivity(ActivityId id) {
             super(id);
@@ -183,6 +193,8 @@ public final class MergeCentroids2OperatorDescriptor extends AbstractOperatorDes
                 public void initialize() throws HyracksDataException {
                     CentroidsState state = (CentroidsState) ctx.getStateObject(centroidsUUID);
                     try {
+                        appender = new FrameTupleAppender(new VSizeFrame(ctx));
+                        tupleBuilder = new ArrayTupleBuilder(1);
                         writer.open();
                         System.err.println("sending merged centroids " + state.getCentroids().size());
                         byte[] serialized = serializeFloatList(state.getCentroids());
