@@ -24,7 +24,6 @@ import org.apache.hyracks.api.comm.FrameConstants;
 import org.apache.hyracks.api.comm.FrameHelper;
 import org.apache.hyracks.api.comm.IFrameTupleAccessor;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
-import org.apache.hyracks.dataflow.common.utils.FrameDebugUtils;
 import org.apache.hyracks.util.IntSerDeUtils;
 
 /**
@@ -54,8 +53,7 @@ public class FrameTupleAccessor implements IFrameTupleAccessor {
 
     public void reset(ByteBuffer buffer, String string) {
         reset(buffer, 0, buffer.limit());
-//        System.err.println("HEREEEEEEEEEEEE :" + string);
-//        FrameDebugUtils.prettyPrint(this, recordDescriptor, string);
+        //        FrameDebugUtils.prettyPrint(this, recordDescriptor, string);
     }
 
     public void reset(ByteBuffer buffer, int start, int length) {

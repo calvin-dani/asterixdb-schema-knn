@@ -116,7 +116,6 @@ public class MaterializerTaskState extends AbstractStateObject {
     }
 
     public GeneratedRunFileReader creatReader() throws HyracksDataException {
-        System.err.println(out.getFileReference().toString() + " get file reader file");
         return out.createReader();
     }
 }

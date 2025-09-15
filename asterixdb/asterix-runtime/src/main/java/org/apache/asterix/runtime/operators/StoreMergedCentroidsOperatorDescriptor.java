@@ -19,11 +19,10 @@
 
 package org.apache.asterix.runtime.operators;
 
+import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
+import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -32,11 +31,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 
+import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
+import org.apache.asterix.om.base.AMutableFloat;
+import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
@@ -53,6 +55,7 @@ import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.data.std.util.ByteArrayAccessibleOutputStream;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
@@ -72,62 +75,82 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
     private final UUID permitUUID;
     private final UUID sampleUUID;
     private final IScalarEvaluatorFactory args;
+    private final RecordDescriptor centroidDesc;
 
     public StoreMergedCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
-            UUID centroidsUUID, UUID permitUUID, UUID sampleUUID, IScalarEvaluatorFactory args) {
+            RecordDescriptor centroidDesc, UUID centroidsUUID, UUID permitUUID, UUID sampleUUID,
+            IScalarEvaluatorFactory args) {
         super(spec, 1, 1);
         this.centroidsUUID = centroidsUUID;
         this.permitUUID = permitUUID;
         this.sampleUUID = sampleUUID;
         this.args = args;
         outRecDescs[0] = rDesc;
-
+        this.centroidDesc = centroidDesc;
     }
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
-            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
+                                                   IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
 
         return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
             private FrameTupleAccessor fta;
+            private FrameTupleAccessor fta2;
             private FrameTupleReference tuple;
+            VoidPointable inputVal;
             IScalarEvaluator eval;
+            CentroidsState currentCentroids;
+            OrderedListBuilder orderedListBuilder;
+            AMutableFloat aFloat;
+            ArrayBackedValueStorage listStorage;
+            ByteArrayAccessibleOutputStream embBytes;
+            DataOutput embBytesOutput;
+
             @Override
             public void open() throws HyracksDataException {
+
+                System.err.println(" Store Centroids Activity Opened partition " + partition + " nPartitions " + nPartitions);
+
                 eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
                 writer.open();
                 fta = new FrameTupleAccessor(outRecDescs[0]);
+                fta2 = new FrameTupleAccessor(centroidDesc);
                 tuple = new FrameTupleReference();
+                inputVal = new VoidPointable();
+                currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
+                orderedListBuilder = new OrderedListBuilder();
+                aFloat = new AMutableFloat(0);
+                listStorage = new ArrayBackedValueStorage();
+                embBytes = new ByteArrayAccessibleOutputStream();
+                embBytesOutput = new DataOutputStream(embBytes);
 
             }
 
             @Override
             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
                 try {
-                    System.err.println(
-                            "Storing merged centroids partiton: " + partition + " total n partiton : " + nPartitions);
-                    List<float[]> floats = deserializeFloatList(buffer.array());
-                    CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
-                    for (float[] f : floats) {
-                        currentCentroids.addCentroid(f);
+                    fta2.reset(buffer);
+
+                    for (int i = 0; i < fta2.getTupleCount(); i++) {
+                        tuple.reset(fta2, i);
+
+                        eval.evaluate(tuple, inputVal);
+                        ListAccessor listAccessorConstant = new ListAccessor();
+                        if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                            continue;
+                        }
+                        listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                        float[] point = createPrimitveList(listAccessorConstant);
+                        currentCentroids.addCentroid(point);
                     }
                     ctx.setStateObject(currentCentroids);
-                    System.err.println("taking the next permit");
                     IterationPermitState iterPermitState =
                             (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
                     Semaphore proceed = iterPermitState.getPermit();
                     proceed.release();
-                    System.err.println("released the next permit");
                 } catch (Exception e) {
                 }
 
-                //                IterationPermitState permitState =
-                //                        (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-
-                // store the merged centroids
-                //                ctx.setStateObject(new CentroidsState(ctx.getJobletContext().getJobId(), centroidsUUID));
-
-                //                permitState.getPermit().release(1);
             }
 
             @Override
@@ -142,7 +165,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
 
             @Override
             public void close() throws HyracksDataException {
-                PartitionedUUID partitionUUID = new PartitionedUUID(sampleUUID,partition);
+                PartitionedUUID partitionUUID = new PartitionedUUID(sampleUUID, partition);
 
                 CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
                 MaterializerTaskState materializerTaskState = (MaterializerTaskState) ctx.getStateObject(partitionUUID);
@@ -157,64 +180,73 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
                 try {
 
-                while (in.nextFrame(vSizeFrame)) {
-                    fta.reset(vSizeFrame.getBuffer(), "cost step ");
-                    int tupleCount = fta.getTupleCount();
-                    for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++, globalTupleIndex++) {
-                        tuple.reset(fta, tupleIndex);
-                        eval.evaluate(tuple, inputVal);
-                        ListAccessor listAccessorConstant = new ListAccessor();
-                        if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-                            continue;
-                        }
-                        listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                        float[] point = createPrimitveList(listAccessorConstant);
+                    while (in.nextFrame(vSizeFrame)) {
+//                        fta.reset(vSizeFrame.getBuffer(), "cost step ");
+                        fta.reset(vSizeFrame.getBuffer());
+                        int tupleCount = fta.getTupleCount();
+                        for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++, globalTupleIndex++) {
+                            tuple.reset(fta, tupleIndex);
+                            eval.evaluate(tuple, inputVal);
+                            ListAccessor listAccessorConstant = new ListAccessor();
+                            if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                continue;
+                            }
+                            listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                            float[] point = createPrimitveList(listAccessorConstant);
 
-                        // Find closest centroid
-                        int closestIdx = -1;
-                        float minCost = Float.POSITIVE_INFINITY;
-                        List<float[]> centroids = currentCentroids.getCentroids();
-                        for (int i = 0; i < centroids.size(); i++) {
-//                            System.out.println("-------centroid------------- " + i + " " + java.util.Arrays.toString(centroids.get(i)));
-                            float cost = euclideanDistance(point, centroids.get(i));
-                            if (cost < minCost) {
-                                minCost = cost;
-                                closestIdx = i;
+                            // Find closest centroid
+                            int closestIdx = -1;
+                            float minCost = Float.POSITIVE_INFINITY;
+                            List<float[]> centroids = currentCentroids.getCentroids();
+                            for (int i = 0; i < centroids.size(); i++) {
+                                float cost = euclideanDistance(point, centroids.get(i));
+                                if (cost < minCost) {
+                                    minCost = cost;
+                                    closestIdx = i;
+                                }
+                            }
+                            preCosts.add(minCost);
+
+                            // Increment count for the closest centroid
+                            if (closestIdx >= 0) {
+                                centroidCounts[closestIdx]++;
                             }
                         }
-                        preCosts.add(minCost);
-
-                        // Increment count for the closest centroid
-                        if (closestIdx >= 0) {
-                            centroidCounts[closestIdx]++;
-                        }
                     }
-                }
 
-                    byte[] serialized = serializeFloat(preCosts);
-                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1);
-                    tupleBuilder.addField(serialized, 0, serialized.length);
 
-// 3. Write tuple to frame
-                    FrameUtils.appendToWriter(writer, appender, tupleBuilder.getFieldEndOffsets(),
-                            tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
-                    // TODO CALVIN DANI: check the API and correct design?
-                    appender.write(writer, true);
-                }
-                catch (Exception e) {
+                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
+
+                    orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
+                    for (float value : preCosts) {
+                        aFloat.setValue(value);
+                        listStorage.reset();
+                        listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
+                        AFloatSerializerDeserializer.INSTANCE.serialize(aFloat, listStorage.getDataOutput());
+                        orderedListBuilder.addItem(listStorage);
+                    }
+                    embBytes.reset();
+                    orderedListBuilder.write(embBytesOutput, true);
+                    tupleBuilder.reset();
+                    tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
+                    if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize())) {
+                        // Frame is full, flush and reset
+                        FrameUtils.flushFrame(appender.getBuffer(), writer);
+                        appender.reset(new VSizeFrame(ctx), true);
+                        appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                    }
+
+                    FrameUtils.flushFrame(appender.getBuffer(), writer);
+
+                } catch (Exception e) {
                     System.err.println("failed to store centroids " + e.getMessage());
-                }
-                finally {
+                } finally {
                     in.close();
-
-                    System.err.println("CLOSING STORE MERGED CENTROIDS partition" + partition + " total n partiton : " + nPartitions);
-                    System.err.println("current centroids  " + currentCentroids.getCentroids().toString());
                     // compute weights and send to next writer
                     writer.close();
                 }
 
 // 2. Build tuple with one field
-
 
 
             }
@@ -257,22 +289,6 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 };
             }
 
-            public static byte[] serializeFloat(List<Float> floatList) throws IOException {
-                // TODO CALVIN DANI: to chnage
-                // 1 FRAME PER LOOP or 1 TUPLE PER LOOP?
-                // KEEP TRACK OF ALL PARTITON END SIGNAL
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                DataOutputStream dos = new DataOutputStream(baos);
-                dos.writeInt(floatList.size());
-                for (Float cost : floatList) {
-//                    for (float f : arr) {
-                        dos.writeFloat(cost.floatValue());
-//                    }
-                }
-                dos.flush();
-                return baos.toByteArray();
-            }
-
             private float euclideanDistance(float[] point, float[] center) {
                 float sum = 0;
                 for (int i = 0; i < point.length; i++) {
@@ -282,35 +298,6 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 return (float) Math.sqrt(sum);
             }
 
-
-            // Deserialization
-            public static List<float[]> deserializeFloatList(byte[] bytes) throws IOException {
-                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
-                int numArrays = dis.readInt();
-                StringBuilder sb = new StringBuilder();
-                sb.append("numArrays ");
-                sb.append(numArrays);
-                List<float[]> result = new ArrayList<>(numArrays);
-                for (int i = 0; i < numArrays; i++) {
-                    int arrLen = dis.readInt();
-                    sb.append("| arrLen ");
-                    sb.append(arrLen);
-                    sb.append('[');
-                    float[] arr = new float[arrLen];
-                    for (int j = 0; j < arrLen; j++) {
-                        arr[j] = dis.readFloat();
-                        sb.append(arr[j]);
-                        if (j < arrLen - 1) {
-                            sb.append(',');
-                        }
-                    }
-                    sb.append(']');
-                    result.add(arr);
-                }
-                System.err.println("merging centroids " + sb.toString());
-
-                return result;
-            }
         };
     }
 }

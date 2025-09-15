@@ -19,6 +19,8 @@
 
 package org.apache.asterix.runtime.operators;
 
+import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
+
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -29,12 +31,28 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.types.EnumDeserializer;
+import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
+import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
+import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.VoidPointable;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
+import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 
@@ -47,14 +65,18 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
     private final int dimensions = 1;
     private final int n = 55;
     float[] accumulatedWeights;
+    RecordDescriptor onlyCentroids;
+    IScalarEvaluatorFactory args;
 
     public ReduceCandidateCentroidsKOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
-            UUID centroidsUUID, UUID permitUUID) {
+            RecordDescriptor onlyCentroids, UUID centroidsUUID, UUID permitUUID, IScalarEvaluatorFactory args) {
         super(spec, 1, 1);
         this.centroidsUUID = centroidsUUID;
         this.permitUUID = permitUUID;
         outRecDescs[0] = rDesc;
         accumulatedWeights = new float[n];
+        this.onlyCentroids = onlyCentroids;
+        this.args = args;
     }
 
     @Override
@@ -63,22 +85,37 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
 
         return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
 
+
+            FrameTupleAccessor fta;
+            FrameTupleReference tRef;
+            IScalarEvaluator eval;
+            VoidPointable inputVal;
             @Override
             public void open() throws HyracksDataException {
+                fta = new FrameTupleAccessor(onlyCentroids);
+                tRef = new FrameTupleReference();
                 writer.open();
+                eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+                inputVal = new VoidPointable();
             }
 
             @Override
             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
                 try {
-                    System.err.println(
-                            "Storing merged centroids partiton: " + partition + " total n partiton : " + nPartitions);
-                    List<Float> weights = deserializeWeight(buffer.array());
-                    for (int i = 0; i < weights.size(); i++) {
-                        accumulatedWeights[i] += weights.get(i);
+                    fta.reset(buffer);
+                    tRef.reset(fta,0);
+                    eval.evaluate(tRef,inputVal);
+                    ListAccessor listAccessorConstant = new ListAccessor();
+                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+//                        continue;
                     }
-                    CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
-                    System.err.println("taking the next permit");
+                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                    float[] point = createPrimitveList(listAccessorConstant);
+
+                    List<Float> weights = deserializeWeight(buffer.array());
+                    for (int i = 0; i < point.length; i++) {
+                        accumulatedWeights[i] += point[i];
+                    }
 
                 } catch (Exception e) {
                 }
@@ -98,8 +135,6 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
             @Override
             public void close() throws HyracksDataException {
                 CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
-                System.err.println("CLOSING STORE MERGED CENTROIDS");
-                System.err.println("current centroids  " + currentCentroids.getCentroids().toString());
                 // compute weights and send to next writer
 
                 try {
@@ -185,35 +220,6 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 writer.close();
             }
 
-            // Deserialization
-            public static List<float[]> deserializeFloatList(byte[] bytes) throws IOException {
-                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
-                int numArrays = dis.readInt();
-                StringBuilder sb = new StringBuilder();
-                sb.append("numArrays ");
-                sb.append(numArrays);
-                List<float[]> result = new ArrayList<>(numArrays);
-                for (int i = 0; i < numArrays; i++) {
-                    int arrLen = dis.readInt();
-                    sb.append("| arrLen ");
-                    sb.append(arrLen);
-                    sb.append('[');
-                    float[] arr = new float[arrLen];
-                    for (int j = 0; j < arrLen; j++) {
-                        arr[j] = dis.readFloat();
-                        sb.append(arr[j]);
-                        if (j < arrLen - 1) {
-                            sb.append(',');
-                        }
-                    }
-                    sb.append(']');
-                    result.add(arr);
-                }
-                System.err.println("merging centroids " + sb.toString());
-
-                return result;
-            }
-
             public static List<Float> deserializeWeight(byte[] bytes) throws IOException {
                 DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
                 List<Float> floatList = new ArrayList<>();
@@ -272,6 +278,45 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 for (int i = 0; i < vec.length; i++) {
                     vec[i] *= factor;
                 }
+            }
+
+
+            protected float[] createPrimitveList(ListAccessor listAccessor) throws IOException {
+                ATypeTag typeTag = listAccessor.getItemType();
+                float[] primitiveArray = new float[listAccessor.size()];
+                IPointable tempVal = new VoidPointable();
+                ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+                for (int i = 0; i < listAccessor.size(); i++) {
+                    listAccessor.getOrWriteItem(i, tempVal, storage);
+                    primitiveArray[i] = extractNumericVector(tempVal, typeTag);
+                }
+                return primitiveArray;
+            }
+
+            protected float extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws
+                    HyracksDataException {
+                byte[] data = pointable.getByteArray();
+                int offset = pointable.getStartOffset();
+                if (derivedTypeTag.isNumericType()) {
+                    return getValueFromTag(derivedTypeTag, data, offset);
+                } else if (derivedTypeTag == ATypeTag.ANY) {
+                    ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+                    return getValueFromTag(typeTag, data, offset);
+                } else {
+                    throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + derivedTypeTag);
+                }
+            }
+
+            protected float getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
+                return switch (typeTag) {
+                    case TINYINT -> AInt8SerializerDeserializer.getByte(data, offset + 1);
+                    case SMALLINT -> AInt16SerializerDeserializer.getShort(data, offset + 1);
+                    case INTEGER -> AInt32SerializerDeserializer.getInt(data, offset + 1);
+                    case BIGINT -> AInt64SerializerDeserializer.getLong(data, offset + 1);
+                    case FLOAT -> AFloatSerializerDeserializer.getFloat(data, offset + 1);
+//                    case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+                    default -> Float.NaN;
+                };
             }
 
         };
