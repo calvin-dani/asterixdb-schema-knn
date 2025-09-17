@@ -64,11 +64,13 @@ import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 
-public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
+public final class MergePartialCentroidsOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
     private final RecordDescriptor centroidDesc;
     private IScalarEvaluatorFactory args;
+    private IScalarEvaluatorFactory count;
+    private IScalarEvaluatorFactory idx;
     private IScalarEvaluatorFactory part;
     private IScalarEvaluatorFactory isLast;
     private ListAccessor listAccessorConstant;
@@ -77,13 +79,16 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
     private FrameTupleAccessor fta2;
     private int totalPartitions;
 
-    public MergeCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
-            RecordDescriptor centroidDesc, IScalarEvaluatorFactory args, IScalarEvaluatorFactory part,
-            IScalarEvaluatorFactory isLast, int totalPartitions) {
+    public MergePartialCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+            RecordDescriptor centroidDesc, IScalarEvaluatorFactory args, IScalarEvaluatorFactory count,
+            IScalarEvaluatorFactory idx, IScalarEvaluatorFactory part, IScalarEvaluatorFactory isLast,
+            int totalPartitions) {
         super(spec, 1, 1);
         outRecDescs[0] = rDesc;
         this.centroidDesc = centroidDesc;
         this.args = args;
+        this.count = count;
+        this.idx = idx;
         this.part = part;
         this.isLast = isLast;
         this.totalPartitions = totalPartitions;
@@ -91,14 +96,18 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
-            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
+                                                   IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
 
         return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
 
             IScalarEvaluator eval;
+            IScalarEvaluator countEval;
+            IScalarEvaluator idxEval;
             IScalarEvaluator partEval;
             IScalarEvaluator isLastEval;
             VoidPointable inputVal = new VoidPointable();
+            VoidPointable countVal = new VoidPointable();
+            VoidPointable idxVal = new VoidPointable();
             VoidPointable partVal = new VoidPointable();
             VoidPointable isLastVal = new VoidPointable();
             FrameTupleAppender appender;
@@ -123,6 +132,8 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                 fta = new FrameTupleAccessor(centroidDesc);
                 tuple = new FrameTupleReference();
                 eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+                countEval = count.createScalarEvaluator(new EvaluatorContext(ctx));
+                idxEval = idx.createScalarEvaluator(new EvaluatorContext(ctx));
                 partEval = part.createScalarEvaluator(new EvaluatorContext(ctx));
                 isLastEval = isLast.createScalarEvaluator(new EvaluatorContext(ctx));
                 partitionSet = new HashSet<>();
@@ -140,18 +151,30 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                 try {
 //                    fta.reset(buffer,"Debugging frame for tuple");
                     fta.reset(buffer, "MERGING ");
-                    for(int tupleIndex = 0; tupleIndex < fta.getTupleCount(); tupleIndex++) {
-                        tuple.reset(fta,tupleIndex);
-                        eval.evaluate(tuple,inputVal);
-                        partEval.evaluate(tuple,partVal);
-                        isLastEval.evaluate(tuple,isLastVal);
+                    int dim = 1;
+                    int K = 2;
+                    int[] counts = new int[K];
+                    float[][] sumVectors = new float[K][dim];
+                    for (int tupleIndex = 0; tupleIndex < fta.getTupleCount(); tupleIndex++) {
+                        tuple.reset(fta, tupleIndex);
+                        eval.evaluate(tuple, inputVal);
+                        countEval.evaluate(tuple, countVal);
+                        idxEval.evaluate(tuple, idxVal);
+                        partEval.evaluate(tuple, partVal);
+                        isLastEval.evaluate(tuple, isLastVal);
 
                         // Extract boolean from VoidPointable
                         boolean isLast = isLastVal.getByteArray()[isLastVal.getStartOffset() + 1] != 0;
 
+
+                        int count = AInt32SerializerDeserializer.getInt(countVal.getByteArray(), countVal.getStartOffset() + 1);
+
+                        // Extract int32 from VoidPointable
+                        int index = AInt32SerializerDeserializer.getInt(idxVal.getByteArray(), idxVal.getStartOffset() + 1);
+
                         // Extract int32 from VoidPointable
                         int part = AInt32SerializerDeserializer.getInt(partVal.getByteArray(), partVal.getStartOffset() + 1);
-                        if(isLast){
+                        if (isLast) {
                             partitionSet.add(part);
                         }
                         ListAccessor listAccessorConstant = new ListAccessor();
@@ -160,14 +183,36 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                         }
                         listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
                         float[] point = createPrimitveList(listAccessorConstant);
-                        accumulator.add(point);
+                        for (int d = 0; d < dim; d++) {
+                            sumVectors[index][d] += point[d];
+                        }
+                        counts[index] += count;
                     }
 
-                    if(totalPartitions == partitionSet.size()) {
+                    if (totalPartitions == partitionSet.size()) {
+
+
+                        List<float[]> finalCentroids = new ArrayList<>(K);
+                        for (int cIdx = 0; cIdx < K; cIdx++) {
+                            float[] centroid = new float[dim];
+                            if (counts[cIdx] > 0) {
+                                for (int d = 0; d < dim; d++) {
+                                    centroid[d] = sumVectors[cIdx][d] / counts[cIdx];
+                                }
+                            } else {
+                                // Handle empty cluster (optional: keep previous centroid or set to zero)
+                                for (int d = 0; d < dim; d++) {
+                                    centroid[d] = 0f;
+                                }
+                            }
+                            finalCentroids.add(centroid);
+                        }
+
+
                         System.err.println(" MERGE CENTROIDS WRITING " + partition);
                         ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
-                        for (int i = 0; i < accumulator.size(); i++) {
-                            float[] arr = accumulator.get(i);
+                        for (int i = 0; i < finalCentroids.size(); i++) {
+                            float[] arr = finalCentroids.get(i);
                             orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
                             for (float value : arr) {
                                 aFloat.setValue(value);
@@ -178,6 +223,7 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                             }
                             embBytes.reset();
                             orderedListBuilder.write(embBytesOutput, true);
+
                             tupleBuilder.reset();
                             tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
 //                                FrameUtils.appendToWriter(writer,appender, tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
@@ -189,7 +235,6 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
                             }
                         }
                         FrameUtils.flushFrame(appender.getBuffer(), writer);
-                        accumulator.clear();
                     }
 
                 } catch (Exception e) {
@@ -211,7 +256,7 @@ public final class MergeCentroidsOperatorDescriptor extends AbstractSingleActivi
 
             @Override
             public void close() throws HyracksDataException {
-                    writer.close();
+                writer.close();
             }
 
 

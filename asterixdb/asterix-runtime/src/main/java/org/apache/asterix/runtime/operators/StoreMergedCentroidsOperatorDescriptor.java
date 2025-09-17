@@ -129,7 +129,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
             @Override
             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
                 try {
-                    fta2.reset(buffer);
+                    fta2.reset(buffer, "Store merged");
 
                     for (int i = 0; i < fta2.getTupleCount(); i++) {
                         tuple.reset(fta2, i);
@@ -216,7 +216,6 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
 
 
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
-
                     orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
                     for (float value : preCosts) {
                         aFloat.setValue(value);
