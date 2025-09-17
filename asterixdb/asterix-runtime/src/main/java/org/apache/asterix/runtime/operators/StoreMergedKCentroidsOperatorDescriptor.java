@@ -22,17 +22,12 @@ package org.apache.asterix.runtime.operators;
 import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 
 import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
@@ -66,55 +61,59 @@ import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 
-public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
+public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
 
     private final UUID centroidsUUID;
     private final UUID permitUUID;
-    private final int dimensions = 1;
-    private final int n = 55;
-    float[] accumulatedWeights;
-    RecordDescriptor onlyCentroids;
-    IScalarEvaluatorFactory args;
+    private final UUID sampleUUID;
+    private final IScalarEvaluatorFactory args;
+    private final RecordDescriptor centroidDesc;
 
-    public ReduceCandidateCentroidsKOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
-            RecordDescriptor onlyCentroids, UUID centroidsUUID, UUID permitUUID, IScalarEvaluatorFactory args) {
+    public StoreMergedKCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+            RecordDescriptor centroidDesc, UUID centroidsUUID, UUID permitUUID, UUID sampleUUID,
+            IScalarEvaluatorFactory args) {
         super(spec, 1, 1);
         this.centroidsUUID = centroidsUUID;
         this.permitUUID = permitUUID;
-        outRecDescs[0] = rDesc;
-        accumulatedWeights = new float[n];
-        this.onlyCentroids = onlyCentroids;
+        this.sampleUUID = sampleUUID;
         this.args = args;
+        outRecDescs[0] = rDesc;
+        this.centroidDesc = centroidDesc;
     }
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
-            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
+                                                   IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
 
         return new AbstractUnaryInputUnaryOutputOperatorNodePushable() {
-
-
-            FrameTupleAccessor fta;
-            FrameTupleReference tRef;
-            IScalarEvaluator eval;
+            private FrameTupleAccessor fta;
+            private FrameTupleAccessor fta2;
+            private FrameTupleReference tuple;
             VoidPointable inputVal;
+            IScalarEvaluator eval;
+            CentroidsState currentCentroids;
             OrderedListBuilder orderedListBuilder;
             AMutableFloat aFloat;
             ArrayBackedValueStorage listStorage;
             ByteArrayAccessibleOutputStream embBytes;
             DataOutput embBytesOutput;
 
-
             @Override
             public void open() throws HyracksDataException {
-                fta = new FrameTupleAccessor(onlyCentroids);
-                tRef = new FrameTupleReference();
-                writer.open();
+
+                System.err.println(" Store Centroids Activity Opened partition " + partition + " nPartitions " + nPartitions);
+
                 eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+                writer.open();
+                fta = new FrameTupleAccessor(outRecDescs[0]);
+                fta2 = new FrameTupleAccessor(centroidDesc);
+                tuple = new FrameTupleReference();
                 inputVal = new VoidPointable();
+                currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
                 orderedListBuilder = new OrderedListBuilder();
                 aFloat = new AMutableFloat(0);
                 listStorage = new ArrayBackedValueStorage();
@@ -126,21 +125,25 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
             @Override
             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
                 try {
-                    fta.reset(buffer);
-                    tRef.reset(fta,0);
-                    eval.evaluate(tRef,inputVal);
-                    ListAccessor listAccessorConstant = new ListAccessor();
-                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-//                        continue;
-                    }
-                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                    float[] point = createPrimitveList(listAccessorConstant);
+                    fta2.reset(buffer, "Store merged");
+                    currentCentroids.getCentroids().clear();
+                    for (int i = 0; i < fta2.getTupleCount(); i++) {
+                        tuple.reset(fta2, i);
 
-                    List<Float> weights = deserializeWeight(buffer.array());
-                    for (int i = 0; i < point.length; i++) {
-                        accumulatedWeights[i] += point[i];
+                        eval.evaluate(tuple, inputVal);
+                        ListAccessor listAccessorConstant = new ListAccessor();
+                        if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                            continue;
+                        }
+                        listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                        float[] point = createPrimitveList(listAccessorConstant);
+                        currentCentroids.addCentroid(point);
                     }
-
+                    ctx.setStateObject(currentCentroids);
+                    IterationPermitState iterPermitState =
+                            (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+                    Semaphore proceed = iterPermitState.getPermit();
+                    proceed.release();
                 } catch (Exception e) {
                 }
 
@@ -158,92 +161,25 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
 
             @Override
             public void close() throws HyracksDataException {
+                PartitionedUUID partitionUUID = new PartitionedUUID(sampleUUID, partition);
+
                 CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
-                // compute weights and send to next writer
+
+                System.err.println(" Storing centroids " + currentCentroids.getCentroids().size() + " for partition " + partition);
+                for (float[] centroid : currentCentroids.getCentroids()) {
+                    System.err.print("Centroid: ");
+                    for (float value : centroid) {
+                        System.err.print(value + " ");
+                    }
+                    System.err.println();
+                }
+                FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
 
                 try {
-                    int dimensions = 1;
-                    int k = 2;
-                    int n = currentCentroids.getCentroids().size();
-                    float[][] centers = new float[k][dimensions];
-                    List<float[]> points = currentCentroids.getCentroids();
-                    double[] costArray = new double[currentCentroids.getCentroids().size()];
-
-                    Random rand = new Random();
-                    int maxIterations = 10;
-                    // Pick first center
-                    int idx = pickWeightedIndex(rand, points, accumulatedWeights);
-                    centers[0] = Arrays.copyOf(points.get(idx), dimensions);
-
-                    // Initialize costArray
-                    for (int i = 0; i < n; i++) {
-                        costArray[i] = fastSquaredDistance(points.get(i), centers[0]);
-                    }
-
-                    for (int i = 1; i < k; i++) {
-                        double sum = 0.0;
-                        for (int j = 0; j < n; j++) {
-                            sum += costArray[j] * accumulatedWeights[j];
-                        }
-                        double r = rand.nextDouble() * sum;
-                        double cumulativeScore = 0.0;
-                        int j = 0;
-                        while (j < n && cumulativeScore < r) {
-                            cumulativeScore += accumulatedWeights[j] * costArray[j];
-                            j++;
-                        }
-                        if (j == 0) {
-                            centers[i] = Arrays.copyOf(points.get(0), dimensions);
-                        } else {
-                            centers[i] = Arrays.copyOf(points.get(j - 1), dimensions);
-                        }
-                        // Update costArray
-                        for (int p = 0; p < n; p++) {
-                            costArray[p] = Math.min(fastSquaredDistance(points.get(p), centers[i]), costArray[p]);
-                        }
-                    }
-
-                    int[] oldClosest = new int[n];
-                    Arrays.fill(oldClosest, -1);
-                    int iteration = 0;
-                    boolean moved = true;
-                    while (moved && iteration < maxIterations) {
-                        moved = false;
-                        double[] counts = new double[k];
-                        float[][] sums = new float[k][dimensions];
-                        for (int i = 0; i < n; i++) {
-                            int index = findClosest(centers, points.get(i));
-                            addWeighted(sums[index], points.get(i), accumulatedWeights[i]);
-                            counts[index] += accumulatedWeights[i];
-                            if (index != oldClosest[i]) {
-                                moved = true;
-                                oldClosest[i] = index;
-                            }
-                        }
-                        // Update centers
-                        for (int j = 0; j < k; j++) {
-                            if (counts[j] == 0.0) {
-                                centers[j] = Arrays.copyOf(points.get(rand.nextInt(n)), dimensions);
-                            } else {
-                                scale(sums[j], 1.0 / counts[j]);
-                                centers[j] = Arrays.copyOf(sums[j], dimensions);
-                            }
-                        }
-                        iteration++;
-                    }
-
-                    for (float[] f : centers) {
-                        System.err.println("final centroids " + Arrays.toString(f));
-                        currentCentroids.addCentroid(f);
-                    }
-                    ctx.setStateObject(currentCentroids);
-                    FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
-                    for (int i = 0; i < k; i++) {
-                        float[] arr = centers[i];
-
-                        orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
-                        for (float value : arr) {
+                    orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
+                    for(float[] point : currentCentroids.getCentroids()) {
+                        for (float value : point) {
                             aFloat.setValue(value);
                             listStorage.reset();
                             listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
@@ -261,74 +197,20 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                             appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
                         }
                     }
+
                     FrameUtils.flushFrame(appender.getBuffer(), writer);
-
                 } catch (Exception e) {
+                    System.err.println("failed to store centroids " + e.getMessage());
+                    writer.fail();
+                } finally {
+                    // compute weights and send to next writer
+                    writer.close();
                 }
 
-                writer.close();
+// 2. Build tuple with one field
+
+
             }
-
-            public static List<Float> deserializeWeight(byte[] bytes) throws IOException {
-                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes, 9, bytes.length - 9));
-                List<Float> floatList = new ArrayList<>();
-                //                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes));
-                int size = dis.readInt();
-                for (int i = 0; i < size; i++) {
-                    floatList.add(dis.readFloat());
-                }
-                return floatList;
-            }
-
-            private int pickWeightedIndex(Random rand, List<float[]> data, float[] weights) {
-                float sum = 0f;
-                for (float w : weights) {
-                    sum += w;
-                }
-                double r = rand.nextDouble() * sum;
-                double curWeight = 0.0;
-                int i = 0;
-                while (i < data.size() && curWeight < r) {
-                    curWeight += weights[i];
-                    i++;
-                }
-                return Math.max(0, i - 1);
-            }
-
-            private double fastSquaredDistance(float[] a, float[] b) {
-                double sum = 0.0;
-                for (int i = 0; i < a.length; i++) {
-                    double diff = a[i] - b[i];
-                    sum += diff * diff;
-                }
-                return sum;
-            }
-
-            private int findClosest(float[][] centers, float[] point) {
-                int best = 0;
-                double bestDist = fastSquaredDistance(centers[0], point);
-                for (int i = 1; i < centers.length; i++) {
-                    double dist = fastSquaredDistance(centers[i], point);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        best = i;
-                    }
-                }
-                return best;
-            }
-
-            private void addWeighted(float[] sum, float[] point, double weight) {
-                for (int i = 0; i < sum.length; i++) {
-                    sum[i] += point[i] * weight;
-                }
-            }
-
-            private void scale(float[] vec, double factor) {
-                for (int i = 0; i < vec.length; i++) {
-                    vec[i] *= factor;
-                }
-            }
-
 
             protected float[] createPrimitveList(ListAccessor listAccessor) throws IOException {
                 ATypeTag typeTag = listAccessor.getItemType();
@@ -368,7 +250,15 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 };
             }
 
-        };
+            private float euclideanDistance(float[] point, float[] center) {
+                float sum = 0;
+                for (int i = 0; i < point.length; i++) {
+                    float diff = point[i] - center[i];
+                    sum += diff * diff;
+                }
+                return (float) Math.sqrt(sum);
+            }
 
+        };
     }
 }

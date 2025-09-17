@@ -28,12 +28,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 
 import org.apache.asterix.builders.OrderedListBuilder;
-import org.apache.asterix.builders.UnorderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.ABooleanSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
@@ -41,8 +39,8 @@ import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserial
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
 import org.apache.asterix.om.base.ABoolean;
-import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.base.AMutableFloat;
+import org.apache.asterix.om.base.AMutableInt32;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
@@ -76,7 +74,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 
-public final class CandidateCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
+public final class KCandidateCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
 
@@ -87,7 +85,7 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
     private RecordDescriptor embeddingDesc;
     private IScalarEvaluatorFactory args;
 
-    public CandidateCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+    public KCandidateCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
             UUID sampleUUID, UUID centroidsUUID, UUID permitUUID, IScalarEvaluatorFactory args,
             RecordDescriptor embeddingDesc) {
         super(spec, 1, 1);
@@ -101,8 +99,8 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
 
     @Override
     public void contributeActivities(IActivityGraphBuilder builder) {
-        StoreCentroidsActivity sa = new StoreCentroidsActivity(new ActivityId(odId, 0));
-        FindCandidatesActivity ca = new FindCandidatesActivity(new ActivityId(odId, 1));
+        StoreKCentroidsActivity sa = new StoreKCentroidsActivity(new ActivityId(odId, 0));
+        FindKCandidatesActivity ca = new FindKCandidatesActivity(new ActivityId(odId, 1));
 
         builder.addActivity(this, sa);
         builder.addSourceEdge(0, sa, 0);
@@ -114,12 +112,12 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
         builder.addTargetEdge(0, ca, 0);
     }
 
-    protected class StoreCentroidsActivity extends AbstractActivityNode {
+    protected class StoreKCentroidsActivity extends AbstractActivityNode {
         private static final long serialVersionUID = 1L;
         private FrameTupleAccessor fta;
         private FrameTupleReference tuple;
 
-        protected StoreCentroidsActivity(ActivityId id) {
+        protected StoreKCentroidsActivity(ActivityId id) {
             super(id);
         }
 
@@ -133,38 +131,38 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
 
                 @Override
                 public void open() throws HyracksDataException {
-
                     System.err.println(" Cand Centroids Activity Opened partition " + partition + " nPartitions " + nPartitions);
-
                     state = new CentroidsState(ctx.getJobletContext().getJobId(), centroidsUUID);
                     eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
                     inputVal = new VoidPointable();
-                    fta = new FrameTupleAccessor(outRecDescs[0]);
+                    fta = new FrameTupleAccessor(embeddingDesc);
                     tuple = new FrameTupleReference();
-//                    writer.open();
-
                 }
 
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
                     // save centroid
-//                    fta.reset(buffer, "saving centroid from init centroid " + partition);
-                    fta.reset(buffer);
-                    tuple.reset(fta, 0);
-                    eval.evaluate(tuple, inputVal);
-                    ListAccessor listAccessorConstant = new ListAccessor();
-                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                    fta.reset(buffer, "saving K centroid from reduce centroid " + partition);
+//                    fta.reset(buffer);
+                    for(int i=0;i<fta.getTupleCount();i++)
+                    {
+                        tuple.reset(fta, i);
+                        eval.evaluate(tuple, inputVal);
+                        ListAccessor listAccessorConstant = new ListAccessor();
+                        if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
 //                        continue;
-                        //TODO: handle error
-                    }
-                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                    try {
-                        float[] point = createPrimitveList(listAccessorConstant);
-                        state.addCentroid(point);
+                            //TODO: handle error
+                        }
+                        listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                        try {
+                            float[] point = createPrimitveList(listAccessorConstant);
+                            state.addCentroid(point);
 
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                     }
+
 //                    ctx.setStateObject(state);
                 }
 
@@ -220,10 +218,10 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
         }
     }
 
-    protected class FindCandidatesActivity extends AbstractActivityNode {
+    protected class FindKCandidatesActivity extends AbstractActivityNode {
         private static final long serialVersionUID = 1L;
 
-        protected FindCandidatesActivity(ActivityId id) {
+        protected FindKCandidatesActivity(ActivityId id) {
             super(id);
         }
 
@@ -238,6 +236,10 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
 // FrameDebugUtils.prettyPrint(fta,new RecordDescriptor( new ISerializerDeserializer[] {     new AOrderedListSerializerDeserializer() AInt64SerializerDeserializer.INSTANCE     }))
                     ByteArrayAccessibleOutputStream embBytes = new ByteArrayAccessibleOutputStream();
                     DataOutput embBytesOutput = new DataOutputStream(embBytes);
+                    ByteArrayAccessibleOutputStream countBytes = new ByteArrayAccessibleOutputStream();
+                    DataOutput countBytesOutput = new DataOutputStream(countBytes);
+                    ByteArrayAccessibleOutputStream indexBytes = new ByteArrayAccessibleOutputStream();
+                    DataOutput indexBytesOutput = new DataOutputStream(indexBytes);
                     ByteArrayAccessibleOutputStream partitionBytes = new ByteArrayAccessibleOutputStream();
                     DataOutput partitionBytesOutput = new DataOutputStream(partitionBytes);
                     MaterializerTaskState sampleState =
@@ -246,9 +248,6 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
 
                     try {
 
-                        AInt32 aInt32 = new AInt32(partition);
-                        partitionBytesOutput.writeByte(ATypeTag.INTEGER.serialize());
-                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, partitionBytesOutput);
 
                         ByteArrayAccessibleOutputStream booleanBytes = new ByteArrayAccessibleOutputStream();
                         DataOutput booleanBytesOutput = new DataOutputStream(booleanBytes);
@@ -263,20 +262,21 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
                         orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
 //                    orderedListBuilder.reset(null);
 
-                        UnorderedListBuilder unorderedListBuilder = new UnorderedListBuilder();
-                        ArrayBackedValueStorage unorderedListStorage = new ArrayBackedValueStorage();
-                        unorderedListBuilder.reset(null);
-
-
                         FrameTupleAccessor fta;
                         FrameTupleReference tuple;
                         IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
                         IPointable inputVal = new VoidPointable();
                         fta = new FrameTupleAccessor(outRecDescs[0]);
                         tuple = new FrameTupleReference();
-                        Semaphore proceed = new Semaphore(1);
-                        ctx.setStateObject(new IterationPermitState(ctx.getJobletContext().getJobId(),
-                                new PartitionedUUID(permitUUID, partition), proceed));
+
+                        IterationPermitState iterPermitState =
+                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+                        Semaphore proceed = iterPermitState.getPermit();
+
+//                        Semaphore proceed = new Semaphore(1);
+//                        ctx.getStateObject()
+//                        ctx.setStateObject(new IterationPermitState(ctx.getJobletContext().getJobId(),
+//                                new PartitionedUUID(permitUUID, partition), proceed));
 
 
 
@@ -288,125 +288,116 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
 
 
                         writer.open();
-                        for (int step = 0; step < 5; step++) {
-                            proceed.acquire();
                             CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
+                            List<float[]> initialCentroids = currentCentroids.getCentroids();
+// Broadcast initialCentroids to all partitions (already handled by CentroidsState)
+// Now run Lloyd's algorithm in parallel on each partition
+                        int K = initialCentroids.size();
+                        int dim = initialCentroids.get(0).length;
+                        float[][] sumVectors = new float[K][dim];
+                        int[] counts = new int[K];
+                            for (int step = 0; step < 20; step++) {
 
-                            // First pass: update preCosts
-                            int totalTupleCount = 8; // You need to provide this
+                                proceed.acquire();
+                                // Each partition runs Lloyd's algorithm using initialCentroids
+                                List<List<float[]>> clusters = new ArrayList<>(K);
+                                for (int i = 0; i < K; i++) clusters.add(new ArrayList<>());
 
-                            List<Float> preCosts = new ArrayList<>();
+                                vSizeFrame.reset();
+                                in.open();
+                                while (in.nextFrame(vSizeFrame)) {
+                                    fta.reset(vSizeFrame.getBuffer());
+                                    int tupleCount = fta.getTupleCount();
+                                    for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
+                                        tuple.reset(fta, tupleIndex);
+                                        eval.evaluate(tuple, inputVal);
+                                        ListAccessor listAccessorConstant = new ListAccessor();
+                                        if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                            continue;
+                                        }
+                                        listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                        float[] point = createPrimitveList(listAccessorConstant);
 
-                            int globalTupleIndex = 0;
-                            // TODO CALVINDANI: CHECK reader reset in original code
-                            vSizeFrame.reset();
-                            in.open();
-                            while (in.nextFrame(vSizeFrame)) {
-//                                fta.reset(vSizeFrame.getBuffer(), "cost step " + step + " partition " + partition);
-                                fta.reset(vSizeFrame.getBuffer());
-                                int tupleCount = fta.getTupleCount();
-                                for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++, globalTupleIndex++) {
-                                    tuple.reset(fta, tupleIndex);
-                                    eval.evaluate(tuple, inputVal);
-                                    ListAccessor listAccessorConstant = new ListAccessor();
-                                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-                                        continue;
-                                    }
-                                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                    float[] point = createPrimitveList(listAccessorConstant);
-
-                                    float minCost = Float.POSITIVE_INFINITY;
-                                    for (float[] center : currentCentroids.getCentroids()) {
-//                                        float cost =  VectorDistanceArrCalculation.euclidean_squared(point, center);
-                                        float cost = euclideanDistance(point, center);
-                                        if (cost < minCost) minCost = cost;
-                                    }
-                                    preCosts.add(minCost);
-                                    // Accumulate minCost for each tuple
-                                }
-                            }
-                            in.close();
-                            int k = 2; // number of clusters
-                            double l = k * 2; // expected number of candidates per round
-
-//                            System.err.println("Precosts size: " + preCosts.size());
-                            // Compute sumCosts
-                            float sumCosts = 0f;
-                            for (float c : preCosts) sumCosts += c;
-
-
-                            // Second pass: probabilistic selection
-                            List<float[]> chosen = new ArrayList<>();
-                            globalTupleIndex = 0;
-                            in.seek(0); // or reopen reader
-                            vSizeFrame.reset();
-                            Random rand = new Random();
-                            in.open();
-                            while (in.nextFrame(vSizeFrame)) {
-//                                fta.reset(vSizeFrame.getBuffer(), "choice selection step " + step + " partition " + partition);
-                                fta.reset(vSizeFrame.getBuffer());
-                                int tupleCount = fta.getTupleCount();
-                                for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++, globalTupleIndex++) {
-                                    tuple.reset(fta, tupleIndex);
-                                    eval.evaluate(tuple, inputVal);
-                                    ListAccessor listAccessorConstant = new ListAccessor();
-                                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-                                        continue;
-                                    }
-                                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                    float[] point = createPrimitveList(listAccessorConstant);
-//                                    float prob = 2.0f * 2 * preCosts[globalTupleIndex] / sumCosts;
-                                    double prob = preCosts.get(globalTupleIndex) / sumCosts;
-                                    if (rand.nextDouble() < prob) {
-                                        chosen.add(point);
+                                        // Assign to nearest centroid
+                                        int bestIdx = 0;
+                                        float minDist = Float.POSITIVE_INFINITY;
+                                        for (int cIdx = 0; cIdx < K; cIdx++) {
+                                            float dist = euclideanDistance(point, initialCentroids.get(cIdx));
+                                            if (dist < minDist) {
+                                                minDist = dist;
+                                                bestIdx = cIdx;
+                                            }
+                                        }
+                                        for (int d = 0; d < dim; d++) {
+                                            sumVectors[bestIdx][d] += point[d];
+                                        }
+                                        counts[bestIdx]++;
                                     }
                                 }
-                            }
-                            in.close();
-
-                            for (float[] c : chosen) {
-                                currentCentroids.addCentroid(c);
-                            }
+                                in.close();
 
 
-                            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3); // 1 field: the record
-                            for (int i = 0; i < currentCentroids.getCentroids().size(); i++) {
-                                float[] arr = currentCentroids.getCentroids().get(i);
-                                boolean isLast = (i == currentCentroids.getCentroids().size() - 1);
-                                if (isLast) {
-                                    booleanBytes.reset();
-                                    booleanBytesOutput.writeByte(ATypeTag.BOOLEAN.serialize());
-                                    ABooleanSerializerDeserializer.INSTANCE.serialize(ABoolean.TRUE, booleanBytesOutput);
-                                }
-                                else{
-                                    booleanBytes.reset();
-                                    booleanBytesOutput.writeByte(ATypeTag.BOOLEAN.serialize());
-                                    ABooleanSerializerDeserializer.INSTANCE.serialize(ABoolean.FALSE, booleanBytesOutput);
-                                }
-                                orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
-                                for (float value : arr) {
-                                    aFloat.setValue(value);
-                                    listStorage.reset();
-                                    listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
-                                    AFloatSerializerDeserializer.INSTANCE.serialize(aFloat, listStorage.getDataOutput());
-                                    orderedListBuilder.addItem(listStorage);
-                                }
-                                embBytes.reset();
-                                orderedListBuilder.write(embBytesOutput, true);
-                                tupleBuilder.reset();
-                                tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
-                                tupleBuilder.addField(partitionBytes.getByteArray(), 0, partitionBytes.getLength());
-                                tupleBuilder.addField(booleanBytes.getByteArray(), 0, booleanBytes.getLength());
+                                ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(5); // 1 field: the record
+                                for (int i = 0; i < sumVectors.length; i++) {
+                                    float[] arr = sumVectors[i];
+                                    boolean isLast = (i == sumVectors.length - 1);
+                                    if (isLast) {
+                                        booleanBytes.reset();
+                                        booleanBytesOutput.writeByte(ATypeTag.BOOLEAN.serialize());
+                                        ABooleanSerializerDeserializer.INSTANCE.serialize(ABoolean.TRUE, booleanBytesOutput);
+                                    }
+                                    else{
+                                        booleanBytes.reset();
+                                        booleanBytesOutput.writeByte(ATypeTag.BOOLEAN.serialize());
+                                        ABooleanSerializerDeserializer.INSTANCE.serialize(ABoolean.FALSE, booleanBytesOutput);
+                                    }
+                                    orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
+                                    for (float value : arr) {
+                                        aFloat.setValue(value);
+                                        listStorage.reset();
+                                        listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
+                                        AFloatSerializerDeserializer.INSTANCE.serialize(aFloat, listStorage.getDataOutput());
+                                        orderedListBuilder.addItem(listStorage);
+                                    }
+
+                                    countBytes.reset();
+                                    AMutableInt32 aInt32 = new AMutableInt32(counts[i]);
+                                    countBytesOutput.writeByte(ATypeTag.INTEGER.serialize());
+                                    AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, countBytesOutput);
+
+                                    indexBytes.reset();
+                                    aInt32.setValue(i);
+                                    indexBytesOutput.writeByte(ATypeTag.INTEGER.serialize());
+                                    AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, indexBytesOutput);
+
+
+                                    partitionBytes.reset();
+                                    aInt32.setValue(partition);
+                                    partitionBytesOutput.writeByte(ATypeTag.INTEGER.serialize());
+                                    AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, partitionBytesOutput);
+
+
+                                    embBytes.reset();
+                                    orderedListBuilder.write(embBytesOutput, true);
+                                    tupleBuilder.reset();
+                                    tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
+                                    tupleBuilder.addField(countBytes.getByteArray(), 0, countBytes.getLength());
+                                    tupleBuilder.addField(indexBytes.getByteArray(), 0, indexBytes.getLength());
+                                    tupleBuilder.addField(partitionBytes.getByteArray(), 0, partitionBytes.getLength());
+                                    tupleBuilder.addField(booleanBytes.getByteArray(), 0, booleanBytes.getLength());
 //                                FrameUtils.appendToWriter(writer,appender, tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
-                                if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize())) {
-                                    // Frame is full, flush and reset
-                                    FrameUtils.flushFrame(appender.getBuffer(), writer);
-                                    appender.reset(new VSizeFrame(ctx), true);
-                                    appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                                    if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize())) {
+                                        // Frame is full, flush and reset
+                                        FrameUtils.flushFrame(appender.getBuffer(), writer);
+                                        appender.reset(new VSizeFrame(ctx), true);
+                                        appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                                    }
                                 }
+                                FrameUtils.flushFrame(appender.getBuffer(), writer);
+
+                                // Update centroids
+
                             }
-                            FrameUtils.flushFrame(appender.getBuffer(), writer);
-                        }
 
                     } catch (Throwable e) {
                         writer.fail();
