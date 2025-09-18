@@ -145,10 +145,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.arraycopy(recordDesc.getFields(), 0, rembeddingSerde, 1, nFields);
         RecordDescriptor rembeddingRecordDesc = new RecordDescriptor(rembeddingSerde, rembeddingTraits);
 
-        targetOp = new InitCentroidOperatorDescriptor(spec, secondaryRecDesc, sampleUUID,
-                new ColumnAccessEvalFactory(0), rembeddingRecordDesc);
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//        targetOp = new InitCentroidOperatorDescriptor(spec, secondaryRecDesc, sampleUUID,
+//                new ColumnAccessEvalFactory(0), rembeddingRecordDesc);
+//        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
+//        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         ISerializerDeserializer[] newCentSerde = new ISerializerDeserializer[3];
         ITypeTraits[] newCentTraits = new ITypeTraits[3];
@@ -172,17 +172,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         // candidate centroids -(broadcast-1)> merge centroids
-        sourceOp = targetOp;
-        MergeCentroidsOperatorDescriptor merge = new MergeCentroidsOperatorDescriptor(spec, secondaryRecDesc,
-                centroidRecDesc, new ColumnAccessEvalFactory(0), new ColumnAccessEvalFactory(1),
-                new ColumnAccessEvalFactory(2), metadataProvider.getClusterLocations().getLocations().length);
-        targetOp = merge;
-        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, merge,
-                metadataProvider.getClusterLocations().getLocations()[0]);
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//        sourceOp = targetOp;
+//        MergeCentroidsOperatorDescriptor merge = new MergeCentroidsOperatorDescriptor(spec, secondaryRecDesc,
+//                centroidRecDesc, new ColumnAccessEvalFactory(0), new ColumnAccessEvalFactory(1),
+//                new ColumnAccessEvalFactory(2), metadataProvider.getClusterLocations().getLocations().length);
+//        targetOp = merge;
+//        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, merge,
+//                metadataProvider.getClusterLocations().getLocations()[0]);
+//        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         ISerializerDeserializer[] onlyCentSerde = new ISerializerDeserializer[1];
         ITypeTraits[] onlyCentTraits = new ITypeTraits[1];
@@ -194,68 +194,78 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         RecordDescriptor onlyCentroidRecDesc = new RecordDescriptor(onlyCentSerde, onlyCentTraits);
 
         // merge centroids -(broadcast-N)> store merged centroids
-        sourceOp = targetOp;
-        StoreMergedCentroidsOperatorDescriptor storeMerged =
-                new StoreMergedCentroidsOperatorDescriptor(spec, secondaryRecDesc, onlyCentroidRecDesc, centroidsUUID,
-                        permitUUID, sampleUUID, new ColumnAccessEvalFactory(0));
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, storeMerged,
-                primaryPartitionConstraint);
-        targetOp = storeMerged;
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//        sourceOp = targetOp;
+//        StoreMergedCentroidsOperatorDescriptor storeMerged =
+//                new StoreMergedCentroidsOperatorDescriptor(spec, secondaryRecDesc, onlyCentroidRecDesc, centroidsUUID,
+//                        permitUUID, sampleUUID, new ColumnAccessEvalFactory(0));
+//        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, storeMerged,
+//                primaryPartitionConstraint);
+//        targetOp = storeMerged;
+//        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        sourceOp = targetOp;
-        ReduceCandidateCentroidsKOperatorDescriptor reduce = new ReduceCandidateCentroidsKOperatorDescriptor(spec,
-                secondaryRecDesc, onlyCentroidRecDesc, centroidsUUID, permitUUID, new ColumnAccessEvalFactory(0));
-        targetOp = reduce;
-        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, reduce,
-                metadataProvider.getClusterLocations().getLocations()[0]);
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//        sourceOp = targetOp;
+//        ReduceCandidateCentroidsKOperatorDescriptor reduce = new ReduceCandidateCentroidsKOperatorDescriptor(spec,
+//                secondaryRecDesc, onlyCentroidRecDesc, centroidsUUID, permitUUID, new ColumnAccessEvalFactory(0));
+//        targetOp = reduce;
+//        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, reduce,
+//                metadataProvider.getClusterLocations().getLocations()[0]);
+//        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         KCandidateCentroidsOperatorDescriptor Kcandidates =
                 new KCandidateCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID, kCentroidsUUID,
-                        permitUUID, new ColumnAccessEvalFactory(0), onlyCentroidRecDesc);
+                        permitUUID, new ColumnAccessEvalFactory(0), centroidRecDesc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, Kcandidates,
                 primaryPartitionConstraint);
         targetOp = Kcandidates;
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        //
+        // ADD ITERATIVE STEPS TO CREATE THE UPPER LEVEL OF THE BTREE CLUSTER BASED ON THE OUTPUT
+        // TODO CALVIN DANI : CONTINUE FROM THE CENTROIDS OR REDO THE KMEANS ++ (CHECK DATASET SIZE)
 
-        ISerializerDeserializer[] partialCentSerde = new ISerializerDeserializer[5];
-        ITypeTraits[] partialCentTraits = new ITypeTraits[5];
-        partialCentSerde[0] = serdeProvider.getSerializerDeserializer(new AOrderedListType(AFLOAT, "embedding"));
-        partialCentSerde[1] = serdeProvider.getSerializerDeserializer(BuiltinType.AINT32);
-        partialCentSerde[2] = serdeProvider.getSerializerDeserializer(BuiltinType.AINT32);
-        partialCentSerde[3] = serdeProvider.getSerializerDeserializer(BuiltinType.AINT32);
-        partialCentSerde[4] = serdeProvider.getSerializerDeserializer(BuiltinType.ABOOLEAN);
-        partialCentTraits[0] = typeTraitProvider.getTypeTrait(new AOrderedListType(AFLOAT, "embedding"));
-        partialCentTraits[1] = typeTraitProvider.getTypeTrait(BuiltinType.AINT32);
-        partialCentTraits[2] = typeTraitProvider.getTypeTrait(BuiltinType.AINT32);
-        partialCentTraits[3] = typeTraitProvider.getTypeTrait(BuiltinType.AINT32);
-        partialCentTraits[4] = typeTraitProvider.getTypeTrait(BuiltinType.ABOOLEAN);
-        // Construct the new RecordDescriptor
 
-        RecordDescriptor partialCentroidRecDesc = new RecordDescriptor(partialCentSerde, partialCentTraits);
-        int length = metadataProvider.getClusterLocations().getLocations().length;
 
-        sourceOp = targetOp;
-        MergePartialCentroidsOperatorDescriptor mergePartial =
-                new MergePartialCentroidsOperatorDescriptor(spec, secondaryRecDesc, partialCentroidRecDesc,
-                        new ColumnAccessEvalFactory(0), new ColumnAccessEvalFactory(1), new ColumnAccessEvalFactory(2),
-                        new ColumnAccessEvalFactory(3), new ColumnAccessEvalFactory(4), length);
-        targetOp = mergePartial;
-        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, mergePartial,
-                metadataProvider.getClusterLocations().getLocations()[0]);
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        sourceOp = targetOp;
-        StoreMergedKCentroidsOperatorDescriptor storeKMerged =
-                new StoreMergedKCentroidsOperatorDescriptor(spec, secondaryRecDesc, onlyCentroidRecDesc, kCentroidsUUID,
-                        permitUUID, sampleUUID, new ColumnAccessEvalFactory(0));
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, storeKMerged,
-                primaryPartitionConstraint);
-        targetOp = storeKMerged;
-        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+
+
+
+//        ISerializerDeserializer[] partialCentSerde = new ISerializerDeserializer[5];
+//        ITypeTraits[] partialCentTraits = new ITypeTraits[5];
+//        partialCentSerde[0] = serdeProvider.getSerializerDeserializer(new AOrderedListType(AFLOAT, "embedding"));
+//        partialCentSerde[1] = serdeProvider.getSerializerDeserializer(BuiltinType.AINT32);
+//        partialCentSerde[2] = serdeProvider.getSerializerDeserializer(BuiltinType.AINT32);
+//        partialCentSerde[3] = serdeProvider.getSerializerDeserializer(BuiltinType.AINT32);
+//        partialCentSerde[4] = serdeProvider.getSerializerDeserializer(BuiltinType.ABOOLEAN);
+//        partialCentTraits[0] = typeTraitProvider.getTypeTrait(new AOrderedListType(AFLOAT, "embedding"));
+//        partialCentTraits[1] = typeTraitProvider.getTypeTrait(BuiltinType.AINT32);
+//        partialCentTraits[2] = typeTraitProvider.getTypeTrait(BuiltinType.AINT32);
+//        partialCentTraits[3] = typeTraitProvider.getTypeTrait(BuiltinType.AINT32);
+//        partialCentTraits[4] = typeTraitProvider.getTypeTrait(BuiltinType.ABOOLEAN);
+//        // Construct the new RecordDescriptor
+//
+//        RecordDescriptor partialCentroidRecDesc = new RecordDescriptor(partialCentSerde, partialCentTraits);
+//        int length = metadataProvider.getClusterLocations().getLocations().length;
+//
+//        sourceOp = targetOp;
+//        MergePartialCentroidsOperatorDescriptor mergePartial =
+//                new MergePartialCentroidsOperatorDescriptor(spec, secondaryRecDesc, partialCentroidRecDesc,
+//                        new ColumnAccessEvalFactory(0), new ColumnAccessEvalFactory(1), new ColumnAccessEvalFactory(2),
+//                        new ColumnAccessEvalFactory(3), new ColumnAccessEvalFactory(4), length);
+//        targetOp = mergePartial;
+//        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, mergePartial,
+//                metadataProvider.getClusterLocations().getLocations()[0]);
+//        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//
+//        sourceOp = targetOp;
+//        StoreMergedKCentroidsOperatorDescriptor storeKMerged =
+//                new StoreMergedKCentroidsOperatorDescriptor(spec, secondaryRecDesc, onlyCentroidRecDesc, kCentroidsUUID,
+//                        permitUUID, sampleUUID, new ColumnAccessEvalFactory(0));
+//        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, storeKMerged,
+//                primaryPartitionConstraint);
+//        targetOp = storeKMerged;
+//        spec.connect(new MToNBroadcastConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         //        sourceOp = targetOp;
         //        PrinterRuntimeFactory printerRuntimeFactory = new PrinterRuntimeFactory(new int[] { 0 },  new IPrinterFactory[] { new AOrderedlistPrinterFactory(new AOrderedListType(AFLOAT, "embedding")) } ,onlyCentroidRecDesc);

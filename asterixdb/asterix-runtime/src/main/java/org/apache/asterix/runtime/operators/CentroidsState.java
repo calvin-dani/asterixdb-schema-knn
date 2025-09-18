@@ -27,11 +27,12 @@ import java.util.UUID;
 
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
+import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 
 public class CentroidsState extends AbstractStateObject {
     private List<float[]> centroids;
 
-    public CentroidsState(JobId jobId, UUID objectId) {
+    public CentroidsState(JobId jobId, PartitionedUUID objectId) {
         super(jobId, objectId);
         this.centroids = new ArrayList<>();
     }

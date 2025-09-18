@@ -231,11 +231,11 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                         }
                         iteration++;
                     }
-
-                    for (float[] f : centers) {
-                        System.err.println("final centroids " + Arrays.toString(f));
-                        currentCentroids.addCentroid(f);
-                    }
+//
+//                    for (float[] f : centers) {
+//                        System.err.println("final centroids " + Arrays.toString(f));
+//                        currentCentroids.addCentroid(f);
+//                    }
                     ctx.setStateObject(currentCentroids);
                     FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
