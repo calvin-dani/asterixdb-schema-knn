@@ -86,6 +86,11 @@ public class TestJobletContext implements IHyracksJobletContext {
     }
 
     @Override
+    public int getMaxFrameSize() {
+        return 0;
+    }
+
+    @Override
     public IIOManager getIoManager() {
         return serviceContext.getIoManager();
     }

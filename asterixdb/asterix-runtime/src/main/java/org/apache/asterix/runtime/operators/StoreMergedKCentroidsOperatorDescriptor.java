@@ -19,7 +19,7 @@
 
 package org.apache.asterix.runtime.operators;
 
-import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
+import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
 import java.io.DataOutput;
@@ -30,11 +30,13 @@ import java.util.UUID;
 import java.util.concurrent.Semaphore;
 
 import org.apache.asterix.builders.OrderedListBuilder;
+import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
+import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.base.AMutableFloat;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -98,6 +100,7 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
             CentroidsState currentCentroids;
             OrderedListBuilder orderedListBuilder;
             AMutableFloat aFloat;
+            AMutableDouble aDouble;
             ArrayBackedValueStorage listStorage;
             ByteArrayAccessibleOutputStream embBytes;
             DataOutput embBytesOutput;
@@ -116,6 +119,7 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
                 currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
                 orderedListBuilder = new OrderedListBuilder();
                 aFloat = new AMutableFloat(0);
+                aDouble = new AMutableDouble(0);
                 listStorage = new ArrayBackedValueStorage();
                 embBytes = new ByteArrayAccessibleOutputStream();
                 embBytesOutput = new DataOutputStream(embBytes);
@@ -136,7 +140,7 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
                             continue;
                         }
                         listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                        float[] point = createPrimitveList(listAccessorConstant);
+                        double[] point = createPrimitveList(listAccessorConstant);
                         currentCentroids.addCentroid(point);
                     }
                     ctx.setStateObject(currentCentroids);
@@ -166,9 +170,9 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
                 CentroidsState currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
 
                 System.err.println(" Storing centroids " + currentCentroids.getCentroids().size() + " for partition " + partition);
-                for (float[] centroid : currentCentroids.getCentroids()) {
+                for (double[] centroid : currentCentroids.getCentroids()) {
                     System.err.print("Centroid: ");
-                    for (float value : centroid) {
+                    for (double value : centroid) {
                         System.err.print(value + " ");
                     }
                     System.err.println();
@@ -177,12 +181,13 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
 
                 try {
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
-                    orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
-                    for(float[] point : currentCentroids.getCentroids()) {
-                        for (float value : point) {
-                            aFloat.setValue(value);
+                    orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
+                    for(double[] point : currentCentroids.getCentroids()) {
+                        for (double value : point) {
+                            aDouble.setValue(value);
+//                            aFloat.setValue(value);
                             listStorage.reset();
-                            listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
+                            listStorage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
                             AFloatSerializerDeserializer.INSTANCE.serialize(aFloat, listStorage.getDataOutput());
                             orderedListBuilder.addItem(listStorage);
                         }
@@ -212,9 +217,9 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
 
             }
 
-            protected float[] createPrimitveList(ListAccessor listAccessor) throws IOException {
+            protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
                 ATypeTag typeTag = listAccessor.getItemType();
-                float[] primitiveArray = new float[listAccessor.size()];
+                double[] primitiveArray = new double[listAccessor.size()];
                 IPointable tempVal = new VoidPointable();
                 ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
                 for (int i = 0; i < listAccessor.size(); i++) {
@@ -224,7 +229,7 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
                 return primitiveArray;
             }
 
-            protected float extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws
+            protected double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws
                     HyracksDataException {
                 byte[] data = pointable.getByteArray();
                 int offset = pointable.getStartOffset();
@@ -238,14 +243,14 @@ public final class StoreMergedKCentroidsOperatorDescriptor extends AbstractSingl
                 }
             }
 
-            protected float getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
+            protected double getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
                 return switch (typeTag) {
                     case TINYINT -> AInt8SerializerDeserializer.getByte(data, offset + 1);
                     case SMALLINT -> AInt16SerializerDeserializer.getShort(data, offset + 1);
                     case INTEGER -> AInt32SerializerDeserializer.getInt(data, offset + 1);
                     case BIGINT -> AInt64SerializerDeserializer.getLong(data, offset + 1);
                     case FLOAT -> AFloatSerializerDeserializer.getFloat(data, offset + 1);
-//                    case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+                    case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
                     default -> Float.NaN;
                 };
             }

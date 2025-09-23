@@ -16,25 +16,35 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+package org.apache.hyracks.dataflow.std.misc;
 
-package org.apache.hyracks.api.context;
+import java.util.Objects;
+import java.util.UUID;
 
-import java.nio.ByteBuffer;
+public class KCentroidPartitionedUUID {
 
-import org.apache.hyracks.api.exceptions.HyracksDataException;
+    private final UUID uuid;
+    private final int partition;
 
-public interface IHyracksFrameMgrContext {
+    public KCentroidPartitionedUUID(UUID uuid, int partition) {
+        this.uuid = uuid;
+        this.partition = partition;
+    }
 
-    public int getInitialFrameSize();
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        KCentroidPartitionedUUID that = (KCentroidPartitionedUUID) o;
+        return partition == that.partition && Objects.equals(uuid, that.uuid);
+    }
 
-    public  int getMaxFrameSize();
-
-    public ByteBuffer allocateFrame() throws HyracksDataException;
-
-    public ByteBuffer allocateFrame(int bytes) throws HyracksDataException;
-
-    public ByteBuffer reallocateFrame(ByteBuffer tobeDeallocate, int newSizeInBytes, boolean copyOldData)
-            throws HyracksDataException;
-
-    public void deallocateFrames(int bytes);
+    @Override
+    public int hashCode() {
+        return Objects.hash(uuid, partition);
+    }
 }

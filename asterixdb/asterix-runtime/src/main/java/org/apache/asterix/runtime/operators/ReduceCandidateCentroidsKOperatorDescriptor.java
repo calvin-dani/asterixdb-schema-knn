@@ -40,6 +40,7 @@ import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserial
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
+import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.base.AMutableFloat;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -75,7 +76,7 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
     private final UUID permitUUID;
     private final int dimensions = 1;
     private final int n = 55;
-    float[] accumulatedWeights;
+    double[] accumulatedWeights;
     RecordDescriptor onlyCentroids;
     IScalarEvaluatorFactory args;
 
@@ -85,7 +86,7 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
         this.centroidsUUID = centroidsUUID;
         this.permitUUID = permitUUID;
         outRecDescs[0] = rDesc;
-        accumulatedWeights = new float[n];
+        accumulatedWeights = new double[n];
         this.onlyCentroids = onlyCentroids;
         this.args = args;
     }
@@ -103,6 +104,7 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
             VoidPointable inputVal;
             OrderedListBuilder orderedListBuilder;
             AMutableFloat aFloat;
+            AMutableDouble aDouble;
             ArrayBackedValueStorage listStorage;
             ByteArrayAccessibleOutputStream embBytes;
             DataOutput embBytesOutput;
@@ -165,8 +167,8 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                     int dimensions = 1;
                     int k = 2;
                     int n = currentCentroids.getCentroids().size();
-                    float[][] centers = new float[k][dimensions];
-                    List<float[]> points = currentCentroids.getCentroids();
+                    double[][] centers = new double[k][dimensions];
+                    List<double[]> points = currentCentroids.getCentroids();
                     double[] costArray = new double[currentCentroids.getCentroids().size()];
 
                     Random rand = new Random();
@@ -210,7 +212,7 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                     while (moved && iteration < maxIterations) {
                         moved = false;
                         double[] counts = new double[k];
-                        float[][] sums = new float[k][dimensions];
+                        double[][] sums = new double[k][dimensions];
                         for (int i = 0; i < n; i++) {
                             int index = findClosest(centers, points.get(i));
                             addWeighted(sums[index], points.get(i), accumulatedWeights[i]);
@@ -240,11 +242,12 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                     FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
                     for (int i = 0; i < k; i++) {
-                        float[] arr = centers[i];
+                        double[] arr = centers[i];
 
                         orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
-                        for (float value : arr) {
-                            aFloat.setValue(value);
+                        for (double value : arr) {
+//                            aFloat.setValue(value);
+                            aDouble.setValue(value);
                             listStorage.reset();
                             listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
                             AFloatSerializerDeserializer.INSTANCE.serialize(aFloat, listStorage.getDataOutput());
@@ -280,9 +283,9 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 return floatList;
             }
 
-            private int pickWeightedIndex(Random rand, List<float[]> data, float[] weights) {
-                float sum = 0f;
-                for (float w : weights) {
+            private int pickWeightedIndex(Random rand, List<double[]> data, double[] weights) {
+                double sum = 0f;
+                for (double w : weights) {
                     sum += w;
                 }
                 double r = rand.nextDouble() * sum;
@@ -295,7 +298,7 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 return Math.max(0, i - 1);
             }
 
-            private double fastSquaredDistance(float[] a, float[] b) {
+            private double fastSquaredDistance(double[] a, double[] b) {
                 double sum = 0.0;
                 for (int i = 0; i < a.length; i++) {
                     double diff = a[i] - b[i];
@@ -304,7 +307,7 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 return sum;
             }
 
-            private int findClosest(float[][] centers, float[] point) {
+            private int findClosest(double[][] centers, double[] point) {
                 int best = 0;
                 double bestDist = fastSquaredDistance(centers[0], point);
                 for (int i = 1; i < centers.length; i++) {
@@ -317,13 +320,13 @@ public final class ReduceCandidateCentroidsKOperatorDescriptor extends AbstractS
                 return best;
             }
 
-            private void addWeighted(float[] sum, float[] point, double weight) {
+            private void addWeighted(double[] sum, double[] point, double weight) {
                 for (int i = 0; i < sum.length; i++) {
                     sum[i] += point[i] * weight;
                 }
             }
 
-            private void scale(float[] vec, double factor) {
+            private void scale(double[] vec, double factor) {
                 for (int i = 0; i < vec.length; i++) {
                     vec[i] *= factor;
                 }

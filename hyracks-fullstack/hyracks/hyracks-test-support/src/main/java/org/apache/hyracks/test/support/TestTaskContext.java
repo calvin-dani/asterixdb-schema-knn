@@ -91,6 +91,11 @@ public class TestTaskContext implements IHyracksTaskContext {
     }
 
     @Override
+    public int getMaxFrameSize() {
+        return 0;
+    }
+
+    @Override
     public IIOManager getIoManager() {
         return jobletContext.getIoManager();
     }

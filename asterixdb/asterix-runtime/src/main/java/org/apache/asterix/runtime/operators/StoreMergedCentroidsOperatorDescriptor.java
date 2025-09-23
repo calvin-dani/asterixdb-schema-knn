@@ -32,11 +32,13 @@ import java.util.UUID;
 import java.util.concurrent.Semaphore;
 
 import org.apache.asterix.builders.OrderedListBuilder;
+import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer;
+import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.base.AMutableFloat;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -102,6 +104,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
             CentroidsState currentCentroids;
             OrderedListBuilder orderedListBuilder;
             AMutableFloat aFloat;
+            AMutableDouble aDouble;
             ArrayBackedValueStorage listStorage;
             ByteArrayAccessibleOutputStream embBytes;
             DataOutput embBytesOutput;
@@ -120,6 +123,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 currentCentroids = (CentroidsState) ctx.getStateObject(centroidsUUID);
                 orderedListBuilder = new OrderedListBuilder();
                 aFloat = new AMutableFloat(0);
+                aDouble = new AMutableDouble(0);
                 listStorage = new ArrayBackedValueStorage();
                 embBytes = new ByteArrayAccessibleOutputStream();
                 embBytesOutput = new DataOutputStream(embBytes);
@@ -140,7 +144,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                             continue;
                         }
                         listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                        float[] point = createPrimitveList(listAccessorConstant);
+                        double[] point = createPrimitveList(listAccessorConstant);
                         currentCentroids.addCentroid(point);
                     }
                     ctx.setStateObject(currentCentroids);
@@ -176,7 +180,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 in.open();
                 int globalTupleIndex = 0;
                 VoidPointable inputVal = new VoidPointable();
-                List<Float> preCosts = new ArrayList<>();
+                List<Double> preCosts = new ArrayList<>();
                 FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
                 try {
 
@@ -192,14 +196,14 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                                 continue;
                             }
                             listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                            float[] point = createPrimitveList(listAccessorConstant);
+                            double[] point = createPrimitveList(listAccessorConstant);
 
                             // Find closest centroid
                             int closestIdx = -1;
-                            float minCost = Float.POSITIVE_INFINITY;
-                            List<float[]> centroids = currentCentroids.getCentroids();
+                            double minCost = Double.POSITIVE_INFINITY;
+                            List<double[]> centroids = currentCentroids.getCentroids();
                             for (int i = 0; i < centroids.size(); i++) {
-                                float cost = euclideanDistance(point, centroids.get(i));
+                                double cost = euclideanDistance(point, centroids.get(i));
                                 if (cost < minCost) {
                                     minCost = cost;
                                     closestIdx = i;
@@ -217,11 +221,12 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
 
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1); // 1 field: the record
                     orderedListBuilder.reset(new AOrderedListType(AFLOAT, "embedding"));
-                    for (float value : preCosts) {
-                        aFloat.setValue(value);
+                    for (double value : preCosts) {
+//                        aFloat.setValue(value);
+                        aDouble.setValue(value);
                         listStorage.reset();
-                        listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
-                        AFloatSerializerDeserializer.INSTANCE.serialize(aFloat, listStorage.getDataOutput());
+                        listStorage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
+                        ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, listStorage.getDataOutput());
                         orderedListBuilder.addItem(listStorage);
                     }
                     embBytes.reset();
@@ -250,9 +255,9 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
 
             }
 
-            protected float[] createPrimitveList(ListAccessor listAccessor) throws IOException {
+            protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
                 ATypeTag typeTag = listAccessor.getItemType();
-                float[] primitiveArray = new float[listAccessor.size()];
+                double[] primitiveArray = new double[listAccessor.size()];
                 IPointable tempVal = new VoidPointable();
                 ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
                 for (int i = 0; i < listAccessor.size(); i++) {
@@ -262,7 +267,7 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 return primitiveArray;
             }
 
-            protected float extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws
+            protected double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws
                     HyracksDataException {
                 byte[] data = pointable.getByteArray();
                 int offset = pointable.getStartOffset();
@@ -276,25 +281,25 @@ public final class StoreMergedCentroidsOperatorDescriptor extends AbstractSingle
                 }
             }
 
-            protected float getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
+            protected double getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
                 return switch (typeTag) {
                     case TINYINT -> AInt8SerializerDeserializer.getByte(data, offset + 1);
                     case SMALLINT -> AInt16SerializerDeserializer.getShort(data, offset + 1);
                     case INTEGER -> AInt32SerializerDeserializer.getInt(data, offset + 1);
                     case BIGINT -> AInt64SerializerDeserializer.getLong(data, offset + 1);
                     case FLOAT -> AFloatSerializerDeserializer.getFloat(data, offset + 1);
-//                    case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+                    case DOUBLE -> ADoubleSerializerDeserializer.getDouble(data, offset + 1);
                     default -> Float.NaN;
                 };
             }
 
-            private float euclideanDistance(float[] point, float[] center) {
+            private double euclideanDistance(double[] point, double[] center) {
                 float sum = 0;
                 for (int i = 0; i < point.length; i++) {
-                    float diff = point[i] - center[i];
+                    double diff = point[i] - center[i];
                     sum += diff * diff;
                 }
-                return (float) Math.sqrt(sum);
+                return (double) Math.sqrt(sum);
             }
 
         };
