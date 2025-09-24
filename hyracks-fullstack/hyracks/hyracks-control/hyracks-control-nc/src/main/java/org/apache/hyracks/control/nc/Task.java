@@ -188,10 +188,10 @@ public class Task implements IHyracksTaskContext, ICounterContext, Runnable {
         return joblet.getInitialFrameSize();
     }
 
-    @Override
-    public int getMaxFrameSize() {
-        return joblet.getMaxFrameSize();
-    }
+    //    @Override
+    //    public int getMaxFrameSize() {
+    //        return joblet.getMaxFrameSize();
+    //    }
 
     @Override
     public IIOManager getIoManager() {

@@ -49,7 +49,7 @@ public class CentroidsState extends AbstractStateObject {
         centroids.add(centroid);
     }
 
-    public  void clearCentroids() {
+    public void clearCentroids() {
         centroids.clear();
     }
 

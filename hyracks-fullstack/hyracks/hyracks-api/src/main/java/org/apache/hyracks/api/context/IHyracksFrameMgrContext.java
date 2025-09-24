@@ -27,8 +27,6 @@ public interface IHyracksFrameMgrContext {
 
     public int getInitialFrameSize();
 
-    public  int getMaxFrameSize();
-
     public ByteBuffer allocateFrame() throws HyracksDataException;
 
     public ByteBuffer allocateFrame(int bytes) throws HyracksDataException;

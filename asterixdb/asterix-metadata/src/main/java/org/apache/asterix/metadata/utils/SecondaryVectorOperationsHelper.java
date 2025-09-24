@@ -122,7 +122,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID permitUUID = UUID.randomUUID();
         UUID kCentroidsUUID = UUID.randomUUID();
 
-        int K = 200;
+        int K = 10;
         int maxScalableKmeansIter = 2;
 
         // _ -> init centroids (materialize sample)
@@ -139,8 +139,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
-        CandidateCentroidsOperatorDescriptor candidates = new CandidateCentroidsOperatorDescriptor(spec,
-                secondaryRecDesc, sampleUUID, centroidsUUID, permitUUID, new ColumnAccessEvalFactory(0), K,maxScalableKmeansIter);
+        CandidateCentroidsOperatorDescriptor candidates =
+                new CandidateCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID, centroidsUUID, permitUUID,
+                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
