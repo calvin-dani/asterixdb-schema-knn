@@ -68,7 +68,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 
-public final class CandidateCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
+public final class LocalKMeansPlusPlusCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
 
@@ -81,7 +81,7 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
     private int K;
     private int maxScalableKmeansIter;
 
-    public CandidateCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+    public LocalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
             UUID sampleUUID, UUID centroidsUUID, UUID permitUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter) {
         super(spec, 1, 1);
@@ -278,7 +278,7 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
                             }
 
                             // Compute sumCosts
-                            float sumCosts = 0f;
+                            double sumCosts = 0d;
                             for (double c : preCosts)
                                 sumCosts += c;
 
@@ -290,7 +290,7 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
                             double cumulative = 0.0;
 
                             // Oversampling factor of 2
-                            double l = K * 2; // expected number of candidates per round
+                            double l = K * 5; // expected number of candidates per round
 
                             // Selecting new centroids based on probability based on their cost
                             vSizeFrame.reset();
@@ -591,7 +591,7 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
                                     sumCosts += c;
 
                                 // Oversampling factor of 2
-                                double l = currentK * 2; // expected number of candidates per round
+                                double l = currentK * 5; // expected number of candidates per round
                                 List<double[]> chosen = new ArrayList<>();
 
                                 int pointCount = currentPoints.size();
@@ -792,18 +792,6 @@ public final class CandidateCentroidsOperatorDescriptor extends AbstractOperator
                         }
 
                         int level = allClusters.size();
-                        //                        StringBuilder sb = new StringBuilder(
-                        //                                " Final centroids at  partition " + partition + " : with level " + allClusters.size()
-                        //                                        + " cost " + currentK * dim * Double.BYTES + " frameSize " + frameSize);
-                        //                        for (List<double[]> centroids : allClusters) {
-                        //                            sb.append(" Level with ").append(level).append(" with K centroids ")
-                        //                                    .append(centroids.size()).append(" for partition ").append(partition).append("\n");
-                        //                            level--;
-                        //                            for (double[] c : centroids) {
-                        //                                sb.append(Arrays.toString(c)).append(" ,  \n");
-                        //                            }
-                        //                        }
-                        //                        System.err.println(sb.toString());
 
                         System.err.println(" Ending");
 
