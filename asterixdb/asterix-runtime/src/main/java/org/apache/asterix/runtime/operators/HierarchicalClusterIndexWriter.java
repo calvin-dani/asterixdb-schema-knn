@@ -88,15 +88,15 @@ public class HierarchicalClusterIndexWriter {
      * Adds a cluster level to the index
      */
     public void addClusterLevel(int level, List<HierarchicalCentroidsState.HierarchicalCentroid> centroids) {
+        // Check if level already exists and remove it first
+        clusterLevels.removeIf(levelData -> (Integer) levelData.get("level") == level);
+
         Map<String, Object> levelData = new HashMap<>();
         levelData.put("level", level);
         levelData.put("centroid_count", centroids.size());
-        levelData.put("centroids", new ArrayList<>());
 
         // Add centroid information
-        @SuppressWarnings("unchecked")
         List<Map<String, Object>> centroidList = new ArrayList<>();
-        Map<Integer, List<Map<String, Object>>> centroidsByParent = new HashMap<>();
 
         for (HierarchicalCentroidsState.HierarchicalCentroid centroid : centroids) {
             Map<String, Object> centroidData = new HashMap<>();
@@ -108,6 +108,11 @@ public class HierarchicalClusterIndexWriter {
             centroidData.put("has_parent", clusterId.hasParent());
             if (clusterId.hasParent()) {
                 centroidData.put("parent_cluster_id", clusterId.getParentClusterId());
+                System.err.println("DEBUG: Adding centroid with parent - Level " + level + ", Cluster "
+                        + clusterId.getClusterId() + ", Parent " + clusterId.getParentClusterId());
+            } else {
+                System.err.println("DEBUG: Adding centroid without parent - Level " + level + ", Cluster "
+                        + clusterId.getClusterId());
             }
 
             // Add centroid coordinates
@@ -120,16 +125,9 @@ public class HierarchicalClusterIndexWriter {
             centroidData.put("dimension", coordinates.length);
 
             centroidList.add(centroidData);
-
-            // Group by parent for better organization
-            int parentId = clusterId.hasParent() ? clusterId.getParentClusterId() : -1;
-            centroidsByParent.computeIfAbsent(parentId, k -> new ArrayList<>()).add(centroidData);
         }
 
         levelData.put("centroids", centroidList);
-        levelData.put("centroids_by_parent", centroidsByParent);
-        levelData.put("parent_groups", centroidsByParent.keySet().size());
-
         clusterLevels.add(levelData);
     }
 
@@ -140,33 +138,82 @@ public class HierarchicalClusterIndexWriter {
         hierarchyStructure.put("total_levels", totalLevels);
         hierarchyStructure.put("total_centroids", totalCentroids);
         hierarchyStructure.put("structure_info", structureInfo);
-        hierarchyStructure.put("parent_child_relationships", buildParentChildRelationships());
     }
 
     /**
-     * Builds parent-child relationships from the cluster levels
+     * Builds a simple tree structure with just basic information
      */
-    private List<Map<String, Object>> buildParentChildRelationships() {
-        List<Map<String, Object>> relationships = new ArrayList<>();
+    private Map<String, Object> buildSimpleTree() {
+        Map<String, Object> tree = new HashMap<>();
 
-        for (int i = 1; i < clusterLevels.size(); i++) {
-            Map<String, Object> currentLevel = clusterLevels.get(i);
-            List<Map<String, Object>> currentCentroids = (List<Map<String, Object>>) currentLevel.get("centroids");
-
-            for (Map<String, Object> centroid : currentCentroids) {
-                if ((Boolean) centroid.get("has_parent")) {
-                    Map<String, Object> relationship = new HashMap<>();
-                    relationship.put("child_global_id", centroid.get("global_id"));
-                    relationship.put("child_cluster_id", centroid.get("cluster_id"));
-                    relationship.put("child_level", centroid.get("level"));
-                    relationship.put("parent_cluster_id", centroid.get("parent_cluster_id"));
-                    relationship.put("parent_level", (Integer) centroid.get("level") - 1);
-                    relationships.add(relationship);
-                }
+        // Find the root level (highest level number)
+        int rootLevel = -1;
+        for (Map<String, Object> level : clusterLevels) {
+            int levelNum = (Integer) level.get("level");
+            if (levelNum > rootLevel) {
+                rootLevel = levelNum;
             }
         }
 
-        return relationships;
+        if (rootLevel == -1) {
+            tree.put("levels", new ArrayList<>());
+            return tree;
+        }
+
+        // Build simple level-by-level structure
+        List<Map<String, Object>> levels = new ArrayList<>();
+
+        // Process each level from root to leaves
+        for (int level = rootLevel; level >= 0; level--) {
+            Map<String, Object> levelData = findLevelData(level);
+            if (levelData != null) {
+                Map<String, Object> levelInfo = new HashMap<>();
+                levelInfo.put("level", level);
+                levelInfo.put("centroids", buildBasicCentroids(levelData));
+                levels.add(levelInfo);
+            }
+        }
+
+        tree.put("levels", levels);
+        tree.put("total_levels", levels.size());
+
+        return tree;
+    }
+
+    /**
+     * Finds level data by level number
+     */
+    private Map<String, Object> findLevelData(int level) {
+        for (Map<String, Object> levelInfo : clusterLevels) {
+            if ((Integer) levelInfo.get("level") == level) {
+                return levelInfo;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Builds basic centroid structure with minimal information
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> buildBasicCentroids(Map<String, Object> levelData) {
+        List<Map<String, Object>> centroids = (List<Map<String, Object>>) levelData.get("centroids");
+        List<Map<String, Object>> basicCentroids = new ArrayList<>();
+
+        for (Map<String, Object> centroid : centroids) {
+            Map<String, Object> basicCentroid = new HashMap<>();
+            basicCentroid.put("cluster_id", centroid.get("cluster_id"));
+            basicCentroid.put("global_id", centroid.get("global_id"));
+
+            // ALWAYS add parent information if it exists - this should match the stdout output
+            if ((Boolean) centroid.get("has_parent")) {
+                basicCentroid.put("parent_cluster_id", centroid.get("parent_cluster_id"));
+            }
+
+            basicCentroids.add(basicCentroid);
+        }
+
+        return basicCentroids;
     }
 
     /**
@@ -174,19 +221,15 @@ public class HierarchicalClusterIndexWriter {
      */
     public void writeIndex() throws HyracksDataException {
         try {
-            // Create the complete index structure
-            Map<String, Object> completeIndex = new HashMap<>();
-            completeIndex.put("metadata", indexMetadata);
-            completeIndex.put("cluster_levels", clusterLevels);
-            completeIndex.put("hierarchy_structure", hierarchyStructure);
-            completeIndex.put("statistics", generateStatistics());
+            // Create simple tree structure
+            Map<String, Object> tree = buildSimpleTree();
 
             // Create directory if it doesn't exist
             createIndexDirectory();
 
             // Write to file
             String indexPath = getIndexFilePath();
-            writeJsonToFile(completeIndex, indexPath);
+            writeJsonToFile(tree, indexPath);
 
             System.out.println("Hierarchical cluster index written to: " + indexPath);
 
@@ -200,19 +243,15 @@ public class HierarchicalClusterIndexWriter {
      */
     public void writeIndexToSideFile() throws HyracksDataException {
         try {
-            // Create the complete index structure
-            Map<String, Object> completeIndex = new HashMap<>();
-            completeIndex.put("metadata", indexMetadata);
-            completeIndex.put("cluster_levels", clusterLevels);
-            completeIndex.put("hierarchy_structure", hierarchyStructure);
-            completeIndex.put("statistics", generateStatistics());
+            // Create simple tree structure
+            Map<String, Object> tree = buildSimpleTree();
 
             // Create managed workspace file
             FileReference indexFile =
                     ctx.getJobletContext().createManagedWorkspaceFile("hierarchical_cluster_index_" + partition);
 
             // Write JSON to the managed file
-            writeJsonToFile(completeIndex, indexFile.getFile().getAbsolutePath());
+            writeJsonToFile(tree, indexFile.getFile().getAbsolutePath());
 
             System.out.println(
                     "Hierarchical cluster index written to side file: " + indexFile.getFile().getAbsolutePath());
@@ -220,33 +259,6 @@ public class HierarchicalClusterIndexWriter {
         } catch (Exception e) {
             throw HyracksDataException.create(e);
         }
-    }
-
-    /**
-     * Generates statistics about the cluster hierarchy
-     */
-    private Map<String, Object> generateStatistics() {
-        Map<String, Object> stats = new HashMap<>();
-
-        int totalCentroids = 0;
-        int totalLevels = clusterLevels.size();
-        int maxCentroidsPerLevel = 0;
-        int minCentroidsPerLevel = Integer.MAX_VALUE;
-
-        for (Map<String, Object> level : clusterLevels) {
-            int centroidCount = (Integer) level.get("centroid_count");
-            totalCentroids += centroidCount;
-            maxCentroidsPerLevel = Math.max(maxCentroidsPerLevel, centroidCount);
-            minCentroidsPerLevel = Math.min(minCentroidsPerLevel, centroidCount);
-        }
-
-        stats.put("total_centroids", totalCentroids);
-        stats.put("total_levels", totalLevels);
-        stats.put("max_centroids_per_level", maxCentroidsPerLevel);
-        stats.put("min_centroids_per_level", minCentroidsPerLevel == Integer.MAX_VALUE ? 0 : minCentroidsPerLevel);
-        stats.put("average_centroids_per_level", totalLevels > 0 ? (double) totalCentroids / totalLevels : 0.0);
-
-        return stats;
     }
 
     /**
@@ -308,6 +320,13 @@ public class HierarchicalClusterIndexWriter {
     }
 
     /**
+     * Gets the cluster levels
+     */
+    public List<Map<String, Object>> getClusterLevels() {
+        return clusterLevels;
+    }
+
+    /**
      * Validates the index structure
      */
     public boolean validateIndex() {
@@ -339,28 +358,4 @@ public class HierarchicalClusterIndexWriter {
         }
     }
 
-    /**
-     * Gets a summary of the index
-     */
-    public String getIndexSummary() {
-        StringBuilder summary = new StringBuilder();
-        summary.append("Hierarchical Cluster Index Summary:\n");
-        summary.append("=====================================\n");
-        summary.append("Index Name: ").append(STATIC_STRUCTURE_INDEX_NAME).append("\n");
-        summary.append("Job ID: ").append(jobId).append("\n");
-        summary.append("Partition: ").append(partition).append("\n");
-        summary.append("Total Levels: ").append(clusterLevels.size()).append("\n");
-
-        int totalCentroids = 0;
-        for (Map<String, Object> level : clusterLevels) {
-            int count = (Integer) level.get("centroid_count");
-            totalCentroids += count;
-            summary.append("  Level ").append(level.get("level")).append(": ").append(count).append(" centroids\n");
-        }
-
-        summary.append("Total Centroids: ").append(totalCentroids).append("\n");
-        summary.append("Index Path: ").append(getIndexFilePath()).append("\n");
-
-        return summary.toString();
-    }
 }

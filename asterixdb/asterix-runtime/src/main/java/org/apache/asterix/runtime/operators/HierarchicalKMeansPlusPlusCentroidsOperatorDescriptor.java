@@ -20,13 +20,9 @@ package org.apache.asterix.runtime.operators;
 
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
-import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
-import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
-import org.apache.hyracks.util.string.UTF8StringUtil;
+import static org.apache.asterix.runtime.utils.VectorDistanceArrCalculation.euclidean_squared;
 
 import java.io.DataOutput;
-import java.io.Serializable;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -75,52 +71,6 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 
-// Serializable distance function implementations
-class ManhattanDistanceFunction implements DistanceFunction, Serializable {
-    private static final long serialVersionUID = 1L;
-    
-    @Override
-    public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.manhattan(a, b);
-    }
-}
-
-class EuclideanDistanceFunction implements DistanceFunction, Serializable {
-    private static final long serialVersionUID = 1L;
-    
-    @Override
-    public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.euclidean(a, b);
-    }
-}
-
-class EuclideanSquaredDistanceFunction implements DistanceFunction, Serializable {
-    private static final long serialVersionUID = 1L;
-    
-    @Override
-    public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.euclidean_squared(a, b);
-    }
-}
-
-class CosineDistanceFunction implements DistanceFunction, Serializable {
-    private static final long serialVersionUID = 1L;
-    
-    @Override
-    public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.cosine(a, b);
-    }
-}
-
-class DotProductDistanceFunction implements DistanceFunction, Serializable {
-    private static final long serialVersionUID = 1L;
-    
-    @Override
-    public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.dot(a, b);
-    }
-}
-
 /**
  * Enhanced version of LocalKMeansPlusPlusCentroidsOperatorDescriptor that maintains
  * hierarchical cluster relationships with parent-child associations.
@@ -143,32 +93,21 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         }
     }
 
+    /**
+     * Result class to hold Lloyd's algorithm results with assignments
+     */
+    private static class LloydResult {
+        final List<double[]> centroids;
+        @SuppressWarnings("unused")
+        final int[] assignments;
+
+        LloydResult(List<double[]> centroids, int[] assignments) {
+            this.centroids = centroids;
+            this.assignments = assignments;
+        }
+    }
+
     private static final long serialVersionUID = 1L;
-
-    // Distance function constants
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
-            UTF8StringPointable.generateUTF8Pointable("euclidean");
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2_SQUARED =
-            UTF8StringPointable.generateUTF8Pointable("l2_squared");
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
-            UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
-    private static final UTF8StringPointable MANHATTAN_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
-    private static final UTF8StringPointable COSINE_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
-    private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
-
-    // Distance function hash map
-    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(
-            MANHATTAN_FORMAT.hash(), new ManhattanDistanceFunction(),
-            EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction(),
-            EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction(),
-            EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
-            EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
-            COSINE_FORMAT.hash(), new CosineDistanceFunction(),
-            DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction()
-    );
 
     private final UUID sampleUUID;
     private final UUID centroidsUUID;
@@ -177,42 +116,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private int K;
     private int maxScalableKmeansIter;
     private HierarchicalClusterTree.OutputMode outputMode;
-    private DistanceFunction distanceFunction;
-
-    private static DistanceFunction getDistanceFunction(String distanceType) {
-        UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
-        DistanceFunction func = DISTANCE_MAP.get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(),
-                formatPointable.getStartOffset()));
-        if (func == null) {
-            throw new IllegalArgumentException("Unsupported distance function: " + distanceType);
-        }
-        return func;
-    }
-
-    private double calculateDistance(double[] a, double[] b) {
-        try {
-            return distanceFunction.apply(a, b);
-        } catch (HyracksDataException e) {
-            throw new RuntimeException("Error calculating distance", e);
-        }
-    }
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor rDesc, UUID sampleUUID, UUID centroidsUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter) {
         this(spec, rDesc, sampleUUID, centroidsUUID, args, K, maxScalableKmeansIter,
-                HierarchicalClusterTree.OutputMode.LEVEL_BY_LEVEL, "euclidean_squared");
+                HierarchicalClusterTree.OutputMode.LEVEL_BY_LEVEL);
     }
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor rDesc, UUID sampleUUID, UUID centroidsUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter, HierarchicalClusterTree.OutputMode outputMode) {
-        this(spec, rDesc, sampleUUID, centroidsUUID, args, K, maxScalableKmeansIter, outputMode, "euclidean_squared");
-    }
-
-    public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
-            RecordDescriptor rDesc, UUID sampleUUID, UUID centroidsUUID, IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter, HierarchicalClusterTree.OutputMode outputMode, String distanceType) {
         super(spec, 1, 1);
         outRecDescs[0] = rDesc;
         this.sampleUUID = sampleUUID;
@@ -221,7 +135,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.outputMode = outputMode;
-        this.distanceFunction = getDistanceFunction(distanceType);
     }
 
     @Override
@@ -365,7 +278,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             buildCompleteTreeClustering(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
                                     KMeansUtils, vSizeFrame, appender, partition, indexWriter);
                         } else {
-                            buildHierarchicalClustering(ctx, in, hierarchicalState, fta, tuple, eval, inputVal,
+                            buildLevelByLevelClustering(ctx, in, hierarchicalState, fta, tuple, eval, inputVal,
                                     listAccessorConstant, KMeansUtils, vSizeFrame, appender, partition, indexWriter);
                         }
 
@@ -375,8 +288,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Also write to static location for manual management
                         indexWriter.writeIndex();
 
-                        // Print index summary
-                        System.out.println(indexWriter.getIndexSummary());
+                        // Print simple summary
+                        System.out.println("Hierarchical cluster index created with "
+                                + indexWriter.getClusterLevels().size() + " levels");
 
                         FrameUtils.flushFrame(appender.getBuffer(), writer);
 
@@ -423,9 +337,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return;
                     }
 
-                    // Set root of tree (first centroid)
-                    tree.setRoot(currentLevelCentroids.get(0));
-                    HierarchicalClusterTree.TreeNode currentLevelNodes = tree.getRoot();
+                    // Add Level 0 centroids (children) to tree - these are the leaf nodes
+                    List<HierarchicalClusterTree.TreeNode> currentLevelNodes = new ArrayList<>();
+                    for (int i = 0; i < currentLevelCentroids.size(); i++) {
+                        HierarchicalClusterTree.TreeNode leafNode =
+                                tree.addChild(null, currentLevelCentroids.get(i), currentLevel);
+                        currentLevelNodes.add(leafNode);
+                    }
 
                     System.err.println("Starting tree building with " + currentLevelCentroids.size()
                             + " centroids at level " + currentLevel);
@@ -442,17 +360,23 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         List<double[]> nextLevelCentroids = performScalableKMeansPlusPlusOnCentroids(
                                 currentLevelCentroids, currentK, rand, kMeansUtils, maxKMeansIterations);
 
-                        // Add children to tree nodes
+                        // Use Lloyd's algorithm approach to assign current level centroids (children) to next level centroids (parents)
+                        int[] parentAssignments = assignCentroidsToParents(currentLevelCentroids, nextLevelCentroids);
+
+                        // Add next level centroids (parents) to tree
                         List<HierarchicalClusterTree.TreeNode> nextLevelNodes = new ArrayList<>();
                         for (int i = 0; i < nextLevelCentroids.size(); i++) {
-                            // Find the closest parent node
                             HierarchicalClusterTree.TreeNode parentNode =
-                                    findClosestParentNode(nextLevelCentroids.get(i), currentLevelNodes);
+                                    tree.addChild(null, nextLevelCentroids.get(i), currentLevel);
+                            nextLevelNodes.add(parentNode);
+                        }
 
-                            // Add child to tree
-                            HierarchicalClusterTree.TreeNode childNode =
-                                    tree.addChild(parentNode, nextLevelCentroids.get(i), currentLevel);
-                            nextLevelNodes.add(childNode);
+                        // Add current level centroids (children) to their parent nodes
+                        for (int j = 0; j < currentLevelCentroids.size(); j++) {
+                            int parentIndex = parentAssignments[j];
+                            HierarchicalClusterTree.TreeNode parentNode = nextLevelNodes.get(parentIndex);
+                            // Create new child node under the parent
+                            tree.addChild(parentNode, currentLevelCentroids.get(j), currentLevel - 1);
                         }
 
                         // Test if all centroids from this level can fit in one frame
@@ -466,7 +390,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Prepare for next iteration
                         currentLevelCentroids = nextLevelCentroids;
-                        currentLevelNodes = nextLevelNodes.get(0); // Use first node as reference
+                        currentLevelNodes = nextLevelNodes;
                         currentLevel++;
                         currentK = Math.max(1, currentK / 2);
                     }
@@ -486,9 +410,140 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
+                 * Builds hierarchical clustering level by level without sorting
+                 * Assigns cluster IDs as we build each level and maintains parent-child relationships
+                 */
+                private void buildLevelByLevelClustering(IHyracksTaskContext ctx, GeneratedRunFileReader in,
+                        HierarchicalCentroidsState hierarchicalState, FrameTupleAccessor fta, FrameTupleReference tuple,
+                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAccessorConstant,
+                        KMeansUtils kMeansUtils, VSizeFrame vSizeFrame, FrameTupleAppender appender, int partition,
+                        HierarchicalClusterIndexWriter indexWriter) throws HyracksDataException, IOException {
+
+                    System.err.println("Building level-by-level clustering without sorting...");
+
+                    // Build hierarchy levels using the original memory-efficient approach
+                    int currentLevel = 0;
+                    int currentK = K;
+                    Random rand = new Random();
+                    int maxKMeansIterations = 20;
+
+                    // Start with the original data (not loaded into memory)
+                    List<double[]> currentLevelCentroids = new ArrayList<>();
+
+                    // First level: Use original probabilistic K-means++ on data
+                    currentLevelCentroids = performMemoryEfficientKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
+                            listAccessorConstant, kMeansUtils, vSizeFrame, currentK, rand, maxKMeansIterations,
+                            partition);
+
+                    // Store and output first level centroids (leaf nodes)
+                    for (int i = 0; i < currentLevelCentroids.size(); i++) {
+                        HierarchicalClusterId clusterId = new HierarchicalClusterId(currentLevel, i);
+                        hierarchicalState.addCentroid(currentLevel, clusterId, currentLevelCentroids.get(i));
+                    }
+
+                    // Add first level to index
+                    indexWriter.addClusterLevel(currentLevel, hierarchicalState.getCentroidsAtLevel(currentLevel));
+
+                    // Output first level centroids immediately
+                    outputLevelCentroids(hierarchicalState, currentLevel, appender);
+
+                    currentLevel++;
+                    currentK = Math.max(1, currentK / 2);
+
+                    // Build subsequent levels until centroids fit into one frame
+                    if (currentLevelCentroids.isEmpty()) {
+                        System.err.println("No centroids available for hierarchy building");
+                        return;
+                    }
+
+                    System.err.println("Starting hierarchy building with " + currentLevelCentroids.size()
+                            + " centroids at level " + currentLevel);
+
+                    while (currentLevelCentroids.size() > 1 && currentK > 0) {
+                        System.err.println("Building level " + currentLevel + " with " + currentLevelCentroids.size()
+                                + " centroids, target K = " + currentK);
+
+                        // Use scalable K-means++ on centroids from previous level
+                        List<double[]> nextLevelCentroids = performScalableKMeansPlusPlusOnCentroids(
+                                currentLevelCentroids, currentK, rand, kMeansUtils, maxKMeansIterations);
+
+                        // Use Lloyd's algorithm to assign current level centroids (children) to next level centroids (parents)
+                        int[] parentAssignments = assignCentroidsToParents(currentLevelCentroids, nextLevelCentroids);
+
+                        // Store next level centroids (parents) with sequential cluster IDs
+                        for (int i = 0; i < nextLevelCentroids.size(); i++) {
+                            HierarchicalClusterId parentId = new HierarchicalClusterId(currentLevel, i);
+                            hierarchicalState.addCentroid(currentLevel, parentId, nextLevelCentroids.get(i));
+                        }
+
+                        // Store current level centroids (children) with their parent relationships
+                        // We need to clear the previous level and re-add with parent relationships
+                        hierarchicalState.clearLevel(currentLevel - 1);
+
+                        for (int j = 0; j < currentLevelCentroids.size(); j++) {
+                            int parentIndex = parentAssignments[j];
+                            HierarchicalClusterId parentId = new HierarchicalClusterId(currentLevel, parentIndex);
+
+                            // Create cluster ID with parent relationship
+                            HierarchicalClusterId childClusterId =
+                                    new HierarchicalClusterId(currentLevel - 1, j, parentId.getClusterId());
+
+                            // Add child centroid with parent relationship
+                            hierarchicalState.addCentroid(currentLevel - 1, childClusterId,
+                                    currentLevelCentroids.get(j));
+                        }
+
+                        // Add this level to index
+                        indexWriter.addClusterLevel(currentLevel, hierarchicalState.getCentroidsAtLevel(currentLevel));
+
+                        // Add the child level (with parent relationships) to index
+                        indexWriter.addClusterLevel(currentLevel - 1,
+                                hierarchicalState.getCentroidsAtLevel(currentLevel - 1));
+
+                        // Output this level centroids immediately
+                        outputLevelCentroids(hierarchicalState, currentLevel, appender);
+
+                        // Test if all centroids from this level can fit in one frame
+                        boolean canFitInOneFrame =
+                                testCentroidsFitInFrame(ctx, hierarchicalState, currentLevel, appender);
+
+                        if (canFitInOneFrame) {
+                            System.err.println(
+                                    "Level " + currentLevel + " centroids fit in one frame! Stopping hierarchy.");
+                            break;
+                        }
+
+                        // Prepare for next iteration
+                        currentLevelCentroids = nextLevelCentroids;
+                        currentLevel++;
+                        currentK = Math.max(1, currentK / 2);
+                    }
+
+                    System.err.println("Final hierarchy: " + currentLevel + " levels with "
+                            + currentLevelCentroids.size() + " centroids at top level");
+
+                    // Add final hierarchy structure to index
+                    Map<String, Object> structureInfo = new HashMap<>();
+                    structureInfo.put("final_level", currentLevel);
+                    structureInfo.put("final_centroid_count", currentLevelCentroids.size());
+                    structureInfo.put("stopped_reason", "centroids_fit_in_frame");
+
+                    int totalCentroids = 0;
+                    for (int level : hierarchicalState.getLevels()) {
+                        totalCentroids += hierarchicalState.getCentroidsAtLevel(level).size();
+                    }
+
+                    indexWriter.addHierarchyStructure(currentLevel + 1, totalCentroids, structureInfo);
+
+                    // Print hierarchy information
+                    printHierarchyInfo(hierarchicalState, partition);
+                }
+
+                /**
                  * Builds the hierarchical clustering structure with parent-child relationships
                  * using memory-efficient probabilistic selection (not loading all data points)
                  */
+                @SuppressWarnings("unused")
                 private void buildHierarchicalClustering(IHyracksTaskContext ctx, GeneratedRunFileReader in,
                         HierarchicalCentroidsState hierarchicalState, FrameTupleAccessor fta, FrameTupleReference tuple,
                         IScalarEvaluator eval, IPointable inputVal, ListAccessor listAccessorConstant,
@@ -541,23 +596,25 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         List<double[]> nextLevelCentroids = performScalableKMeansPlusPlusOnCentroids(
                                 currentLevelCentroids, currentK, rand, kMeansUtils, maxKMeansIterations);
 
-                        // Store centroids with parent-child relationships and sort by parent
-                        List<CentroidWithParent> centroidsWithParents = new ArrayList<>();
+                        // Use Lloyd's algorithm to assign current level centroids (children) to next level centroids (parents)
+                        // This is bottom-up: Level 0 centroids are children, Level 1 centroids are parents
+                        int[] parentAssignments = assignCentroidsToParents(currentLevelCentroids, nextLevelCentroids);
 
+                        // Store the next level centroids (parents) in hierarchical state
                         for (int i = 0; i < nextLevelCentroids.size(); i++) {
-                            // Find the closest parent centroid
-                            HierarchicalClusterId parentId = findClosestParentCentroid(nextLevelCentroids.get(i),
-                                    hierarchicalState, currentLevel - 1);
+                            HierarchicalClusterId parentId = new HierarchicalClusterId(currentLevel, i);
+                            hierarchicalState.addCentroid(currentLevel, parentId, nextLevelCentroids.get(i));
+                        }
 
-                            HierarchicalClusterId clusterId;
-                            if (parentId != null) {
-                                clusterId = new HierarchicalClusterId(currentLevel, i, parentId.getClusterId());
-                            } else {
-                                clusterId = new HierarchicalClusterId(currentLevel, i);
-                            }
-
+                        // Store the current level centroids (children) with their parent relationships
+                        List<CentroidWithParent> centroidsWithParents = new ArrayList<>();
+                        for (int j = 0; j < currentLevelCentroids.size(); j++) {
+                            int parentIndex = parentAssignments[j];
+                            HierarchicalClusterId parentId = new HierarchicalClusterId(currentLevel, parentIndex);
+                            HierarchicalClusterId clusterId =
+                                    new HierarchicalClusterId(currentLevel - 1, j, parentId.getClusterId());
                             centroidsWithParents
-                                    .add(new CentroidWithParent(nextLevelCentroids.get(i), clusterId, parentId));
+                                    .add(new CentroidWithParent(currentLevelCentroids.get(j), clusterId, parentId));
                         }
 
                         // Sort centroids by parent cluster ID to group children together
@@ -677,7 +734,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 // Calculate minimum cost to current candidates
                                 double minCost = Double.POSITIVE_INFINITY;
                                 for (double[] candidate : currentCandidates) {
-                                    double cost = calculateDistance(point, candidate);
+                                    double cost = euclidean_squared(point, candidate);
                                     if (cost < minCost) {
                                         minCost = cost;
                                     }
@@ -732,15 +789,20 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     List<double[]> weightedCentroids =
                             performWeightedKMeansPlusPlus(currentCandidates, k, rand, kMeansUtils, maxIterations);
 
-                    // Run Lloyd's algorithm to improve the centroids (like original implementation)
-                    return performLloydsAlgorithm(in, fta, tuple, eval, inputVal, listAccessorConstant, kMeansUtils,
-                            vSizeFrame, weightedCentroids, k, maxIterations);
+                    // Run Lloyd's algorithm with assignments to improve the centroids and get parent-child relationships
+                    LloydResult lloydResult = performLloydsAlgorithmWithAssignments(in, fta, tuple, eval, inputVal,
+                            listAccessorConstant, kMeansUtils, vSizeFrame, weightedCentroids, k, maxIterations);
+
+                    // Store assignments for parent-child relationships (we'll use this later)
+                    // For now, just return the centroids
+                    return lloydResult.centroids;
                 }
 
                 /**
                  * Performs Lloyd's algorithm to improve centroids by iteratively assigning points to nearest centroids
                  * This is the same as the original implementation
                  */
+                @SuppressWarnings("unused")
                 private List<double[]> performLloydsAlgorithm(GeneratedRunFileReader in, FrameTupleAccessor fta,
                         FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, VSizeFrame vSizeFrame,
@@ -792,7 +854,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 int bestIdx = 0;
                                 double minDist = Double.POSITIVE_INFINITY;
                                 for (int cIdx = 0; cIdx < k; cIdx++) {
-                                    double dist = calculateDistance(point, centers[cIdx]);
+                                    double dist = euclidean_squared(point, centers[cIdx]);
                                     if (dist < minDist) {
                                         minDist = dist;
                                         bestIdx = cIdx;
@@ -817,7 +879,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 newCenters[cIdx] = Arrays.copyOf(centers[cIdx], dim);
                             }
                             // Check movement
-                            double dist = calculateDistance(centers[cIdx], newCenters[cIdx]);
+                            double dist = euclidean_squared(centers[cIdx], newCenters[cIdx]);
                             if (dist > epsilon) {
                                 converged = false;
                             }
@@ -840,6 +902,127 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     return finalCentroids;
+                }
+
+                /**
+                 * Performs Lloyd's algorithm with assignment tracking for parent-child relationships
+                 * This eliminates the need for expensive parent finding later
+                 */
+                private LloydResult performLloydsAlgorithmWithAssignments(GeneratedRunFileReader in,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, VSizeFrame vSizeFrame,
+                        List<double[]> initialCentroids, int k, int maxIterations)
+                        throws HyracksDataException, IOException {
+
+                    if (initialCentroids.isEmpty() || k <= 0) {
+                        return new LloydResult(initialCentroids, new int[0]);
+                    }
+
+                    int dim = initialCentroids.get(0).length;
+                    double[][] centers = new double[k][dim];
+                    for (int i = 0; i < k && i < initialCentroids.size(); i++) {
+                        centers[i] = Arrays.copyOf(initialCentroids.get(i), dim);
+                    }
+
+                    double[][] newCenters = new double[k][dim];
+                    int[] counts = new int[k];
+                    double epsilon = 1e-4; // convergence threshold
+                    int step = 0;
+                    boolean converged = false;
+
+                    // Track assignments for parent-child relationships
+                    List<Integer> assignments = new ArrayList<>();
+
+                    while (!converged && step < maxIterations) {
+                        // Reset accumulators
+                        for (int i = 0; i < k; i++) {
+                            counts[i] = 0;
+                            for (int d = 0; d < dim; d++) {
+                                newCenters[i][d] = 0.0;
+                            }
+                        }
+
+                        // Clear assignments for this iteration
+                        assignments.clear();
+
+                        // Assign points to nearest centroid and sum
+                        vSizeFrame.reset();
+                        in.seek(0);
+                        while (in.nextFrame(vSizeFrame)) {
+                            fta.reset(vSizeFrame.getBuffer());
+                            int tupleCount = fta.getTupleCount();
+                            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
+                                tuple.reset(fta, tupleIndex);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    continue;
+                                }
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                                // Assign to nearest centroid
+                                int bestIdx = 0;
+                                double minDist = Double.POSITIVE_INFINITY;
+                                for (int cIdx = 0; cIdx < k; cIdx++) {
+                                    double dist = euclidean_squared(point, centers[cIdx]);
+                                    if (dist < minDist) {
+                                        minDist = dist;
+                                        bestIdx = cIdx;
+                                    }
+                                }
+
+                                // Store assignment for parent-child relationships
+                                assignments.add(bestIdx);
+
+                                for (int d = 0; d < dim; d++) {
+                                    newCenters[bestIdx][d] += point[d];
+                                }
+                                counts[bestIdx]++;
+                            }
+                        }
+
+                        // Update centroids & check for convergence
+                        converged = true;
+                        for (int cIdx = 0; cIdx < k; cIdx++) {
+                            if (counts[cIdx] > 0) {
+                                for (int d = 0; d < dim; d++) {
+                                    newCenters[cIdx][d] /= counts[cIdx];
+                                }
+                            } else {
+                                // Optionally keep old center or set to zero
+                                newCenters[cIdx] = Arrays.copyOf(centers[cIdx], dim);
+                            }
+                            // Check movement
+                            double dist = euclidean_squared(centers[cIdx], newCenters[cIdx]);
+                            if (dist > epsilon) {
+                                converged = false;
+                            }
+                        }
+
+                        // Copy newCenters to centers for next iteration
+                        for (int cIdx = 0; cIdx < k; cIdx++) {
+                            System.arraycopy(newCenters[cIdx], 0, centers[cIdx], 0, dim);
+                        }
+
+                        step++;
+                    }
+
+                    // Build final centroids
+                    List<double[]> finalCentroids = new ArrayList<>(k);
+                    for (int cIdx = 0; cIdx < k; cIdx++) {
+                        double[] centroid = new double[dim];
+                        System.arraycopy(centers[cIdx], 0, centroid, 0, dim);
+                        finalCentroids.add(centroid);
+                    }
+
+                    // Convert assignments to array
+                    int[] assignmentArray = new int[assignments.size()];
+                    for (int i = 0; i < assignments.size(); i++) {
+                        assignmentArray[i] = assignments.get(i);
+                    }
+
+                    return new LloydResult(finalCentroids, assignmentArray);
                 }
 
                 /**
@@ -867,7 +1050,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Initialize costArray efficiently
                     double[] costArray = new double[n];
                     for (int i = 0; i < n; i++) {
-                        costArray[i] = calculateDistance(candidates.get(i), centers[0]);
+                        costArray[i] = euclidean_squared(candidates.get(i), centers[0]);
                     }
 
                     // Weighted K-means++ initialization (efficient approach)
@@ -891,7 +1074,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Update costArray efficiently (only 2 nested loops)
                         for (int p = 0; p < n; p++) {
-                            costArray[p] = Math.min(calculateDistance(candidates.get(p), centers[i]), costArray[p]);
+                            costArray[p] = Math.min(euclidean_squared(candidates.get(p), centers[i]), costArray[p]);
                         }
                     }
 
@@ -963,7 +1146,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                             double minCost = Double.POSITIVE_INFINITY;
                             for (double[] center : currentCandidates) {
-                                double cost = calculateDistance(point, center);
+                                double cost = euclidean_squared(point, center);
                                 if (cost < minCost)
                                     minCost = cost;
                             }
@@ -1003,7 +1186,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         int closestIdx = -1;
                         double minCost = Double.POSITIVE_INFINITY;
                         for (int j = 0; j < centroids.size(); j++) {
-                            double cost = calculateDistance(candidate, centroids.get(j));
+                            double cost = euclidean_squared(candidate, centroids.get(j));
                             if (cost < minCost) {
                                 minCost = cost;
                                 closestIdx = j;
@@ -1059,7 +1242,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             int bestIdx = 0;
                             double minDist = Double.POSITIVE_INFINITY;
                             for (int cIdx = 0; cIdx < k; cIdx++) {
-                                double dist = calculateDistance(centroid, centers[cIdx]);
+                                double dist = euclidean_squared(centroid, centers[cIdx]);
                                 if (dist < minDist) {
                                     minDist = dist;
                                     bestIdx = cIdx;
@@ -1083,7 +1266,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 newCenters[cIdx] = Arrays.copyOf(centers[cIdx], dim);
                             }
                             // Check movement
-                            double dist = calculateDistance(centers[cIdx], newCenters[cIdx]);
+                            double dist = euclidean_squared(centers[cIdx], newCenters[cIdx]);
                             if (dist > epsilon) {
                                 converged = false;
                             }
@@ -1128,7 +1311,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Initialize costArray efficiently
                     double[] costArray = new double[n];
                     for (int i = 0; i < n; i++) {
-                        costArray[i] = calculateDistance(candidates.get(i), centers[0]);
+                        costArray[i] = euclidean_squared(candidates.get(i), centers[0]);
                     }
 
                     // Weighted K-means++ initialization (efficient approach)
@@ -1152,7 +1335,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Update costArray efficiently (only 2 nested loops)
                         for (int p = 0; p < n; p++) {
-                            costArray[p] = Math.min(calculateDistance(candidates.get(p), centers[i]), costArray[p]);
+                            costArray[p] = Math.min(euclidean_squared(candidates.get(p), centers[i]), costArray[p]);
                         }
                     }
 
@@ -1282,6 +1465,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Finds the closest parent centroid for establishing parent-child relationships
                  */
+                @SuppressWarnings("unused")
                 private HierarchicalClusterId findClosestParentCentroid(double[] childCentroid,
                         HierarchicalCentroidsState hierarchicalState, int parentLevel) {
                     List<HierarchicalCentroidsState.HierarchicalCentroid> parentCentroids =
@@ -1295,7 +1479,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     HierarchicalClusterId closestParent = null;
 
                     for (HierarchicalCentroidsState.HierarchicalCentroid parent : parentCentroids) {
-                        double distance = calculateDistance(childCentroid, parent.getCentroid());
+                        double distance = euclidean_squared(childCentroid, parent.getCentroid());
                         if (distance < minDistance) {
                             minDistance = distance;
                             closestParent = parent.getClusterId();
@@ -1350,8 +1534,99 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
+                 * Assigns child centroids to parent centroids using Lloyd's algorithm approach
+                 * This is more efficient than individual distance calculations
+                 */
+                private int[] assignCentroidsToParents(List<double[]> childCentroids, List<double[]> parentCentroids) {
+                    if (childCentroids.isEmpty() || parentCentroids.isEmpty()) {
+                        return new int[0];
+                    }
+
+                    int[] assignments = new int[childCentroids.size()];
+
+                    // For each child centroid, find its closest parent
+                    for (int i = 0; i < childCentroids.size(); i++) {
+                        double[] childCentroid = childCentroids.get(i);
+                        int closestParentIndex = 0;
+                        double minDistance = Double.POSITIVE_INFINITY;
+
+                        for (int j = 0; j < parentCentroids.size(); j++) {
+                            double distance = euclidean_squared(childCentroid, parentCentroids.get(j));
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                closestParentIndex = j;
+                            }
+                        }
+
+                        assignments[i] = closestParentIndex;
+                    }
+
+                    return assignments;
+                }
+
+                /**
+                 * Finds the closest parent index for a child centroid
+                 */
+                @SuppressWarnings("unused")
+                private int findClosestParentIndex(double[] childCentroid, List<double[]> parentCentroids) {
+                    if (parentCentroids.isEmpty()) {
+                        return 0;
+                    }
+
+                    int closestIndex = 0;
+                    double minDistance = Double.POSITIVE_INFINITY;
+
+                    for (int i = 0; i < parentCentroids.size(); i++) {
+                        double distance = euclidean_squared(childCentroid, parentCentroids.get(i));
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestIndex = i;
+                        }
+                    }
+
+                    return closestIndex;
+                }
+
+                /**
+                 * Finds parent node by index (for Lloyd's assignments)
+                 */
+                @SuppressWarnings("unused")
+                private HierarchicalClusterTree.TreeNode findParentNodeByIndex(int parentIndex,
+                        HierarchicalClusterTree.TreeNode currentLevelNodes) {
+                    if (currentLevelNodes == null) {
+                        return null;
+                    }
+
+                    // Search through all nodes at the same level as currentLevelNodes
+                    Queue<HierarchicalClusterTree.TreeNode> queue = new LinkedList<>();
+                    queue.offer(currentLevelNodes);
+
+                    int currentIndex = 0;
+                    while (!queue.isEmpty()) {
+                        HierarchicalClusterTree.TreeNode current = queue.poll();
+
+                        // Check if this node is at the parent level
+                        if (current.level == currentLevelNodes.level) {
+                            if (currentIndex == parentIndex) {
+                                return current;
+                            }
+                            currentIndex++;
+                        }
+
+                        // Add children to queue
+                        for (HierarchicalClusterTree.TreeNode child : current.getChildren()) {
+                            queue.offer(child);
+                        }
+                    }
+
+                    // If not found, return the first node as fallback
+                    return currentLevelNodes;
+                }
+
+                /**
                  * Finds the closest parent node for tree-based clustering
                  */
+                @SuppressWarnings("unused")
                 private HierarchicalClusterTree.TreeNode findClosestParentNode(double[] childCentroid,
                         HierarchicalClusterTree.TreeNode parentNode) {
                     if (parentNode == null) {
@@ -1370,7 +1645,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Check if this node is at the parent level
                         if (current.level == parentNode.level) {
-                            double distance = calculateDistance(childCentroid, current.getCentroid());
+                            double distance = euclidean_squared(childCentroid, current.getCentroid());
                             if (distance < minDistance) {
                                 minDistance = distance;
                                 closestParent = current;
@@ -1526,12 +1801,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 private void printHierarchyInfo(HierarchicalCentroidsState hierarchicalState, int partition) {
                     StringBuilder sb = new StringBuilder();
                     sb.append("Hierarchical Clustering Results for Partition ").append(partition).append(":\n");
+                    sb.append("================================================\n");
 
                     for (int level : hierarchicalState.getLevels()) {
                         List<HierarchicalCentroidsState.HierarchicalCentroid> centroids =
                                 hierarchicalState.getCentroidsAtLevel(level);
-                        sb.append("  Level ").append(level).append(": ").append(centroids.size())
+                        sb.append("\nLevel ").append(level).append(": ").append(centroids.size())
                                 .append(" centroids\n");
+                        sb.append("-".repeat(50)).append("\n");
 
                         // Group centroids by parent for better visualization
                         Map<Integer, List<HierarchicalCentroidsState.HierarchicalCentroid>> centroidsByParent =
@@ -1550,22 +1827,46 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             List<HierarchicalCentroidsState.HierarchicalCentroid> children = entry.getValue();
 
                             if (parentId == -1) {
-                                sb.append("    Root clusters:\n");
+                                sb.append("  Root clusters:\n");
                             } else {
-                                sb.append("    Children of Parent ").append(parentId).append(":\n");
+                                sb.append("  Children of Parent ").append(parentId).append(":\n");
                             }
 
                             for (HierarchicalCentroidsState.HierarchicalCentroid centroid : children) {
                                 HierarchicalClusterId clusterId = centroid.getClusterId();
-                                sb.append("      Cluster ").append(clusterId.getClusterId()).append(" (Global ID: ")
+                                double[] centroidValues = centroid.getCentroid();
+
+                                sb.append("    Cluster ").append(clusterId.getClusterId()).append(" (Global ID: ")
                                         .append(clusterId.getGlobalId()).append(")");
                                 if (clusterId.hasParent()) {
                                     sb.append(" -> Parent: ").append(clusterId.getParentClusterId());
                                 }
                                 sb.append("\n");
+
+                                // Print the actual centroid values
+                                sb.append("      Centroid: [");
+                                for (int i = 0; i < centroidValues.length; i++) {
+                                    sb.append(String.format("%.4f", centroidValues[i]));
+                                    if (i < centroidValues.length - 1) {
+                                        sb.append(", ");
+                                    }
+                                }
+                                sb.append("]\n");
                             }
                         }
                     }
+
+                    // Print summary
+                    sb.append("\n").append("=".repeat(50)).append("\n");
+                    sb.append("Summary:\n");
+                    int totalCentroids = 0;
+                    for (int level : hierarchicalState.getLevels()) {
+                        int levelCount = hierarchicalState.getCentroidsAtLevel(level).size();
+                        totalCentroids += levelCount;
+                        sb.append("  Level ").append(level).append(": ").append(levelCount).append(" centroids\n");
+                    }
+                    sb.append("  Total centroids: ").append(totalCentroids).append("\n");
+                    sb.append("  Total levels: ").append(hierarchicalState.getLevels().size()).append("\n");
 
                     System.err.println(sb.toString());
                 }
