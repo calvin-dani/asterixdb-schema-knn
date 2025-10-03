@@ -1,4 +1,28 @@
-package org.apache.hyracks.storage.am.lsm.vector.impls;
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+package org.apache.hyracks.storage.am.vector.impls;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Stack;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -14,8 +38,6 @@ import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-
-import java.util.*;
 
 /**
  * Static structure bulk loader for VectorClusteringTree.
@@ -101,8 +123,8 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
             centroids.add(new CentroidEntry(centroidId, embedding, childPageId));
         }
 
-        PageBuilder createOverflowPage(IPageManager pageManager, int fileId,
-                IBufferCache bufferCache, ITreeIndexMetadataFrame metaFrame) throws HyracksDataException {
+        PageBuilder createOverflowPage(IPageManager pageManager, int fileId, IBufferCache bufferCache,
+                ITreeIndexMetadataFrame metaFrame) throws HyracksDataException {
             if (overflowPage != null) {
                 return overflowPage.createOverflowPage(pageManager, fileId, bufferCache, metaFrame);
             }
@@ -111,14 +133,14 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
             long dpid = BufferedFileHandle.getDiskPageId(fileId, overflowPageId);
             ICachedPage overflowCachedPage = bufferCache.pin(dpid);
 
-            PageBuilder overflowBuilder = new PageBuilder(overflowPageId, overflowCachedPage, pageType,
-                    isOverflowPage ? primaryPage : this);
+            PageBuilder overflowBuilder =
+                    new PageBuilder(overflowPageId, overflowCachedPage, pageType, isOverflowPage ? primaryPage : this);
 
             this.overflowPage = overflowBuilder;
             this.nextPagePointer = overflowPageId;
 
-            System.out.println("DEBUG: Created overflow page " + overflowPageId +
-                    " for primary page " + (isOverflowPage ? primaryPage.pageId : pageId));
+            System.out.println("DEBUG: Created overflow page " + overflowPageId + " for primary page "
+                    + (isOverflowPage ? primaryPage.pageId : pageId));
 
             return overflowBuilder;
         }
@@ -143,11 +165,8 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
         }
     }
 
-    public VCTreeStaticStructureLoader(float fillFactor, boolean verifyInput,
-            IPageWriteCallback callback,
-            VectorClusteringTree vectorTree,
-            ITreeIndexFrame leafFrame,
-            IBufferCacheWriteContext writeContext)
+    public VCTreeStaticStructureLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback,
+            VectorClusteringTree vectorTree, ITreeIndexFrame leafFrame, IBufferCacheWriteContext writeContext)
             throws HyracksDataException {
         super(fillFactor, callback, vectorTree, leafFrame, writeContext);
 
@@ -237,8 +256,8 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
         PageType pageType = convertToPageType(data.pageType);
 
         if (pageType != currentLevel.expectedPageType) {
-            throw new HyracksDataException("Page type mismatch. Expected: " +
-                    currentLevel.expectedPageType + ", got: " + pageType);
+            throw new HyracksDataException(
+                    "Page type mismatch. Expected: " + currentLevel.expectedPageType + ", got: " + pageType);
         }
 
         // Allocate new page
@@ -268,13 +287,13 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
             // Interior/root page - lookup child page from lower level
             Integer childId = centroidToPageMap.get(data.centroidId);
             if (childId == null) {
-                throw new HyracksDataException("No child page found for centroid " + data.centroidId +
-                        " at level " + currentLevel.level + ". Centroid must exist in lower level first.");
+                throw new HyracksDataException("No child page found for centroid " + data.centroidId + " at level "
+                        + currentLevel.level + ". Centroid must exist in lower level first.");
             }
             childPageId = childId;
 
-            System.out.println("DEBUG: Centroid " + data.centroidId + " at level " + currentLevel.level +
-                    " points to child page " + childPageId);
+            System.out.println("DEBUG: Centroid " + data.centroidId + " at level " + currentLevel.level
+                    + " points to child page " + childPageId);
         } else {
             System.out.println("DEBUG: Leaf centroid " + data.centroidId + " (no child page)");
         }
@@ -307,8 +326,8 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
         // Update centroid-to-page mapping for next level
         for (CentroidEntry centroid : primaryPage.centroids) {
             centroidToPageMap.put(centroid.centroidId, primaryPage.pageId);
-            System.out.println("DEBUG: Mapped centroid " + centroid.centroidId +
-                    " -> page " + primaryPage.pageId + " for level " + currentLevel.level);
+            System.out.println("DEBUG: Mapped centroid " + centroid.centroidId + " -> page " + primaryPage.pageId
+                    + " for level " + currentLevel.level);
         }
 
         // Map overflow centroids to PRIMARY page (upper level references primary only)
@@ -316,14 +335,14 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
         while (currentOverflow != null) {
             for (CentroidEntry centroid : currentOverflow.centroids) {
                 centroidToPageMap.put(centroid.centroidId, primaryPage.pageId);
-                System.out.println("DEBUG: Mapped overflow centroid " + centroid.centroidId +
-                        " -> primary page " + primaryPage.pageId);
+                System.out.println("DEBUG: Mapped overflow centroid " + centroid.centroidId + " -> primary page "
+                        + primaryPage.pageId);
             }
             currentOverflow = currentOverflow.overflowPage;
         }
 
-        System.out.println("DEBUG: Completed page chain starting with " + primaryPage.pageId +
-                " (" + pageChain.size() + " pages total)");
+        System.out.println("DEBUG: Completed page chain starting with " + primaryPage.pageId + " (" + pageChain.size()
+                + " pages total)");
 
         currentPage = null;
     }
@@ -336,8 +355,8 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
             throw new HyracksDataException("LEVEL_END without LEVEL_START");
         }
 
-        System.out.println("DEBUG: Completed level " + currentLevel.level +
-                " with " + currentLevel.pages.size() + " pages");
+        System.out.println(
+                "DEBUG: Completed level " + currentLevel.level + " with " + currentLevel.pages.size() + " pages");
 
         levelStack.pop();
         currentLevel = levelStack.isEmpty() ? null : levelStack.peek();
@@ -374,13 +393,13 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
             pageChain.add(currentPageBuilder);
 
             if (centroidIndex < allCentroids.size()) {
-                currentPageBuilder = currentPageBuilder.createOverflowPage(
-                        freePageManager, fileId, bufferCache, metaFrame);
+                currentPageBuilder =
+                        currentPageBuilder.createOverflowPage(freePageManager, fileId, bufferCache, metaFrame);
             }
         }
 
-        System.out.println("DEBUG: Created page chain with " + pageChain.size() +
-                " pages for " + allCentroids.size() + " centroids");
+        System.out.println("DEBUG: Created page chain with " + pageChain.size() + " pages for " + allCentroids.size()
+                + " centroids");
 
         return pageChain;
     }
@@ -470,23 +489,20 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
     /**
      * Initialize leaf frame
      */
-    private void initializeLeafFrame(PageBuilder pageBuilder, double[] pageRepresentative)
-            throws HyracksDataException {
+    private void initializeLeafFrame(PageBuilder pageBuilder, double[] pageRepresentative) throws HyracksDataException {
 
         // Set overflow page pointer
         if (pageBuilder.overflowPage != null) {
-            System.out.println("DEBUG: Leaf page " + pageBuilder.pageId +
-                    " linked to overflow page " + pageBuilder.nextPagePointer);
+            System.out.println("DEBUG: Leaf page " + pageBuilder.pageId + " linked to overflow page "
+                    + pageBuilder.nextPagePointer);
         }
 
         // Insert centroid tuples - each points to a metadata page
         for (CentroidEntry centroid : pageBuilder.centroids) {
             int metadataPageId = createMetadataPage(centroid);
-            ITupleReference clusterTuple = createClusterTuple(
-                    centroid.centroidId, centroid.embedding, metadataPageId);
+            ITupleReference clusterTuple = createClusterTuple(centroid.centroidId, centroid.embedding, metadataPageId);
 
-            System.out.println("DEBUG: Leaf cluster " + centroid.centroidId +
-                    " -> metadata page " + metadataPageId);
+            System.out.println("DEBUG: Leaf cluster " + centroid.centroidId + " -> metadata page " + metadataPageId);
         }
     }
 
@@ -498,17 +514,17 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
 
         // Set overflow page pointer
         if (pageBuilder.overflowPage != null) {
-            System.out.println("DEBUG: Interior page " + pageBuilder.pageId +
-                    " linked to overflow page " + pageBuilder.nextPagePointer);
+            System.out.println("DEBUG: Interior page " + pageBuilder.pageId + " linked to overflow page "
+                    + pageBuilder.nextPagePointer);
         }
 
         // Insert centroid tuples - each points to a child page
         for (CentroidEntry centroid : pageBuilder.centroids) {
-            ITupleReference clusterTuple = createClusterTuple(
-                    centroid.centroidId, centroid.embedding, centroid.childPageId);
+            ITupleReference clusterTuple =
+                    createClusterTuple(centroid.centroidId, centroid.embedding, centroid.childPageId);
 
-            System.out.println("DEBUG: Interior cluster " + centroid.centroidId +
-                    " -> child page " + centroid.childPageId);
+            System.out.println(
+                    "DEBUG: Interior cluster " + centroid.centroidId + " -> child page " + centroid.childPageId);
         }
     }
 
@@ -530,8 +546,8 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
 
         try {
             metadataPage.acquireWriteLatch();
-            System.out.println("DEBUG: Created metadata page " + metadataPageId +
-                    " for cluster " + centroid.centroidId);
+            System.out
+                    .println("DEBUG: Created metadata page " + metadataPageId + " for cluster " + centroid.centroidId);
         } finally {
             metadataPage.releaseWriteLatch(true);
             bufferCache.unpin(metadataPage);
@@ -545,14 +561,9 @@ public class VCTreeStaticStructureLoader extends AbstractTreeIndexBulkLoader {
      */
     private ITupleReference createClusterTuple(int centroidId, float[] embedding, int pointer)
             throws HyracksDataException {
-        return TupleUtils.createTuple(
-                new org.apache.hyracks.api.dataflow.value.ISerializerDeserializer[]{
-                        IntegerSerializerDeserializer.INSTANCE,
-                        FloatArraySerializerDeserializer.INSTANCE,
-                        IntegerSerializerDeserializer.INSTANCE
-                },
-                centroidId, embedding, pointer
-        );
+        return TupleUtils.createTuple(new org.apache.hyracks.api.dataflow.value.ISerializerDeserializer[] {
+                IntegerSerializerDeserializer.INSTANCE, FloatArraySerializerDeserializer.INSTANCE,
+                IntegerSerializerDeserializer.INSTANCE }, centroidId, embedding, pointer);
     }
 
     /**

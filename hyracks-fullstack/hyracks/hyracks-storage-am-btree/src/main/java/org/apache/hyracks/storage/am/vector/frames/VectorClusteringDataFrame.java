@@ -17,7 +17,16 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.frames;
+package org.apache.hyracks.storage.am.vector.frames;
+
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutput;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
@@ -35,15 +44,6 @@ import org.apache.hyracks.storage.am.common.ophelpers.FindTupleNoExactMatchPolic
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
-
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutput;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 /**
  * Vector clustering data frame implementation.
@@ -159,8 +159,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     public FrameOpSpaceStatus hasSpaceInsert(ITupleReference tuple) throws HyracksDataException {
         int bytesRequired = tupleWriter.bytesRequired(tuple);
         // Check if we have enough contiguous space (without compaction)
-        if (bytesRequired + slotManager.getSlotSize() <= buf.capacity()
-                - buf.getInt(Constants.FREE_SPACE_OFFSET)
+        if (bytesRequired + slotManager.getSlotSize() <= buf.capacity() - buf.getInt(Constants.FREE_SPACE_OFFSET)
                 - (buf.getInt(Constants.TUPLE_COUNT_OFFSET) * slotManager.getSlotSize())) {
             return FrameOpSpaceStatus.SUFFICIENT_CONTIGUOUS_SPACE;
         }

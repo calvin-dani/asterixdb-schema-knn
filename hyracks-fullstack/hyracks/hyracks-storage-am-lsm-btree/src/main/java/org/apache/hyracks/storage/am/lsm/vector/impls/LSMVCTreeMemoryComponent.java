@@ -61,22 +61,9 @@ public class LSMVCTreeMemoryComponent extends AbstractLSMMemoryComponent {
     }
 
     @Override
+    /* todo */
     public int getWriterCount() {
-        // Vector clustering trees typically have a single writer
         return 0;
-    }
-
-    @Override
-    public void reset() throws HyracksDataException {
-        super.reset();
-        vctree.deactivate();
-        vctree.destroy();
-        vctree.create();
-        vctree.activate();
-    }
-
-    public LSMVCTree getLSMTree() {
-        return lsmTree;
     }
 
     /**

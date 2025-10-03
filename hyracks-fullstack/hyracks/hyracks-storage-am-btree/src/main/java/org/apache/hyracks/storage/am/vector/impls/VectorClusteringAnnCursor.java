@@ -16,13 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.hyracks.storage.am.lsm.vector.impls;
+package org.apache.hyracks.storage.am.vector.impls;
+
+import java.util.Iterator;
+import java.util.List;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
-import org.apache.hyracks.storage.am.vector.predicates.VectorAnnPredicate;
 import org.apache.hyracks.storage.am.vector.util.TopKVectorQueue;
 import org.apache.hyracks.storage.am.vector.util.VectorDistanceUtils;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
@@ -33,9 +35,6 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.context.read.DefaultBufferCacheReadContextProvider;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-
-import java.util.Iterator;
-import java.util.List;
 
 /**
  * Cursor for performing ANN (Approximate Nearest Neighbor) search in a VectorClusteringTree.

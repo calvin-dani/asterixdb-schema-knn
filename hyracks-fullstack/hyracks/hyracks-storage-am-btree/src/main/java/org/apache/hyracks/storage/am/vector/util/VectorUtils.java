@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.utils;
+package org.apache.hyracks.storage.am.vector.util;
 
 import java.util.Arrays;
 

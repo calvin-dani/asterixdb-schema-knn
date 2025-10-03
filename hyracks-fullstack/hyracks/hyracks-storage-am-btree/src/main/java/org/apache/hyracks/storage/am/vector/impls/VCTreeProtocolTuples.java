@@ -1,4 +1,22 @@
-package org.apache.hyracks.storage.am.lsm.vector.impls;
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+package org.apache.hyracks.storage.am.vector.impls;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -28,25 +46,21 @@ public class VCTreeProtocolTuples {
     public static final int METADATA_PAGE_TYPE = 3;
 
     // Serializer/Deserializer arrays for different tuple types
-    private static final ISerializerDeserializer[] LEVEL_START_SERDES = {
-            IntegerSerializerDeserializer.INSTANCE, // tuple type
+    private static final ISerializerDeserializer[] LEVEL_START_SERDES = { IntegerSerializerDeserializer.INSTANCE, // tuple type
             IntegerSerializerDeserializer.INSTANCE, // level
-            IntegerSerializerDeserializer.INSTANCE  // page type
+            IntegerSerializerDeserializer.INSTANCE // page type
     };
 
-    private static final ISerializerDeserializer[] PAGE_START_SERDES = {
-            IntegerSerializerDeserializer.INSTANCE, // tuple type
-            IntegerSerializerDeserializer.INSTANCE  // page type
+    private static final ISerializerDeserializer[] PAGE_START_SERDES = { IntegerSerializerDeserializer.INSTANCE, // tuple type
+            IntegerSerializerDeserializer.INSTANCE // page type
     };
 
-    private static final ISerializerDeserializer[] CENTROID_DATA_SERDES = {
-            IntegerSerializerDeserializer.INSTANCE,      // tuple type
-            IntegerSerializerDeserializer.INSTANCE,      // centroid ID
-            FloatArraySerializerDeserializer.INSTANCE    // embedding
+    private static final ISerializerDeserializer[] CENTROID_DATA_SERDES = { IntegerSerializerDeserializer.INSTANCE, // tuple type
+            IntegerSerializerDeserializer.INSTANCE, // centroid ID
+            FloatArraySerializerDeserializer.INSTANCE // embedding
     };
 
-    private static final ISerializerDeserializer[] SINGLE_INT_SERDES = {
-            IntegerSerializerDeserializer.INSTANCE // tuple type only
+    private static final ISerializerDeserializer[] SINGLE_INT_SERDES = { IntegerSerializerDeserializer.INSTANCE // tuple type only
     };
 
     // Reusable tuple builders for efficiency
@@ -72,7 +86,8 @@ public class VCTreeProtocolTuples {
     /**
      * Create CENTROID_DATA tuple: <TYPE:2, cid:int, embedding:float[]>
      */
-    public static ITupleReference createCentroidDataTuple(int centroidId, float[] embedding) throws HyracksDataException {
+    public static ITupleReference createCentroidDataTuple(int centroidId, float[] embedding)
+            throws HyracksDataException {
         return TupleUtils.createTuple(CENTROID_DATA_SERDES, CENTROID_DATA_TYPE, centroidId, embedding);
     }
 
@@ -99,9 +114,8 @@ public class VCTreeProtocolTuples {
         }
 
         // Use TupleUtils to deserialize the first field only
-        Object[] fields = TupleUtils.deserializeTuple(tuple, new ISerializerDeserializer[]{
-                IntegerSerializerDeserializer.INSTANCE
-        });
+        Object[] fields = TupleUtils.deserializeTuple(tuple,
+                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE });
 
         return (Integer) fields[0];
     }
@@ -115,10 +129,10 @@ public class VCTreeProtocolTuples {
         }
 
         // Deserialize first two fields
-        Object[] fields = TupleUtils.deserializeTuple(tuple, new ISerializerDeserializer[]{
-                IntegerSerializerDeserializer.INSTANCE, // tuple type
-                IntegerSerializerDeserializer.INSTANCE  // level
-        });
+        Object[] fields = TupleUtils.deserializeTuple(tuple,
+                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // tuple type
+                        IntegerSerializerDeserializer.INSTANCE // level
+                });
 
         return (Integer) fields[1];
     }
@@ -159,10 +173,10 @@ public class VCTreeProtocolTuples {
         }
 
         // Deserialize first two fields
-        Object[] fields = TupleUtils.deserializeTuple(tuple, new ISerializerDeserializer[]{
-                IntegerSerializerDeserializer.INSTANCE, // tuple type
-                IntegerSerializerDeserializer.INSTANCE  // centroid ID
-        });
+        Object[] fields = TupleUtils.deserializeTuple(tuple,
+                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // tuple type
+                        IntegerSerializerDeserializer.INSTANCE // centroid ID
+                });
 
         return (Integer) fields[1];
     }
@@ -245,8 +259,8 @@ public class VCTreeProtocolTuples {
         switch (tupleType) {
             case LEVEL_START_TYPE:
                 LevelStartData levelStartData = parseLevelStartTuple(tuple);
-                sb.append("LEVEL_START(level=").append(levelStartData.level)
-                        .append(", pageType=").append(getPageTypeName(levelStartData.pageType)).append(")");
+                sb.append("LEVEL_START(level=").append(levelStartData.level).append(", pageType=")
+                        .append(getPageTypeName(levelStartData.pageType)).append(")");
                 break;
 
             case CLUSTER_START_TYPE:
@@ -256,14 +270,15 @@ public class VCTreeProtocolTuples {
 
             case CENTROID_DATA_TYPE:
                 CentroidDataTuple centroidData = parseCentroidDataTuple(tuple);
-                sb.append("CENTROID_DATA(cid=").append(centroidData.centroidId)
-                        .append(", embedding=[");
+                sb.append("CENTROID_DATA(cid=").append(centroidData.centroidId).append(", embedding=[");
                 float[] embedding = centroidData.embedding;
                 for (int i = 0; i < Math.min(embedding.length, 4); i++) { // Limit output
                     sb.append(String.format("%.2f", embedding[i]));
-                    if (i < Math.min(embedding.length, 4) - 1) sb.append(", ");
+                    if (i < Math.min(embedding.length, 4) - 1)
+                        sb.append(", ");
                 }
-                if (embedding.length > 4) sb.append("...");
+                if (embedding.length > 4)
+                    sb.append("...");
                 sb.append("])");
                 break;
 
@@ -287,11 +302,16 @@ public class VCTreeProtocolTuples {
      */
     private static String getPageTypeName(int pageType) {
         switch (pageType) {
-            case LEAF_PAGE_TYPE: return "LEAF";
-            case INTERIOR_PAGE_TYPE: return "INTERIOR";
-            case ROOT_PAGE_TYPE: return "ROOT";
-            case METADATA_PAGE_TYPE: return "METADATA";
-            default: return "UNKNOWN(" + pageType + ")";
+            case LEAF_PAGE_TYPE:
+                return "LEAF";
+            case INTERIOR_PAGE_TYPE:
+                return "INTERIOR";
+            case ROOT_PAGE_TYPE:
+                return "ROOT";
+            case METADATA_PAGE_TYPE:
+                return "METADATA";
+            default:
+                return "UNKNOWN(" + pageType + ")";
         }
     }
 

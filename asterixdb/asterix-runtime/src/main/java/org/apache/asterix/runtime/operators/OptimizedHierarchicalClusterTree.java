@@ -374,4 +374,3 @@ public class OptimizedHierarchicalClusterTree implements Serializable {
         return nodeMemory + centroidMemory;
     }
 }
-

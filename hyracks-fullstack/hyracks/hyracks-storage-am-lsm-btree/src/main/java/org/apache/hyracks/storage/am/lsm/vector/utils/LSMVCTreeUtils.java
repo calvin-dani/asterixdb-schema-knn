@@ -17,19 +17,35 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.tuples;
+package org.apache.hyracks.storage.am.lsm.vector.utils;
+
+import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
+import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
-import org.apache.hyracks.storage.am.common.api.*;
-import org.apache.hyracks.storage.am.lsm.common.api.*;
+import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
+import org.apache.hyracks.storage.am.common.api.INullIntrospector;
+import org.apache.hyracks.storage.am.common.api.IPrimitiveValueProviderFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
+import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexFileManager;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicy;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTracker;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponentFactory;
@@ -44,8 +60,6 @@ import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTuple
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
-
-import java.util.List;
 
 /**
  * Utility class for creating LSM Vector Clustering Tree instances.
@@ -85,10 +99,10 @@ public class LSMVCTreeUtils {
      * @return configured LSMVCTree instance
      * @throws HyracksDataException if creation fails
      */
-    public static LSMVCTree createLSMTree(IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
-            FileReference file, IBufferCache diskBufferCache, ITypeTraits[] typeTraits,
-            IBinaryComparatorFactory[] cmpFactories, double bloomFilterFalsePositiveRate, ILSMMergePolicy mergePolicy,
-            ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
+    public static LSMVCTree createLSMTree(NCConfig storageConfig, IIOManager ioManager,
+            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
+            ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories, double bloomFilterFalsePositiveRate,
+            ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields,
             ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
@@ -153,7 +167,7 @@ public class LSMVCTreeUtils {
         ILSMDiskComponentFactory componentFactory = new LSMVCTreeDiskComponentFactory(vctreeFactory, filterHelper);
 
         // Create the LSMVCTree instance
-        return new LSMVCTree(ioManager, virtualBufferCaches, interiorFrameFactory, leafFrameFactory,
+        return new LSMVCTree(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory, leafFrameFactory,
                 metadataFrameFactory, dataFrameFactory, diskBufferCache, fileManager, componentFactory,
                 componentFactory, filterHelper, filterFrameFactory, filterManager, bloomFilterFalsePositiveRate,
                 cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory,
@@ -184,13 +198,13 @@ public class LSMVCTreeUtils {
      * @return configured LSMVCTree instance
      * @throws HyracksDataException if creation fails
      */
-    public static LSMVCTree createLSMTree(IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
-            FileReference file, IBufferCache diskBufferCache, ITypeTraits[] typeTraits,
-            IBinaryComparatorFactory[] cmpFactories, IPrimitiveValueProviderFactory[] valueProviderFactories,
-            double bloomFilterFalsePositiveRate, ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker,
-            ILSMIOOperationScheduler ioScheduler, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
-            ILSMPageWriteCallbackFactory pageWriteCallbackFactory, boolean needKeyDupCheck, int vectorDimensions,
-            int[] vectorFields, int[] filterFields, boolean durable,
+    public static LSMVCTree createLSMTree(NCConfig storageConfig, IIOManager ioManager,
+            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
+            ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories,
+            IPrimitiveValueProviderFactory[] valueProviderFactories, double bloomFilterFalsePositiveRate,
+            ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
+            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
             IMetadataPageManagerFactory metadataPageManagerFactory) throws HyracksDataException {
 
         // Use default configurations for simplified creation
@@ -199,61 +213,9 @@ public class LSMVCTreeUtils {
         IComponentFilterHelper filterHelper = null; // No filter helper by default
         boolean atomic = true; // Default to atomic operations
 
-        return createLSMTree(ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits, cmpFactories,
-                bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
+        return createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits,
+                cmpFactories, bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields,
                 filterFrameFactory, filterManager, filterHelper, durable, metadataPageManagerFactory, atomic);
     }
-
-    /**
-     * Validates the configuration parameters for LSMVCTree creation.
-     *
-     * @param vectorDimensions number of dimensions in vectors
-     * @param vectorFields array of vector field indices
-     * @param typeTraits type traits for all fields
-     * @param cmpFactories comparator factories
-     * @throws IllegalArgumentException if configuration is invalid
-     */
-    private static void validateConfiguration(int vectorDimensions, int[] vectorFields, ITypeTraits[] typeTraits,
-            IBinaryComparatorFactory[] cmpFactories) {
-
-        if (vectorDimensions <= 0) {
-            throw new IllegalArgumentException("Vector dimensions must be positive");
-        }
-
-        if (vectorFields == null || vectorFields.length == 0) {
-            throw new IllegalArgumentException("Vector fields must be specified");
-        }
-
-        if (typeTraits == null || typeTraits.length == 0) {
-            throw new IllegalArgumentException("Type traits must be specified");
-        }
-
-        if (cmpFactories == null || cmpFactories.length == 0) {
-            throw new IllegalArgumentException("Comparator factories must be specified");
-        }
-
-        // Validate vector field indices
-        for (int vectorField : vectorFields) {
-            if (vectorField < 0 || vectorField >= typeTraits.length) {
-                throw new IllegalArgumentException(
-                        "Vector field index " + vectorField + " is out of bounds for type traits array");
-            }
-        }
-    }
-
-    /**
-     * Creates a default metadata page manager factory if none is provided.
-     *
-     * @return default metadata page manager factory
-     */
-    private static IMetadataPageManagerFactory createDefaultMetadataPageManagerFactory() {
-        // Return a basic metadata page manager factory
-        // Implementation depends on your specific metadata page manager requirements
-        return null; // Placeholder - implement based on your needs
-    }
-
-    /**
-     * No-op LSM page write callback factory for testing.
-     */
 }

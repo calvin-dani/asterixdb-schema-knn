@@ -24,9 +24,14 @@ import java.util.List;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.IIOManager;
+import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
-import org.apache.hyracks.storage.am.common.api.*;
+import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
+import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
+import org.apache.hyracks.storage.am.common.api.IPageManager;
+import org.apache.hyracks.storage.am.common.api.ITreeIndex;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
@@ -80,7 +85,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     protected final int vectorDimensions;
     protected final boolean needKeyDupCheck;
 
-    public LSMVCTree(IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
+    public LSMVCTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
             IBufferCache diskBufferCache, ILSMIndexFileManager fileManager, ILSMDiskComponentFactory componentFactory,
@@ -92,8 +97,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
             boolean atomic) throws HyracksDataException {
 
-        super(ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate, mergePolicy,
-                opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
+        super(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
+                mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
                 bulkLoadComponentFactory, filterFrameFactory, filterManager, filterFields, durable, filterHelper,
                 vectorFields, ITracer.NONE, atomic);
 
@@ -193,8 +198,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         try {
             component = createDiskComponentFromFlushingComponent(flushingComponent, componentFactory, false);
 
-            componentBulkLoader = component.createBulkLoader(operation, 1.0f, false, 0L, false, false, false,
-                    pageWriteCallbackFactory.createPageWriteCallback());
+            componentBulkLoader = component.createBulkLoader(storageConfig, operation, 1.0f, false, 0L, false, false,
+                    false, pageWriteCallbackFactory.createPageWriteCallback());
             try {
                 // Simple bulk load - just copy all pages
                 componentBulkLoader.end();
@@ -225,73 +230,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         return component;
     }
 
-    /*
-    @Override
-    public ILSMDiskComponent doFlush(ILSMIOOperation operation) throws HyracksDataException {
-        LSMVCTreeFlushOperation flushOp = (LSMVCTreeFlushOperation) operation;
-        LSMVCTreeMemoryComponent flushingComponent = (LSMVCTreeMemoryComponent) flushOp.getFlushingComponent();
-    
-        // Create the disk component
-        ILSMDiskComponent component = null;
-        try {
-            component = createDiskComponent(componentFactory, flushOp.getTarget(), null, null, true);
-    
-            // Create a bulk loader for the disk component
-            ILSMDiskComponentBulkLoader componentBulkLoader = component.createBulkLoader(operation, 1.0f, false, 0L,
-                    false, false, false, pageWriteCallbackFactory.createPageWriteCallback());
-    
-            try {
-                // Scan the memory component and load into disk component
-                LSMVCTreeOpContext opCtx = (LSMVCTreeOpContext) flushOp.getAccessor().getOpContext();
-                LSMVCTreeSearchCursor cursor = new LSMVCTreeSearchCursor(opCtx);
-                RangePredicate pred = new RangePredicate(null, null, true, true, null, null);
-    
-                // Create initial state for cursor
-                LSMVCTreeCursorInitialState initialState = new LSMVCTreeCursorInitialState(interiorFrameFactory,
-                        leafFrameFactory, metadataFrameFactory, dataFrameFactory, MultiComparator.create(cmpFactories),
-                        getHarness(), pred, opCtx.getSearchOperationCallback(), opCtx.getComponentHolder());
-    
-                // Search the memory component
-                cursor.open(initialState, pred);
-                try {
-                    while (cursor.hasNext()) {
-                        cursor.next();
-                        ITupleReference tuple = cursor.getTuple();
-                        componentBulkLoader.add(tuple);
-                    }
-                } finally {
-                    cursor.close();
-                }
-    
-                // Copy metadata from memory component to disk component
-                flushingComponent.getMetadata().copy(component.getMetadata());
-                componentBulkLoader.end();
-            } catch (Throwable e) {
-                try {
-                    if (componentBulkLoader != null) {
-                        componentBulkLoader.abort();
-                    }
-                } catch (Throwable th) {
-                    e.addSuppressed(th);
-                }
-                throw e;
-            }
-        } catch (Throwable e) {
-            try {
-                if (component != null) {
-                    component.markAsValid(false, null);
-                    component.destroy();
-                    component = null;
-                }
-            } catch (Throwable th) {
-                e.addSuppressed(th);
-            }
-            throw e;
-        }
-        return component;
-    }
-    */
-
     @Override
     public ILSMDiskComponent doMerge(ILSMIOOperation operation) throws HyracksDataException {
         LSMVCTreeMergeOperation mergeOp = (LSMVCTreeMergeOperation) operation;
@@ -302,8 +240,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             component = createDiskComponent(componentFactory, mergeOp.getTarget(), null, null, true);
 
             // Create a bulk loader for the merged disk component
-            ILSMDiskComponentBulkLoader componentBulkLoader = component.createBulkLoader(operation, 1.0f, false, 0L,
-                    false, false, false, pageWriteCallbackFactory.createPageWriteCallback());
+            ILSMDiskComponentBulkLoader componentBulkLoader = component.createBulkLoader(storageConfig, operation, 1.0f,
+                    false, 0L, false, false, false, pageWriteCallbackFactory.createPageWriteCallback());
 
             try {
                 // Get the components to be merged

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.hyracks.storage.am.lsm.vector.utils;
+package org.apache.hyracks.storage.am.vector.util;
 
 /**
  * Utility class for vector distance calculations in ANN search operations.

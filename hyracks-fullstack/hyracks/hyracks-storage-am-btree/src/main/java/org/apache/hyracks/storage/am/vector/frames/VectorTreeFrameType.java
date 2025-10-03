@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.frames;
+package org.apache.hyracks.storage.am.vector.frames;
 
 /**
  * Enumeration of frame types for VectorClusteringTree structures.

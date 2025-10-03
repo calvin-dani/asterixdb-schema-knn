@@ -19,7 +19,13 @@
 
 package org.apache.hyracks.storage.am.vector;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
+import java.util.TreeSet;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
@@ -122,8 +128,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
             // Create tuple with vector and primary key: <vector, primary_key>
             String primaryKey = "pk_" + i;
             ITupleReference tuple = VectorTreeTestUtils.createVectorTuple(vector, primaryKey);
-            System.out.println(" Inserting tuple with primary key: " + primaryKey + " vector: "
-                    + java.util.Arrays.toString(vector));
+            System.out.println(
+                    " Inserting tuple with primary key: " + primaryKey + " vector: " + Arrays.toString(vector));
             accessor.insert(tuple);
             vectors.add(vector);
         }
@@ -162,7 +168,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
     @Override
     protected Collection createCheckTuplesCollection() {
-        return new java.util.TreeSet<>();
+        return new TreeSet<>();
     }
 
     @Override
@@ -187,26 +193,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         // Vector-specific disk order scan result checking
         // For now, just return true as a placeholder
         return true;
-    }
-
-    /**
-     * Create a VectorCheckTuple from vector field values
-     */
-    @SuppressWarnings("unchecked")
-    public VectorCheckTuple createVectorCheckTuple(float[][] vectors, String[] metadata, int numKeyFields) {
-        VectorCheckTuple checkTuple = new VectorCheckTuple(vectors.length + metadata.length, numKeyFields);
-
-        // Add vector fields - wrap float arrays in a FloatArrayWrapper
-        for (float[] vector : vectors) {
-            checkTuple.appendField(new VectorCheckTuple.FloatArrayWrapper(vector));
-        }
-
-        // Add metadata fields
-        for (String meta : metadata) {
-            checkTuple.appendField(meta);
-        }
-
-        return checkTuple;
     }
 
     /**
@@ -438,7 +424,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
         // Create cluster tuples for leaf frames instead of data tuples  
         // Leaf frames expect format: <cid, centroid, metadata_pointer>
-        java.util.List<ITupleReference> clusterTuples = new java.util.ArrayList<>();
+        List<ITupleReference> clusterTuples = new ArrayList<>();
 
         int totalTuples = config.numLeafPages * config.tuplesPerLeaf;
         for (int i = 0; i < totalTuples; i++) {
@@ -544,78 +530,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     }
 
     /**
-     * Create multiple cluster tuples for testing
-     */
-    public static java.util.List<ITupleReference> createClusterTuples(int numClusters, int vectorDimensions)
-            throws HyracksDataException {
-        java.util.List<ITupleReference> clusterTuples = new java.util.ArrayList<>();
-
-        for (int i = 0; i < numClusters; i++) {
-            int clusterId = 100 + i; // Arbitrary cluster IDs starting from 100
-            float[] centroid = generatePredictableVector(vectorDimensions, i);
-            int metadataPointer = 1000 + i; // Arbitrary metadata pointers
-
-            clusterTuples.add(createClusterTuple(clusterId, centroid, metadataPointer));
-        }
-
-        return clusterTuples;
-    }
-
-    /**
-     * Create interior cluster tuples with format: <cid, centroid, child_pointer>
-     */
-    public static ITupleReference createInteriorClusterTuple(int clusterId, float[] centroid, int childPointer)
-            throws HyracksDataException {
-        try {
-            // Use ArrayTupleBuilder to create proper interior cluster tuple
-            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
-
-            // Add CID field (field 0)
-            tupleBuilder.addField(
-                    org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer.INSTANCE,
-                    clusterId);
-
-            // Add centroid field (field 1)
-            tupleBuilder.addField(FloatArraySerializerDeserializer.INSTANCE, centroid);
-
-            // Add child pointer field (field 2)
-            tupleBuilder.addField(
-                    org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer.INSTANCE,
-                    childPointer);
-
-            // Create the tuple reference
-            ArrayTupleReference tupleRef = new ArrayTupleReference();
-            tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
-
-            return tupleRef;
-        } catch (Exception e) {
-            throw new HyracksDataException("Failed to create interior cluster tuple", e);
-        }
-    }
-
-    /**
-     * Initialize static tree structure using VectorClusteringTreeStaticInitializer with proper cluster tuples
-     */
-    public static void initializeStaticStructureWithClusterTuples(AbstractVectorTreeTestContext ctx,
-            org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config)
-            throws Exception {
-
-        // Create cluster tuples instead of data tuples for leaf frames
-        java.util.List<ITupleReference> clusterTuples =
-                createClusterTuples(config.tuplesPerLeaf * config.numLeafPages, 4);
-
-        // Initialize the static structure with cluster tuples
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree vectorTree =
-                (org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree) ctx.getIndex();
-
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer initializer =
-                new org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer(vectorTree);
-
-        initializer.initializeStaticStructure(config, clusterTuples);
-        staticInitializer = initializer;
-    }
-
-    /**
      * Initialize the default 3-level tree structure for comprehensive testing:
      * - Root: 2 centroids  
      * - Interior: 4 centroids (2 per root)
@@ -623,21 +537,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      * Each level uses 4D centroids
      */
     public static void initializeThreeLevelStructure(AbstractVectorTreeTestContext ctx) throws Exception {
-        // Create 16 cluster tuples for the 3-level structure (2 per leaf page)
-        //        java.util.List<ITupleReference> clusterTuples = new java.util.ArrayList<>();
-        //
-        //        // Generate cluster tuples with hierarchical centroid organization
-        //        for (int leafIndex = 0; leafIndex < 8; leafIndex++) {
-        //            for (int tupleIndex = 0; tupleIndex < 2; tupleIndex++) {
-        //                int clusterId = 42 + leafIndex * 10 + tupleIndex; // Arbitrary CID values
-        //                float[] centroid = generateHierarchicalCentroid(leafIndex, tupleIndex);
-        //                int metadataPointer = 2000 + clusterId; // Unique metadata pointers
-        //
-        //                clusterTuples.add(createClusterTuple(clusterId, centroid, metadataPointer));
-        //            }
-        //        }
-
-        // Initialize with the special 3-level configuration
         VectorClusteringTree vectorTree = (VectorClusteringTree) ctx.getIndex();
 
         org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer initializer =
@@ -646,61 +545,5 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         // Use the specialized 3-level structure directly
         initializer.initializeThreeLevelStructure();
         staticInitializer = initializer;
-    }
-
-    /**
-     * Generate hierarchical 4D centroids for the 3-level structure.
-     * Creates centroids that naturally cluster into the tree hierarchy.
-     */
-    private static float[] generateHierarchicalCentroid(int leafIndex, int tupleIndex) {
-        float[] centroid = new float[4];
-
-        // Create centroids that align with the tree structure
-        // Root level: divide into 2 main regions (positive/negative)
-        // Interior level: further subdivide each root region
-        // Leaf level: final clustering within each interior region
-
-        int rootRegion = leafIndex / 4; // 0 or 1
-        int interiorRegion = leafIndex / 2; // 0, 1, 2, or 3
-
-        // Base region assignment
-        float baseX = rootRegion == 0 ? 20.0f : -20.0f;
-        float baseY = (interiorRegion % 2) == 0 ? 20.0f : -20.0f;
-        float baseZ = (leafIndex % 2) == 0 ? 20.0f : -20.0f;
-        float baseW = tupleIndex == 0 ? 10.0f : -10.0f;
-
-        // Add small variations to create distinct clusters
-        centroid[0] = baseX + (leafIndex % 2) * 5.0f + tupleIndex * 2.0f;
-        centroid[1] = baseY + (leafIndex % 3) * 3.0f + tupleIndex * 1.5f;
-        centroid[2] = baseZ + (leafIndex % 4) * 2.0f + tupleIndex * 1.0f;
-        centroid[3] = baseW + leafIndex * 0.5f + tupleIndex * 0.5f;
-
-        return centroid;
-    }
-
-    /**
-     * Initialize a 3-level tree structure for comprehensive cursor testing.
-     * - Root: 2 centroids
-     * - Interior: 4 centroids (2 per root)
-     * - Leaf: 8 clusters (2 per interior)
-     */
-    public static void initializeThreeLevelStructure(
-            org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree vectorTree, int numVectors)
-            throws HyracksDataException {
-
-        // Create test tuples using cluster tuple method
-        List<ITupleReference> testTuples = createClusterTuples(numVectors, 4);
-
-        // Use the static initializer to create the 3-level structure
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer initializer =
-                new org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer(vectorTree);
-
-        // Use the threeLevelDefault configuration
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .threeLevelDefault();
-
-        // Initialize the structure
-        initializer.initializeStaticStructure(config, testTuples);
     }
 }

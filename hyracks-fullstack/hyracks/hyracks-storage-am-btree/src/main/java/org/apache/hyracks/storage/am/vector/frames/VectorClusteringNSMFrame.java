@@ -17,11 +17,15 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.frames;
+package org.apache.hyracks.storage.am.vector.frames;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.storage.am.common.api.*;
+import org.apache.hyracks.storage.am.common.api.ISlotManager;
+import org.apache.hyracks.storage.am.common.api.ISplitKey;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.frames.TreeIndexNSMFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 import org.apache.hyracks.storage.common.MultiComparator;

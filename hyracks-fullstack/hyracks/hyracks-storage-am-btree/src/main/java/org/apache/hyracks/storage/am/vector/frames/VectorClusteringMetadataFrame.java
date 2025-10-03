@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.frames;
+package org.apache.hyracks.storage.am.vector.frames;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
@@ -116,10 +116,8 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
         int freeSpace = buf.getInt(Constants.FREE_SPACE_OFFSET);
         slotManager.insertSlot(tupleIndex, freeSpace);
         int bytesWritten = tupleWriter.writeTuple(tuple, buf.array(), freeSpace);
-        buf.putInt(Constants.TUPLE_COUNT_OFFSET,
-                buf.getInt(Constants.TUPLE_COUNT_OFFSET) + 1);
-        buf.putInt(Constants.FREE_SPACE_OFFSET,
-                buf.getInt(Constants.FREE_SPACE_OFFSET) + bytesWritten);
+        buf.putInt(Constants.TUPLE_COUNT_OFFSET, buf.getInt(Constants.TUPLE_COUNT_OFFSET) + 1);
+        buf.putInt(Constants.FREE_SPACE_OFFSET, buf.getInt(Constants.FREE_SPACE_OFFSET) + bytesWritten);
         buf.putInt(TOTAL_FREE_SPACE_OFFSET,
                 buf.getInt(TOTAL_FREE_SPACE_OFFSET) - bytesWritten - slotManager.getSlotSize());
     }

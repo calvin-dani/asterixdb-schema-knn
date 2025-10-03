@@ -32,7 +32,7 @@ import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.frames.VectorTreeFrameType;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorCursorInitialState;
-import org.apache.hyracks.storage.am.vector.predicates.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.am.vector.util.VectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.util.VectorTreeTestHarness;
 import org.apache.hyracks.storage.common.IIndexAccessor;

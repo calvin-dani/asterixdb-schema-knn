@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.impls;
+package org.apache.hyracks.storage.am.vector.impls;
 
 import org.apache.hyracks.storage.common.ISearchPredicate;
 

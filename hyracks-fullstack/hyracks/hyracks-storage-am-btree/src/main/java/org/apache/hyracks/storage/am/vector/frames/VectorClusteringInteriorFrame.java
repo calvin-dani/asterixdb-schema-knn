@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.frames;
+package org.apache.hyracks.storage.am.vector.frames;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
@@ -34,7 +34,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
  */
 public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame implements IVectorClusteringInteriorFrame {
 
-    protected static final int NEXT_PAGE_OFFSET =  CENTROID_DATA_OFFSET + 4;
+    protected static final int NEXT_PAGE_OFFSET = CENTROID_DATA_OFFSET + 4;
     private final ITreeIndexTupleReference cmpFrameTuple;
 
     public VectorClusteringInteriorFrame(ITreeIndexTupleWriter tupleWriter, int centroidDimensions) {
@@ -55,7 +55,6 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
     public int getNextPage() {
         return buf.getInt(NEXT_PAGE_OFFSET);
     }
-
 
     @Override
     public int getChildPageId(int tupleIndex) throws HyracksDataException {

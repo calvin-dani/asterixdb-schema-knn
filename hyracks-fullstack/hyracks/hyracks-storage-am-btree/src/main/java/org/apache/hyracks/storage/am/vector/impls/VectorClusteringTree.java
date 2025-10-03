@@ -17,7 +17,12 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector.impls;
+package org.apache.hyracks.storage.am.vector.impls;
+
+import static org.apache.hyracks.storage.common.buffercache.context.read.DefaultBufferCacheReadContextProvider.NEW;
+
+import java.util.Arrays;
+import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
@@ -28,7 +33,11 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
-import org.apache.hyracks.storage.am.common.api.*;
+import org.apache.hyracks.storage.am.common.api.IPageManager;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
@@ -48,11 +57,6 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-
-import java.util.Arrays;
-import java.util.List;
-
-import static org.apache.hyracks.storage.common.buffercache.context.read.DefaultBufferCacheReadContextProvider.NEW;
 
 /**
  * Vector Clustering Tree implementation for multi-level k-means vector index.
@@ -1186,8 +1190,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                         }
 
                         double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-                        System.out.println("DEBUG: Interior tuple " + i + " centroid="
-                                + Arrays.toString(centroid) + ", distance=" + distance);
+                        System.out.println("DEBUG: Interior tuple " + i + " centroid=" + Arrays.toString(centroid)
+                                + ", distance=" + distance);
 
                         if (distance < bestDistance) {
                             bestDistance = distance;

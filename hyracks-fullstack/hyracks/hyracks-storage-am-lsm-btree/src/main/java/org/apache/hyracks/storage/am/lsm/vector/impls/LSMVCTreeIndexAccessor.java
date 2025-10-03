@@ -24,7 +24,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMHarness;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor;
-import org.apache.hyracks.storage.am.vector.predicates.VectorAnnPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorAnnPredicate;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 
@@ -39,8 +39,8 @@ public class LSMVCTreeIndexAccessor extends LSMTreeIndexAccessor {
 
     private final LSMVCTree lsmVCTree;
 
-    public LSMVCTreeIndexAccessor(ILSMHarness lsmHarness, ILSMIndexOperationContext ctx,
-            LSMTreeIndexAccessor.ICursorFactory cursorFactory, LSMVCTree lsmVCTree) {
+    public LSMVCTreeIndexAccessor(ILSMHarness lsmHarness, ILSMIndexOperationContext ctx, ICursorFactory cursorFactory,
+            LSMVCTree lsmVCTree) {
         super(lsmHarness, ctx, cursorFactory);
         this.lsmVCTree = lsmVCTree;
     }
