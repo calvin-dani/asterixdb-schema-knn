@@ -529,8 +529,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     public static void initializeThreeLevelStructure(AbstractVectorTreeTestContext ctx) throws Exception {
         VectorClusteringTree vectorTree = (VectorClusteringTree) ctx.getIndex();
 
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer initializer =
-                new org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer(vectorTree);
+        VectorClusteringTreeStaticInitializer initializer =
+                new VectorClusteringTreeStaticInitializer(vectorTree);
 
         // Use the specialized 3-level structure directly
         initializer.initializeThreeLevelStructure();
