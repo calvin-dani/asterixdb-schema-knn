@@ -53,7 +53,6 @@ public class FrameTupleAccessor implements IFrameTupleAccessor {
 
     public void reset(ByteBuffer buffer, String string) {
         reset(buffer, 0, buffer.limit());
-        //        FrameDebugUtils.prettyPrint(this, recordDescriptor, string);
     }
 
     public void reset(ByteBuffer buffer, int start, int length) {

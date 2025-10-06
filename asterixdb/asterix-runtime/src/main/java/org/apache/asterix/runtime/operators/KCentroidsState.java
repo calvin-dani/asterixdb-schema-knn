@@ -26,12 +26,12 @@ import java.util.List;
 
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
-import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.dataflow.std.misc.KCentroidPartitionedUUID;
 
-public class CentroidsState extends AbstractStateObject {
+public class KCentroidsState extends AbstractStateObject {
     private List<double[]> centroids;
 
-    public CentroidsState(JobId jobId, PartitionedUUID objectId) {
+    public KCentroidsState(JobId jobId, KCentroidPartitionedUUID objectId) {
         super(jobId, objectId);
         this.centroids = new ArrayList<>();
     }
@@ -47,10 +47,6 @@ public class CentroidsState extends AbstractStateObject {
             }
         }
         centroids.add(centroid);
-    }
-
-    public void clearCentroids() {
-        centroids.clear();
     }
 
     @Override
