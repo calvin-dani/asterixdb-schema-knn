@@ -38,8 +38,6 @@ public interface IColumnWriteMultiPageOp {
      */
     ByteBuffer confiscatePersistent() throws HyracksDataException;
 
-    ByteBuffer confiscatePageZeroPersistent() throws HyracksDataException;
-
     /**
      * Persist all confiscated persistent buffers to disk
      */

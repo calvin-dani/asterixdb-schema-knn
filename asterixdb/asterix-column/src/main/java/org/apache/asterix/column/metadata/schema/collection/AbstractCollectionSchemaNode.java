@@ -45,24 +45,13 @@ public abstract class AbstractCollectionSchemaNode extends AbstractSchemaNestedN
             definitionLevels.put(this, new RunLengthIntArray());
         }
         item = AbstractSchemaNode.deserialize(input, definitionLevels);
-        numberOfColumns = item.getNumberOfColumns();
-        previousNumberOfColumns = numberOfColumns;
     }
 
     public final AbstractSchemaNode getOrCreateItem(ATypeTag childTypeTag, FlushColumnMetadata columnMetadata)
             throws HyracksDataException {
         AbstractSchemaNode newItem = columnMetadata.getOrCreateChild(item, childTypeTag);
-        if (item == null) {
-            newItem.getDeltaColumnsChanged();
-            numberOfColumns += newItem.getNumberOfColumns();
+        if (newItem != item) {
             item = newItem;
-        } else if (newItem != item) {
-            numberOfColumns -= item.getNumberOfColumns();
-            item = newItem;
-            newItem.getDeltaColumnsChanged();
-            numberOfColumns += newItem.getNumberOfColumns();
-        } else {
-            numberOfColumns += item.getDeltaColumnsChanged();
         }
         return item;
     }

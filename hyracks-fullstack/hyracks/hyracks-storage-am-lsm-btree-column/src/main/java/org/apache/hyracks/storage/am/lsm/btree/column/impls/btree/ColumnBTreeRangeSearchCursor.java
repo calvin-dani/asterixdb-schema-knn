@@ -92,9 +92,8 @@ public class ColumnBTreeRangeSearchCursor extends EnforcedIndexCursor
         do {
             page0 = context.pinNext(frame, bufferCache, fileId);
             stats.getPageCounter().update(1);
-            context.preparePageZeroSegments(frame, bufferCache, fileId);
-            frameTuple.newPage();
             context.prepareColumns(frame, bufferCache, fileId);
+            frameTuple.newPage();
             setCursorPosition();
             nextLeafPage = frame.getNextLeaf();
         } while (frame.getTupleCount() == 0 && nextLeafPage > 0);
@@ -132,9 +131,8 @@ public class ColumnBTreeRangeSearchCursor extends EnforcedIndexCursor
         frame.setPage(page0);
         frame.setMultiComparator(originalKeyCmp);
         if (frame.getTupleCount() > 0) {
-            context.preparePageZeroSegments(frame, bufferCache, fileId);
-            frameTuple.newPage();
             context.prepareColumns(frame, bufferCache, fileId);
+            frameTuple.newPage();
             initCursorPosition(searchPred);
         } else {
             yieldFirstCall = false;

@@ -19,7 +19,6 @@
 package org.apache.asterix.lang.common.base;
 
 import java.util.Collection;
-import java.util.List;
 import java.util.Set;
 
 import org.apache.asterix.common.api.INamespaceResolver;
@@ -66,7 +65,7 @@ public interface IQueryRewriter {
 
     String toFunctionParameterName(VarIdentifier paramVar);
 
-    Query createFunctionAccessorQuery(FunctionDecl functionDecl, List<Expression> args);
+    Query createFunctionAccessorQuery(FunctionDecl functionDecl);
 
     Query createViewAccessorQuery(ViewDecl viewDecl, INamespaceResolver namespaceResolver);
 

@@ -49,7 +49,6 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractSchemaNode> children;
     private IntUnaryOperator nextIndex;
-    private boolean isEmptyObject = false;
 
     public ObjectSchemaNode() {
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
@@ -73,8 +72,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         }
 
         children = new ArrayList<>();
-        numberOfColumns = deserializeChildren(input, children, numberOfChildren, definitionLevels);
-        previousNumberOfColumns = numberOfColumns;
+        deserializeChildren(input, children, numberOfChildren, definitionLevels);
     }
 
     public AbstractSchemaNode getOrCreateChild(IValueReference fieldName, ATypeTag childTypeTag,
@@ -88,13 +86,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
             children.add(childIndex, newChild);
             fieldNameIndexToChildIndexMap.put(fieldNameIndex, childIndex);
         } else if (currentChild != newChild) {
-            numberOfColumns -= currentChild.getNumberOfColumns();
             children.set(childIndex, newChild);
-            newChild.getDeltaColumnsChanged();
-            numberOfColumns += newChild.getNumberOfColumns();
-        } else {
-            // If the child is the same, we just update the number of columns
-            numberOfColumns += currentChild.getDeltaColumnsChanged();
         }
 
         return newChild;
@@ -106,15 +98,13 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         children.add(child);
     }
 
-    public AbstractSchemaNode setEmptyObject(FlushColumnMetadata columnMetadata) throws HyracksDataException {
+    public void setEmptyObject(FlushColumnMetadata columnMetadata) throws HyracksDataException {
         if (!children.isEmpty()) {
-            return null;
+            return;
         }
-        isEmptyObject = true;
         AbstractSchemaNode emptyChild = columnMetadata.getOrCreateChild(null, ATypeTag.MISSING);
         addChild(DUMMY_FIELD_NAME_INDEX, emptyChild);
         nextIndex = this::emptyColumnIndex;
-        return emptyChild;
     }
 
     public AbstractSchemaNode getChild(int fieldNameIndex) {
@@ -197,15 +187,11 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         }
     }
 
-    private static int deserializeChildren(DataInput input, List<AbstractSchemaNode> children, int numberOfChildren,
+    private static void deserializeChildren(DataInput input, List<AbstractSchemaNode> children, int numberOfChildren,
             Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels) throws IOException {
-        int numberOfColumns = 0;
         for (int i = 0; i < numberOfChildren; i++) {
-            AbstractSchemaNode child = AbstractSchemaNode.deserialize(input, definitionLevels);
-            numberOfColumns += child.getNumberOfColumns();
-            children.add(child);
+            children.add(AbstractSchemaNode.deserialize(input, definitionLevels));
         }
-        return numberOfColumns;
     }
 
     private int nextIndex(int fieldNameIndex) {
@@ -216,11 +202,6 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         nextIndex = this::nextIndex;
         fieldNameIndexToChildIndexMap.remove(DUMMY_FIELD_NAME_INDEX);
         fieldNameIndexToChildIndexMap.put(fieldNameIndex, 0);
-        isEmptyObject = false;
         return 0;
-    }
-
-    public boolean isEmptyObject() {
-        return isEmptyObject;
     }
 }

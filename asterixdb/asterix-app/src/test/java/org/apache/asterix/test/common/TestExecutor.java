@@ -2254,7 +2254,7 @@ public class TestExecutor {
                         }
                         fail(true, testCaseCtx, cUnit, testFileCtxs, pb, testFile, e);
                     } else {
-                        LOGGER.info("testFile {} raised an (expected) exception: {}", testFile, e.toString());
+                        LOGGER.info("testFile {} raised an (expected) exception", testFile, e.toString());
                     }
                 }
                 if (numOfFiles == testFileCtxs.size()) {

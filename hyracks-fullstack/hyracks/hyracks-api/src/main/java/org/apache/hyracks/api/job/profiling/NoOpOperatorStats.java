@@ -110,7 +110,7 @@ public class NoOpOperatorStats implements IOperatorStats {
     }
 
     @Override
-    public ICounter getTupleBytes() {
+    public ICounter getAverageTupleSz() {
         return NOOP_COUNTER;
     }
 
@@ -121,11 +121,6 @@ public class NoOpOperatorStats implements IOperatorStats {
 
     @Override
     public ICounter getMinTupleSz() {
-        return NOOP_COUNTER;
-    }
-
-    @Override
-    public ICounter getTotalFrameCount() {
         return NOOP_COUNTER;
     }
 

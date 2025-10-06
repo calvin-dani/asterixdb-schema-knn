@@ -104,8 +104,7 @@ public class ColumnFilterPushdownProcessor extends AbstractFilterPushdownProcess
     }
 
     @Override
-    protected FilterBranch handleCompare(AbstractFunctionCallExpression expression, int depth,
-            UseDescriptor currentDescriptor) throws AlgebricksException {
+    protected boolean handleCompare(AbstractFunctionCallExpression expression, int depth) throws AlgebricksException {
         List<Mutable<ILogicalExpression>> args = expression.getArguments();
 
         Mutable<ILogicalExpression> leftRef = args.get(0);
@@ -114,38 +113,17 @@ public class ColumnFilterPushdownProcessor extends AbstractFilterPushdownProcess
         ILogicalExpression left = leftRef.getValue();
         ILogicalExpression right = rightRef.getValue();
 
-        //If the left or right is handlePath (like getField), then the right or left shouldn't be an array
-        FilterBranch leftBranch = pushdownFilterExpression(left, currentDescriptor, depth + 1);
-        FilterBranch rightBranch = pushdownFilterExpression(right, currentDescriptor, depth + 1);
-
-        FilterBranch result = FilterBranch.andOutput(leftBranch, rightBranch, FilterBranch.COMPARE);
-        if (result == FilterBranch.NA) {
-            //If the result is NA, then we cannot push down the filter
-            return FilterBranch.NA;
-        }
-
-        boolean pushdown = true;
-        //If the value is a filterPath, means it is coming from the expression tree.
-        if (leftBranch == FilterBranch.FILTER_PATH && rightBranch == FilterBranch.FILTER_PATH) {
-            return FilterBranch.COMPARE;
-        } else if (leftBranch == FilterBranch.FILTER_PATH) {
-            // if the expression return type is an array or any, we cannot push it down
-            pushdown = !expressionReturnsArray(right, currentDescriptor.getOperator());
-        } else if (rightBranch == FilterBranch.FILTER_PATH) {
-            pushdown = !expressionReturnsArray(left, currentDescriptor.getOperator());
-        }
-
-        return pushdown ? result : FilterBranch.NA;
+        return pushdownFilterExpression(left, depth + 1) && pushdownFilterExpression(right, depth + 1);
     }
 
     @Override
-    protected FilterBranch handlePath(AbstractFunctionCallExpression expression, IExpectedSchemaNode node)
+    protected boolean handlePath(AbstractFunctionCallExpression expression, IExpectedSchemaNode node)
             throws AlgebricksException {
         if (node.getType() != ExpectedSchemaNodeType.ANY) {
-            return FilterBranch.NA;
+            return false;
         }
         paths.put(expression, pathBuilderVisitor.buildPath((AnyExpectedSchemaNode) node));
-        return FilterBranch.FILTER_PATH;
+        return true;
     }
 
     @Override

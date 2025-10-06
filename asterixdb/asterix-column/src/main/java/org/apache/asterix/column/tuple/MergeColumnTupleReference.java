@@ -18,13 +18,14 @@
  */
 package org.apache.asterix.column.tuple;
 
-import java.util.BitSet;
+import java.nio.ByteBuffer;
 
 import org.apache.asterix.column.bytes.stream.in.MultiByteBufferInputStream;
 import org.apache.asterix.column.operation.lsm.merge.IEndOfPageCallBack;
 import org.apache.asterix.column.operation.lsm.merge.MergeColumnReadMetadata;
 import org.apache.asterix.column.values.IColumnValuesReader;
 import org.apache.asterix.column.values.reader.PrimitiveColumnValuesReader;
+import org.apache.asterix.column.values.writer.filters.AbstractColumnFilterWriter;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnBufferProvider;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnReadMultiPageOp;
@@ -37,7 +38,6 @@ public final class MergeColumnTupleReference extends AbstractAsterixColumnTupleR
     private final IColumnValuesReader[] columnReaders;
     private int skipCount;
     private IEndOfPageCallBack endOfPageCallBack;
-    private BitSet presentColumnIndexes;
     private int mergingLength;
 
     public MergeColumnTupleReference(int componentIndex, ColumnBTreeReadLeafFrame frame,
@@ -65,9 +65,9 @@ public final class MergeColumnTupleReference extends AbstractAsterixColumnTupleR
     }
 
     @Override
-    protected boolean startNewPage(int numberOfTuples) {
+    protected boolean startNewPage(ByteBuffer pageZero, int numberOfColumns, int numberOfTuples) {
         //Skip filters
-        frame.skipFilters();
+        pageZero.position(pageZero.position() + numberOfColumns * AbstractColumnFilterWriter.FILTER_SIZE);
         // skip count is always start from zero as no "search" is conducted during a merge
         this.skipCount = 0;
         mergingLength = 0;
@@ -87,15 +87,6 @@ public final class MergeColumnTupleReference extends AbstractAsterixColumnTupleR
         IColumnValuesReader reader = columnReaders[ordinal];
         reader.reset(columnStream, numberOfTuples);
         mergingLength += buffersProvider.getLength();
-    }
-
-    @Override
-    public void newPage() throws HyracksDataException {
-        super.newPage();
-        // the tuples are being read, meanwhile MegaLeaf changed
-        if (presentColumnIndexes != null) {
-            frame.getAllColumns(presentColumnIndexes);
-        }
     }
 
     @Override
@@ -153,13 +144,5 @@ public final class MergeColumnTupleReference extends AbstractAsterixColumnTupleR
                 throw new NullPointerException("endOfPageCallBack is null");
             }
         };
-    }
-
-    public void setColumnIndexes(BitSet presentColumnsIndexes) {
-        this.presentColumnIndexes = presentColumnsIndexes;
-    }
-
-    public void fillColumnIndexes() {
-        frame.getAllColumns(presentColumnIndexes);
     }
 }

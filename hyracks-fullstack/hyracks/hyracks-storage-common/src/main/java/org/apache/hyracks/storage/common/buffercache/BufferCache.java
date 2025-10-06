@@ -500,8 +500,7 @@ public class BufferCache implements IBufferCacheInternal, ILifeCycleComponent, I
             for (ICachedPageInternal internalPage : cachedPages) {
                 CachedPage c = (CachedPage) internalPage;
                 if (c != null) {
-                    if (c.confiscated() || c.latch.getReadLockCount() != 0 || c.latch.getWriteHoldCount() != 0
-                            || c.pinCount.get() != 0) {
+                    if (c.confiscated() || c.latch.getReadLockCount() != 0 || c.latch.getWriteHoldCount() != 0) {
                         return false;
                     }
                     if (c.valid) {

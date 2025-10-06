@@ -20,7 +20,6 @@ package org.apache.asterix.column.common.buffer;
 
 import java.nio.ByteBuffer;
 
-import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 
 public class TestWriteMultiPageOp implements IColumnWriteMultiPageOp {
@@ -34,11 +33,6 @@ public class TestWriteMultiPageOp implements IColumnWriteMultiPageOp {
 
     @Override
     public ByteBuffer confiscatePersistent() {
-        return dummyBufferCache.allocate(fileId).getBuffer();
-    }
-
-    @Override
-    public ByteBuffer confiscatePageZeroPersistent() throws HyracksDataException {
         return dummyBufferCache.allocate(fileId).getBuffer();
     }
 

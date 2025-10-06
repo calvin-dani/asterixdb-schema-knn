@@ -44,6 +44,7 @@ public class ProfiledFrameWriter implements ITimedWriter {
     protected IOperatorStats inputStats = NoOpOperatorStats.INSTANCE;
     private int minSz = Integer.MAX_VALUE;
     private int maxSz = -1;
+    private long avgSz;
 
     private final ICounter totalTime;
 
@@ -86,22 +87,23 @@ public class ProfiledFrameWriter implements ITimedWriter {
         int tupleCountOffset = FrameHelper.getTupleCountOffset(buffer.limit());
         int tupleCount = IntSerDeUtils.getInt(buffer.array(), tupleCountOffset);
         ICounter tupleCounter = inputStats.getTupleCounter();
-        long tupleSizes = 0;
+        long prevCount = tupleCounter.get();
         for (int i = 0; i < tupleCount; i++) {
             int tupleLen = getTupleLength(i, tupleCountOffset, buffer);
-            tupleSizes += tupleLen;
             if (maxSz < tupleLen) {
                 maxSz = tupleLen;
             }
             if (minSz > tupleLen) {
                 minSz = tupleLen;
             }
+            long prev = avgSz * prevCount;
+            avgSz = (prev + tupleLen) / (prevCount + 1);
+            prevCount++;
         }
         inputStats.getMaxTupleSz().set(maxSz);
         inputStats.getMinTupleSz().set(minSz);
-        inputStats.getTupleBytes().update(tupleSizes);
+        inputStats.getAverageTupleSz().set(avgSz);
         tupleCounter.update(tupleCount);
-        inputStats.getTotalFrameCount().update(1);
     }
 
     @Override

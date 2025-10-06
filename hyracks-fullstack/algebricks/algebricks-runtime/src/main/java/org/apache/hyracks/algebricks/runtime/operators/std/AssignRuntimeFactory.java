@@ -146,7 +146,6 @@ public class AssignRuntimeFactory extends AbstractOneInputOneOutputRuntimeFactor
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             // what if nTuple is 0?
-            //            tAccess.reset(buffer, "ASSIGN     ");
             tAccess.reset(buffer);
             int nTuple = tAccess.getTupleCount();
             if (nTuple < 1) {

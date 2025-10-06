@@ -18,8 +18,6 @@
  */
 package org.apache.asterix.column.operation.lsm.flush;
 
-import java.util.BitSet;
-
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
 import org.apache.asterix.column.metadata.schema.ObjectSchemaNode;
@@ -43,7 +41,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
     private final FlushColumnMetadata columnMetadata;
     private final VoidPointable nonTaggedValue;
     private final ObjectSchemaNode root;
-    private final BitSet presentColumnsIndexes;
     private AbstractSchemaNestedNode currentParent;
     private int primaryKeysLength;
     /**
@@ -52,15 +49,12 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
      * leaf node to avoid having a single column that spans to megabytes of pages.
      */
     private int stringLengths;
-    private int currentBatchVersion;
 
-    public ColumnTransformer(FlushColumnMetadata columnMetadata, ObjectSchemaNode root, BitSet presentColumnsIndexes) {
+    public ColumnTransformer(FlushColumnMetadata columnMetadata, ObjectSchemaNode root) {
         this.columnMetadata = columnMetadata;
         this.root = root;
-        this.presentColumnsIndexes = presentColumnsIndexes;
         nonTaggedValue = new VoidPointable();
         stringLengths = 0;
-        currentBatchVersion = 1;
     }
 
     public int getStringLengths() {
@@ -69,7 +63,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
 
     public void resetStringLengths() {
         stringLengths = 0;
-        currentBatchVersion++;
     }
 
     /**
@@ -79,7 +72,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
      * @return the estimated size (possibly overestimated) of the primary key(s) columns
      */
     public int transform(RecordLazyVisitablePointable pointable) throws HyracksDataException {
-        // clear the last present column indexes.
         primaryKeysLength = 0;
         pointable.accept(this, root);
         return primaryKeysLength;
@@ -92,8 +84,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
             int start = tuple.getFieldStart(i);
             ATypeTag tag = ATypeTag.VALUE_TYPE_MAPPING[bytes[start]];
             nonTaggedValue.set(bytes, start + 1, tuple.getFieldLength(i) - 1);
-            // include the primary key column
-            presentColumnsIndexes.set(i);
             IColumnValuesWriter writer = columnMetadata.getWriter(i);
             writer.writeAntiMatter(tag, nonTaggedValue);
             pkSize += writer.getEstimatedSize();
@@ -109,13 +99,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
 
         ObjectSchemaNode objectNode = (ObjectSchemaNode) arg;
         currentParent = objectNode;
-
-        if (currentParent.getVisitedBatchVersion() != currentBatchVersion) {
-            currentParent.needAllColumns(false);
-            currentParent.setMissingInitiallyInBatch(false);
-            currentParent.setVisitedBatchVersion(currentBatchVersion);
-        }
-
         for (int i = 0; i < pointable.getNumberOfChildren(); i++) {
             pointable.nextChild();
             IValueReference fieldName = pointable.getFieldName();
@@ -130,17 +113,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
         if (pointable.getNumberOfChildren() == 0) {
             // Set as empty object
             objectNode.setEmptyObject(columnMetadata);
-            if (!objectNode.isMissingInitiallyInBatch() && objectNode.isEmptyObject()) {
-                objectNode.needAllColumns(true);
-                objectNode.setMissingInitiallyInBatch(true);
-                PrimitiveSchemaNode missingNode = (PrimitiveSchemaNode) objectNode.getChildren().get(0);
-                presentColumnsIndexes.set(missingNode.getColumnIndex());
-            }
-        } else {
-            if (objectNode.isMissingInitiallyInBatch()) {
-                objectNode.setMissingInitiallyInBatch(false);
-                objectNode.needAllColumns(false);
-            }
         }
 
         columnMetadata.exitNode(arg);
@@ -160,34 +132,19 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
         int missingLevel = columnMetadata.getLevel();
         currentParent = collectionNode;
 
-        if (currentParent.getVisitedBatchVersion() != currentBatchVersion) {
-            currentParent.needAllColumns(false);
-            currentParent.setMissingInitiallyInBatch(false);
-            currentParent.setVisitedBatchVersion(currentBatchVersion);
-        }
-
-        // If it's an array, all column will be needed as anyone of them, will be a delegate.
-        currentParent.needAllColumns(true);
-
         int numberOfChildren = pointable.getNumberOfChildren();
-        int newDiscoveredColumns = 0;
         for (int i = 0; i < numberOfChildren; i++) {
             pointable.nextChild();
             ATypeTag childTypeTag = pointable.getChildTypeTag();
             AbstractSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, columnMetadata);
             acceptActualNode(pointable.getChildVisitablePointable(), childNode);
-            currentParent.incrementColumns(childNode.getDeltaColumnsChanged());
-            newDiscoveredColumns += childNode.getNewDiscoveredColumns();
-            childNode.setNewDiscoveredColumns(0);
             /*
              * The array item may change (e.g., BIGINT --> UNION). Thus, new items would be considered as missing
              */
             defLevels.add(missingLevel);
         }
 
-        currentParent.setNewDiscoveredColumns(newDiscoveredColumns);
-        currentParent.setNumberOfVisitedColumnsInBatch(
-                currentParent.getNumberOfVisitedColumnsInBatch() + newDiscoveredColumns);
+        // Add missing as a last element of the array to help indicate empty arrays
         collectionNode.getOrCreateItem(ATypeTag.MISSING, columnMetadata);
         defLevels.add(missingLevel);
 
@@ -202,7 +159,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
         columnMetadata.enterNode(currentParent, arg);
         ATypeTag valueTypeTag = pointable.getTypeTag();
         PrimitiveSchemaNode node = (PrimitiveSchemaNode) arg;
-        presentColumnsIndexes.set(node.getColumnIndex());
         IColumnValuesWriter writer = columnMetadata.getWriter(node.getColumnIndex());
         if (valueTypeTag == ATypeTag.MISSING) {
             writer.writeLevel(columnMetadata.getLevel());
@@ -242,7 +198,6 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
                  */
                 AbstractSchemaNode actualNode = unionNode.getOriginalType();
                 acceptActualNode(pointable, actualNode);
-                currentParent.incrementColumns(actualNode.getDeltaColumnsChanged());
             } else {
                 AbstractSchemaNode actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), columnMetadata);
                 pointable.accept(this, actualNode);
@@ -251,8 +206,7 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
             currentParent = previousParent;
             columnMetadata.exitNode(node);
         } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.needAllColumns(true);
-            columnMetadata.addNestedNull(currentParent, (AbstractSchemaNestedNode) node, true);
+            columnMetadata.addNestedNull(currentParent, (AbstractSchemaNestedNode) node);
         } else {
             pointable.accept(this, node);
         }

@@ -226,8 +226,7 @@ public class CachedPage implements ICachedPageInternal {
 
     @Override
     public String toString() {
-        return "CachedPage:[dpid: " + dpid + ", fileId: " + BufferedFileHandle.getFileId(dpid) + ", page:"
-                + BufferedFileHandle.getPageId(dpid) + ", compressedPageOffset:" + compressedOffset
+        return "CachedPage:[page:" + BufferedFileHandle.getPageId(dpid) + ", compressedPageOffset:" + compressedOffset
                 + ", compressedSize:" + compressedSize + "]";
     }
 }

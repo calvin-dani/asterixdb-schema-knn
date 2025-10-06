@@ -44,7 +44,9 @@ import org.apache.asterix.lang.common.base.IReturningStatement;
 import org.apache.asterix.lang.common.expression.AbstractCallExpression;
 import org.apache.asterix.lang.common.expression.CallExpr;
 import org.apache.asterix.lang.common.expression.FieldAccessor;
+import org.apache.asterix.lang.common.expression.LiteralExpr;
 import org.apache.asterix.lang.common.expression.VariableExpr;
+import org.apache.asterix.lang.common.literal.MissingLiteral;
 import org.apache.asterix.lang.common.rewrites.LangRewritingContext;
 import org.apache.asterix.lang.common.statement.DatasetDecl;
 import org.apache.asterix.lang.common.statement.FunctionDecl;
@@ -93,6 +95,7 @@ import org.apache.asterix.om.types.IAType;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.common.utils.Triple;
+import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.util.LogRedactionUtil;
 import org.apache.logging.log4j.LogManager;
@@ -625,8 +628,12 @@ public class SqlppQueryRewriter implements IQueryRewriter {
     }
 
     @Override
-    public Query createFunctionAccessorQuery(FunctionDecl functionDecl, List<Expression> args) {
+    public Query createFunctionAccessorQuery(FunctionDecl functionDecl) {
+        // dataverse_name.function_name(MISSING, ... MISSING)
         FunctionSignature functionSignature = functionDecl.getSignature();
+        int arity = functionSignature.getArity();
+        List<Expression> args = arity == FunctionIdentifier.VARARGS ? Collections.emptyList()
+                : Collections.nCopies(arity, new LiteralExpr(MissingLiteral.INSTANCE));
         CallExpr fcall = new CallExpr(functionSignature, args);
         fcall.setSourceLocation(functionDecl.getSourceLocation());
         return ExpressionUtils.createWrappedQuery(fcall, functionDecl.getSourceLocation());

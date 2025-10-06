@@ -131,11 +131,6 @@ public class LSMBTreeBatchPointSearchOperatorNodePushable extends BTreeSearchOpe
                 break;
             }
         }
-
-        if (matchingTupleCount == 0 && retainInput && retainMissing) {
-            int end = accessor.getTupleCount();
-            appendMissingTuple(0, end);
-        }
         stats.getInputTupleCounter().update(matchingTupleCount);
     }
 

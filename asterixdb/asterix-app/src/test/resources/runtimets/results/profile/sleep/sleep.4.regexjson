@@ -40,10 +40,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             }
           ]
         },
@@ -73,10 +70,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             },
             {
               "name": "R{.+}",
@@ -85,10 +79,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             },
             {
               "name": "R{.+}",
@@ -108,12 +99,9 @@
               "run-time": "R{[0-9.]+}",
               "runtime-id": "R{.+}",
               "cardinality-out": 10,
-              "avg-tuple-size": 143.1,
+              "avg-tuple-size": 140,
               "min-tuple-size": 137,
-              "max-tuple-size": 151,
-              "tuple-bytes": 1431,
-              "frames-processed": 1,
-              "avg-tuples-per-frame": 10.0
+              "max-tuple-size": 151
             },
             {
               "name": "R{.+}",
@@ -124,10 +112,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             },
             {
               "name": "R{.+}",
@@ -136,10 +121,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             },
             {
               "name": "R{.+}",
@@ -148,10 +130,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             },
             {
               "name": "R{.+}",
@@ -160,10 +139,7 @@
               "cardinality-out": "R{[0-9.]+}",
               "avg-tuple-size": "R{[0-9.]+}",
               "min-tuple-size": "R{[0-9.]+}",
-              "max-tuple-size": "R{[0-9.]+}",
-              "tuple-bytes": "R{.+}",
-              "frames-processed": "R{[0-9.]+}",
-              "avg-tuples-per-frame": "R{[0-9.]+}"
+              "max-tuple-size": "R{[0-9.]+}"
             },
             {
               "name": "R{.+}",

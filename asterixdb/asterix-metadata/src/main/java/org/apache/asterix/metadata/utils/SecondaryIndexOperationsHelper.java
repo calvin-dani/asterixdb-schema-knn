@@ -172,14 +172,7 @@ public abstract class SecondaryIndexOperationsHelper implements ISecondaryIndexO
                         new SecondaryArrayIndexBTreeOperationsHelper(dataset, index, metadataProvider, sourceLoc);
                 break;
             case BTREE:
-                boolean vector = true;
-                if (vector) {
-                    indexOperationsHelper =
-                            new SecondaryVectorOperationsHelper(dataset, index, metadataProvider, sourceLoc);
-                } else {
-                    indexOperationsHelper =
-                            new SecondaryBTreeOperationsHelper(dataset, index, metadataProvider, sourceLoc);
-                }
+                indexOperationsHelper = new SecondaryBTreeOperationsHelper(dataset, index, metadataProvider, sourceLoc);
                 break;
             case RTREE:
                 ensureNotColumnar(dataset, indexType, sourceLoc);

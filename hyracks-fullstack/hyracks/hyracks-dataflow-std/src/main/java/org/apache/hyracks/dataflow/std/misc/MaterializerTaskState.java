@@ -31,7 +31,6 @@ import org.apache.hyracks.api.dataflow.TaskId;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.job.JobId;
-import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
@@ -39,10 +38,6 @@ import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
 public class MaterializerTaskState extends AbstractStateObject {
     private RunFileWriter out;
     private final AtomicInteger numConsumers = new AtomicInteger(1);
-
-    public MaterializerTaskState(JobId jobId, PartitionedUUID uuid) {
-        super(jobId, uuid);
-    }
 
     public MaterializerTaskState(JobId jobId, TaskId taskId) {
         super(jobId, taskId);
@@ -113,9 +108,5 @@ public class MaterializerTaskState extends AbstractStateObject {
                 }
             }
         }
-    }
-
-    public GeneratedRunFileReader creatReader() throws HyracksDataException {
-        return out.createReader();
     }
 }

@@ -28,7 +28,6 @@ import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
-import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.storage.am.bloomfilter.impls.BloomFilterFactory;
 import org.apache.hyracks.storage.am.btree.frames.BTreeLeafFrameType;
 import org.apache.hyracks.storage.am.btree.frames.BTreeNSMInteriorFrameFactory;
@@ -145,7 +144,7 @@ public class InvertedIndexUtils {
                 leafFrameFactory, invListCmpFactories, invListCmpFactories.length);
     }
 
-    public static LSMInvertedIndex createLSMInvertedIndex(NCConfig storageConfig, IIOManager ioManager,
+    public static LSMInvertedIndex createLSMInvertedIndex(IIOManager ioManager,
             List<IVirtualBufferCache> virtualBufferCaches, ITypeTraits[] invListTypeTraits,
             IBinaryComparatorFactory[] invListCmpFactories, ITypeTraits[] tokenTypeTraits,
             IBinaryComparatorFactory[] tokenCmpFactories, IBinaryTokenizerFactory tokenizerFactory,
@@ -190,16 +189,16 @@ public class InvertedIndexUtils {
         ILSMDiskComponentFactory componentFactory = new LSMInvertedIndexDiskComponentFactory(invIndexFactory,
                 deletedKeysBTreeFactory, bloomFilterFactory, filterHelper);
 
-        return new LSMInvertedIndex(storageConfig, ioManager, virtualBufferCaches, componentFactory, filterHelper,
-                filterFrameFactory, filterManager, bloomFilterFalsePositiveRate, diskBufferCache, fileManager,
-                invListTypeTraits, invListCmpFactories, tokenTypeTraits, tokenCmpFactories, tokenizerFactory,
+        return new LSMInvertedIndex(ioManager, virtualBufferCaches, componentFactory, filterHelper, filterFrameFactory,
+                filterManager, bloomFilterFalsePositiveRate, diskBufferCache, fileManager, invListTypeTraits,
+                invListCmpFactories, tokenTypeTraits, tokenCmpFactories, tokenizerFactory,
                 fullTextConfigEvaluatorFactory, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, invertedIndexFields, filterFields, filterFieldsForNonBulkLoadOps,
                 invertedIndexFieldsForNonBulkLoadOps, durable, tracer, nullTypeTraits, nullIntrospector);
     }
 
-    public static PartitionedLSMInvertedIndex createPartitionedLSMInvertedIndex(NCConfig storageConfig,
-            IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches, ITypeTraits[] invListTypeTraits,
+    public static PartitionedLSMInvertedIndex createPartitionedLSMInvertedIndex(IIOManager ioManager,
+            List<IVirtualBufferCache> virtualBufferCaches, ITypeTraits[] invListTypeTraits,
             IBinaryComparatorFactory[] invListCmpFactories, ITypeTraits[] tokenTypeTraits,
             IBinaryComparatorFactory[] tokenCmpFactories, IBinaryTokenizerFactory tokenizerFactory,
             IFullTextConfigEvaluatorFactory fullTextConfigEvaluatorFactory, IBufferCache diskBufferCache,
@@ -243,13 +242,12 @@ public class InvertedIndexUtils {
         ILSMDiskComponentFactory componentFactory = new LSMInvertedIndexDiskComponentFactory(invIndexFactory,
                 deletedKeysBTreeFactory, bloomFilterFactory, filterHelper);
 
-        return new PartitionedLSMInvertedIndex(storageConfig, ioManager, virtualBufferCaches, componentFactory,
-                filterHelper, filterFrameFactory, filterManager, bloomFilterFalsePositiveRate, diskBufferCache,
-                fileManager, invListTypeTraits, invListCmpFactories, tokenTypeTraits, tokenCmpFactories,
-                tokenizerFactory, fullTextConfigEvaluatorFactory, mergePolicy, opTracker, ioScheduler,
-                ioOpCallbackFactory, pageWriteCallbackFactory, invertedIndexFields, filterFields,
-                filterFieldsForNonBulkLoadOps, invertedIndexFieldsForNonBulkLoadOps, durable, tracer, nullTypeTraits,
-                nullIntrospector);
+        return new PartitionedLSMInvertedIndex(ioManager, virtualBufferCaches, componentFactory, filterHelper,
+                filterFrameFactory, filterManager, bloomFilterFalsePositiveRate, diskBufferCache, fileManager,
+                invListTypeTraits, invListCmpFactories, tokenTypeTraits, tokenCmpFactories, tokenizerFactory,
+                fullTextConfigEvaluatorFactory, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
+                pageWriteCallbackFactory, invertedIndexFields, filterFields, filterFieldsForNonBulkLoadOps,
+                invertedIndexFieldsForNonBulkLoadOps, durable, tracer, nullTypeTraits, nullIntrospector);
     }
 
     public static boolean checkTypeTraitsAllFixed(ITypeTraits[] typeTraits) {

@@ -35,13 +35,13 @@ import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 
 import it.unimi.dsi.fastutil.longs.LongSet;
 
-public class ColumnMultiBufferProvider implements IColumnBufferProvider {
+public final class ColumnMultiBufferProvider implements IColumnBufferProvider {
     private final int columnIndex;
     private final IColumnReadMultiPageOp multiPageOp;
     private final Queue<ICachedPage> pages;
     private final LongSet pinnedPages;
-    protected int numberOfRemainingPages;
-    protected int startPage;
+    private int numberOfRemainingPages;
+    private int startPage;
     private int startOffset;
     private int length;
 
@@ -54,7 +54,7 @@ public class ColumnMultiBufferProvider implements IColumnBufferProvider {
 
     @Override
     public void reset(ColumnBTreeReadLeafFrame frame) throws HyracksDataException {
-        if (!frame.isValidColumn(columnIndex)) {
+        if (columnIndex >= frame.getNumberOfColumns()) {
             numberOfRemainingPages = 0;
             length = 0;
             return;

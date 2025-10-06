@@ -29,8 +29,6 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.io.IJsonSerializable;
 import org.apache.hyracks.api.io.IPersistedResourceRegistry;
-import org.apache.hyracks.control.common.controllers.NCConfig;
-import org.apache.hyracks.control.nc.NodeControllerService;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
 import org.apache.hyracks.storage.am.lsm.btree.dataflow.LSMBTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
@@ -78,7 +76,6 @@ public class TestLsmBtreeLocalResource extends LSMBTreeLocalResource {
     @Override
     public ILSMIndex createInstance(INCServiceContext serviceCtx) throws HyracksDataException {
         IIOManager ioManager = storageManager.getIoManager(serviceCtx);
-        NCConfig storageConfig = ((NodeControllerService) serviceCtx.getControllerService()).getConfiguration();
         FileReference file = ioManager.resolve(path);
         List<IVirtualBufferCache> vbcs = vbcProvider.getVirtualBufferCaches(serviceCtx, file);
         for (int i = 0; i < vbcs.size(); i++) {
@@ -90,9 +87,9 @@ public class TestLsmBtreeLocalResource extends LSMBTreeLocalResource {
         }
         ioOpCallbackFactory.initialize(serviceCtx, this);
         pageWriteCallbackFactory.initialize(serviceCtx, this);
-        return TestLsmBtreeUtil.createLSMTree(storageConfig, ioManager, vbcs, file,
-                storageManager.getBufferCache(serviceCtx), typeTraits, cmpFactories, bloomFilterKeyFields,
-                bloomFilterFalsePositiveRate, mergePolicyFactory.createMergePolicy(mergePolicyProperties, serviceCtx),
+        return TestLsmBtreeUtil.createLSMTree(ioManager, vbcs, file, storageManager.getBufferCache(serviceCtx),
+                typeTraits, cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
+                mergePolicyFactory.createMergePolicy(mergePolicyProperties, serviceCtx),
                 opTrackerProvider.getOperationTracker(serviceCtx, this), ioSchedulerProvider.getIoScheduler(serviceCtx),
                 ioOpCallbackFactory, pageWriteCallbackFactory, isPrimary, filterTypeTraits, filterCmpFactories,
                 btreeFields, filterFields, durable, metadataPageManagerFactory, false, serviceCtx.getTracer());

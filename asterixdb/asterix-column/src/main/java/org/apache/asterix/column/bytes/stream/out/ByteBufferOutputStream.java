@@ -35,10 +35,6 @@ public final class ByteBufferOutputStream extends OutputStream {
         return buffer.position() - startOffset;
     }
 
-    public int getPosition() {
-        return buffer.position();
-    }
-
     @Override
     public void write(int b) throws IOException {
         buffer.put((byte) b);

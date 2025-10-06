@@ -135,13 +135,6 @@ public enum ATypeTag implements IEnumSerializer {
         return this == ATypeTag.OBJECT || this == ATypeTag.ARRAY || this == ATypeTag.MULTISET || this == ATypeTag.UNION;
     }
 
-    public boolean isNumericType() {
-        return this == ATypeTag.TINYINT || this == ATypeTag.SMALLINT || this == ATypeTag.INTEGER
-                || this == ATypeTag.BIGINT || this == ATypeTag.UINT8 || this == ATypeTag.UINT16
-                || this == ATypeTag.UINT32 || this == ATypeTag.UINT64 || this == ATypeTag.FLOAT
-                || this == ATypeTag.DOUBLE;
-    }
-
     // TODO(ali): remove and use ATypeHierarchy getTypeDomain()
     public final boolean isListType() {
         return this == ATypeTag.ARRAY || this == ATypeTag.MULTISET;

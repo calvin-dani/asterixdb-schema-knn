@@ -32,7 +32,6 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IODeviceHandle;
-import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.control.nc.io.IOManager;
 import org.apache.hyracks.storage.am.btree.frames.BTreeLeafFrameType;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
@@ -77,7 +76,6 @@ public class LSMBTreeTestHarness {
     private final ICompressorDecompressorFactory compressorDecompressorFactory;
 
     protected IOManager ioManager;
-    protected NCConfig ncConfig;
     protected int ioDeviceId;
     protected IBufferCache diskBufferCache;
     protected List<IVirtualBufferCache> virtualBufferCaches;
@@ -115,7 +113,6 @@ public class LSMBTreeTestHarness {
         this.ioOpCallbackFactory = new CountingIoOperationCallbackFactory();
         this.pageWriteCallbackFactory = NoOpPageWriteCallbackFactory.INSTANCE;
         this.compressorDecompressorFactory = compressorDecompressorFactory;
-        this.ncConfig = new NCConfig(null);
     }
 
     public void setUp() throws HyracksDataException {
@@ -182,10 +179,6 @@ public class LSMBTreeTestHarness {
 
     public IOManager getIOManager() {
         return ioManager;
-    }
-
-    public NCConfig getNCConfig() {
-        return ncConfig;
     }
 
     public int getIODeviceId() {

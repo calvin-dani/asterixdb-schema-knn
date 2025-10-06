@@ -29,7 +29,6 @@ import org.apache.hyracks.api.dataflow.value.ILinearizeComparatorFactory;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.IIOManager;
-import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.BTree.BTreeAccessor;
@@ -73,7 +72,7 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 public class LSMRTree extends AbstractLSMRTree {
     protected final int[] buddyBTreeFields;
 
-    public LSMRTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
+    public LSMRTree(IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
             RTreeFrameFactory rtreeInteriorFrameFactory, RTreeFrameFactory rtreeLeafFrameFactory,
             ITreeIndexFrameFactory btreeInteriorFrameFactory, ITreeIndexFrameFactory btreeLeafFrameFactory,
             IBufferCache diskBufferCache, ILSMIndexFileManager fileNameManager,
@@ -86,7 +85,7 @@ public class LSMRTree extends AbstractLSMRTree {
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             int[] rtreeFields, int[] buddyBTreeFields, int[] filterFields, boolean durable, boolean isPointMBR)
             throws HyracksDataException {
-        super(storageConfig, ioManager, virtualBufferCaches, rtreeInteriorFrameFactory, rtreeLeafFrameFactory,
+        super(ioManager, virtualBufferCaches, rtreeInteriorFrameFactory, rtreeLeafFrameFactory,
                 btreeInteriorFrameFactory, btreeLeafFrameFactory, diskBufferCache, fileNameManager, componentFactory,
                 componentFactory, fieldCount, rtreeCmpFactories, btreeCmpFactories, linearizer, comparatorFields,
                 linearizerArray, bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
@@ -118,9 +117,8 @@ public class LSMRTree extends AbstractLSMRTree {
                 rTreeTupleSorter.sort();
                 component = createDiskComponent(componentFactory, flushOp.getTarget(), flushOp.getBTreeTarget(),
                         flushOp.getBloomFilterTarget(), true);
-                componentBulkLoader =
-                        component.createBulkLoader(storageConfig, operation, 1.0f, false, numBTreeTuples.longValue(),
-                                false, false, false, pageWriteCallbackFactory.createPageWriteCallback());
+                componentBulkLoader = component.createBulkLoader(operation, 1.0f, false, numBTreeTuples.longValue(),
+                        false, false, false, pageWriteCallbackFactory.createPageWriteCallback());
                 flushLoadRTree(isEmpty, rTreeTupleSorter, componentBulkLoader);
                 // scan the memory BTree and bulk load delete tuples
                 flushLoadBtree(memBTreeAccessor, componentBulkLoader, btreeNullPredicate);
@@ -321,13 +319,13 @@ public class LSMRTree extends AbstractLSMRTree {
                     numElements += ((LSMRTreeDiskComponent) mergeOp.getMergingComponents().get(i)).getBloomFilter()
                             .getNumElements();
                 }
-                componentBulkLoader = mergedComponent.createBulkLoader(storageConfig, mergeOp, 1.0f, false, numElements,
-                        false, false, false, pageWriteCallbackFactory.createPageWriteCallback());
+                componentBulkLoader = mergedComponent.createBulkLoader(mergeOp, 1.0f, false, numElements, false, false,
+                        false, pageWriteCallbackFactory.createPageWriteCallback());
                 mergeLoadBTree(mergeOp, opCtx, rtreeSearchPred, componentBulkLoader);
             } else {
                 //no buddy-btree needed
-                componentBulkLoader = mergedComponent.createBulkLoader(storageConfig, mergeOp, 1.0f, false, 0L, false,
-                        false, false, pageWriteCallbackFactory.createPageWriteCallback());
+                componentBulkLoader = mergedComponent.createBulkLoader(mergeOp, 1.0f, false, 0L, false, false, false,
+                        pageWriteCallbackFactory.createPageWriteCallback());
             }
             //search old rtree components
             while (cursor.hasNext()) {

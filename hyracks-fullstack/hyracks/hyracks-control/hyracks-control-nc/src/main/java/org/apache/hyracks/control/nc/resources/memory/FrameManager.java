@@ -39,11 +39,6 @@ public class FrameManager implements IHyracksFrameMgrContext {
         return minFrameSize;
     }
 
-    //    @Override
-    //    public int getMaxFrameSize() {
-    //        return FrameConstants.MAX_FRAMESIZE;
-    //    }
-
     @Override
     public ByteBuffer allocateFrame() throws HyracksDataException {
         return allocateFrame(minFrameSize);

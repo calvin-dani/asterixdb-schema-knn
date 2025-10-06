@@ -50,16 +50,16 @@ public class ParquetFilterPushdownProcessor extends ColumnFilterPushdownProcesso
     }
 
     @Override
-    protected FilterBranch handlePath(AbstractFunctionCallExpression expression, IExpectedSchemaNode node)
+    protected boolean handlePath(AbstractFunctionCallExpression expression, IExpectedSchemaNode node)
             throws AlgebricksException {
         if (node.getType() != ExpectedSchemaNodeType.ANY) {
-            return FilterBranch.NA;
+            return false;
         }
 
         // The inferred path from the provided expression
         ARecordType expressionPath = pathBuilderVisitor.buildPath((AnyExpectedSchemaNode) node);
         paths.put(expression, expressionPath);
-        return FilterBranch.FILTER_PATH;
+        return true;
     }
 
     @Override

@@ -76,7 +76,6 @@ public class SchemaBuilderFromIATypeVisitor implements IATypeVisitor<Void, Abstr
         try {
             AbstractSchemaNode itemNode = collectionNode.getOrCreateItem(itemType.getTypeTag(), columnMetadata);
             itemType.accept(this, itemNode);
-            collectionNode.incrementColumns(itemNode.getDeltaColumnsChanged());
         } catch (HyracksDataException e) {
             throw new IllegalStateException(e);
         }
@@ -155,6 +154,5 @@ public class SchemaBuilderFromIATypeVisitor implements IATypeVisitor<Void, Abstr
         AbstractSchemaNode child = objectNode.getOrCreateChild(fieldName, fieldType.getTypeTag(), columnMetadata);
 
         fieldType.accept(this, child);
-        objectNode.incrementColumns(child.getDeltaColumnsChanged());
     }
 }

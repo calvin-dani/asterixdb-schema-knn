@@ -88,10 +88,6 @@ public class AbstractFrameAppender implements IFrameAppender {
         return frame.getBuffer();
     }
 
-    public int getFrameSize() {
-        return frame.getFrameSize();
-    }
-
     @Override
     public void write(IFrameWriter outWriter, boolean clearFrame) throws HyracksDataException {
         failIfInterrupted();

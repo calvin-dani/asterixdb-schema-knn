@@ -18,6 +18,7 @@
  */
 package org.apache.asterix.column.tuple;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 
 import org.apache.asterix.column.assembler.value.MissingValueGetter;
@@ -36,6 +37,7 @@ import org.apache.asterix.column.operation.query.QueryColumnMetadata;
 import org.apache.asterix.column.operation.query.QueryColumnWithMetaMetadata;
 import org.apache.asterix.column.values.IColumnValuesReader;
 import org.apache.asterix.column.values.reader.PrimitiveColumnValuesReader;
+import org.apache.asterix.column.values.writer.filters.AbstractColumnFilterWriter;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnBufferProvider;
@@ -95,13 +97,14 @@ public final class QueryColumnWithMetaTupleReference extends AbstractAsterixColu
     }
 
     @Override
-    protected boolean startNewPage(int numberOfTuples) throws HyracksDataException {
+    protected boolean startNewPage(ByteBuffer pageZero, int numberOfColumns, int numberOfTuples)
+            throws HyracksDataException {
         //Skip to filters
-        frame.skipColumnOffsets();
+        pageZero.position(pageZero.position() + numberOfColumns * Integer.BYTES);
         //Set filters' values
-        FilterAccessorProvider.setFilterValues(filterValueAccessors, frame);
+        FilterAccessorProvider.setFilterValues(filterValueAccessors, pageZero, numberOfColumns);
         //Skip filters
-        frame.skipFilters();
+        pageZero.position(pageZero.position() + numberOfColumns * AbstractColumnFilterWriter.FILTER_SIZE);
         //Check if we should read all column pages
         boolean readColumns = rangeFilterEvaluator.evaluate();
         assembler.reset(readColumns ? numberOfTuples : 0);

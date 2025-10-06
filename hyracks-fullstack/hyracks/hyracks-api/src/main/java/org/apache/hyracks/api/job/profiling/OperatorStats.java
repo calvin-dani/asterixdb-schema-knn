@@ -28,7 +28,7 @@ import org.apache.hyracks.api.com.job.profiling.counters.Counter;
 import org.apache.hyracks.api.job.profiling.counters.ICounter;
 
 public class OperatorStats implements IOperatorStats {
-    private static final long serialVersionUID = 6401830963361567128L;
+    private static final long serialVersionUID = 6401830963361567126L;
     public final String operatorName;
 
     public final String operatorId;
@@ -39,11 +39,10 @@ public class OperatorStats implements IOperatorStats {
     public final ICounter cloudReadRequestCounter;
     public final ICounter cloudReadPageCounter;
     public final ICounter cloudPersistPageCounter;
-    public final ICounter tupleBytes;
+    public final ICounter avgTupleSz;
     public final ICounter minTupleSz;
     public final ICounter maxTupleSz;
     public final ICounter inputTupleCounter;
-    public final ICounter frameCounter;
     public final ICounter level;
     public final ICounter bytesRead;
     public final ICounter bytesWritten;
@@ -64,11 +63,10 @@ public class OperatorStats implements IOperatorStats {
         cloudReadRequestCounter = new Counter("cloudReadRequestCounter");
         cloudReadPageCounter = new Counter("cloudReadPageCounter");
         cloudPersistPageCounter = new Counter("cloudPersistPageCounter");
-        tupleBytes = new Counter("tupleBytes");
+        avgTupleSz = new Counter("avgTupleSz");
         minTupleSz = new Counter("minTupleSz");
         maxTupleSz = new Counter("maxTupleSz");
         inputTupleCounter = new Counter("inputTupleCounter");
-        frameCounter = new Counter("frameCounter");
         level = new Counter("level");
         bytesRead = new Counter("bytesRead");
         bytesWritten = new Counter("bytesWritten");
@@ -117,6 +115,11 @@ public class OperatorStats implements IOperatorStats {
     }
 
     @Override
+    public ICounter getAverageTupleSz() {
+        return avgTupleSz;
+    }
+
+    @Override
     public ICounter getMaxTupleSz() {
         return maxTupleSz;
     }
@@ -124,11 +127,6 @@ public class OperatorStats implements IOperatorStats {
     @Override
     public ICounter getMinTupleSz() {
         return minTupleSz;
-    }
-
-    @Override
-    public ICounter getTupleBytes() {
-        return tupleBytes;
     }
 
     @Override
@@ -149,11 +147,6 @@ public class OperatorStats implements IOperatorStats {
     @Override
     public ICounter getBytesWritten() {
         return bytesWritten;
-    }
-
-    @Override
-    public ICounter getTotalFrameCount() {
-        return frameCounter;
     }
 
     @Override
@@ -202,11 +195,10 @@ public class OperatorStats implements IOperatorStats {
         output.writeLong(cloudReadRequestCounter.get());
         output.writeLong(cloudReadPageCounter.get());
         output.writeLong(cloudPersistPageCounter.get());
-        output.writeLong(tupleBytes.get());
+        output.writeLong(avgTupleSz.get());
         output.writeLong(minTupleSz.get());
         output.writeLong(maxTupleSz.get());
         output.writeLong(inputTupleCounter.get());
-        output.writeLong(frameCounter.get());
         output.writeLong(level.get());
         output.writeLong(bytesRead.get());
         output.writeLong(bytesWritten.get());
@@ -222,11 +214,10 @@ public class OperatorStats implements IOperatorStats {
         cloudReadRequestCounter.set(input.readLong());
         cloudReadPageCounter.set(input.readLong());
         cloudPersistPageCounter.set(input.readLong());
-        tupleBytes.set(input.readLong());
+        avgTupleSz.set(input.readLong());
         minTupleSz.set(input.readLong());
         maxTupleSz.set(input.readLong());
         inputTupleCounter.set(input.readLong());
-        frameCounter.set(input.readLong());
         level.set(input.readLong());
         bytesRead.set(input.readLong());
         bytesWritten.set(input.readLong());
@@ -258,11 +249,10 @@ public class OperatorStats implements IOperatorStats {
                 + cloudReadRequestCounter.getName() + "\": " + cloudReadRequestCounter.get() + ", \""
                 + cloudReadPageCounter.getName() + "\": " + cloudReadPageCounter.get() + ", \""
                 + cloudPersistPageCounter.getName() + "\": " + cloudPersistPageCounter.get() + ", \""
-                + tupleBytes.getName() + "\": " + tupleBytes.get() + ", \"" + minTupleSz.getName() + "\": "
-                + minTupleSz.get() + ", \"" + maxTupleSz.getName() + "\": " + maxTupleSz.get() + ", \""
-                + inputTupleCounter.getName() + "\": " + inputTupleCounter.get() + ", \"" + frameCounter.getName()
-                + "\": " + frameCounter.get() + ", \"" + bytesRead.getName() + "\": " + bytesRead.get() + ", \""
-                + bytesWritten.getName() + "\": " + bytesWritten.get() + ", \"" + level.getName() + "\": " + level.get()
-                + ", \"indexStats\": \"" + indexesStats + "\" }";
+                + avgTupleSz.getName() + "\": " + avgTupleSz.get() + ", \"" + minTupleSz.getName() + "\": "
+                + minTupleSz.get() + ", \"" + minTupleSz.getName() + "\": " + timeCounter.get() + ", \""
+                + inputTupleCounter.getName() + "\": " + bytesRead.get() + ", \"" + bytesRead.getName() + "\": "
+                + bytesWritten.get() + ", \"" + bytesWritten.getName() + "\": " + inputTupleCounter.get() + ", \""
+                + level.getName() + "\": " + level.get() + ", \"indexStats\": \"" + indexesStats + "\" }";
     }
 }

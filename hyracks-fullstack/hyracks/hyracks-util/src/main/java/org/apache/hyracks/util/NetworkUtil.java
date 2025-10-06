@@ -180,10 +180,6 @@ public class NetworkUtil {
         }
     }
 
-    public static String extractHostPort(URI uri) {
-        return toHostPort(uri.getHost(), uri.getPort());
-    }
-
     public static String encodeIPv6LiteralHost(String hostname) {
         return InetAddressUtils.isIPv6Address(hostname) ? "[" + hostname + "]" : hostname;
     }

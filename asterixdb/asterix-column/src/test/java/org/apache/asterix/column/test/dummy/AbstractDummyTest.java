@@ -19,7 +19,6 @@
 package org.apache.asterix.column.test.dummy;
 
 import java.io.IOException;
-import java.util.BitSet;
 import java.util.Collections;
 
 import org.apache.asterix.column.common.buffer.NoOpWriteMultiPageOp;
@@ -31,7 +30,6 @@ import org.apache.asterix.column.operation.lsm.flush.ColumnTransformer;
 import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
 import org.apache.asterix.column.values.writer.DummyColumnValuesWriterFactory;
 import org.apache.asterix.column.values.writer.NoOpColumnBatchWriter;
-import org.apache.asterix.column.zero.writers.DefaultColumnPageZeroWriter;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.commons.lang3.mutable.MutableObject;
@@ -43,7 +41,6 @@ public abstract class AbstractDummyTest extends TestBase {
     protected final FlushColumnMetadata columnMetadata;
     protected final ColumnTransformer columnTransformer;
     protected final BatchFinalizerVisitor finalizer;
-    protected final BitSet presentColumnsIndexes;
     //Schema
     protected final ArrayBackedValueStorage storage;
     protected final RecordLazyVisitablePointable pointable;
@@ -51,10 +48,9 @@ public abstract class AbstractDummyTest extends TestBase {
 
     protected AbstractDummyTest(TestCase testCase) throws HyracksDataException {
         super(testCase);
-        presentColumnsIndexes = new BitSet();
         columnMetadata = new FlushColumnMetadata(DefaultOpenFieldType.NESTED_OPEN_RECORD_TYPE, null,
                 Collections.emptyList(), null, WRITER_FACTORY, new MutableObject<>(NoOpWriteMultiPageOp.INSTANCE));
-        columnTransformer = new ColumnTransformer(columnMetadata, columnMetadata.getRoot(), presentColumnsIndexes);
+        columnTransformer = new ColumnTransformer(columnMetadata, columnMetadata.getRoot());
         finalizer = new BatchFinalizerVisitor(columnMetadata);
         storage = new ArrayBackedValueStorage();
         pointable = new RecordLazyVisitablePointable(true);
@@ -68,8 +64,7 @@ public abstract class AbstractDummyTest extends TestBase {
             storage.reset();
             numberOfTuples++;
         }
-        finalizer.finalizeBatchColumns(columnMetadata, presentColumnsIndexes, new DefaultColumnPageZeroWriter());
-        finalizer.finalizeBatch(NoOpColumnBatchWriter.INSTANCE);
+        finalizer.finalizeBatch(NoOpColumnBatchWriter.INSTANCE, columnMetadata);
         return columnMetadata.getRoot();
     }
 }

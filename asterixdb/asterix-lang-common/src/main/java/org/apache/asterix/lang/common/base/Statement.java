@@ -118,7 +118,6 @@ public interface Statement extends ILangExpression {
         SYNONYM_DROP,
         VIEW_DROP,
         ANALYZE,
-        KMEANS,
         ANALYZE_DROP,
         COMPACT,
         SUBSCRIBE_FEED,

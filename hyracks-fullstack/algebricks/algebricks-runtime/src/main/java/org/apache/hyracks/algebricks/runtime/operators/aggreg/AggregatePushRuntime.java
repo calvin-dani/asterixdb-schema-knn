@@ -105,7 +105,6 @@ public class AggregatePushRuntime extends AbstractOneInputOneOutputOneFramePushR
     }
 
     private void processTuple(FrameTupleReference tupleRef) throws HyracksDataException {
-        System.err.println("AggregatePushRuntime.processTuple: processing tuple");
         for (IAggregateEvaluator aggEval : aggEvals) {
             aggEval.step(tupleRef);
         }

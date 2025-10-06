@@ -76,14 +76,7 @@ public final class DefaultColumnReadContext implements IColumnReadContext {
     }
 
     @Override
-    public void preparePageZeroSegments(ColumnBTreeReadLeafFrame leafFrame, IBufferCache bufferCache, int fileId)
-            throws HyracksDataException {
-        // NoOp
-    }
-
-    @Override
     public void prepareColumns(ColumnBTreeReadLeafFrame leafFrame, IBufferCache bufferCache, int fileId) {
-        // If there are page segments, they are expected to be present in flash cache.
         // NoOp
     }
 

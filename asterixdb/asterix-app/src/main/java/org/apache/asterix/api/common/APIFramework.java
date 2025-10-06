@@ -391,7 +391,6 @@ public class APIFramework {
             if (isQuery && conf.is(SessionConfig.OOB_HYRACKS_JOB)) {
                 generateJob(spec, output.config().getHyracksJobFormat());
             }
-            // TODO CALVIN DANI
             return spec;
 
         } catch (StackOverflowError error) {
