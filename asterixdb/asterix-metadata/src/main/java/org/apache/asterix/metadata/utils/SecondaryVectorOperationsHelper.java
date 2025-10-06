@@ -34,7 +34,6 @@ import org.apache.asterix.metadata.entities.InternalDatasetDetails;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
-import org.apache.asterix.runtime.operators.CandidateCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -141,8 +140,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID, centroidsUUID,
-                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
+                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID,
+                        centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
