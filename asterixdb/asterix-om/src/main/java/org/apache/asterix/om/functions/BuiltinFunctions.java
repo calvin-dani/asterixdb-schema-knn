@@ -503,6 +503,13 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier SCALAR_KURTOSIS = FunctionConstants.newAsterix("kurtosis", 1);
     public static final FunctionIdentifier SCALAR_UNION_MBR = FunctionConstants.newAsterix("union_mbr", 1);
 
+    // aggregates for clustering
+    public static final FunctionIdentifier KMEANS_ACCUMULATE = FunctionConstants.newAsterix("agg-kmeans-accumulate", 1);
+    public static final FunctionIdentifier LOCAL_KMEANS_ACCUMULATE =
+            FunctionConstants.newAsterix("agg-local-kmeans-accumulate", 1);
+    public static final FunctionIdentifier GLOBAL_KMEANS_ACCUMULATE =
+            FunctionConstants.newAsterix("agg-global-kmeans-accumulate", 1);
+
     // serializable aggregate functions
     public static final FunctionIdentifier SERIAL_AVG = FunctionConstants.newAsterix("avg-serial", 1);
     public static final FunctionIdentifier SERIAL_COUNT = FunctionConstants.newAsterix("count-serial", 1);
@@ -1149,6 +1156,16 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier OVERLAP_BINS = FunctionConstants.newAsterix("overlap-bins", 3);
     public static final FunctionIdentifier GET_OVERLAPPING_INTERVAL =
             FunctionConstants.newAsterix("get-overlapping-interval", 2);
+
+    //Vector functions
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY = FunctionConstants.newAsterix("vector-distance", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
+            FunctionConstants.newAsterix("vector-distance-constant", 3);
+
+    // KMEAN function
+    public static final FunctionIdentifier KMEAN_FAISS = FunctionConstants.newAsterix("kmean-faiss", 3);
+    public static final FunctionIdentifier KMEAN_COMMONS = FunctionConstants.newAsterix("kmean-common", 3);
+    //    public static final FunctionIdentifier KMEAN_FAISS = FunctionConstants.newAsterix("kmean-faiss", 3);
 
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
@@ -1867,6 +1884,11 @@ public class BuiltinFunctions {
         addFunction(SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
 
+        // Vector functions
+        addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
+
+        addFunction(KMEAN_FAISS, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);

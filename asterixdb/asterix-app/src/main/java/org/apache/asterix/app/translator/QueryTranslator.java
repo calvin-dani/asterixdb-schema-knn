@@ -23,8 +23,10 @@ import static org.apache.asterix.common.utils.IdentifierUtil.dataset;
 import static org.apache.asterix.common.utils.IdentifierUtil.dataverse;
 import static org.apache.asterix.lang.common.statement.CreateFullTextFilterStatement.FIELD_TYPE_STOPWORDS;
 
+import java.io.DataInputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -113,15 +115,20 @@ import org.apache.asterix.external.util.ExternalDataConstants;
 import org.apache.asterix.external.util.ExternalDataUtils;
 import org.apache.asterix.external.util.WriterValidationUtil;
 import org.apache.asterix.external.writer.printer.parquet.SchemaConverterVisitor;
+import org.apache.asterix.formats.base.IDataFormat;
+import org.apache.asterix.lang.common.base.Expression;
 import org.apache.asterix.lang.common.base.IQueryRewriter;
 import org.apache.asterix.lang.common.base.IReturningStatement;
 import org.apache.asterix.lang.common.base.IRewriterFactory;
 import org.apache.asterix.lang.common.base.IStatementRewriter;
 import org.apache.asterix.lang.common.base.Statement;
 import org.apache.asterix.lang.common.expression.IndexedTypeExpression;
+import org.apache.asterix.lang.common.expression.LiteralExpr;
+import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.lang.common.expression.TypeExpression;
 import org.apache.asterix.lang.common.expression.TypeReferenceExpression;
 import org.apache.asterix.lang.common.expression.VariableExpr;
+import org.apache.asterix.lang.common.literal.MissingLiteral;
 import org.apache.asterix.lang.common.rewrites.LangRewritingContext;
 import org.apache.asterix.lang.common.statement.AdapterDropStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeDropStatement;
@@ -159,6 +166,7 @@ import org.apache.asterix.lang.common.statement.FunctionDropStatement;
 import org.apache.asterix.lang.common.statement.IndexDropStatement;
 import org.apache.asterix.lang.common.statement.InsertStatement;
 import org.apache.asterix.lang.common.statement.InternalDetailsDecl;
+import org.apache.asterix.lang.common.statement.KmeansStatement;
 import org.apache.asterix.lang.common.statement.LibraryDropStatement;
 import org.apache.asterix.lang.common.statement.LoadStatement;
 import org.apache.asterix.lang.common.statement.NodeGroupDropStatement;
@@ -188,6 +196,8 @@ import org.apache.asterix.metadata.dataset.DatasetFormatInfo;
 import org.apache.asterix.metadata.dataset.hints.DatasetHints;
 import org.apache.asterix.metadata.dataset.hints.DatasetHints.DatasetNodegroupCardinalityHint;
 import org.apache.asterix.metadata.declared.MetadataProvider;
+import org.apache.asterix.metadata.declared.ResultSetDataSink;
+import org.apache.asterix.metadata.declared.ResultSetSinkId;
 import org.apache.asterix.metadata.entities.CompactionPolicy;
 import org.apache.asterix.metadata.entities.Database;
 import org.apache.asterix.metadata.entities.Dataset;
@@ -267,8 +277,12 @@ import org.apache.hyracks.algebricks.core.algebra.base.LogicalOperatorTag;
 import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCallExpression.FunctionKind;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
+import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
 import org.apache.hyracks.api.client.IClusterInfoCollector;
 import org.apache.hyracks.api.client.IHyracksClientConnection;
+import org.apache.hyracks.api.comm.IFrame;
+import org.apache.hyracks.api.comm.VSizeFrame;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.exceptions.IWarningCollector;
 import org.apache.hyracks.api.exceptions.SourceLocation;
@@ -279,10 +293,14 @@ import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.api.job.profiling.IOperatorStats;
 import org.apache.hyracks.api.result.IResultSet;
+import org.apache.hyracks.api.result.IResultSetReader;
 import org.apache.hyracks.api.result.ResultSetId;
 import org.apache.hyracks.api.util.ExceptionUtils;
 import org.apache.hyracks.control.cc.ClusterControllerService;
 import org.apache.hyracks.control.common.controllers.CCConfig;
+import org.apache.hyracks.control.nc.resources.memory.FrameManager;
+import org.apache.hyracks.data.std.util.ByteArrayAccessibleInputStream;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDropOperatorDescriptor.DropOption;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LSMTreeIndexInsertUpdateDeleteOperatorDescriptor;
@@ -457,7 +475,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                         break;
                     case CREATE_FUNCTION:
                         handleCreateFunctionStatement(metadataProvider, stmt, stmtRewriter, requestParameters,
-                                Creator.DEFAULT_CREATOR);
+                                Creator.DEFAULT_CREATOR, hcc);
                         break;
                     case FUNCTION_DROP:
                         handleFunctionDropStatement(metadataProvider, stmt, requestParameters);
@@ -558,6 +576,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                         break;
                     case ANALYZE:
                         handleAnalyzeStatement(metadataProvider, stmt, hcc, requestParameters);
+                        break;
+                    case KMEANS:
+                        handleKmeansStatement(metadataProvider, stmt, hcc, requestParameters);
                         break;
                     case ANALYZE_DROP:
                         handleAnalyzeDropStatement(metadataProvider, stmt, hcc, requestParameters);
@@ -3187,7 +3208,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
     }
 
     public void handleCreateFunctionStatement(MetadataProvider metadataProvider, Statement stmt,
-            IStatementRewriter stmtRewriter, IRequestParameters requestParameters, Creator creator) throws Exception {
+            IStatementRewriter stmtRewriter, IRequestParameters requestParameters, Creator creator,
+            IHyracksClientConnection hcc) throws Exception {
         CreateFunctionStatement cfs = (CreateFunctionStatement) stmt;
         FunctionSignature signature = cfs.getFunctionSignature();
         DataverseName funDataverse = signature.getDataverseName();
@@ -3220,7 +3242,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         lockUtil.createFunctionBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName,
                 signature.getName(), libraryDatabaseName, libraryDataverseName, libraryName);
         try {
-            doCreateFunction(metadataProvider, cfs, signature, stmtRewriter, requestParameters, creator);
+            doCreateFunction(metadataProvider, cfs, signature, stmtRewriter, requestParameters, creator, hcc);
         } finally {
             metadataProvider.getLocks().unlock();
             metadataProvider.setDefaultNamespace(activeNamespace);
@@ -3229,7 +3251,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
     protected CreateResult doCreateFunction(MetadataProvider metadataProvider, CreateFunctionStatement cfs,
             FunctionSignature functionSignature, IStatementRewriter stmtRewriter, IRequestParameters requestParameters,
-            Creator creator) throws Exception {
+            Creator creator, IHyracksClientConnection hcc) throws Exception {
         DataverseName dataverseName = functionSignature.getDataverseName();
         String databaseName = functionSignature.getDatabaseName();
         SourceLocation sourceLoc = cfs.getSourceLocation();
@@ -3373,7 +3395,15 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                         cfs.isTransform());
                 fd.setSourceLocation(sourceLoc);
 
-                Query wrappedQuery = queryRewriter.createFunctionAccessorQuery(fd);
+                int arity = functionSignature.getArity();
+                List<Expression> args;
+                if (cfs.isTransform()) {
+                    args = Collections.singletonList(new RecordConstructor(Collections.emptyList()));
+                } else {
+                    args = arity == FunctionIdentifier.VARARGS ? Collections.emptyList()
+                            : Collections.nCopies(arity, new LiteralExpr(MissingLiteral.INSTANCE));
+                }
+                Query wrappedQuery = queryRewriter.createFunctionAccessorQuery(fd, args);
                 List<FunctionDecl> fdList = new ArrayList<>(declaredFunctions.size() + 1);
                 fdList.addAll(declaredFunctions);
                 fdList.add(fd);
@@ -3392,6 +3422,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                                 "Transform function definition can not use collections/views");
                     }
                     validateTransformFunction(metadataProvider, rewrittenQuery, sourceLoc);
+                    apiFramework.compileQuery(hcc, metadataProvider, (Query) rewrittenQuery.first,
+                            rewrittenQuery.second, null, sessionOutput, null, null, responsePrinter, warningCollector,
+                            requestParameters, jobFlags);
                 }
                 appCtx.getReceptionist().ensureAuthorized(requestParameters, metadataProvider);
 
@@ -5000,6 +5033,283 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         }
     }
 
+    protected void handleKmeansStatement(MetadataProvider metadataProvider, Statement stmt,
+            IHyracksClientConnection hcc, IRequestParameters requestParameters) throws Exception {
+        KmeansStatement analyzeStatement = (KmeansStatement) stmt;
+        metadataProvider.validateDatabaseObjectName(analyzeStatement.getNamespace(), analyzeStatement.getDatasetName(),
+                analyzeStatement.getSourceLocation());
+        Namespace stmtActiveNamespace = getActiveNamespace(analyzeStatement.getNamespace());
+        DataverseName dataverseName = stmtActiveNamespace.getDataverseName();
+        String databaseName = stmtActiveNamespace.getDatabaseName();
+        String datasetName = analyzeStatement.getDatasetName();
+        if (isCompileOnly()) {
+            return;
+        }
+        lockUtil.analyzeDatasetBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName,
+                datasetName);
+        try {
+            doAKmeanseDataset(metadataProvider, analyzeStatement, databaseName, dataverseName, datasetName, hcc,
+                    requestParameters);
+        } finally {
+            metadataProvider.getLocks().unlock();
+        }
+    }
+
+    protected void doAKmeanseDataset(MetadataProvider metadataProvider, KmeansStatement stmtAnalyze,
+            String databaseName, DataverseName dataverseName, String datasetName, IHyracksClientConnection hcc,
+            IRequestParameters requestParameters) throws Exception {
+        SourceLocation sourceLoc = stmtAnalyze.getSourceLocation();
+        ProgressState progressNewIndexCreate = ProgressState.NO_PROGRESS;
+        ProgressState progressExistingIndexDrop = ProgressState.NO_PROGRESS;
+        Dataset ds = null;
+        Index existingIndex = null, newIndexPendingAdd = null;
+        JobSpecification existingIndexDropSpec = null;
+        MetadataTransactionContext mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+        boolean bActiveTxn = true;
+        metadataProvider.setMetadataTxnContext(mdTxnCtx);
+        try {
+            // Check if the dataverse exists
+            Dataverse dv = MetadataManager.INSTANCE.getDataverse(mdTxnCtx, databaseName, dataverseName);
+            if (dv == null) {
+                throw new CompilationException(ErrorCode.UNKNOWN_DATAVERSE, sourceLoc,
+                        MetadataUtil.dataverseName(databaseName, dataverseName, metadataProvider.isUsingDatabase()));
+            }
+            // Check if the dataset exists
+            ds = metadataProvider.findDataset(databaseName, dataverseName, datasetName);
+            if (ds == null) {
+                throw new CompilationException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, sourceLoc, datasetName,
+                        MetadataUtil.dataverseName(databaseName, dataverseName, metadataProvider.isUsingDatabase()));
+            }
+            if (ds.getDatasetType() == DatasetType.INTERNAL) {
+                validateDatasetState(metadataProvider, ds, sourceLoc);
+            } else {
+                throw new CompilationException(ErrorCode.OPERATION_NOT_SUPPORTED, sourceLoc);
+            }
+
+            IndexType sampleIndexType = IndexType.SAMPLE;
+            Pair<String, String> sampleIndexNames = IndexUtil.getSampleIndexNames(datasetName);
+            String newIndexName;
+            existingIndex = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), databaseName,
+                    dataverseName, datasetName, sampleIndexNames.first);
+            if (existingIndex != null) {
+                newIndexName = sampleIndexNames.second;
+            } else {
+                existingIndex = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(),
+                        databaseName, dataverseName, datasetName, sampleIndexNames.second);
+                newIndexName = sampleIndexNames.first;
+            }
+
+            InternalDatasetDetails dsDetails = (InternalDatasetDetails) ds.getDatasetDetails();
+            int sampleCardinalityTarget = stmtAnalyze.getSampleSize();
+            long sampleSeed = stmtAnalyze.getOrCreateSampleSeed();
+
+            Index.SampleIndexDetails newIndexDetailsPendingAdd = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
+                    dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget, 0, 0,
+                    sampleSeed, Collections.emptyMap());
+            newIndexPendingAdd = new Index(databaseName, dataverseName, datasetName, newIndexName, sampleIndexType,
+                    newIndexDetailsPendingAdd, false, false, MetadataUtil.PENDING_ADD_OP, Creator.DEFAULT_CREATOR);
+
+            // #. add a new index with PendingAddOp
+            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), newIndexPendingAdd);
+            // #. prepare to create the index artifact in NC.
+            JobSpecification spec =
+                    IndexUtil.buildSecondaryIndexCreationJobSpec(ds, newIndexPendingAdd, metadataProvider, sourceLoc);
+            if (spec == null) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Failed to create job spec for creating index '" + ds.getDatasetName() + "."
+                                + newIndexPendingAdd.getIndexName() + "'");
+            }
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+            progressNewIndexCreate = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+
+            // #. create the index artifact in NC.
+            runJob(hcc, spec);
+
+            // #. flush dataset
+            FlushDatasetUtil.flushDataset(hcc, metadataProvider, databaseName, dataverseName, datasetName);
+            //
+            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            bActiveTxn = true;
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+            // #. load data into the index in NC.
+            spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, newIndexPendingAdd, metadataProvider, sourceLoc);
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+            //
+            //            List<IOperatorStats> opStats
+            Pair<JobId, List<IOperatorStats>> pair = runJob(hcc, spec, jobFlags,
+                    Collections.singletonList(SampleOperationsHelper.DATASET_STATS_OPERATOR_NAME));
+
+            //1. Analyze statment - update (no res) , Sample query - issued by CBO (res)
+            //2. DistributeResultOperator DistributeResultOperator to be used.
+
+            ResultSetId resultSetId = new ResultSetId(metadataProvider.getResultSetIdCounter().getAndInc());
+            ResultSetSinkId rssId = new ResultSetSinkId(resultSetId);
+            ResultSetDataSink sink = new ResultSetDataSink(rssId, null);
+            IResultSetReader resultSetReader = appCtx.getResultSet().createReader(pair.first, resultSetId);
+
+            BuiltinType aggType = BuiltinType.AINT64;
+            List<ISerializerDeserializer<?>> resultSerdeList = new ArrayList<>(1);
+            ISerializerDeserializer[] aggSerde = new ISerializerDeserializer[1];
+            IDataFormat format = metadataProvider.getDataFormat();
+            ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
+            resultSerdeList.add(serdeProvider.getSerializerDeserializer(aggType));
+
+            //            FrameManager frameManager = new FrameManager(queryOptCtx.getPhysicalOptimizationConfig().getFrameSize());
+            //metadataprived
+            FrameManager frameManager = new FrameManager(10);
+            IFrame frame = new VSizeFrame(frameManager);
+            //            metadataProvide
+
+            FrameTupleAccessor fta = new FrameTupleAccessor(null);
+            ByteArrayAccessibleInputStream bais = new ByteArrayAccessibleInputStream(frame.getBuffer().array(), 0, 0);
+            DataInputStream dis = new DataInputStream(bais);
+            List<List<IAObject>> result = new ArrayList<>();
+
+            while (resultSetReader.read(frame) > 0) {
+                ByteBuffer buffer = frame.getBuffer();
+                fta.reset(buffer);
+                int nTuples = fta.getTupleCount();
+                for (int tupleIdx = 0; tupleIdx < nTuples; tupleIdx++) {
+                    int tupleStart = fta.getTupleStartOffset(tupleIdx);
+                    int tupleEnd = fta.getTupleEndOffset(tupleIdx);
+                    bais.setContent(buffer.array(), tupleStart, tupleEnd - tupleStart);
+
+                    List<IAObject> values = new ArrayList<>(1);
+                    for (int fieldIdx = 0; fieldIdx < 1; fieldIdx++) {
+                        IAObject value = (IAObject) resultSerdeList.get(fieldIdx).deserialize(dis);
+                        values.add(value);
+                    }
+                    result.add(values);
+                }
+            }
+
+            // Result and calculate AVG CENTROID =>
+
+            if (pair.second == null || pair.second.size() == 0) {
+                throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_STATE, "", sourceLoc);
+            }
+            // TODO CALVIN DANI COMPARE with BTREE
+            DatasetStreamStats stats = new DatasetStreamStats(pair.second.get(0));
+            ////
+            Index.SampleIndexDetails newIndexDetailsFinal = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
+                    dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget,
+                    stats.getCardinality(), stats.getAvgTupleSize(), sampleSeed, stats.getIndexesStats());
+            Index newIndexFinal = new Index(databaseName, dataverseName, datasetName, newIndexName, sampleIndexType,
+                    newIndexDetailsFinal, false, false, MetadataUtil.PENDING_NO_OP, Creator.DEFAULT_CREATOR);
+
+            // #. begin new metadataTxn
+            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            bActiveTxn = true;
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+            // #. add same new index with PendingNoOp after deleting its entry with PendingAddOp
+            MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+                    newIndexPendingAdd.getDatabaseName(), newIndexPendingAdd.getDataverseName(),
+                    newIndexPendingAdd.getDatasetName(), newIndexPendingAdd.getIndexName());
+            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), newIndexFinal);
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+            progressNewIndexCreate = ProgressState.NO_PROGRESS;
+
+            if (existingIndex != null) {
+                // #. set existing index to PendingDropOp because we'll be dropping it next
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+                        existingIndex.getDatabaseName(), existingIndex.getDataverseName(),
+                        existingIndex.getDatasetName(), existingIndex.getIndexName());
+                existingIndex.setPendingOp(MetadataUtil.PENDING_DROP_OP);
+                MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), existingIndex);
+                existingIndexDropSpec = IndexUtil.buildDropIndexJobSpec(existingIndex, metadataProvider, ds, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                progressExistingIndexDrop = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+                bActiveTxn = false;
+
+                // #. drop existing index on NCs
+                runJob(hcc, existingIndexDropSpec);
+
+                // #. drop existing index metadata
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+                        existingIndex.getDatabaseName(), existingIndex.getDataverseName(),
+                        existingIndex.getDatasetName(), existingIndex.getIndexName());
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                progressExistingIndexDrop = ProgressState.NO_PROGRESS;
+            }
+
+        } catch (Exception e) {
+            LOGGER.error("failed to analyze dataset; executing compensating operations", e);
+            if (bActiveTxn) {
+                abort(e, e, mdTxnCtx);
+            }
+
+            if (progressExistingIndexDrop == ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA) {
+                // #. execute compensation operations remove the index in NCs
+                try {
+                    runJob(hcc, existingIndexDropSpec);
+                } catch (Exception e2) {
+                    // do no throw exception since still the metadata needs to be compensated.
+                    e.addSuppressed(e2);
+                }
+                // #. remove the record from the metadata.
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                try {
+                    MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+                            existingIndex.getDatabaseName(), existingIndex.getDataverseName(),
+                            existingIndex.getDatasetName(), existingIndex.getIndexName());
+                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                } catch (Exception e2) {
+                    e.addSuppressed(e2);
+                    abort(e, e2, mdTxnCtx);
+                    throw new IllegalStateException("System is inconsistent state: pending index("
+                            + existingIndex.getDataverseName() + "." + existingIndex.getDatasetName() + "."
+                            + existingIndex.getIndexName() + ") couldn't be removed from the metadata", e);
+                }
+            } else if (progressNewIndexCreate == ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA) {
+                // #. execute compensation operations remove the index in NCs
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                try {
+                    JobSpecification jobSpec =
+                            IndexUtil.buildDropIndexJobSpec(newIndexPendingAdd, metadataProvider, ds, sourceLoc);
+                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                    bActiveTxn = false;
+                    runJob(hcc, jobSpec);
+                } catch (Exception e2) {
+                    e.addSuppressed(e2);
+                    if (bActiveTxn) {
+                        abort(e, e2, mdTxnCtx);
+                    }
+                }
+                // #. remove the record from the metadata.
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                try {
+                    MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+                            newIndexPendingAdd.getDatabaseName(), newIndexPendingAdd.getDataverseName(),
+                            newIndexPendingAdd.getDatasetName(), newIndexPendingAdd.getIndexName());
+                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                } catch (Exception e2) {
+                    e.addSuppressed(e2);
+                    abort(e, e2, mdTxnCtx);
+                    throw new IllegalStateException("System is in inconsistent state: pending index("
+                            + newIndexPendingAdd.getDataverseName() + "." + newIndexPendingAdd.getDatasetName() + "."
+                            + newIndexPendingAdd.getIndexName() + ") couldn't be removed from the metadata", e);
+                }
+            }
+
+            throw e;
+        }
+    }
+
     protected void doAnalyzeDataset(MetadataProvider metadataProvider, AnalyzeStatement stmtAnalyze,
             String databaseName, DataverseName dataverseName, String datasetName, IHyracksClientConnection hcc,
             IRequestParameters requestParameters) throws Exception {
@@ -5083,12 +5393,12 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
             bActiveTxn = false;
 
-            List<IOperatorStats> opStats = runJob(hcc, spec, jobFlags,
+            Pair<JobId, List<IOperatorStats>> pair = runJob(hcc, spec, jobFlags,
                     Collections.singletonList(SampleOperationsHelper.DATASET_STATS_OPERATOR_NAME));
-            if (opStats == null || opStats.size() == 0) {
+            if (pair.second == null || pair.second.size() == 0) {
                 throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_STATE, "", sourceLoc);
             }
-            DatasetStreamStats stats = new DatasetStreamStats(opStats.get(0));
+            DatasetStreamStats stats = new DatasetStreamStats(pair.second.get(0));
 
             Index.SampleIndexDetails newIndexDetailsFinal = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
                     dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget,
@@ -5611,10 +5921,10 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         JobUtils.runJobIfActive(hcc, jobSpec, jobFlags, true);
     }
 
-    private static List<IOperatorStats> runJob(IHyracksClientConnection hcc, JobSpecification jobSpec,
+    private static Pair<JobId, List<IOperatorStats>> runJob(IHyracksClientConnection hcc, JobSpecification jobSpec,
             EnumSet<JobFlag> jobFlags, List<String> statOperatorNames) throws Exception {
         Pair<JobId, List<IOperatorStats>> p = JobUtils.runJobIfActive(hcc, jobSpec, jobFlags, true, statOperatorNames);
-        return p.second;
+        return p;
     }
 
     private void createAndRunJob(IHyracksClientConnection hcc, EnumSet<JobFlag> jobFlags, Mutable<JobId> jId,

@@ -1,0 +1,111 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "type": "java",
+            "name": "Current File",
+            "request": "launch",
+            "mainClass": "${file}"
+        },
+        {
+            "type": "java",
+            "name": "IdentityStreamingScript",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.algebricks.tests.script.IdentityStreamingScript",
+            "projectName": "algebricks-tests"
+        },
+        {
+            "type": "java",
+            "name": "AsterixHelper",
+            "request": "launch",
+            "mainClass": "org.apache.asterix.clienthelper.AsterixHelper",
+            "projectName": "asterix-client-helper"
+        },
+        {
+            "type": "java",
+            "name": "FuzzyJoinMemory",
+            "request": "launch",
+            "mainClass": "org.apache.asterix.fuzzyjoin.FuzzyJoinMemory",
+            "projectName": "asterix-fuzzyjoin"
+        },
+        {
+            "type": "java",
+            "name": "CCDriver",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.control.cc.CCDriver",
+            "projectName": "hyracks-control-cc"
+        },
+        {
+            "type": "java",
+            "name": "NCDriver",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.control.nc.NCDriver",
+            "projectName": "hyracks-control-nc"
+        },
+        {
+            "type": "java",
+            "name": "NCService",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.control.nc.service.NCService",
+            "projectName": "hyracks-nc-service"
+        },
+        {
+            "type": "java",
+            "name": "LexerGenerator",
+            "request": "launch",
+            "mainClass": "org.apache.asterix.lexergenerator.LexerGenerator",
+            "projectName": "lexer-generator-maven-plugin"
+        },
+        {
+            "type": "java",
+            "name": "WordCountMain",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.examples.text.client.WordCountMain",
+            "projectName": "textclient"
+        },
+        {
+            "type": "java",
+            "name": "Groupby",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.examples.tpch.client.Groupby",
+            "projectName": "tpchclient"
+        },
+        {
+            "type": "java",
+            "name": "Join",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.examples.tpch.client.Join",
+            "projectName": "tpchclient"
+        },
+        {
+            "type": "java",
+            "name": "Sort",
+            "request": "launch",
+            "mainClass": "org.apache.hyracks.examples.tpch.client.Sort",
+            "projectName": "tpchclient"
+        },
+        {
+            "type": "java",
+            "name": "AsterixHyracksIntegrationUtil",
+            "request": "launch",
+            "mainClass": "org.apache.asterix.test.server.AsterixServerIntegrationUtil",
+            "vmArgs": "-Dcleanup.start=true -Xms6144m -Xmx6144m -Dnode.Resolver=\"org.apache.asterix.external.util.IdentityResolverFactory\"",
+            "args": "",
+            "console": "integratedTerminal"
+        },
+        {
+            "type": "java",
+            "name": "AsterixHyracksIntegrationUtil-Maven",
+            "request": "launch",
+            "mainClass": "org.apache.asterix.test.server.AsterixServerIntegrationUtil",
+            "vmArgs": "-Dcleanup.start=true -Xms6144m -Xmx6144m -Dnode.Resolver=\"org.apache.asterix.external.util.IdentityResolverFactory\"",
+            "args": "",
+            "console": "integratedTerminal",
+            "preLaunchTask": "maven-compile"
+        }
+    ]
+}

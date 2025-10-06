@@ -550,6 +550,7 @@ import org.apache.asterix.runtime.evaluators.functions.bitwise.BitTestWithoutAll
 import org.apache.asterix.runtime.evaluators.functions.bitwise.BitXorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.bitwise.IsBitSetWithAllFlagDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.bitwise.IsBitSetWithoutAllFlagDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.kmeans.KmeanFaissArrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.AccessFieldDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.AccessNestedFieldDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.FieldAccessByIndexDescriptor;
@@ -641,6 +642,8 @@ import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYear2Descr
 import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYearDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationGreaterThanComparatorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationLessThanComparatorDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceConstantDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.DenseRankRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.NtileRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.PercentRankRunningAggregateDescriptor;
@@ -1323,6 +1326,11 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(GetOverlappingIntervalDescriptor.FACTORY);
         fc.add(DurationFromIntervalDescriptor.FACTORY);
 
+        // Vector functions
+        fc.add(VectorDistanceArrDescriptor.FACTORY);
+        fc.add(VectorDistanceConstantDescriptor.FACTORY);
+
+        fc.add(KmeanFaissArrDescriptor.FACTORY);
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
         fc.add(IsArrayDescriptor.FACTORY);
