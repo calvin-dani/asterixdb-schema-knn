@@ -40,7 +40,7 @@ public class VectorClusteringLeafFrameFactory implements ITreeIndexFrameFactory 
 
     @Override
     public IVectorClusteringLeafFrame createFrame() {
-        return new VectorClusteringLeafFrame(tupleWriter, centroidDimensions);
+        return new VectorClusteringLeafFrame(tupleWriter);
     }
 
     @Override

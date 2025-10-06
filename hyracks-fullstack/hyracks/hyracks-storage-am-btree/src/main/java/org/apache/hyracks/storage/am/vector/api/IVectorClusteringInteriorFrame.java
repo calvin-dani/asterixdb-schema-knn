@@ -66,4 +66,8 @@ public interface IVectorClusteringInteriorFrame extends IVectorClusteringFrame {
      * @throws HyracksDataException if an error occurs
      */
     int findInsertTupleIndex(ITupleReference tuple) throws HyracksDataException;
+
+    void setNextPage(int nextPageId);
+
+    int getNextPage();
 }

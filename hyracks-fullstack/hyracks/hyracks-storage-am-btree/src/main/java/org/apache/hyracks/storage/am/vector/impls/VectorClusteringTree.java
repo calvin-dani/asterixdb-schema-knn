@@ -22,7 +22,6 @@ package org.apache.hyracks.storage.am.vector.impls;
 import static org.apache.hyracks.storage.common.buffercache.context.read.DefaultBufferCacheReadContextProvider.NEW;
 
 import java.util.Arrays;
-import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
@@ -140,6 +139,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         // Use unified cluster search and access pattern
         if (!isStaticStructureInitialized()) {
             staticInitializer = new VectorClusteringTreeStaticInitializer(this);
+            /* TODO: FOR TESTING ONLY */
             staticInitializer.initializeThreeLevelStructure();
             setStaticStructureInitialized();
         }
@@ -152,10 +152,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Calculate distance and cosine similarity to cluster centroid
             double[] centroidDouble = accessResult.clusterResult.centroid;
-            double distance = org.apache.hyracks.storage.am.vector.util.VectorUtils.calculateEuclideanDistance(vector,
-                    centroidDouble);
-            double cosineSim = org.apache.hyracks.storage.am.vector.util.VectorUtils.calculateCosineSimilarity(vector,
-                    centroidDouble);
+            double distance = VectorUtils.calculateEuclideanDistance(vector, centroidDouble);
+            double cosineSim = VectorUtils.calculateCosineSimilarity(vector, centroidDouble);
 
             // Insert into appropriate data page based on distance
             insertIntoDataPages(accessResult.metadataPageId, vector, distance, cosineSim, tuple, ctx);
@@ -179,7 +177,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         while (currentMetadataPageId != -1) {
             ICachedPage metadataPage =
                     bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) currentMetadataPageId));
-
+            ctx.setMetadataPageId(currentMetadataPageId);
             try {
                 metadataPage.acquireWriteLatch();
                 ctx.getMetadataFrame().setPage(metadataPage);
@@ -381,7 +379,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             throws HyracksDataException {
 
         // Find the metadata page that contains the reference to the original data page
-        long targetMetadataPageId = findMetadataPageContainingDataPage(originalDataPageId, ctx);
+        /* TODO: metadataPageId should be passed down from caller to avoid this search */
+        long targetMetadataPageId = ctx.getMetadataPageId();
 
         if (targetMetadataPageId == -1) {
             System.out
@@ -684,14 +683,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     }
 
     /**
-     * Copy tuple data to a new SimpleTupleReference.
-     */
-    private void copyTuple(ITupleReference source, SimpleTupleReference target) throws HyracksDataException {
-        // Use VectorClusteringTupleUtils for consistent tuple copying
-        VectorClusteringTupleUtils.copyTuple(source, target);
-    }
-
-    /**
      * Extract primary key from tuple (assumes last field).
      */
     private byte[] extractPrimaryKeyFromTuple(ITupleReference tuple) {
@@ -970,9 +961,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     private void handleDataPageOverflow(long metadataPageId, float[] vector, double distance, double cosineSim,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-        // Implementation for handling data page overflow
-        // This typically involves splitting the page and redistributing data
-
         // Use the frame factories and page manager to handle overflow
         IVectorClusteringDataFrame dataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
         IPageManager pageManager = ctx.getFreePageManager();
@@ -1023,12 +1011,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Check if there's space for the new metadata entry
             FrameOpSpaceStatus spaceStatus = ctx.getMetadataFrame().hasSpaceInsert(metadataTuple);
-
-            // Handle null case from mock frames in tests
-            if (spaceStatus == null) {
-                // Assume sufficient space for test scenarios
-                spaceStatus = FrameOpSpaceStatus.SUFFICIENT_SPACE;
-            }
 
             if (spaceStatus == FrameOpSpaceStatus.SUFFICIENT_CONTIGUOUS_SPACE
                     || spaceStatus == FrameOpSpaceStatus.SUFFICIENT_SPACE) {
@@ -1291,10 +1273,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     public int getVectorDimensions() {
         return vectorDimensions;
-    }
-
-    public List<Integer> getAllPageIds() {
-        throw new UnsupportedOperationException("Use bulkLoadFromTree() instead");
     }
 
     public boolean isStaticStructureInitialized() {

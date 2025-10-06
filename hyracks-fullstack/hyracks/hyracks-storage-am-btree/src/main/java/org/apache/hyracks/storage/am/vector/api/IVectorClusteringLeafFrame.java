@@ -82,4 +82,6 @@ public interface IVectorClusteringLeafFrame extends IVectorClusteringFrame {
      */
     void ensureCapacity(IBufferCache bufferCache, ITupleReference tuple, IExtraPageBlockHelper extraPageBlockHelper)
             throws HyracksDataException;
+
+    void setOverflowFlagBit(boolean overflowFlag);
 }

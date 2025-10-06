@@ -32,7 +32,8 @@ import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDese
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
-import org.apache.hyracks.storage.common.MultiComparator;
+import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame;
+import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
@@ -51,17 +52,10 @@ public class VectorClusteringTreeStaticInitializer {
     private final IPageManager pageManager;
     private final ITreeIndexMetadataFrame metaFrame;
     @SuppressWarnings("unused")
-    private final MultiComparator cmp;
     private final int fileId;
     private final List<TestPage> testPages;
 
     // Tuple writers for different frame types
-    @SuppressWarnings("unused")
-    private final org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriter leafTupleWriter;
-    @SuppressWarnings("unused")
-    private final org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriter interiorTupleWriter;
-    @SuppressWarnings("unused")
-    private final org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriter metadataTupleWriter;
 
     /**
      * Represents a test page in the vector tree structure
@@ -138,19 +132,8 @@ public class VectorClusteringTreeStaticInitializer {
         this.bufferCache = vectorTree.getBufferCache();
         this.pageManager = vectorTree.getPageManager();
         this.metaFrame = pageManager.createMetadataFrame();
-        this.cmp = null;
         this.fileId = vectorTree.getFileId();
         this.testPages = new ArrayList<>();
-
-        // Initialize tuple writers for different frame types
-        this.leafTupleWriter = (org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriter) vectorTree
-                .getLeafFrameFactory().createFrame().getTupleWriter();
-        this.interiorTupleWriter =
-                (org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriter) vectorTree
-                        .getInteriorFrameFactory().createFrame().getTupleWriter();
-        this.metadataTupleWriter =
-                (org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriter) vectorTree
-                        .getMetadataFrameFactory().createFrame().getTupleWriter();
     }
 
     /**
@@ -162,9 +145,6 @@ public class VectorClusteringTreeStaticInitializer {
         if (tuples.isEmpty()) {
             throw new IllegalArgumentException("Cannot initialize tree with empty tuple list");
         }
-
-        // Clear any existing structure
-        cleanup();
 
         // Check if this is our special 3-level configuration
         if (config.numLeafPages == 8 && config.numInteriorPages == 4 && config.createMultiLevel) {
@@ -282,11 +262,10 @@ public class VectorClusteringTreeStaticInitializer {
     /**
      * Create a new page of the specified type using proper buffer management pattern.
      *
-     * This method follows the proper page lifecycle pattern to ensure buffer synchronization:
-     * 1. pageManager.takePage(metaFrame) - get page ID from page manager
-     * 2. BufferedFileHandle.getDiskPageId(fileId, pageId) - create disk page ID 
-     * 3. bufferCache.pin(dpid, NEW) - pin the page in buffer cache
-     * 4. Keep page pinned for initialization - page will be unpinned by caller after modifications
+     * This method follows the proper page lifecycle pattern to ensure buffer synchronization: 1.
+     * pageManager.takePage(metaFrame) - get page ID from page manager 2. BufferedFileHandle.getDiskPageId(fileId,
+     * pageId) - create disk page ID 3. bufferCache.pin(dpid, NEW) - pin the page in buffer cache 4. Keep page pinned
+     * for initialization - page will be unpinned by caller after modifications
      *
      * This ensures proper page ID management and buffer synchronization for tree operations.
      */
@@ -318,7 +297,6 @@ public class VectorClusteringTreeStaticInitializer {
                 (org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrame) vectorTree.getLeafFrameFactory()
                         .createFrame();
 
-        // CRITICAL FIX: Proper buffer management pattern
         leafPage.page.acquireWriteLatch();
         try {
             leafFrame.setPage(leafPage.page);
@@ -326,7 +304,6 @@ public class VectorClusteringTreeStaticInitializer {
 
             // Set a test centroid for this leaf page
             double[] testCentroid = generateTestCentroid(leafPage.pageId);
-            leafFrame.setCentroid(testCentroid);
             leafFrame.setClusterId(leafPage.pageId); // Use page ID as cluster ID for testing
 
             // Insert tuples into the leaf frame using proper frame methods
@@ -353,7 +330,6 @@ public class VectorClusteringTreeStaticInitializer {
                 (org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame) vectorTree
                         .getInteriorFrameFactory().createFrame();
 
-        // CRITICAL FIX: Proper buffer management pattern
         interiorPage.page.acquireWriteLatch();
         try {
             interiorFrame.setPage(interiorPage.page);
@@ -361,7 +337,6 @@ public class VectorClusteringTreeStaticInitializer {
 
             // Set a test centroid for this interior page
             double[] testCentroid = generateTestCentroid(interiorPage.pageId);
-            interiorFrame.setCentroid(testCentroid);
             interiorFrame.setClusterId(interiorPage.pageId); // Use page ID as cluster ID for testing
 
             // Insert cluster entries with child page pointers
@@ -394,7 +369,6 @@ public class VectorClusteringTreeStaticInitializer {
                 (org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame) vectorTree.getDataFrameFactory()
                         .createFrame();
 
-        // CRITICAL FIX: Proper buffer management pattern
         dataPage.page.acquireWriteLatch();
         try {
             dataFrame.setPage(dataPage.page);
@@ -402,7 +376,6 @@ public class VectorClusteringTreeStaticInitializer {
 
             // Set test centroid and cluster ID
             double[] testCentroid = generateTestCentroid(dataPage.pageId);
-            dataFrame.setCentroid(testCentroid);
             dataFrame.setClusterId(dataPage.pageId);
         } finally {
             dataPage.page.releaseWriteLatch(true); // Mark page as dirty
@@ -479,35 +452,6 @@ public class VectorClusteringTreeStaticInitializer {
     }
 
     /**
-     * Create a test tuple for leaf frames (format: <cid, centroid, metadata_ptr>)
-     */
-    @SuppressWarnings("unused")
-    private ITupleReference createLeafTestTuple(int clusterId, double[] centroid, int metadataPageId) {
-        // Create a simple tuple reference for testing
-        // In practice, you would use proper tuple builders and serializers
-        return new org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference();
-    }
-
-    /**
-     * Create a test tuple for interior frames (format: <cid, centroid, child_ptr>)
-     */
-    @SuppressWarnings("unused")
-    private ITupleReference createInteriorTestTuple(int clusterId, double[] centroid, int childPageId) {
-        // Create a simple tuple reference for testing
-        // In practice, you would use proper tuple builders and serializers
-        return new org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference();
-    }
-
-    /**
-     * Create a test tuple for metadata frames (format: <max_distance, data_page_ptr>)
-     */
-    @SuppressWarnings("unused")
-    private ITupleReference createMetadataTestTuple(float maxDistance, int dataPageId) {
-        // Create a simple tuple reference for testing
-        return new org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference();
-    }
-
-    /**
      * Set the root page ID using reflection to access the protected field
      */
     private void setRootPageId(int rootPageId) throws HyracksDataException {
@@ -530,10 +474,7 @@ public class VectorClusteringTreeStaticInitializer {
         if (rootPage != null) {
             return rootPage.pageId;
         }
-
-        // If no explicit root, return the first interior or leaf page
-        return testPages.stream().filter(p -> p.type == TestPage.PageType.INTERIOR || p.type == TestPage.PageType.LEAF)
-                .findFirst().map(p -> p.pageId).orElse(-1);
+        return -1;
     }
 
     /**
@@ -699,7 +640,6 @@ public class VectorClusteringTreeStaticInitializer {
 
         // Generate hierarchical centroid for this leaf position
         double[] leafCentroid = generateHierarchicalCentroid(leafIndex, 0); // Level 0 = leaf
-        leafFrame.setCentroid(leafCentroid);
         leafFrame.setClusterId(leafIndex);
 
         // Create a single cluster tuple for this leaf (cid + centroid + metadata_pointer)
@@ -735,16 +675,14 @@ public class VectorClusteringTreeStaticInitializer {
      */
     private void initializeInteriorPageWithHierarchicalCentroid(TestPage interiorPage, int interiorIndex,
             int leftChildPageId, int rightChildPageId) throws HyracksDataException {
-        org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame interiorFrame =
-                (org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame) vectorTree
-                        .getInteriorFrameFactory().createFrame();
+        VectorClusteringInteriorFrame interiorFrame =
+                (VectorClusteringInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
 
         interiorFrame.setPage(interiorPage.page);
         interiorFrame.initBuffer((byte) 1); // Interior level is 1
 
         // Generate hierarchical centroid for this interior position
         double[] interiorCentroid = generateHierarchicalCentroid(interiorIndex, 1); // Level 1 = interior
-        interiorFrame.setCentroid(interiorCentroid);
         interiorFrame.setClusterId(interiorIndex);
 
         // Insert cluster tuples into the interior frame
@@ -779,16 +717,14 @@ public class VectorClusteringTreeStaticInitializer {
      */
     private void initializeRootPageWith4Children(TestPage rootPage, List<Integer> interiorPageIds)
             throws HyracksDataException {
-        org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame rootFrame =
-                (org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame) vectorTree
-                        .getInteriorFrameFactory().createFrame();
+        VectorClusteringInteriorFrame rootFrame =
+                (VectorClusteringInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
 
         rootFrame.setPage(rootPage.page);
         rootFrame.initBuffer((byte) 2); // Root level is 2
 
         // Set root centroid (centroid of all data)
-        double[] rootCentroid = generateHierarchicalCentroid(0, 2); // Level 2 = root
-        rootFrame.setCentroid(rootCentroid);
+
         rootFrame.setClusterId(0); // Root has cluster ID 0
 
         // Insert cluster tuples first, then set child pointers  
@@ -800,7 +736,6 @@ public class VectorClusteringTreeStaticInitializer {
             }
         }
 
-        // CRITICAL: Set child pointers using actual allocated page IDs from page manager
         for (int i = 0; i < Math.min(4, interiorPageIds.size()); i++) {
             if (i < rootFrame.getTupleCount()) {
                 rootFrame.setChildPageId(i, interiorPageIds.get(i));
@@ -942,16 +877,14 @@ public class VectorClusteringTreeStaticInitializer {
      * pages will be added dynamically during insertion.
      */
     private void initializeEmptyMetadataPage(TestPage metadataPage, int clusterIndex) throws HyracksDataException {
-        org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame metadataFrame =
-                (org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame) vectorTree
-                        .getMetadataFrameFactory().createFrame();
+        VectorClusteringMetadataFrame metadataFrame =
+                (VectorClusteringMetadataFrame) vectorTree.getMetadataFrameFactory().createFrame();
 
         metadataFrame.setPage(metadataPage.page);
         metadataFrame.initBuffer((byte) 0); // Metadata pages are at level 0
 
         // Set cluster-specific centroid and ID
         double[] clusterCentroid = generateHierarchicalCentroid(clusterIndex, 0);
-        metadataFrame.setCentroid(clusterCentroid);
         metadataFrame.setClusterId(clusterIndex);
 
         // Initialize as empty (no data page entries yet)

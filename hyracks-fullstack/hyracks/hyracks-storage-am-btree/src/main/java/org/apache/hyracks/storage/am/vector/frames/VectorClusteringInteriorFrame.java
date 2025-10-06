@@ -34,11 +34,11 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
  */
 public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame implements IVectorClusteringInteriorFrame {
 
-    protected static final int NEXT_PAGE_OFFSET = CENTROID_DATA_OFFSET + 4;
+    protected static final int NEXT_PAGE_OFFSET = CENTROID_ID_OFFSET + 4;
     private final ITreeIndexTupleReference cmpFrameTuple;
 
-    public VectorClusteringInteriorFrame(ITreeIndexTupleWriter tupleWriter, int centroidDimensions) {
-        super(tupleWriter, new OrderedSlotManager(), centroidDimensions);
+    public VectorClusteringInteriorFrame(ITreeIndexTupleWriter tupleWriter) {
+        super(tupleWriter, new OrderedSlotManager());
         this.cmpFrameTuple = tupleWriter.createTupleReference();
     }
 
@@ -76,36 +76,11 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
 
     @Override
     public int findChildIndex(ITupleReference searchKey) throws HyracksDataException {
-        // For interior frames, we need to find the best matching cluster centroid
-        // This is a simplified implementation - in practice, you might want more sophisticated matching
-        int tupleCount = getTupleCount();
-        if (tupleCount == 0) {
-            return 0;
-        }
-
-        double bestDistance = Double.MAX_VALUE;
-        int bestIndex = 0;
-
-        // Extract search vector from the search key (assuming it's in the first field)
-        double[] searchVector = extractVectorFromTuple(searchKey);
-
-        for (int i = 0; i < tupleCount; i++) {
-            frameTuple.resetByTupleIndex(this, i);
-            double[] centroid = extractCentroidFromTuple(frameTuple);
-            double distance = computeEuclideanDistance(searchVector, centroid);
-
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestIndex = i;
-            }
-        }
-
-        return bestIndex;
+        return -1;
     }
 
     @Override
     public int findInsertTupleIndex(ITupleReference tuple) throws HyracksDataException {
-        // For interior frames, insertions typically happen during splits
         // Insert at the end for simplicity
         return getTupleCount();
     }
@@ -122,6 +97,12 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
     }
 
     @Override
+    public void insertSorted(ITupleReference tuple) {
+        // For leaf frames, order doesn't matter, so just insert at the end
+        insert(tuple, getTupleCount());
+    }
+
+    @Override
     public FrameOpSpaceStatus hasSpaceInsert(ITupleReference tuple) throws HyracksDataException {
         int tupleSize = getBytesRequiredToWriteTuple(tuple);
         int totalFreeSpace = buf.getInt(TOTAL_FREE_SPACE_OFFSET);
@@ -135,27 +116,6 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
         } else {
             return FrameOpSpaceStatus.INSUFFICIENT_SPACE;
         }
-    }
-
-    /**
-     * Extracts vector from a tuple (assumes vector is in the centroid field).
-     */
-    private double[] extractVectorFromTuple(ITupleReference tuple) {
-        // This is a simplified implementation
-        // In practice, you'd need to properly parse the tuple structure
-        // For now, assume the centroid is stored as a serialized double array
-        // You would implement proper deserialization based on your tuple format
-        return new double[centroidDimensions]; // Placeholder
-    }
-
-    /**
-     * Extracts centroid from a cluster entry tuple.
-     */
-    private double[] extractCentroidFromTuple(ITreeIndexTupleReference tuple) {
-        // This is a simplified implementation
-        // In practice, you'd need to properly parse the tuple structure
-        // The centroid should be the second field in interior node entries
-        return new double[centroidDimensions]; // Placeholder
     }
 
     public int getFreeSpaceOff() {

@@ -40,7 +40,7 @@ public class VectorClusteringDataFrameFactory implements ITreeIndexFrameFactory 
 
     @Override
     public IVectorClusteringDataFrame createFrame() {
-        return new VectorClusteringDataFrame(tupleWriterFactory.createTupleWriter(), vectorDimensions);
+        return new VectorClusteringDataFrame(tupleWriterFactory.createTupleWriter());
     }
 
     @Override

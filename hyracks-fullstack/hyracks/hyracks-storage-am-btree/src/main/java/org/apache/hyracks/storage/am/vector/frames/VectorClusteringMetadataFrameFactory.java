@@ -40,7 +40,7 @@ public class VectorClusteringMetadataFrameFactory implements ITreeIndexFrameFact
 
     @Override
     public IVectorClusteringMetadataFrame createFrame() {
-        return new VectorClusteringMetadataFrame(tupleWriter, centroidDimensions);
+        return new VectorClusteringMetadataFrame(tupleWriter);
     }
 
     @Override

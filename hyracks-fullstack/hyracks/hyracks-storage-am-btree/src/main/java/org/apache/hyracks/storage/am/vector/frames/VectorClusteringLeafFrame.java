@@ -34,35 +34,40 @@ import org.apache.hyracks.storage.common.buffercache.IExtraPageBlockHelper;
  * Contains cluster entries: <cid, full_precision_centroid, pointer_to_first_metadata_page>
  */
 public class VectorClusteringLeafFrame extends VectorClusteringNSMFrame implements IVectorClusteringLeafFrame {
+    protected static final int NEXT_PAGE_OFFSET = CENTROID_ID_OFFSET + 4;
+    protected static final int OVERFLOW_FLAG_OFFSET = NEXT_PAGE_OFFSET + 4;
 
-    // Offset for next leaf pointer (4 bytes) - comes after centroid data
-    private int getNextLeafOffset() {
-        return CENTROID_DATA_OFFSET + (centroidDimensions * 8);
-    }
-
-    public VectorClusteringLeafFrame(ITreeIndexTupleWriter tupleWriter, int centroidDimensions) {
-        super(tupleWriter, new OrderedSlotManager(), centroidDimensions);
+    public VectorClusteringLeafFrame(ITreeIndexTupleWriter tupleWriter) {
+        super(tupleWriter, new OrderedSlotManager());
     }
 
     @Override
     public void initBuffer(byte level) {
         super.initBuffer(level);
-        buf.putInt(getNextLeafOffset(), -1); // Initialize next leaf pointer to -1
+        buf.putInt(NEXT_PAGE_OFFSET, -1); // Initialize next leaf pointer to -1
     }
 
     @Override
     public int getPageHeaderSize() {
-        return getNextLeafOffset() + 4; // Base header + next leaf pointer
+        return OVERFLOW_FLAG_OFFSET + 1; // Base header + next leaf pointer
     }
 
     @Override
     public void setNextLeaf(int nextLeafPage) {
-        buf.putInt(getNextLeafOffset(), nextLeafPage);
+        buf.putInt(NEXT_PAGE_OFFSET, nextLeafPage);
     }
 
     @Override
     public int getNextLeaf() {
-        return buf.getInt(getNextLeafOffset());
+        return buf.getInt(NEXT_PAGE_OFFSET);
+    }
+
+    public void setOverflowFlagBit(boolean overflowFlag) {
+        buf.put(OVERFLOW_FLAG_OFFSET, (byte) (overflowFlag ? 1 : 0));
+    }
+
+    public boolean getOverflowFlagBit() {
+        return buf.get(OVERFLOW_FLAG_OFFSET) != 0;
     }
 
     @Override
@@ -101,6 +106,7 @@ public class VectorClusteringLeafFrame extends VectorClusteringNSMFrame implemen
                 buf.getInt(TOTAL_FREE_SPACE_OFFSET) - bytesWritten - slotManager.getSlotSize());
     }
 
+    @Override
     public void insertSorted(ITupleReference tuple) {
         // For leaf frames, order doesn't matter, so just insert at the end
         insert(tuple, getTupleCount());

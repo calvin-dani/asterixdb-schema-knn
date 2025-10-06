@@ -71,6 +71,7 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
     private List<Integer> smPages;
     private int opRestarts = 0;
     private boolean destroyed = false;
+    private long metadataPageId = -1;
 
     public VectorClusteringOpContext(IIndexAccessor accessor, ITreeIndexFrameFactory interiorFrameFactory,
             ITreeIndexFrameFactory leafFrameFactory, ITreeIndexFrameFactory metadataFrameFactory,
@@ -215,5 +216,13 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
     @Override
     public void returnFreePageBlock(int blockPageId, int size) throws HyracksDataException {
         freePageManager.releaseBlock(metaFrame, blockPageId, size);
+    }
+
+    public long getMetadataPageId() {
+        return metadataPageId;
+    }
+
+    public void setMetadataPageId(long metadataPageId) {
+        this.metadataPageId = metadataPageId;
     }
 }

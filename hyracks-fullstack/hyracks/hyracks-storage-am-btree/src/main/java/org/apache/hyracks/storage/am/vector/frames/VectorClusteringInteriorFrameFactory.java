@@ -45,7 +45,7 @@ public class VectorClusteringInteriorFrameFactory implements ITreeIndexFrameFact
 
     @Override
     public IVectorClusteringInteriorFrame createFrame() {
-        return new VectorClusteringInteriorFrame(tupleWriter, centroidDimensions);
+        return new VectorClusteringInteriorFrame(tupleWriter);
     }
 
     @Override

@@ -40,11 +40,11 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
 
     // Offset for next page pointer (4 bytes) - comes after centroid data
     private int getNextPageOffset() {
-        return CENTROID_DATA_OFFSET + (centroidDimensions * 8);
+        return CENTROID_ID_OFFSET + 4;
     }
 
-    public VectorClusteringMetadataFrame(ITreeIndexTupleWriter tupleWriter, int centroidDimensions) {
-        super(tupleWriter, new OrderedSlotManager(), centroidDimensions);
+    public VectorClusteringMetadataFrame(ITreeIndexTupleWriter tupleWriter) {
+        super(tupleWriter, new OrderedSlotManager());
     }
 
     @Override

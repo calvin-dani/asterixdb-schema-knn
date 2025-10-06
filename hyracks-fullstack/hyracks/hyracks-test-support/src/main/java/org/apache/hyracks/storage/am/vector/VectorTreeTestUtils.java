@@ -42,6 +42,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
+import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -62,14 +63,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
             this.clusterCentroid = centroid.clone();
             this.insertedVectors = new ArrayList<>();
             this.clusterId = id;
-        }
-    }
-
-    public void initializeTestStaticStructure(AbstractVectorTreeTestContext ctx) throws Exception {
-        try {
-            VectorTreeTestUtils.initializeThreeLevelStructure(ctx);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -177,7 +170,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     }
 
     @Override
-    protected org.apache.hyracks.storage.common.ISearchPredicate createNullSearchPredicate() {
+    protected ISearchPredicate createNullSearchPredicate() {
         return null;
     }
 
@@ -436,11 +429,9 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         }
 
         // Initialize the static structure
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree vectorTree =
-                (org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree) ctx.getIndex();
+        VectorClusteringTree vectorTree = (VectorClusteringTree) ctx.getIndex();
 
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer initializer =
-                new org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer(vectorTree);
+        VectorClusteringTreeStaticInitializer initializer = new VectorClusteringTreeStaticInitializer(vectorTree);
 
         initializer.initializeStaticStructure(config, clusterTuples);
         staticInitializer = initializer;
@@ -460,7 +451,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     /**
      * Get the current static initializer
      */
-    public static org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer getStaticInitializer() {
+    public static VectorClusteringTreeStaticInitializer getStaticInitializer() {
         return staticInitializer;
     }
 
@@ -469,7 +460,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      */
     public static void cleanupStaticInitializer() throws Exception {
         if (staticInitializer != null) {
-            staticInitializer.cleanup();
             staticInitializer = null;
         }
     }

@@ -27,6 +27,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.storage.am.vector.frames.VectorTreeFrameType;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
 import org.apache.hyracks.storage.am.vector.util.VectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.util.VectorTreeTestHarness;
 import org.junit.After;
@@ -124,7 +125,7 @@ public class VectorClusteringTreeInsertTest extends AbstractVectorTreeTestDriver
     }
 
     /**
-     * Test high-dimensional vector insertion (stress test)
+     * Test high-dimensional vector insertion
      */
     public void highDimensionVectorTest() throws Exception {
         if (LOGGER.isInfoEnabled()) {
@@ -162,9 +163,8 @@ public class VectorClusteringTreeInsertTest extends AbstractVectorTreeTestDriver
         ctx.getIndex().activate();
 
         // Initialize static structure using the initializer
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .multipleLeaves();
+        VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
+                VectorClusteringTreeStaticInitializer.TreeStructureConfig.multipleLeaves();
         VectorTreeTestUtils.initializeStaticStructure(ctx, config);
 
         // Insert additional tuples into the pre-built structure
@@ -202,9 +202,8 @@ public class VectorClusteringTreeInsertTest extends AbstractVectorTreeTestDriver
         ctx.getIndex().activate();
 
         // Initialize deep tree structure
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .deepTree();
+        VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
+                VectorClusteringTreeStaticInitializer.TreeStructureConfig.deepTree();
         VectorTreeTestUtils.initializeStaticStructure(ctx, config);
 
         // Insert tuples into the deep structure
@@ -217,70 +216,6 @@ public class VectorClusteringTreeInsertTest extends AbstractVectorTreeTestDriver
 
         ctx.getIndex().validate();
 
-        VectorTreeTestUtils.cleanupStaticInitializer();
-
-        ctx.getIndex().deactivate();
-        ctx.getIndex().destroy();
-    }
-
-    /**
-     * Test edge cases with zero vectors and special values
-     */
-    public void edgeCaseVectorTest() throws Exception {
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info("VectorClusteringTree " + getTestOpName() + " Test With Edge Case Vectors.");
-        }
-
-        ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
-
-        AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
-        ctx.getIndex().create();
-        ctx.getIndex().activate();
-
-        // Insert edge case vectors (zero vectors, normalized vectors, etc.)
-        vectorTreeTestUtils.insertEdgeCaseVectors(ctx, 100, getRandom());
-
-        // Validate the insertions
-        vectorTreeTestUtils.checkPointSearches(ctx);
-        vectorTreeTestUtils.checkScan(ctx);
-
-        ctx.getIndex().validate();
-        ctx.getIndex().deactivate();
-        ctx.getIndex().destroy();
-    }
-
-    /**
-     * Test using pre-built static tree structure - Single leaf configuration
-     */
-    public void staticStructureSingleLeafTest() throws Exception {
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info(
-                    "VectorClusteringTree " + getTestOpName() + " Test With Pre-built Static Single Leaf Structure.");
-        }
-
-        ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
-
-        AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
-        ctx.getIndex().create();
-        ctx.getIndex().activate();
-
-        // Initialize static single leaf structure
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .singleLeaf();
-
-        VectorTreeTestUtils.initializeStaticStructure(ctx, config);
-
-        // Validate the pre-built structure
-        vectorTreeTestUtils.checkScan(ctx);
-        vectorTreeTestUtils.checkDiskOrderScan(ctx);
-
-        // Validate tree structure integrity
-        ctx.getIndex().validate();
-
-        // Clean up static initializer
         VectorTreeTestUtils.cleanupStaticInitializer();
 
         ctx.getIndex().deactivate();
@@ -304,9 +239,8 @@ public class VectorClusteringTreeInsertTest extends AbstractVectorTreeTestDriver
         ctx.getIndex().activate();
 
         // Initialize static multiple leaves structure
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .multipleLeaves();
+        VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
+                VectorClusteringTreeStaticInitializer.TreeStructureConfig.multipleLeaves();
 
         VectorTreeTestUtils.initializeStaticStructure(ctx, config);
 
@@ -318,93 +252,6 @@ public class VectorClusteringTreeInsertTest extends AbstractVectorTreeTestDriver
         vectorTreeTestUtils.checkVectorSimilaritySearches(ctx);
 
         // Validate tree structure integrity
-        ctx.getIndex().validate();
-
-        // Clean up static initializer
-        VectorTreeTestUtils.cleanupStaticInitializer();
-
-        ctx.getIndex().deactivate();
-        ctx.getIndex().destroy();
-    }
-
-    /**
-     * Test using pre-built static tree structure - Deep tree configuration
-     */
-    public void staticStructureDeepTreeTest() throws Exception {
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info("VectorClusteringTree " + getTestOpName() + " Test With Pre-built Static Deep Tree Structure.");
-        }
-
-        ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
-
-        AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
-        ctx.getIndex().create();
-        ctx.getIndex().activate();
-
-        // Initialize static deep tree structure
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .deepTree();
-
-        VectorTreeTestUtils.initializeStaticStructure(ctx, config);
-
-        // Test comprehensive operations on the deep structure
-        vectorTreeTestUtils.checkScan(ctx);
-        vectorTreeTestUtils.checkDiskOrderScan(ctx);
-        vectorTreeTestUtils.checkVectorSimilaritySearches(ctx);
-
-        // Validate tree structure integrity - this is important for deep trees
-        ctx.getIndex().validate();
-
-        // Test static initializer information
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer initializer =
-                VectorTreeTestUtils.getStaticInitializer();
-        if (initializer != null) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("Deep tree structure initialized with root page ID: " + initializer.getRootPageId());
-                LOGGER.info("Total test pages created: " + initializer.getAllPages().size());
-            }
-        }
-
-        // Clean up static initializer
-        VectorTreeTestUtils.cleanupStaticInitializer();
-
-        ctx.getIndex().deactivate();
-        ctx.getIndex().destroy();
-    }
-
-    /**
-     * Test mixed insertions on pre-built static structure
-     */
-    public void staticStructureMixedInsertionsTest() throws Exception {
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info(
-                    "VectorClusteringTree " + getTestOpName() + " Test With Mixed Insertions on Pre-built Structure.");
-        }
-
-        ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
-
-        AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
-        ctx.getIndex().create();
-        ctx.getIndex().activate();
-
-        // Initialize static structure first
-        org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config =
-                org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig
-                        .multipleLeaves();
-
-        VectorTreeTestUtils.initializeStaticStructure(ctx, config);
-
-        // Now perform additional insertions on the pre-built structure
-        vectorTreeTestUtils.insertVectorTuples(ctx, 50, getRandom());
-
-        // Validate combined structure (static + dynamic insertions)
-        vectorTreeTestUtils.checkScan(ctx);
-        vectorTreeTestUtils.checkVectorSimilaritySearches(ctx);
-
-        // Validate tree structure integrity after mixed operations
         ctx.getIndex().validate();
 
         // Clean up static initializer

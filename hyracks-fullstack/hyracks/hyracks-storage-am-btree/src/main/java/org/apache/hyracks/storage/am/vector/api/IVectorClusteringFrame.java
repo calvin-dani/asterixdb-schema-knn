@@ -34,13 +34,13 @@ public interface IVectorClusteringFrame extends ITreeIndexFrame {
      * Sets the centroid for this frame/page.
      * @param centroid the centroid vector
      */
-    void setCentroid(double[] centroid);
+    void setCentroidID(int centroid);
 
     /**
      * Gets the centroid for this frame/page.
      * @return the centroid vector
      */
-    double[] getCentroid();
+    int getCentroidID();
 
     /**
      * Gets the cluster ID associated with this frame.
@@ -68,4 +68,6 @@ public interface IVectorClusteringFrame extends ITreeIndexFrame {
      * @throws HyracksDataException if an error occurs
      */
     int findTupleIndex(ITupleReference tuple, MultiComparator cmp) throws HyracksDataException;
+
+    void insertSorted(ITupleReference tuple) throws HyracksDataException;
 }
