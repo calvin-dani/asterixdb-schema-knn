@@ -25,6 +25,7 @@ import static org.apache.asterix.runtime.utils.VectorDistanceArrCalculation.eucl
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,6 +43,8 @@ import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
+import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -55,6 +58,7 @@ import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.ByteArrayAccessibleOutputStream;
@@ -70,7 +74,53 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.util.string.UTF8StringUtil;
 
+// Serializable distance function implementations
+class ManhattanDistanceFunction implements DistanceFunction, Serializable {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public double apply(double[] a, double[] b) throws HyracksDataException {
+        return VectorDistanceArrCalculation.manhattan(a, b);
+    }
+}
+
+class EuclideanDistanceFunction implements DistanceFunction, Serializable {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public double apply(double[] a, double[] b) throws HyracksDataException {
+        return VectorDistanceArrCalculation.euclidean(a, b);
+    }
+}
+
+class EuclideanSquaredDistanceFunction implements DistanceFunction, Serializable {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public double apply(double[] a, double[] b) throws HyracksDataException {
+        return VectorDistanceArrCalculation.euclidean_squared(a, b);
+    }
+}
+
+class CosineDistanceFunction implements DistanceFunction, Serializable {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public double apply(double[] a, double[] b) throws HyracksDataException {
+        return VectorDistanceArrCalculation.cosine(a, b);
+    }
+}
+
+class DotProductDistanceFunction implements DistanceFunction, Serializable {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public double apply(double[] a, double[] b) throws HyracksDataException {
+        return VectorDistanceArrCalculation.dot(a, b);
+    }
+}
 /**
  * Enhanced version of LocalKMeansPlusPlusCentroidsOperatorDescriptor that maintains
  * hierarchical cluster relationships with parent-child associations.
@@ -175,6 +225,28 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private static final long serialVersionUID = 1L;
 
+    // Distance function constants
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
+            UTF8StringPointable.generateUTF8Pointable("euclidean");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2_SQUARED =
+            UTF8StringPointable.generateUTF8Pointable("l2_squared");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
+            UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
+    private static final UTF8StringPointable MANHATTAN_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+    private static final UTF8StringPointable COSINE_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+    private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
+
+    // Distance function hash map
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
+            Map.of(MANHATTAN_FORMAT.hash(), new ManhattanDistanceFunction(), EUCLIDEAN_DISTANCE.hash(),
+                    new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction(),
+                    EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
+                    EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
+                    new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+
     private final UUID sampleUUID;
     private final UUID centroidsUUID;
 
@@ -182,6 +254,26 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private IScalarEvaluatorFactory args; // Evaluator for extracting vector data from tuples
     private int K; // Number of clusters for initial level (leaf nodes)
     private int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
+    private HierarchicalClusterTree.OutputMode outputMode;
+    private DistanceFunction distanceFunction;
+
+    private static DistanceFunction getDistanceFunction(String distanceType) {
+        UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
+        DistanceFunction func = DISTANCE_MAP
+                .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
+        if (func == null) {
+            throw new IllegalArgumentException("Unsupported distance function: " + distanceType);
+        }
+        return func;
+    }
+
+    private double calculateDistance(double[] a, double[] b) {
+        try {
+            return distanceFunction.apply(a, b);
+        } catch (HyracksDataException e) {
+            throw new RuntimeException("Error calculating distance", e);
+        }
+    }
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor rDesc, UUID sampleUUID, UUID centroidsUUID, IScalarEvaluatorFactory args, int K,
