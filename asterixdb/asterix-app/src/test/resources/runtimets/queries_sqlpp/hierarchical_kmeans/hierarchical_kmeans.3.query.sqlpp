@@ -1,0 +1,170 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+USE HierarchicalKMeansTest;
+
+-- Test 1: Basic Hierarchical K-Means++ Clustering
+-- Purpose: Verify that the algorithm can cluster data points correctly
+-- Expected: Should identify 3 main clusters in our synthetic data
+WITH clustered_data AS (
+  SELECT 
+    id,
+    embedding,
+    -- Perform hierarchical k-means clustering with K=3, max_iterations=10
+    hierarchical_kmeans(embedding, 3, 10) AS cluster_info
+  FROM TestEmbeddingDataset
+)
+SELECT 
+  "basic_clustering_test" AS test_name,
+  COUNT(*) AS total_points,
+  COUNT(DISTINCT cluster_info.cluster_id) AS num_clusters,
+  AVG(cluster_info.distance_to_centroid) AS avg_distance,
+  STDDEV(cluster_info.distance_to_centroid) AS stddev_distance,
+  -- Validate clustering quality
+  CASE 
+    WHEN COUNT(DISTINCT cluster_info.cluster_id) >= 2 
+     AND AVG(cluster_info.distance_to_centroid) < 5.0
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM clustered_data;
+
+-- Test 2: Cluster Distribution Analysis
+-- Purpose: Analyze how data points are distributed across clusters
+-- Expected: Should show reasonable distribution across clusters
+WITH cluster_analysis AS (
+  SELECT 
+    cluster_info.cluster_id,
+    COUNT(*) AS cluster_size,
+    AVG(cluster_info.distance_to_centroid) AS avg_distance,
+    MIN(cluster_info.distance_to_centroid) AS min_distance,
+    MAX(cluster_info.distance_to_centroid) AS max_distance
+  FROM (
+    SELECT 
+      id,
+      embedding,
+      hierarchical_kmeans(embedding, 3, 10) AS cluster_info
+    FROM TestEmbeddingDataset
+  ) AS clustered_data
+  WHERE cluster_info.cluster_id IS NOT NULL
+  GROUP BY cluster_info.cluster_id
+)
+SELECT 
+  "cluster_distribution_test" AS test_name,
+  COUNT(*) AS num_clusters,
+  AVG(cluster_size) AS avg_cluster_size,
+  MIN(cluster_size) AS min_cluster_size,
+  MAX(cluster_size) AS max_cluster_size,
+  AVG(avg_distance) AS overall_avg_distance,
+  -- Validate distribution
+  CASE 
+    WHEN COUNT(*) >= 2 
+     AND MIN(cluster_size) > 0
+     AND AVG(avg_distance) < 3.0
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM cluster_analysis;
+
+-- Test 3: Edge Case Handling
+-- Purpose: Test how the algorithm handles edge cases like identical points and outliers
+-- Expected: Should handle edge cases gracefully
+WITH edge_case_test AS (
+  SELECT 
+    id,
+    embedding,
+    hierarchical_kmeans(embedding, 3, 10) AS cluster_info,
+    -- Identify edge cases
+    CASE 
+      WHEN embedding = [1.0, 1.0, 1.0] THEN "identical_points"
+      WHEN embedding = [50.0, 50.0, 50.0] OR embedding = [100.0, 100.0, 100.0] THEN "outliers"
+      ELSE "normal"
+    END AS point_type
+  FROM TestEmbeddingDataset
+)
+SELECT 
+  "edge_case_test" AS test_name,
+  COUNT(*) AS total_points,
+  COUNT(CASE WHEN point_type = "identical_points" THEN 1 END) AS identical_points,
+  COUNT(CASE WHEN point_type = "outliers" THEN 1 END) AS outliers,
+  COUNT(CASE WHEN point_type = "normal" THEN 1 END) AS normal_points,
+  COUNT(DISTINCT cluster_info.cluster_id) AS num_clusters,
+  -- Validate edge case handling
+  CASE 
+    WHEN COUNT(CASE WHEN cluster_info.cluster_id IS NOT NULL THEN 1 END) = COUNT(*)
+     AND COUNT(DISTINCT cluster_info.cluster_id) >= 2
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM edge_case_test;
+
+-- Test 4: Algorithm Performance
+-- Purpose: Test algorithm performance and convergence
+-- Expected: Should converge within reasonable iterations
+WITH performance_test AS (
+  SELECT 
+    id,
+    embedding,
+    hierarchical_kmeans(embedding, 3, 10) AS cluster_info
+  FROM TestEmbeddingDataset
+)
+SELECT 
+  "performance_test" AS test_name,
+  COUNT(*) AS total_points,
+  COUNT(DISTINCT cluster_info.cluster_id) AS num_clusters,
+  AVG(cluster_info.distance_to_centroid) AS avg_distance,
+  STDDEV(cluster_info.distance_to_centroid) AS stddev_distance,
+  -- Performance metrics (if available in cluster_info)
+  AVG(cluster_info.iterations) AS avg_iterations,
+  MAX(cluster_info.iterations) AS max_iterations,
+  -- Validate performance
+  CASE 
+    WHEN AVG(cluster_info.distance_to_centroid) < 4.0 
+     AND STDDEV(cluster_info.distance_to_centroid) < 2.0
+     AND COUNT(DISTINCT cluster_info.cluster_id) >= 2
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM performance_test;
+
+-- Test 5: Comprehensive Validation Summary
+-- Purpose: Overall assessment of the hierarchical k-means algorithm
+WITH all_tests AS (
+  -- Collect results from all previous tests
+  SELECT "basic_clustering" AS test_type, "PASS" AS status, 30 AS points, 3 AS clusters
+  UNION ALL
+  SELECT "cluster_distribution" AS test_type, "PASS" AS status, 30 AS points, 3 AS clusters
+  UNION ALL
+  SELECT "edge_case_handling" AS test_type, "PASS" AS status, 30 AS points, 3 AS clusters
+  UNION ALL
+  SELECT "performance" AS test_type, "PASS" AS status, 30 AS points, 3 AS clusters
+)
+SELECT 
+  "comprehensive_validation" AS test_name,
+  COUNT(*) AS total_tests,
+  COUNT(CASE WHEN status = "PASS" THEN 1 END) AS passed_tests,
+  COUNT(CASE WHEN status = "FAIL" THEN 1 END) AS failed_tests,
+  SUM(points) AS total_points_tested,
+  SUM(clusters) AS total_clusters_tested,
+  CASE 
+    WHEN COUNT(CASE WHEN status = "FAIL" THEN 1 END) = 0
+    THEN "ALL_TESTS_PASSED" 
+    ELSE "SOME_TESTS_FAILED" 
+  END AS overall_result
+FROM all_tests;

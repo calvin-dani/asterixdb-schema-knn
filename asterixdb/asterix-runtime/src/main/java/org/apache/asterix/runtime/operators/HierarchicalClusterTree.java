@@ -137,7 +137,7 @@ public class HierarchicalClusterTree implements Serializable {
         this.root = new TreeNode(centroid, 0, 0, nextGlobalId++, -1);
         this.totalNodes = 1;
     }
-    
+
     /**
      * Sets the root of the tree to an existing node
      * 
@@ -159,13 +159,13 @@ public class HierarchicalClusterTree implements Serializable {
      */
     public List<TreeNode> addRootNodes(List<double[]> centroids, int level) {
         List<TreeNode> rootNodes = new ArrayList<>();
-        
+
         for (int i = 0; i < centroids.size(); i++) {
             TreeNode node = new TreeNode(centroids.get(i), level, i, nextGlobalId++, -1);
             rootNodes.add(node);
             totalNodes++;
         }
-        
+
         return rootNodes;
     }
 
@@ -222,7 +222,7 @@ public class HierarchicalClusterTree implements Serializable {
         // The previous implementation called newParent.addChild(childNode) which creates
         // a new TreeNode instead of moving the existing childNode
         newParent.getChildren().add(childNode);
-        
+
         // Update child's parent global ID
         childNode.parentGlobalId = newParent.getGlobalId();
     }
