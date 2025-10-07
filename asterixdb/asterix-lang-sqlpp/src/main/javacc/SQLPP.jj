@@ -145,6 +145,7 @@ import org.apache.asterix.lang.common.statement.CreateFeedPolicyStatement;
 import org.apache.asterix.lang.common.statement.CreateFeedStatement;
 import org.apache.asterix.lang.common.statement.CreateFunctionStatement;
 import org.apache.asterix.lang.common.statement.CreateIndexStatement;
+import org.apache.asterix.lang.common.statement.CreateVectorIndexStatement;
 import org.apache.asterix.lang.common.statement.CreateSynonymStatement;
 import org.apache.asterix.lang.common.statement.CreateFullTextFilterStatement;
 import org.apache.asterix.lang.common.statement.CreateFullTextConfigStatement;
@@ -1068,6 +1069,7 @@ Statement CreateStatement() throws ParseException:
     | stmt = CreateNodegroupStatement(startToken)
     | stmt = CreateDatasetStatement(startToken)
     | stmt = CreateIndexStatement(startToken)
+    | stmt = CreateVectorIndexStatement(startToken)
     | stmt = CreateDatabaseStatement(startToken)
     | stmt = CreateDataverseStatement(startToken)
     | stmt = CreateFunctionStatement(startToken, false)
@@ -1465,10 +1467,66 @@ CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseExcept
       gramLength = -1;
       fullTextConfigName = null;
     }
-    CreateIndexStatement stmt = new CreateIndexStatement(nameComponents.first, nameComponents.second,
-      new Identifier(indexName), indexType, indexedElementList, enforced, gramLength, fullTextConfigName, ifNotExists,
-      excludeUnknown, castDefaultNull, castConfig);
+    try{
+        CreateIndexStatement stmt = CreateIndexStatement.CreateNonVectorIndexStatement(nameComponents.first, nameComponents.second,
+        new Identifier(indexName), indexType, indexedElementList, enforced, gramLength, fullTextConfigName, ifNotExists,
+            excludeUnknown, castDefaultNull, castConfig);
+        return addSourceLocation(stmt, startStmtToken);
+    }   catch (CompilationException e) {
+        throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
+        }
+    }
+  }
+}
+
+CreateIndexStatement CreateVectorIndexStatement(Token startStmtToken) throws ParseException:
+{
+  CreateIndexStatement stmt = null;
+}
+{
+  <VECTOR> <INDEX> stmt = VectorIndexSpecification(startStmtToken)
+  {
+    return stmt;
+  }
+}
+
+CreateIndexStatement VectorIndexSpecification(Token startStmtToken) throws ParseException:
+{
+  Pair<Namespace, Identifier> nameComponents = null;
+  String indexName = null;
+  boolean ifNotExists = false;
+  CreateIndexStatement.IndexedElement vectorField = null;
+  CreateIndexStatement.IndexedElement includeField = null;
+  List<CreateIndexStatement.IndexedElement> nonVectorFieldsList = new ArrayList<CreateIndexStatement.IndexedElement>();
+  RecordConstructor withRecord = null;
+   Token startElementToken = null;
+}
+{
+   indexName = Identifier() ifNotExists = IfNotExists()
+   <ON> nameComponents = QualifiedName()
+   <LEFTPAREN> { startElementToken  = token; }
+       vectorField = IndexedElement(startElementToken) {
+   }
+   <RIGHTPAREN>
+   <INC> <LEFTPAREN> { startElementToken  = token; }
+        includeField = IndexedElement(startElementToken) {
+            nonVectorFieldsList.add(includeField);
+        }
+        (<COMMA> { startElementToken = token; }
+        includeField = IndexedElement(startElementToken) {
+            nonVectorFieldsList.add(includeField);
+        }
+        )*
+  <RIGHTPAREN>
+  <WITH> withRecord = RecordConstructor()
+  {
+    try {
+    CreateIndexStatement stmt = CreateIndexStatement.CreateVectorIndexStatement(nameComponents.first, nameComponents.second,
+    new Identifier(indexName), vectorField, nonVectorFieldsList, withRecord, ifNotExists);
     return addSourceLocation(stmt, startStmtToken);
+    } catch (CompilationException e) {
+      throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
+    }
   }
 }
 
@@ -6089,6 +6147,7 @@ TOKEN [IGNORE_CASE]:
   | <IF : "if">
   | <INTO : "into">
   | <IN : "in">
+  | <INC : "inc">
   | <INDEX : "index">
   | <INGESTION : "ingestion">
   | <INNER : "inner">
@@ -6152,6 +6211,7 @@ TOKEN [IGNORE_CASE]:
   | <USING : "using">
   | <VALUE : "value">
   | <VALUED : "valued">
+  | <VECTOR : "vector">
   | <VIEW : "view">
   | <WHEN : "when">
   | <WHERE : "where">

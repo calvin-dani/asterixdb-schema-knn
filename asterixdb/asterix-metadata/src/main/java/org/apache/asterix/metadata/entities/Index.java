@@ -36,6 +36,7 @@ import org.apache.asterix.metadata.MetadataCache;
 import org.apache.asterix.metadata.api.IMetadataEntity;
 import org.apache.asterix.metadata.utils.Creator;
 import org.apache.asterix.metadata.utils.IndexUtil;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.AUnionType;
 import org.apache.asterix.om.types.IAType;
@@ -45,6 +46,7 @@ import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.api.job.profiling.IndexStats;
 import org.apache.hyracks.util.OptionalBoolean;
+import org.checkerframework.checker.units.qual.A;
 
 /**
  * Metadata describing an index.
@@ -72,9 +74,9 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
     public Index(String databaseName, DataverseName dataverseName, String datasetName, String indexName,
             IndexType indexType, IIndexDetails indexDetails, boolean isEnforced, boolean isPrimaryIndex, int pendingOp,
             Creator creator) {
-        boolean categoryOk = (indexType == null && indexDetails == null) || (IndexCategory
-                .of(Objects.requireNonNull(indexType)) == ((AbstractIndexDetails) Objects.requireNonNull(indexDetails))
-                        .getIndexCategory());
+        boolean categoryOk = (indexType == null && indexDetails == null) || (IndexCategory.of(
+                Objects.requireNonNull(indexType)) == ((AbstractIndexDetails) Objects.requireNonNull(
+                indexDetails)).getIndexCategory());
         if (!categoryOk) {
             throw new IllegalArgumentException();
         }
@@ -95,10 +97,9 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             IndexType indexType, List<List<String>> keyFieldNames, List<Integer> keyFieldSourceIndicators,
             List<IAType> keyFieldTypes, boolean overrideKeyFieldTypes, boolean isEnforced, boolean isPrimaryIndex,
             int pendingOp, OptionalBoolean excludeUnknownKey, Creator creator) {
-        this(database, dataverseName, datasetName,
-                indexName, indexType, createSimpleIndexDetails(indexType, keyFieldNames, keyFieldSourceIndicators,
-                        keyFieldTypes, overrideKeyFieldTypes, excludeUnknownKey),
-                isEnforced, isPrimaryIndex, pendingOp, creator);
+        this(database, dataverseName, datasetName, indexName, indexType,
+                createSimpleIndexDetails(indexType, keyFieldNames, keyFieldSourceIndicators, keyFieldTypes,
+                        overrideKeyFieldTypes, excludeUnknownKey), isEnforced, isPrimaryIndex, pendingOp, creator);
     }
 
     public static Index createPrimaryIndex(String database, DataverseName dataverseName, String datasetName,
@@ -106,8 +107,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             int pendingOp, Creator creator) {
         return new Index(database, dataverseName, datasetName, datasetName, IndexType.BTREE,
                 new ValueIndexDetails(keyFieldNames, keyFieldSourceIndicators, keyFieldTypes, false,
-                        OptionalBoolean.empty(), OptionalBoolean.empty(), null, null, null),
-                false, true, pendingOp, creator);
+                        OptionalBoolean.empty(), OptionalBoolean.empty(), null, null, null), false, true, pendingOp,
+                creator);
     }
 
     public String getDatabaseName() {
@@ -242,8 +243,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
         if (!datasetName.equals(otherIndex.getDatasetName())) {
             return false;
         }
-        return Objects.equals(databaseName, otherIndex.databaseName)
-                && dataverseName.equals(otherIndex.getDataverseName());
+        return Objects.equals(databaseName, otherIndex.databaseName) && dataverseName.equals(
+                otherIndex.getDataverseName());
     }
 
     @Override
@@ -326,7 +327,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
         VALUE,
         TEXT,
         ARRAY,
-        SAMPLE;
+        SAMPLE,
+        VECTOR;
 
         public static IndexCategory of(IndexType indexType) {
             switch (indexType) {
@@ -342,6 +344,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
                     return ARRAY;
                 case SAMPLE:
                     return SAMPLE;
+                case VECTOR:
+                    return VECTOR;
                 default:
                     throw new IllegalArgumentException(String.valueOf(indexType));
             }
@@ -440,6 +444,100 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         public ARecordType getIndexExpectedType() throws AlgebricksException {
             return ProjectionFiltrationTypeUtil.getRecordType(getKeyFieldNames());
+        }
+    }
+
+    public static final class VectorIndexDetails extends AbstractIndexDetails {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<String> keyFieldNames;
+
+        private final List<List<String>> includeFieldNames;
+
+        private final List<Integer> includeFieldSourceIndicators;
+
+        private final List<IAType> includeFieldTypes;
+
+        private final boolean overrideKeyFieldTypes;
+
+        private final Boolean excludeUnknownKey;
+
+        private final Boolean castDefaultNull;
+
+        private final String castDatetimeFormat;
+
+        private final String castDateFormat;
+
+        private final String castTimeFormat;
+
+        private final AdmObjectNode withObjectNode;
+
+        public VectorIndexDetails(List<String> keyFieldNames, List<List<String>> includeFieldNames,
+                List<Integer> includeFieldSourceIndicators, List<IAType> includeFieldTypes,
+                boolean overrideKeyFieldTypes, OptionalBoolean excludeUnknownKey, OptionalBoolean castDefaultNull,
+                String castDatetimeFormat, String castDateFormat, String castTimeFormat, AdmObjectNode withObjectNode) {
+            this.keyFieldNames = keyFieldNames;
+            this.overrideKeyFieldTypes = overrideKeyFieldTypes;
+            this.excludeUnknownKey = excludeUnknownKey.isEmpty() ? null : excludeUnknownKey.get();
+            this.castDefaultNull = castDefaultNull.isEmpty() ? null : castDefaultNull.get();
+            this.castDatetimeFormat = castDatetimeFormat;
+            this.castDateFormat = castDateFormat;
+            this.castTimeFormat = castTimeFormat;
+            this.includeFieldNames = includeFieldNames;
+            this.includeFieldTypes = includeFieldTypes;
+            this.includeFieldSourceIndicators = includeFieldSourceIndicators;
+            this.withObjectNode = withObjectNode;
+        }
+
+        @Override
+        IndexCategory getIndexCategory() {
+            return IndexCategory.VECTOR;
+        }
+
+        public List<List<String>> getIncludeFieldNames() {
+            return includeFieldNames;
+        }
+
+        public List<Integer> getIncludeFieldSourceIndicators() {
+            return includeFieldSourceIndicators;
+        }
+
+        public List<IAType> getIncludeFieldTypes() {
+            return includeFieldTypes;
+        }
+
+        public OptionalBoolean getExcludeUnknownKey() {
+            return OptionalBoolean.ofNullable(excludeUnknownKey);
+        }
+
+        public OptionalBoolean getCastDefaultNull() {
+            return OptionalBoolean.ofNullable(castDefaultNull);
+        }
+
+        public String getCastDatetimeFormat() {
+            return castDatetimeFormat;
+        }
+
+        public String getCastDateFormat() {
+            return castDateFormat;
+        }
+
+        public String getCastTimeFormat() {
+            return castTimeFormat;
+        }
+
+        public AdmObjectNode getWithObjectNode() {
+            return withObjectNode;
+        }
+
+        @Override
+        public boolean isOverridingKeyFieldTypes() {
+            return overrideKeyFieldTypes;
+        }
+
+        public List<List<String>> getKeyFieldNames() {
+            return Collections.singletonList(keyFieldNames);
         }
     }
 

@@ -31,12 +31,16 @@ import org.apache.asterix.common.metadata.Namespace;
 import org.apache.asterix.lang.common.base.AbstractStatement;
 import org.apache.asterix.lang.common.base.Statement;
 import org.apache.asterix.lang.common.expression.IndexedTypeExpression;
+import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.lang.common.struct.Identifier;
+import org.apache.asterix.lang.common.util.VectorIndexDeclUtil;
 import org.apache.asterix.lang.common.visitor.base.ILangVisitor;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.common.utils.Triple;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.util.OptionalBoolean;
+import shadedelta.com.github.mjakubowski84.parquet4s.Col;
 
 public class CreateIndexStatement extends AbstractStatement {
 
@@ -55,9 +59,14 @@ public class CreateIndexStatement extends AbstractStatement {
     private final OptionalBoolean castDefaultNull;
     private final Map<String, String> castConfig;
 
+    private final List<CreateIndexStatement.IndexedElement> includeElements;
+    private final AdmObjectNode withObjectNode;
+
     public CreateIndexStatement(Namespace namespace, Identifier datasetName, Identifier indexName, IndexType indexType,
             List<IndexedElement> indexedElements, boolean enforced, int gramLength, String fullTextConfigName,
-            boolean ifNotExists, Boolean excludeUnknownKey, Boolean castDefaultNull, Map<String, String> castConfig) {
+            boolean ifNotExists, Boolean excludeUnknownKey, Boolean castDefaultNull, Map<String, String> castConfig,
+            List<CreateIndexStatement.IndexedElement> includeElements, RecordConstructor withObjectRecord)
+            throws CompilationException {
         this.namespace = namespace;
         this.datasetName = Objects.requireNonNull(datasetName);
         this.indexName = Objects.requireNonNull(indexName);
@@ -70,6 +79,25 @@ public class CreateIndexStatement extends AbstractStatement {
         this.excludeUnknownKey = OptionalBoolean.ofNullable(excludeUnknownKey);
         this.castDefaultNull = OptionalBoolean.ofNullable(castDefaultNull);
         this.castConfig = castConfig == null ? Collections.emptyMap() : castConfig;
+        this.includeElements = includeElements;
+        this.withObjectNode = VectorIndexDeclUtil.validateAndGetWithObjectNode(withObjectRecord);
+    }
+
+    public static CreateIndexStatement CreateNonVectorIndexStatement(Namespace namespace, Identifier datasetName, Identifier indexName, IndexType indexType,
+            List<IndexedElement> indexedElements, boolean enforced, int gramLength, String fullTextConfigName,
+            boolean ifNotExists, Boolean excludeUnknownKey, Boolean castDefaultNull, Map<String, String> castConfig)
+            throws CompilationException {
+        return new CreateIndexStatement(namespace, datasetName, indexName, indexType,
+                indexedElements, enforced, gramLength, fullTextConfigName, ifNotExists,
+                excludeUnknownKey, castDefaultNull, castConfig, Collections.emptyList(), null);
+    }
+
+    public static CreateIndexStatement CreateVectorIndexStatement(Namespace namespace, Identifier datasetName,
+            Identifier vectorIndexName, CreateIndexStatement.IndexedElement vectorField,
+            List<CreateIndexStatement.IndexedElement> includedFields, RecordConstructor withRecord, boolean ifNotExists) throws CompilationException {
+        return new CreateIndexStatement(namespace, datasetName, vectorIndexName, IndexType.VECTOR,
+                Collections.singletonList(vectorField), false, 0, null, ifNotExists,
+                null, null, null, includedFields, withRecord);
     }
 
     public String getFullTextConfigName() {
@@ -99,6 +127,8 @@ public class CreateIndexStatement extends AbstractStatement {
     public List<IndexedElement> getIndexedElements() {
         return indexedElements;
     }
+
+    public List<IndexedElement> getIncludeElements() {return includeElements; }
 
     public boolean isEnforced() {
         return enforced;
@@ -130,6 +160,10 @@ public class CreateIndexStatement extends AbstractStatement {
 
     public Map<String, String> getCastConfig() {
         return castConfig;
+    }
+
+    public AdmObjectNode getWithObjectNode() {
+        return withObjectNode;
     }
 
     @Override

@@ -261,6 +261,7 @@ public class ValidateUtil {
         switch (indexType) {
             case ARRAY:
             case BTREE:
+            case VECTOR:
                 switch (fieldType.getTypeTag()) {
                     case TINYINT:
                     case SMALLINT:

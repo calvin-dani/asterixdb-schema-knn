@@ -580,6 +580,10 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     case KMEANS:
                         handleKmeansStatement(metadataProvider, stmt, hcc, requestParameters);
                         break;
+                    case CREATE_VECTOR_INDEX:
+                        handleCreateVectorIndexStatement(metadataProvider, stmt, hcc, requestParameters,
+                                Creator.DEFAULT_CREATOR);
+                        break;
                     case ANALYZE_DROP:
                         handleAnalyzeDropStatement(metadataProvider, stmt, hcc, requestParameters);
                         break;
@@ -1323,6 +1327,11 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 metadataProvider);
     }
 
+    public void handleCreateVectorIndexStatement(MetadataProvider metadataProvider, Statement stmt,
+            IHyracksClientConnection hcc, IRequestParameters requestParameters, Creator creator) throws Exception {
+        handleCreateIndexStatement(metadataProvider, stmt, hcc, requestParameters, creator);
+    }
+
     public void handleCreateIndexStatement(MetadataProvider metadataProvider, Statement stmt,
             IHyracksClientConnection hcc, IRequestParameters requestParameters, Creator creator) throws Exception {
         CreateIndexStatement stmtCreateIndex = (CreateIndexStatement) stmt;
@@ -1373,7 +1382,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             List<CreateIndexStatement.IndexedElement> indexedElements = stmtCreateIndex.getIndexedElements();
             int indexedElementsCount = indexedElements.size();
             boolean isSecondaryPrimary = indexedElementsCount == 0;
-            validateIndexType(datasetType, indexType, isSecondaryPrimary, sourceLoc);
+            validateIndexType(datasetType, indexType, isSecondaryPrimary, indexedElementsCount, sourceLoc);
 
             String indexName = stmtCreateIndex.getIndexName().getValue();
             Index index = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), databaseName,
@@ -1402,7 +1411,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 aRecordType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(aRecordType, null, ds);
             }
 
-            List<List<IAType>> indexFieldTypes = new ArrayList<>(indexedElementsCount);
+            indexedElements = indexType == IndexType.VECTOR ? stmtCreateIndex.getIncludeElements() : indexedElements;
+            List<List<IAType>> indexFieldTypes = new ArrayList<>(indexedElements.size());
             boolean hadUnnest = false;
             boolean overridesFieldTypes = false;
             boolean isHeterogeneousIndex = false;
@@ -1626,6 +1636,46 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 }
             }
             Index.IIndexDetails indexDetails;
+            if (indexType == IndexType.VECTOR) {
+                List<CreateIndexStatement.IndexedElement> includeElements = stmtCreateIndex.getIncludeElements();
+                int includeElementsCount = includeElements.size();
+                /* process include fields */
+                List<List<String>> includeFieldNames = new ArrayList<>(includeElementsCount);
+                List<IAType> includeFieldTypes = new ArrayList<>(includeElementsCount);
+                List<Integer> includeFieldSourceIndicators = new ArrayList<>(includeElementsCount);
+
+                for (int i = 0; i < includeElementsCount; i++) {
+                    CreateIndexStatement.IndexedElement includeElement = includeElements.get(i);
+                    includeFieldNames.add(includeElement.getProjectList().getFirst().first);
+                    includeFieldTypes.add(indexFieldTypes.get(i).getFirst());
+                    includeFieldSourceIndicators.add(includeElement.getSourceIndicator());
+                }
+
+
+                Map<String, String> castConfig = TypeUtil.validateConfiguration(stmtCreateIndex.getCastConfig(),
+                        stmtCreateIndex.getSourceLocation());
+                String datetimeFormat = TypeUtil.getDatetimeFormat(castConfig);
+                String dateFormat = TypeUtil.getDateFormat(castConfig);
+                String timeFormat = TypeUtil.getTimeFormat(castConfig);
+
+                CreateIndexStatement.IndexedElement indexedElement = stmtCreateIndex.getIndexedElements().getFirst();
+                List<String> keyFieldNames = indexedElement.getProjectList().getFirst().first;
+
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames,
+                        includeFieldNames, includeFieldSourceIndicators, includeFieldTypes,
+                        true, stmtCreateIndex.getExcludeUnknownKey(),
+                        stmtCreateIndex.getCastDefaultNull(), datetimeFormat, dateFormat, timeFormat,
+                        stmtCreateIndex.getWithObjectNode());
+
+                Index newIndex = new Index(databaseName, dataverseName, datasetName, indexName, indexType, indexDetails,
+                        stmtCreateIndex.isEnforced(), false, MetadataUtil.PENDING_ADD_OP, creator);
+
+                bActiveTxn = false; // doCreateIndexImpl() takes over the current transaction
+                EntityDetails entityDetails = EntityDetails.newIndex(databaseName, dataverseName, indexName);
+                doCreateVectorIndexImplSimple(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator, entityDetails);
+                return;
+            }
+
             if (Index.IndexCategory.of(indexType) == Index.IndexCategory.ARRAY) {
                 if (!stmtCreateIndex.hasExcludeUnknownKey()
                         || !stmtCreateIndex.getExcludeUnknownKey().getOrElse(false)) {
@@ -2002,14 +2052,19 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         }
     }
 
-    protected void validateIndexType(DatasetType datasetType, IndexType indexType, boolean isSecondaryPrimaryIndex,
-            SourceLocation sourceLoc) throws AlgebricksException {
+    protected void validateIndexType(DatasetType datasetType, IndexType indexType, boolean isSecondaryPrimary,
+            int indexedElementsCount, SourceLocation sourceLoc) throws AlgebricksException {
+        boolean isSecondaryPrimaryIndex = indexedElementsCount == 0;
         // disable creating secondary primary index on an external dataset
         if (datasetType == DatasetType.EXTERNAL && isSecondaryPrimaryIndex) {
             throw new CompilationException(ErrorCode.CANNOT_CREATE_SEC_PRIMARY_IDX_ON_EXT_DATASET);
         }
         if (indexType != IndexType.BTREE && isSecondaryPrimaryIndex) {
             throw new CompilationException(ErrorCode.COMPILATION_INCOMPATIBLE_INDEX_TYPE, sourceLoc,
+                    String.valueOf(indexType));
+        }
+        if (indexType == IndexType.VECTOR && indexedElementsCount != 1) {
+            throw new CompilationException(ErrorCode.CANNOT_CREATE_VECTOR_IDX_ON_MULTIPLE_FIELDS, sourceLoc,
                     String.valueOf(indexType));
         }
     }
@@ -5030,6 +5085,82 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     requestParameters);
         } finally {
             metadataProvider.getLocks().unlock();
+        }
+    }
+
+    private void doCreateVectorIndexImplSimple(IHyracksClientConnection hcc, MetadataProvider metadataProvider, Dataset ds,
+            Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
+            EntityDetails entityDetails) throws Exception {
+        MetadataTransactionContext mdTxnCtx = metadataProvider.getMetadataTxnContext();
+        index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+        MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+        beforeTxnCommit(metadataProvider, creator, entityDetails);
+        MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    }
+
+
+    private void doCreateVectorIndexImpl(IHyracksClientConnection hcc, MetadataProvider metadataProvider, Dataset ds,
+            Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
+            EntityDetails entityDetails) throws Exception {
+        boolean bActiveTxn = true;
+        MetadataTransactionContext mdTxnCtx = metadataProvider.getMetadataTxnContext();
+        try {
+            // #. add a new index with PendingAddOp
+            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+            // #. prepare to create the index artifact in NC.
+            /* spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
+            if (spec == null) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Failed to create job spec for creating index '" + ds.getDatasetName() + "." + index.getIndexName() + "'");
+            } */
+            beforeTxnCommit(metadataProvider, creator, entityDetails);
+
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+            // #. create the index artifact in NC.
+            //runJob(hcc, spec, jobFlags);
+
+            // #. flush the internal dataset
+            // We need this to guarantee the correctness of component Id acceleration for
+            // secondary-to-primary index.
+            // Otherwise, the new secondary index component would corresponding to a partial
+            // memory component
+            // of the primary index, which is incorrect.
+            /*
+            if (ds.getDatasetType() == DatasetType.INTERNAL) {
+                FlushDatasetUtil.flushDataset(hcc, metadataProvider, index.getDatabaseName(), index.getDataverseName(),
+                        index.getDatasetName());
+            }
+             */
+
+            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            bActiveTxn = true;
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+            // #. load data into the index in NC.
+            //spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, index, metadataProvider, sourceLoc);
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+
+            //runJob(hcc, spec, jobFlags);
+
+            // #. begin new metadataTxn
+            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            bActiveTxn = true;
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+            // #. add another new index with PendingNoOp after deleting the index with
+            // PendingAddOp
+            MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(), index.getDatabaseName(),
+                    index.getDataverseName(), index.getDatasetName(), index.getIndexName());
+            index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+        } catch (Exception e) {
+            if (bActiveTxn) {
+                abort(e, e, mdTxnCtx);
+            }
+            throw e;
         }
     }
 
