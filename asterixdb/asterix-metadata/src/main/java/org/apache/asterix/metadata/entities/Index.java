@@ -46,7 +46,6 @@ import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.api.job.profiling.IndexStats;
 import org.apache.hyracks.util.OptionalBoolean;
-import org.checkerframework.checker.units.qual.A;
 
 /**
  * Metadata describing an index.
@@ -74,9 +73,9 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
     public Index(String databaseName, DataverseName dataverseName, String datasetName, String indexName,
             IndexType indexType, IIndexDetails indexDetails, boolean isEnforced, boolean isPrimaryIndex, int pendingOp,
             Creator creator) {
-        boolean categoryOk = (indexType == null && indexDetails == null) || (IndexCategory.of(
-                Objects.requireNonNull(indexType)) == ((AbstractIndexDetails) Objects.requireNonNull(
-                indexDetails)).getIndexCategory());
+        boolean categoryOk = (indexType == null && indexDetails == null) || (IndexCategory
+                .of(Objects.requireNonNull(indexType)) == ((AbstractIndexDetails) Objects.requireNonNull(indexDetails))
+                        .getIndexCategory());
         if (!categoryOk) {
             throw new IllegalArgumentException();
         }
@@ -97,9 +96,10 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             IndexType indexType, List<List<String>> keyFieldNames, List<Integer> keyFieldSourceIndicators,
             List<IAType> keyFieldTypes, boolean overrideKeyFieldTypes, boolean isEnforced, boolean isPrimaryIndex,
             int pendingOp, OptionalBoolean excludeUnknownKey, Creator creator) {
-        this(database, dataverseName, datasetName, indexName, indexType,
-                createSimpleIndexDetails(indexType, keyFieldNames, keyFieldSourceIndicators, keyFieldTypes,
-                        overrideKeyFieldTypes, excludeUnknownKey), isEnforced, isPrimaryIndex, pendingOp, creator);
+        this(database, dataverseName, datasetName,
+                indexName, indexType, createSimpleIndexDetails(indexType, keyFieldNames, keyFieldSourceIndicators,
+                        keyFieldTypes, overrideKeyFieldTypes, excludeUnknownKey),
+                isEnforced, isPrimaryIndex, pendingOp, creator);
     }
 
     public static Index createPrimaryIndex(String database, DataverseName dataverseName, String datasetName,
@@ -107,8 +107,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             int pendingOp, Creator creator) {
         return new Index(database, dataverseName, datasetName, datasetName, IndexType.BTREE,
                 new ValueIndexDetails(keyFieldNames, keyFieldSourceIndicators, keyFieldTypes, false,
-                        OptionalBoolean.empty(), OptionalBoolean.empty(), null, null, null), false, true, pendingOp,
-                creator);
+                        OptionalBoolean.empty(), OptionalBoolean.empty(), null, null, null),
+                false, true, pendingOp, creator);
     }
 
     public String getDatabaseName() {
@@ -243,8 +243,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
         if (!datasetName.equals(otherIndex.getDatasetName())) {
             return false;
         }
-        return Objects.equals(databaseName, otherIndex.databaseName) && dataverseName.equals(
-                otherIndex.getDataverseName());
+        return Objects.equals(databaseName, otherIndex.databaseName)
+                && dataverseName.equals(otherIndex.getDataverseName());
     }
 
     @Override

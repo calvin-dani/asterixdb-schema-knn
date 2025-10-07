@@ -375,8 +375,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                         projectTypeNullable = inputTypeNullable;
                         projectTypeMissable = inputTypeMissable;
                     } else if (inputTypePrime == null ||
-                            // handle special case of the empty field name in
-                            // ExternalIndexingOperations.FILE_INDEX_FIELD_NAMES
+                    // handle special case of the empty field name in
+                    // ExternalIndexingOperations.FILE_INDEX_FIELD_NAMES
                             (projectPath.size() == 1 && projectPath.get(0).isEmpty())) {
                         projectTypePrime = null; // ANY
                         projectTypeNullable = projectTypeMissable = true;
@@ -402,7 +402,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                     }
                     IAType projectType = projectTypePrime == null ? null
                             : KeyFieldTypeUtil.makeUnknownableType(projectTypePrime, projectTypeNullable,
-                            projectTypeMissable);
+                                    projectTypeMissable);
 
                     projectTypeList.add(projectType);
                 }
@@ -469,9 +469,9 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
                 excludeUnknownKey = OptionalBoolean.empty();
                 castDefaultNull = OptionalBoolean.empty();
-                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), keyFieldNames, keyFieldSourceIndicator,
-                        keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey, castDefaultNull, null,
-                        null, null, null);
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), keyFieldNames,
+                        keyFieldSourceIndicator, keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
+                        castDefaultNull, null, null, null, null);
                 break;
             case TEXT:
                 keyFieldNames =
@@ -710,7 +710,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
         writeSearchKeyType(index);
 
-        if(Index.IndexCategory.of(index.getIndexType()) == Index.IndexCategory.VECTOR) {
+        if (Index.IndexCategory.of(index.getIndexType()) == Index.IndexCategory.VECTOR) {
             // Vector indexes do not have enforced keys.
             return;
         }
@@ -851,7 +851,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         recordBuilder.addField(nameValue, fieldValue);
     }
 
-    private void writeIncludeFields(Index.VectorIndexDetails index) throws HyracksDataException{
+    private void writeIncludeFields(Index.VectorIndexDetails index) throws HyracksDataException {
         List<List<String>> includeElements = index.getIncludeFieldNames();
         OrderedListBuilder listBuilder = new OrderedListBuilder();
         listBuilder.reset(new AOrderedListType(BuiltinType.ASTRING, null));

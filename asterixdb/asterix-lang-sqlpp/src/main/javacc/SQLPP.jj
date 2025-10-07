@@ -1476,7 +1476,6 @@ CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseExcept
         throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
         }
     }
-  }
 }
 
 CreateIndexStatement CreateVectorIndexStatement(Token startStmtToken) throws ParseException:
@@ -1653,10 +1652,14 @@ CreateIndexStatement PrimaryIndexSpecification(Token startStmtToken) throws Pars
     if (indexName == null) {
       indexName = MetadataConstants.PRIMARY_INDEX_PREFIX + nameComponents.second;
     }
-    CreateIndexStatement stmt = new CreateIndexStatement(nameComponents.first, nameComponents.second,
+    try {
+      CreateIndexStatement stmt = CreateIndexStatement.CreateNonVectorIndexStatement(nameComponents.first, nameComponents.second,
       new Identifier(indexName), IndexType.BTREE, Collections.emptyList(), false, -1, null, ifNotExists, null, null,
       Collections.emptyMap());
-    return addSourceLocation(stmt, startStmtToken);
+      return addSourceLocation(stmt, startStmtToken);
+    } catch (CompilationException e) {
+      throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
+    }
   }
 }
 

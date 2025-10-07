@@ -529,8 +529,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     public static void initializeThreeLevelStructure(AbstractVectorTreeTestContext ctx) throws Exception {
         VectorClusteringTree vectorTree = (VectorClusteringTree) ctx.getIndex();
 
-        VectorClusteringTreeStaticInitializer initializer =
-                new VectorClusteringTreeStaticInitializer(vectorTree);
+        VectorClusteringTreeStaticInitializer initializer = new VectorClusteringTreeStaticInitializer(vectorTree);
 
         // Use the specialized 3-level structure directly
         initializer.initializeThreeLevelStructure();

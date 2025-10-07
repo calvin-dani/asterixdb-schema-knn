@@ -40,7 +40,6 @@ import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.common.utils.Triple;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.util.OptionalBoolean;
-import shadedelta.com.github.mjakubowski84.parquet4s.Col;
 
 public class CreateIndexStatement extends AbstractStatement {
 
@@ -83,21 +82,22 @@ public class CreateIndexStatement extends AbstractStatement {
         this.withObjectNode = VectorIndexDeclUtil.validateAndGetWithObjectNode(withObjectRecord);
     }
 
-    public static CreateIndexStatement CreateNonVectorIndexStatement(Namespace namespace, Identifier datasetName, Identifier indexName, IndexType indexType,
-            List<IndexedElement> indexedElements, boolean enforced, int gramLength, String fullTextConfigName,
-            boolean ifNotExists, Boolean excludeUnknownKey, Boolean castDefaultNull, Map<String, String> castConfig)
-            throws CompilationException {
-        return new CreateIndexStatement(namespace, datasetName, indexName, indexType,
-                indexedElements, enforced, gramLength, fullTextConfigName, ifNotExists,
-                excludeUnknownKey, castDefaultNull, castConfig, Collections.emptyList(), null);
+    public static CreateIndexStatement CreateNonVectorIndexStatement(Namespace namespace, Identifier datasetName,
+            Identifier indexName, IndexType indexType, List<IndexedElement> indexedElements, boolean enforced,
+            int gramLength, String fullTextConfigName, boolean ifNotExists, Boolean excludeUnknownKey,
+            Boolean castDefaultNull, Map<String, String> castConfig) throws CompilationException {
+        return new CreateIndexStatement(namespace, datasetName, indexName, indexType, indexedElements, enforced,
+                gramLength, fullTextConfigName, ifNotExists, excludeUnknownKey, castDefaultNull, castConfig,
+                Collections.emptyList(), null);
     }
 
     public static CreateIndexStatement CreateVectorIndexStatement(Namespace namespace, Identifier datasetName,
             Identifier vectorIndexName, CreateIndexStatement.IndexedElement vectorField,
-            List<CreateIndexStatement.IndexedElement> includedFields, RecordConstructor withRecord, boolean ifNotExists) throws CompilationException {
+            List<CreateIndexStatement.IndexedElement> includedFields, RecordConstructor withRecord, boolean ifNotExists)
+            throws CompilationException {
         return new CreateIndexStatement(namespace, datasetName, vectorIndexName, IndexType.VECTOR,
-                Collections.singletonList(vectorField), false, 0, null, ifNotExists,
-                null, null, null, includedFields, withRecord);
+                Collections.singletonList(vectorField), false, 0, null, ifNotExists, null, null, null, includedFields,
+                withRecord);
     }
 
     public String getFullTextConfigName() {
@@ -128,7 +128,9 @@ public class CreateIndexStatement extends AbstractStatement {
         return indexedElements;
     }
 
-    public List<IndexedElement> getIncludeElements() {return includeElements; }
+    public List<IndexedElement> getIncludeElements() {
+        return includeElements;
+    }
 
     public boolean isEnforced() {
         return enforced;

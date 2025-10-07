@@ -1651,7 +1651,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     includeFieldSourceIndicators.add(includeElement.getSourceIndicator());
                 }
 
-
                 Map<String, String> castConfig = TypeUtil.validateConfiguration(stmtCreateIndex.getCastConfig(),
                         stmtCreateIndex.getSourceLocation());
                 String datetimeFormat = TypeUtil.getDatetimeFormat(castConfig);
@@ -1661,9 +1660,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 CreateIndexStatement.IndexedElement indexedElement = stmtCreateIndex.getIndexedElements().getFirst();
                 List<String> keyFieldNames = indexedElement.getProjectList().getFirst().first;
 
-                indexDetails = new Index.VectorIndexDetails(keyFieldNames,
-                        includeFieldNames, includeFieldSourceIndicators, includeFieldTypes,
-                        true, stmtCreateIndex.getExcludeUnknownKey(),
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames, includeFieldNames,
+                        includeFieldSourceIndicators, includeFieldTypes, true, stmtCreateIndex.getExcludeUnknownKey(),
                         stmtCreateIndex.getCastDefaultNull(), datetimeFormat, dateFormat, timeFormat,
                         stmtCreateIndex.getWithObjectNode());
 
@@ -1672,7 +1670,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
                 bActiveTxn = false; // doCreateIndexImpl() takes over the current transaction
                 EntityDetails entityDetails = EntityDetails.newIndex(databaseName, dataverseName, indexName);
-                doCreateVectorIndexImplSimple(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator, entityDetails);
+                doCreateVectorIndexImplSimple(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator,
+                        entityDetails);
                 return;
             }
 
@@ -5088,8 +5087,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         }
     }
 
-    private void doCreateVectorIndexImplSimple(IHyracksClientConnection hcc, MetadataProvider metadataProvider, Dataset ds,
-            Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
+    private void doCreateVectorIndexImplSimple(IHyracksClientConnection hcc, MetadataProvider metadataProvider,
+            Dataset ds, Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
             EntityDetails entityDetails) throws Exception {
         MetadataTransactionContext mdTxnCtx = metadataProvider.getMetadataTxnContext();
         index.setPendingOp(MetadataUtil.PENDING_NO_OP);
@@ -5097,7 +5096,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         beforeTxnCommit(metadataProvider, creator, entityDetails);
         MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
     }
-
 
     private void doCreateVectorIndexImpl(IHyracksClientConnection hcc, MetadataProvider metadataProvider, Dataset ds,
             Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
