@@ -222,7 +222,10 @@ public class HierarchicalClusterIndexWriter {
      */
     public void addClusterLevel(int level, List<HierarchicalCentroidsState.HierarchicalCentroid> centroids) {
         // Check if level already exists and remove it first
-        clusterLevels.removeIf(levelData -> (Integer) levelData.get("level") == level);
+        clusterLevels.removeIf(levelData -> {
+            Object levelObj = levelData.get("level");
+            return levelObj != null && (Integer) levelObj == level;
+        });
 
         Map<String, Object> levelData = new HashMap<>();
         levelData.put("level", level);
@@ -241,11 +244,6 @@ public class HierarchicalClusterIndexWriter {
             centroidData.put("has_parent", clusterId.hasParent());
             if (clusterId.hasParent()) {
                 centroidData.put("parent_cluster_id", clusterId.getParentClusterId());
-                System.err.println("DEBUG: Adding centroid with parent - Level " + level + ", Cluster "
-                        + clusterId.getClusterId() + ", Parent " + clusterId.getParentClusterId());
-            } else {
-                System.err.println("DEBUG: Adding centroid without parent - Level " + level + ", Cluster "
-                        + clusterId.getClusterId());
             }
 
             // Add centroid coordinates

@@ -19,6 +19,8 @@
 package org.apache.asterix.runtime.operators;
 
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
+import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
+import static org.apache.asterix.om.types.BuiltinType.AINT32;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 import static org.apache.asterix.runtime.utils.VectorDistanceArrCalculation.euclidean_squared;
 
@@ -39,7 +41,10 @@ import java.util.UUID;
 
 import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
+import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.om.base.AMutableDouble;
+import org.apache.asterix.om.base.AMutableInt32;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
@@ -75,6 +80,8 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.util.string.UTF8StringUtil;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 
 // Serializable distance function implementations
 class ManhattanDistanceFunction implements DistanceFunction, Serializable {
@@ -121,6 +128,7 @@ class DotProductDistanceFunction implements DistanceFunction, Serializable {
         return VectorDistanceArrCalculation.dot(a, b);
     }
 }
+
 /**
  * Enhanced version of LocalKMeansPlusPlusCentroidsOperatorDescriptor that maintains
  * hierarchical cluster relationships with parent-child associations.
@@ -256,6 +264,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
     private HierarchicalClusterTree.OutputMode outputMode;
     private DistanceFunction distanceFunction;
+    private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
@@ -276,16 +285,21 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     }
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
-            RecordDescriptor rDesc, UUID sampleUUID, UUID centroidsUUID, IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter) {
+            RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID centroidsUUID, 
+            IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
         super(spec, 1, 1);
-        outRecDescs[0] = rDesc;
+        // Output record descriptor defines the format of output tuples (level, clusterId, centroidId, embedding)
+        // Input record descriptor is the 2-field format with vector embeddings
+        outRecDescs[0] = outputRecDesc;       // Output format (hierarchical structure)
+        this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
         this.sampleUUID = sampleUUID;
         this.centroidsUUID = centroidsUUID;
         this.args = args;
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
     }
+
+
 
     @Override
     public void contributeActivities(IActivityGraphBuilder builder) {
@@ -366,7 +380,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Initialize evaluator for extracting vector data from tuples
                     eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
                     inputVal = new VoidPointable();
-                    fta = new FrameTupleAccessor(outRecDescs[0]);
+                    // Use secondaryRecDesc directly for now (2-field format with vector embeddings)
+                    RecordDescriptor inputRecDesc = secondaryRecDesc;
+                    fta = new FrameTupleAccessor(inputRecDesc);
                     tuple = new FrameTupleReference();
                     first = true;
                     kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
@@ -375,6 +391,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
                     fta.reset(buffer);
+                    int tupleCount = fta.getTupleCount();
+
                     if (first) {
                         // CRITICAL: Perform initial K-means++ on raw data to generate K centroids
                         // This is essential for hierarchical clustering - we need multiple centroids
@@ -447,10 +465,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             // First pass: collect all data points
             fta.reset(buffer);
             int tupleCount = fta.getTupleCount();
+
             for (int i = 0; i < tupleCount; i++) {
                 tuple.reset(fta, i);
                 eval.evaluate(tuple, inputVal);
                 ListAccessor listAccessorConstant = new ListAccessor();
+                
                 if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
                         .isListType()) {
                     continue; // Skip unsupported types
@@ -475,7 +495,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             // 1. Choose first centroid randomly
             int firstIdx = rand.nextInt(allPoints.size());
             centroids.add(Arrays.copyOf(allPoints.get(firstIdx), allPoints.get(firstIdx).length));
-            System.err.println("Added first centroid at index " + firstIdx);
 
             // 2. Choose remaining centroids using weighted selection
             for (int i = 1; i < k; i++) {
@@ -493,6 +512,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     totalDistance += minDist;
                 }
 
+
                 // Weighted random selection
                 double r = rand.nextDouble() * totalDistance;
                 double cumulativeDistance = 0.0;
@@ -506,7 +526,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 centroids.add(Arrays.copyOf(allPoints.get(selectedIdx), allPoints.get(selectedIdx).length));
-                System.err.println("Added centroid " + i + " at index " + selectedIdx);
             }
 
             // 3. Lloyd's algorithm for refinement
@@ -559,8 +578,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
             }
 
-            System.err.println("performInitialKMeansPlusPlus: generated " + centroids.size() + " centroids (target was "
-                    + k + ")");
+            System.err.println("=== INITIAL K-MEANS++ COMPLETE ===");
+            System.err.println("Generated " + centroids.size() + " centroids (target was " + k + ")");
+            System.err.println("Success rate: " + String.format("%.1f", (double)centroids.size() / k * 100) + "%");
+            System.err.println("=== END INITIAL K-MEANS++ ===");
 
             return centroids;
         }
@@ -646,7 +667,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         IPointable tempVal = new VoidPointable();
                         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
                         KMeansUtils KMeansUtils = new KMeansUtils(tempVal, storage);
-                        fta = new FrameTupleAccessor(outRecDescs[0]);
+                        // Use secondaryRecDesc directly for now (2-field format with vector embeddings)
+                        RecordDescriptor inputRecDesc = secondaryRecDesc;
+                        fta = new FrameTupleAccessor(inputRecDesc);
                         tuple = new FrameTupleReference();
                         VSizeFrame vSizeFrame = new VSizeFrame(ctx);
                         FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
@@ -760,7 +783,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         FrameTupleAppender appender, int partition, HierarchicalClusterIndexWriter indexWriter)
                         throws HyracksDataException, IOException {
 
-                    System.err.println("Building complete tree with BFS-based ID assignment...");
+                    System.err.println("=== HIERARCHICAL CLUSTERING PHASE ===");
+                    System.err.println("Starting hierarchical clustering with K=" + K);
 
                     // Create tree structure
                     HierarchicalClusterTree tree = new HierarchicalClusterTree();
@@ -775,20 +799,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     List<double[]> currentLevelCentroids = new ArrayList<>();
 
                     // First level: Use original probabilistic K-means++ on data
-                    System.err.println("Starting memory-efficient K-means++ with K=" + currentK);
                     currentLevelCentroids = performMemoryEfficientKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
                             listAccessorConstant, kMeansUtils, vSizeFrame, currentK, rand, maxKMeansIterations,
                             partition);
 
-                    System.err.println("Memory-efficient K-means++ completed, found " + currentLevelCentroids.size()
-                            + " centroids (expected: " + currentK + ")");
-
-                    // Debug: print first few centroids
-                    for (int i = 0; i < Math.min(3, currentLevelCentroids.size()); i++) {
-                        System.err.println(
-                                "Centroid " + i + ": " + Arrays.toString(Arrays.copyOf(currentLevelCentroids.get(i),
-                                        Math.min(5, currentLevelCentroids.get(i).length))));
-                    }
+                    System.err.println("Level 0: Generated " + currentLevelCentroids.size() + " centroids");
 
                     if (currentLevelCentroids.isEmpty()) {
                         System.err.println("No centroids available for tree building");
@@ -819,10 +834,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     currentLevel++;
                     currentK = Math.max(1, currentK / 2);
 
+                    // Limit to maximum 5 levels to prevent excessive hierarchy
+                    int maxLevels = 5;
+
                     System.err.println("Starting hierarchical levels. Current level: " + currentLevel + ", K: "
                             + currentK + ", centroids: " + currentLevelCentroids.size());
                     System.err.println("While loop condition: centroids.size() > 1 = "
-                            + (currentLevelCentroids.size() > 1) + ", K > 0 = " + (currentK > 0));
+                            + (currentLevelCentroids.size() > 1) + ", K > 1 = " + (currentK > 1) + ", level < maxLevels = " + (currentLevel < maxLevels));
+                    System.err.println("=== CLUSTERING PROGRESS ===");
 
                     // Debug: print all centroids
                     for (int i = 0; i < currentLevelCentroids.size(); i++) {
@@ -831,22 +850,16 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         Math.min(3, currentLevelCentroids.get(i).length))));
                     }
 
-                    // Build subsequent levels until centroids fit into one frame
-                    while (currentLevelCentroids.size() > 1 && currentK > 0) {
-                        System.err.println("Building level " + currentLevel + " with " + currentLevelCentroids.size()
-                                + " centroids, target K = " + currentK);
-
+                    // Build subsequent levels until centroids fit into one frame or only one centroid remains
+                    while (currentLevelCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
                         // Use scalable K-means++ on centroids from previous level
                         List<double[]> nextLevelCentroids = performScalableKMeansPlusPlusOnCentroids(
                                 currentLevelCentroids, currentK, rand, kMeansUtils, maxKMeansIterations);
 
-                        System.err.println("Generated " + nextLevelCentroids.size() + " centroids for level "
-                                + currentLevel + " (target K = " + currentK + ")");
+                        System.err.println("Level " + currentLevel + ": " + currentLevelCentroids.size() + " → " + nextLevelCentroids.size() + " centroids");
 
                         // Use Lloyd's algorithm approach to assign current level centroids (children) to next level centroids (parents)
                         int[] parentAssignments = assignCentroidsToParents(currentLevelCentroids, nextLevelCentroids);
-
-                        System.err.println("Parent assignments: " + Arrays.toString(parentAssignments));
 
                         // Add next level centroids (parents) to tree
                         List<HierarchicalClusterTree.TreeNode> nextLevelNodes = new ArrayList<>();
@@ -873,26 +886,19 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
 
                         // Move current level centroids (children) to their assigned parent nodes
-                        System.err.println("Moving " + currentLevelCentroids.size() + " children to "
-                                + nextLevelCentroids.size() + " parents");
                         for (int j = 0; j < currentLevelCentroids.size(); j++) {
                             int parentIndex = parentAssignments[j];
                             HierarchicalClusterTree.TreeNode childNode = currentLevelNodes.get(j);
                             HierarchicalClusterTree.TreeNode parentNode = nextLevelNodes.get(parentIndex);
-                            System.err.println("Moving child " + j + " (global_id=" + childNode.getGlobalId()
-                                    + ") to parent " + parentIndex + " (global_id=" + parentNode.getGlobalId() + ")");
                             // Move existing child node to new parent
                             tree.moveChildToParent(childNode, parentNode);
                         }
-
-                        System.err.println("After moving children, tree has " + tree.getTotalNodes() + " total nodes");
 
                         // Test if all centroids from this level can fit in one frame
                         boolean canFitInOneFrame = testTreeLevelFitsInFrame(ctx, nextLevelNodes, appender);
 
                         if (canFitInOneFrame) {
-                            System.err.println(
-                                    "Level " + currentLevel + " centroids fit in one frame! Stopping tree building.");
+                            System.err.println("Frame capacity reached at level " + currentLevel + " - stopping");
                             break;
                         }
 
@@ -901,27 +907,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         currentLevelNodes = nextLevelNodes;
                         currentLevel++;
                         currentK = Math.max(1, currentK / 2);
-
-                        System.err.println("After iteration: level=" + currentLevel + ", K=" + currentK + ", centroids="
-                                + currentLevelCentroids.size() + ", total_nodes=" + tree.getTotalNodes());
-                        System.err.println("Next iteration condition: centroids.size() > 1 = "
-                                + (currentLevelCentroids.size() > 1) + ", K > 0 = " + (currentK > 0));
                     }
 
-                    System.err.println("While loop exited. Final level: " + currentLevel + ", final centroids: "
-                            + currentLevelCentroids.size() + ", total nodes: " + tree.getTotalNodes());
-                    System.err.println("Tree building complete. Assigning BFS-based IDs...");
+                    System.err.println("Hierarchical clustering complete: " + (currentLevel + 1) + " levels, " + tree.getTotalNodes() + " total nodes");
 
                     // Assign BFS-based IDs to all nodes (no sorting needed!)
                     tree.assignBFSIds();
 
-                    // Print tree structure
-                    tree.printTree();
-
                     // Output all nodes in BFS order
                     outputCompleteTree(tree, appender, indexWriter, partition);
 
-                    System.err.println("Complete tree output finished with " + tree.getTotalNodes() + " total nodes");
+                    System.err.println("Tree output complete: " + tree.getTotalNodes() + " nodes");
                 }
 
                 /**
@@ -1987,6 +1983,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 ByteArrayAccessibleOutputStream embBytes = new ByteArrayAccessibleOutputStream();
                                 DataOutput embBytesOutput = new DataOutputStream(embBytes);
                                 AMutableDouble aDouble = new AMutableDouble(0);
+                                AMutableInt32 aInt32 = new AMutableInt32(0);
                                 OrderedListBuilder orderedListBuilder = new OrderedListBuilder();
                                 ArrayBackedValueStorage listStorage = new ArrayBackedValueStorage();
                                 orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
@@ -2003,9 +2000,32 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 embBytes.reset();
                                 orderedListBuilder.write(embBytesOutput, true);
 
-                                // Create tuple builder
-                                ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1);
+                                // Create tuple builder with level, clusterId, centroidId, and embedding
+                                ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
                                 tupleBuilder.reset();
+
+                                // Add level (int)
+                                listStorage.reset();
+                                listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
+                                aInt32.setValue(node.getLevel());
+                                AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
+                                tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
+
+                                // Add clusterId (int) 
+                                listStorage.reset();
+                                listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
+                                aInt32.setValue(node.getClusterId());
+                                AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
+                                tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
+
+                                // Add centroidId (int) - using globalId as centroidId
+                                listStorage.reset();
+                                listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
+                                aInt32.setValue((int) node.getGlobalId());
+                                AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
+                                tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
+
+                                // Add embedding (float array)
                                 tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
 
                                 // Try to append - if this fails, nodes don't fit in one frame
@@ -2142,8 +2162,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             .entrySet()) {
                         int level = entry.getKey();
                         List<HierarchicalCentroidsState.HierarchicalCentroid> centroids = entry.getValue();
-                        System.err
-                                .println("Adding level " + level + " with " + centroids.size() + " centroids to index");
                         indexWriter.addClusterLevel(level, centroids);
                     }
 
@@ -2151,12 +2169,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     ByteArrayAccessibleOutputStream embBytes = new ByteArrayAccessibleOutputStream();
                     DataOutput embBytesOutput = new DataOutputStream(embBytes);
                     AMutableDouble aDouble = new AMutableDouble(0);
+                    AMutableInt32 aInt32 = new AMutableInt32(0);
                     OrderedListBuilder orderedListBuilder = new OrderedListBuilder();
                     ArrayBackedValueStorage listStorage = new ArrayBackedValueStorage();
                     orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
-                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(1);
-
-                    System.err.println("Outputting " + allNodes.size() + " nodes in BFS order:");
+                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
 
                     for (HierarchicalClusterTree.TreeNode node : allNodes) {
                         double[] arr = node.getCentroid();
@@ -2171,11 +2188,30 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         embBytes.reset();
                         orderedListBuilder.write(embBytesOutput, true);
                         tupleBuilder.reset();
-                        tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
 
-                        System.err.println("  Node Level " + node.getLevel() + ", Cluster " + node.getClusterId()
-                                + ", Global ID " + node.getGlobalId()
-                                + (node.getParentGlobalId() != -1 ? ", Parent " + node.getParentGlobalId() : ""));
+                        // Add level (int)
+                        listStorage.reset();
+                        listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
+                        aInt32.setValue(node.getLevel());
+                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
+                        tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
+
+                        // Add clusterId (int) 
+                        listStorage.reset();
+                        listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
+                        aInt32.setValue(node.getClusterId());
+                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
+                        tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
+
+                        // Add centroidId (int) - using globalId as centroidId
+                        listStorage.reset();
+                        listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
+                        aInt32.setValue((int) node.getGlobalId());
+                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
+                        tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
+
+                        // Add embedding (float array)
+                        tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
 
                         if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                                 tupleBuilder.getSize())) {
@@ -2185,6 +2221,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     tupleBuilder.getSize());
                         }
                     }
+                    
+                    // CRITICAL: Flush the final frame after outputting all nodes
+                    // This ensures that the last batch of nodes is sent to the next operator
+                    FrameUtils.flushFrame(appender.getBuffer(), writer);
                 }
 
             };

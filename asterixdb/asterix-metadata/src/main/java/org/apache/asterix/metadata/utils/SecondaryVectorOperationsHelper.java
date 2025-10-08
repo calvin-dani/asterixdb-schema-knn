@@ -18,6 +18,7 @@
  */
 package org.apache.asterix.metadata.utils;
 
+import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
 import static org.apache.asterix.om.types.BuiltinType.AINT32;
 
@@ -36,7 +37,7 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
-import org.apache.asterix.runtime.operators.VCTreeBulkLoaderOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeStaticStructureBulkLoaderOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -156,16 +157,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         hierarchicalTraits[2] = typeTraitProvider.getTypeTrait(AINT32);
 
         // Embedding (float array)
-        hierarchicalSerde[3] = serdeProvider.getSerializerDeserializer(new AOrderedListType(AFLOAT, "embedding"));
-        hierarchicalTraits[3] = typeTraitProvider.getTypeTrait(new AOrderedListType(AFLOAT, "embedding"));
+        hierarchicalSerde[3] = serdeProvider.getSerializerDeserializer(new AOrderedListType(ADOUBLE, "embedding"));
+        hierarchicalTraits[3] = typeTraitProvider.getTypeTrait(new AOrderedListType(ADOUBLE, "embedding"));
 
         RecordDescriptor hierarchicalRecDesc = new RecordDescriptor(hierarchicalSerde, hierarchicalTraits);
 
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID,
-                        centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
+                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc, 
+                        sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -174,8 +175,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Connect hierarchical k-means output to VCTree bulk loader
         sourceOp = targetOp;
 
-        VCTreeBulkLoaderOperatorDescriptor vcTreeLoader =
-                new VCTreeBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc);
+        VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
+                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
                 primaryPartitionConstraint);
         targetOp = vcTreeLoader;
