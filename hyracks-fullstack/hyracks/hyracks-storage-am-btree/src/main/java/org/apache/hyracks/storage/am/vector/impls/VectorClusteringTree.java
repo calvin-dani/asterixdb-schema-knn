@@ -128,7 +128,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
         // TODO: Implement vector clustering tree bulk loader
-        return new VectorClusteringTreeBulkLoader(fillFactor, verifyInput, numElementsHint, this, callback);
+        return new VectorClusteringTreeFlushLoader(fillFactor, verifyInput, numElementsHint, this, callback);
     }
 
     /**

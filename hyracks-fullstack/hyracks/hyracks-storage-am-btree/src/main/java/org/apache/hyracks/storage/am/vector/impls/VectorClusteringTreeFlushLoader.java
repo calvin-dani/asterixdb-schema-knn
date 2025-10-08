@@ -25,9 +25,9 @@ import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 
-public class VectorClusteringTreeBulkLoader extends AbstractTreeIndexBulkLoader {
+public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader {
 
-    public VectorClusteringTreeBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
+    public VectorClusteringTreeFlushLoader(float fillFactor, boolean verifyInput, long numElementsHint,
             VectorClusteringTree treeIndex, IPageWriteCallback callback) throws HyracksDataException {
         super(fillFactor, callback, treeIndex);
     }
