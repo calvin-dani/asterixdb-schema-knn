@@ -25,9 +25,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.asterix.common.storage.StaticStructureFileManager;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
@@ -88,11 +90,11 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         private final int partition;
         private final int nPartitions;
 
-            private VCTreeStaticStructureLoader staticStructureLoader;
-            private boolean bulkLoadingStarted = false;
-            private int tupleCount = 0;
-            private FrameTupleReference tuple = new FrameTupleReference();
-            private FrameTupleAccessor fta;
+        private VCTreeStaticStructureLoader staticStructureLoader;
+        private boolean bulkLoadingStarted = false;
+        private int tupleCount = 0;
+        private FrameTupleReference tuple = new FrameTupleReference();
+        private FrameTupleAccessor fta;
             
             // Evaluators for extracting tuple fields
             private IScalarEvaluator levelEval;
@@ -116,9 +118,9 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             this.fta = new FrameTupleAccessor(inputRecDesc);
         }
 
-            @Override
-            public void open() throws HyracksDataException {
-                System.err.println("=== VCTreeStaticStructureBulkLoader OPENING ===");
+        @Override
+        public void open() throws HyracksDataException {
+            System.err.println("=== VCTreeStaticStructureBulkLoader OPENING ===");
                 try {
                     // Initialize evaluators for extracting tuple fields
                     EvaluatorContext evalCtx = new EvaluatorContext(ctx);
@@ -136,17 +138,17 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                     System.err.println("Evaluators initialized for field extraction");
                     System.err.println("Expected 4 fields: level(0), clusterId(1), centroidId(2), embedding(3)");
                     
-                    if (writer != null) {
-                        writer.open();
-                    }
+                if (writer != null) {
+                    writer.open();
+                }
 
                     System.err.println("VCTreeStaticStructureBulkLoader opened successfully");
-                } catch (Exception e) {
-                    System.err.println("ERROR: Failed to open VCTreeStaticStructureBulkLoader: " + e.getMessage());
-                    e.printStackTrace();
-                    throw HyracksDataException.create(e);
-                }
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to open VCTreeStaticStructureBulkLoader: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
             }
+        }
 
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
@@ -381,13 +383,53 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             System.err.println("Total centroids processed: " + totalCentroids);
             System.err.println("=====================================");
         }
+        
+        /**
+         * Writes the static structure information to .staticstructure file
+         */
+        private void writeStaticStructureToFile() {
+            try {
+                // Get the IOManager from the task context
+                IIOManager ioManager = ctx.getIoManager();
+                
+                // Use a simple path that won't trigger AsterixDB path parsing
+                // The StaticStructureFileManager now uses getFileReference() instead of resolve()
+                String indexPath = "/tmp/vctree_structure_" + partition;
+                
+                // Create static structure file manager
+                StaticStructureFileManager structureFileManager = 
+                    StaticStructureFileManager.create(ioManager, indexPath);
+                
+                // Prepare structure data
+                Map<String, Object> structureData = new HashMap<>();
+                structureData.put("numLevels", levelDistribution.size());
+                structureData.put("levelDistribution", levelDistribution);
+                structureData.put("clusterDistribution", clusterDistribution);
+                structureData.put("totalTuplesProcessed", tupleCount);
+                structureData.put("timestamp", System.currentTimeMillis());
+                structureData.put("partition", partition);
+                
+                // Write to file
+                structureFileManager.writeStaticStructure(structureData);
+                
+                System.err.println("Static structure written to .staticstructure file");
+                System.err.println("  - Index path: " + indexPath);
+                System.err.println("  - Partition: " + partition);
+                System.err.println("  - Levels: " + levelDistribution.size());
+                System.err.println("  - Total centroids: " + levelDistribution.values().stream().mapToInt(Integer::intValue).sum());
+                
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to write static structure file: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
 
 
 
-            @Override
-            public void close() throws HyracksDataException {
+        @Override
+        public void close() throws HyracksDataException {
                 System.err.println("=== VCTreeStaticStructureBulkLoader FINALIZING ===");
-                System.err.println("Total tuples processed: " + tupleCount);
+            System.err.println("Total tuples processed: " + tupleCount);
                 
                 // Log final structure
                 logCurrentStructure();
@@ -395,22 +437,25 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 // Create VCTreeStaticStructureLoader with real structure
                 createVCTreeStaticStructureLoaderWithRealData();
 
-                if (staticStructureLoader != null) {
-                    try {
-                        // staticStructureLoader.end();
+            if (staticStructureLoader != null) {
+                try {
+                    // staticStructureLoader.end();
                         System.err.println("VCTreeStaticStructureLoader finalized with real data");
-                    } catch (Exception e) {
-                        System.err.println("ERROR: Failed to finalize VCTreeStaticStructureLoader: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("ERROR: Failed to finalize VCTreeStaticStructureLoader: " + e.getMessage());
                     }
                 }
 
-                // Close the writer if available
-                if (writer != null) {
-                    writer.close();
-                }
+                // Write static structure to .staticstructure file
+                writeStaticStructureToFile();
+
+            // Close the writer if available
+            if (writer != null) {
+                writer.close();
+            }
                 
                 System.err.println("=== VCTreeStaticStructureBulkLoader COMPLETE ===");
-            }
+        }
 
         @Override
         public void fail() throws HyracksDataException {

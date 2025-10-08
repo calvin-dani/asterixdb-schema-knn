@@ -46,6 +46,7 @@ public class StorageConstants {
     public static final String INDEX_NON_DATA_FILES_PREFIX = ".";
     public static final String INDEX_CHECKPOINT_FILE_PREFIX = ".idx_checkpoint_";
     public static final String METADATA_FILE_NAME = ".metadata";
+    public static final String STATIC_STRUCTURE_FILE_NAME = ".staticstructure";
     public static final String MASK_FILE_PREFIX = ".mask_";
     public static final String COMPONENT_MASK_FILE_PREFIX = MASK_FILE_PREFIX + "C_";
     public static final float DEFAULT_TREE_FILL_FACTOR = 1.00f;
