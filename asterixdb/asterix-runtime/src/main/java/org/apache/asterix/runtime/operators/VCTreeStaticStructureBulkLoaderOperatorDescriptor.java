@@ -58,6 +58,7 @@ import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
+import java.util.UUID;
 
 public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
@@ -65,23 +66,25 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final int maxEntriesPerPage;
     private final float fillFactor;
+    private final UUID permitUUID;
 
     public VCTreeStaticStructureBulkLoaderOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
-            RecordDescriptor inputRecordDescriptor) {
+            RecordDescriptor inputRecordDescriptor, UUID permitUUID) {
         super(spec, 1, 1); // Input arity 1, Output arity 1 (regular operator)
         this.indexHelperFactory = indexHelperFactory;
         this.maxEntriesPerPage = maxEntriesPerPage;
         this.fillFactor = fillFactor;
+        this.permitUUID = permitUUID; // New field
         this.outRecDescs[0] = inputRecordDescriptor; // Pass through the same record descriptor
-        System.err.println("VCTreeStaticStructureBulkLoaderOperatorDescriptor created.");
+        System.err.println("VCTreeStaticStructureBulkLoaderOperatorDescriptor created with permit UUID: " + permitUUID);
     }
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         RecordDescriptor inputRecDesc = recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0);
-        return new VCTreeStaticStructureBulkLoaderNodePushable(ctx, partition, nPartitions, inputRecDesc);
+        return new VCTreeStaticStructureBulkLoaderNodePushable(ctx, partition, nPartitions, inputRecDesc, permitUUID);
     }
 
     private class VCTreeStaticStructureBulkLoaderNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
@@ -89,6 +92,8 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         private final IHyracksTaskContext ctx;
         private final int partition;
         private final int nPartitions;
+        private final RecordDescriptor inputRecDesc;
+        private final UUID permitUUID;
 
         private VCTreeStaticStructureLoader staticStructureLoader;
         private boolean bulkLoadingStarted = false;
@@ -109,12 +114,18 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             // Debug tracking fields
             private Map<Integer, Integer> levelDistribution = null;
             private Map<String, Map<Integer, Integer>> clusterDistribution = null;
+            
+            // Accumulator to collect all frame data before processing
+            private List<ByteBuffer> frameAccumulator = new ArrayList<>();
+            private boolean dataCollectionComplete = false;
 
         public VCTreeStaticStructureBulkLoaderNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions, 
-                RecordDescriptor inputRecDesc) throws HyracksDataException {
+                RecordDescriptor inputRecDesc, UUID permitUUID) throws HyracksDataException {
             this.ctx = ctx;
             this.partition = partition;
             this.nPartitions = nPartitions;
+            this.inputRecDesc = inputRecDesc;
+            this.permitUUID = permitUUID;
             this.fta = new FrameTupleAccessor(inputRecDesc);
         }
 
@@ -153,10 +164,27 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             fta.reset(buffer);
+            
+            System.err.println("=== VCTreeStaticStructureBulkLoader: Processing frame with " + fta.getTupleCount() + " tuples ===");
+            System.err.println("=== THREAD: " + Thread.currentThread().getName() + " ===");
+            System.err.println("=== TIMESTAMP: " + System.currentTimeMillis() + " ===");
 
-            for (int i = 0; i < fta.getTupleCount(); i++) {
-                tuple.reset(fta, i);
-                processTuple(tuple);
+            if (!dataCollectionComplete) {
+                // Accumulate the entire frame for later processing
+                ByteBuffer frameCopy = ByteBuffer.allocate(buffer.remaining());
+                frameCopy.put(buffer.duplicate());
+                frameCopy.flip();
+                frameAccumulator.add(frameCopy);
+                
+                tupleCount += fta.getTupleCount();
+                System.err.println("=== ACCUMULATED FRAME #" + frameAccumulator.size() + " with " + fta.getTupleCount() + " tuples ===");
+                System.err.println("=== TOTAL TUPLES ACCUMULATED: " + tupleCount + " ===");
+            } else {
+                // Process frame immediately (shouldn't happen in this pattern)
+                for (int i = 0; i < fta.getTupleCount(); i++) {
+                    tuple.reset(fta, i);
+                    processTuple(tuple);
+                }
             }
 
             // Pass through the input frame to output
@@ -166,34 +194,54 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         }
 
         private void processTuple(ITupleReference tuple) throws HyracksDataException {
-            if (!bulkLoadingStarted) {
-                // Start bulk loading with real hierarchical k-means data
-                System.err.println("=== VCTreeStaticStructureBulkLoader PHASE ===");
-                startBulkLoadingWithRealData();
-                bulkLoadingStarted = true;
-            } else {
-                // Process real tuple from hierarchical k-means
-                processRealTuple(tuple);
-                tupleCount++;
-            }
+            // This method is no longer used in the accumulation pattern
+            // All processing happens in processAllAccumulatedTuples()
+            System.err.println("WARNING: processTuple called but should use accumulation pattern");
         }
 
-        private void startBulkLoadingWithRealData() throws HyracksDataException {
-            System.err.println("=== STARTING BULK LOADING WITH REAL HIERARCHICAL K-MEANS DATA ===");
-            
-            // We'll collect the first batch of tuples to analyze the structure
-            // This is a two-pass approach: first pass to analyze, second pass to process
-            System.err.println("Real data analysis will be performed during tuple processing...");
-            System.err.println("Structure will be determined dynamically from incoming tuples");
+            private void processAllAccumulatedTuples() throws HyracksDataException {
+            System.err.println("=== PROCESSING " + frameAccumulator.size() + " ACCUMULATED FRAMES ===");
             
             // Initialize data collection structures
             levelDistribution = new HashMap<>();
             clusterDistribution = new HashMap<>();
             
-            System.err.println("Ready to process real hierarchical k-means data");
+            // Process each accumulated frame
+            for (int frameIndex = 0; frameIndex < frameAccumulator.size(); frameIndex++) {
+                ByteBuffer frameBuffer = frameAccumulator.get(frameIndex);
+                FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecDesc);
+                frameFta.reset(frameBuffer);
+                
+                System.err.println("=== PROCESSING FRAME #" + (frameIndex + 1) + " with " + frameFta.getTupleCount() + " tuples ===");
+                
+                // Process each tuple in the frame
+                for (int i = 0; i < frameFta.getTupleCount(); i++) {
+                    tuple.reset(frameFta, i);
+                    
+                    // Debug: Extract and log tuple data before processing
+                    try {
+                        FrameTupleReference frameTuple = (FrameTupleReference) tuple;
+                        levelEval.evaluate(frameTuple, levelVal);
+                        clusterIdEval.evaluate(frameTuple, clusterIdVal);
+                        centroidIdEval.evaluate(frameTuple, centroidIdVal);
+                        
+                        int level = AInt32SerializerDeserializer.getInt(levelVal.getByteArray(), levelVal.getStartOffset()+1);
+                        int clusterId = AInt32SerializerDeserializer.getInt(clusterIdVal.getByteArray(), clusterIdVal.getStartOffset()+1);
+                        int centroidId = AInt32SerializerDeserializer.getInt(centroidIdVal.getByteArray(), centroidIdVal.getStartOffset()+1);
+                        
+                        System.err.println("=== FRAME #" + (frameIndex + 1) + " TUPLE #" + (i + 1) + " DATA: Level=" + level + ", Cluster=" + clusterId + ", Centroid=" + centroidId + " ===");
+                    } catch (Exception e) {
+                        System.err.println("=== FRAME #" + (frameIndex + 1) + " TUPLE #" + (i + 1) + " DATA: ERROR extracting data: " + e.getMessage() + " ===");
+                    }
+                    
+                    processRealTuple(tuple);
+                }
+            }
+            
+            System.err.println("=== COMPLETED PROCESSING ALL " + frameAccumulator.size() + " FRAMES ===");
         }
 
-            private void processRealTuple(ITupleReference tuple) throws HyracksDataException {
+        private void processRealTuple(ITupleReference tuple) throws HyracksDataException {
                 
                 try {
                     // Cast to FrameTupleReference (it's already created in nextFrame)
@@ -429,7 +477,15 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         @Override
         public void close() throws HyracksDataException {
                 System.err.println("=== VCTreeStaticStructureBulkLoader FINALIZING ===");
-            System.err.println("Total tuples processed: " + tupleCount);
+            System.err.println("Total frames accumulated: " + frameAccumulator.size());
+            System.err.println("Total tuples accumulated: " + tupleCount);
+            
+            // Process all accumulated tuples at once
+            if (!dataCollectionComplete) {
+                System.err.println("=== PROCESSING ALL ACCUMULATED TUPLES ===");
+                processAllAccumulatedTuples();
+                dataCollectionComplete = true;
+            }
                 
                 // Log final structure
                 logCurrentStructure();

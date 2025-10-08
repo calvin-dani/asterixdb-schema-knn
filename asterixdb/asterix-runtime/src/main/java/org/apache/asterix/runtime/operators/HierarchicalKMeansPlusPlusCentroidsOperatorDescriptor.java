@@ -654,6 +654,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 @Override
                 public void initialize() throws HyracksDataException {
+                    System.err.println("=== HIERARCHICAL K-MEANS INITIALIZE CALLED ===");
+                    System.err.println("=== PARTITION: " + partition + " ===");
+                    System.err.println("=== ACTIVITY: FindCandidatesActivity ===");
+                    System.err.println("=== THREAD: " + Thread.currentThread().getName() + " ===");
+                    System.err.println("=== TIMESTAMP: " + System.currentTimeMillis() + " ===");
+                    
                     // Get file reader for written samples
                     MaterializerTaskState sampleState =
                             (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(sampleUUID, partition));
@@ -680,9 +686,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Create hierarchical cluster index writer
                         HierarchicalClusterIndexWriter indexWriter = new HierarchicalClusterIndexWriter(ctx, partition);
 
-                        // Build complete tree clustering with parent-child relationships
-                        buildCompleteTreeClustering(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
-                                KMeansUtils, vSizeFrame, appender, partition, indexWriter);
+                    // Build complete tree clustering with parent-child relationships
+                    System.err.println("=== CALLING buildCompleteTreeClustering ===");
+                    System.err.println("=== PARTITION: " + partition + " ===");
+                    buildCompleteTreeClustering(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
+                            KMeansUtils, vSizeFrame, appender, partition, indexWriter);
+                    System.err.println("=== COMPLETED buildCompleteTreeClustering ===");
 
                         // Write the hierarchical cluster index to side file
                         indexWriter.writeIndexToSideFile();
@@ -915,7 +924,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     tree.assignBFSIds();
 
                     // Output all nodes in BFS order
+                    System.err.println("=== CALLING outputCompleteTree ===");
+                    System.err.println("=== TREE NODES: " + tree.getTotalNodes() + " ===");
                     outputCompleteTree(tree, appender, indexWriter, partition);
+                    System.err.println("=== COMPLETED outputCompleteTree ===");
 
                     System.err.println("Tree output complete: " + tree.getTotalNodes() + " nodes");
                 }
@@ -2175,7 +2187,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
 
+                    int tupleOutputCount = 0;
+                    int frameCount = 0;
+                    
                     for (HierarchicalClusterTree.TreeNode node : allNodes) {
+                        tupleOutputCount++;
+                        System.err.println("=== OUTPUTTING TUPLE #" + tupleOutputCount + " ===");
+                        System.err.println("=== NODE: level=" + node.getLevel() + ", clusterId=" + node.getClusterId() + ", globalId=" + node.getGlobalId() + " ===");
+                        
                         double[] arr = node.getCentroid();
                         orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
                         for (double value : arr) {
@@ -2215,6 +2234,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                                 tupleBuilder.getSize())) {
+                            // Frame is full, flush and reset
+                            frameCount++;
+                            System.err.println("=== FRAME #" + frameCount + " FULL, FLUSHING ===");
+                            System.err.println("=== FRAME #" + frameCount + " CONTAINS " + (tupleOutputCount - 1) + " TUPLES ===");
+                            
                             FrameUtils.flushFrame(appender.getBuffer(), writer);
                             appender.reset(new VSizeFrame(ctx), true);
                             appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
@@ -2224,7 +2248,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     
                     // CRITICAL: Flush the final frame after outputting all nodes
                     // This ensures that the last batch of nodes is sent to the next operator
+                    frameCount++;
+                    System.err.println("=== FLUSHING FINAL FRAME #" + frameCount + " ===");
+                    System.err.println("=== TOTAL TUPLES OUTPUT: " + tupleOutputCount + " ===");
+                    System.err.println("=== TOTAL FRAMES OUTPUT: " + frameCount + " ===");
                     FrameUtils.flushFrame(appender.getBuffer(), writer);
+                    System.err.println("=== FINAL FRAME FLUSHED ===");
                 }
 
             };
