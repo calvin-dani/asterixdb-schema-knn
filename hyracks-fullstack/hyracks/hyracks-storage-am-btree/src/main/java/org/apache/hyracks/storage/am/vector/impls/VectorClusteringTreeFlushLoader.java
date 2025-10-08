@@ -27,8 +27,8 @@ import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 
 public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader {
 
-    public VectorClusteringTreeFlushLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            VectorClusteringTree treeIndex, IPageWriteCallback callback) throws HyracksDataException {
+    public VectorClusteringTreeFlushLoader(float fillFactor, VectorClusteringTree treeIndex,
+            IPageWriteCallback callback) throws HyracksDataException {
         super(fillFactor, callback, treeIndex);
     }
 
@@ -36,6 +36,21 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
     public void add(ITupleReference tuple) throws HyracksDataException {
         // Not used - we bulk load entire pages, not individual tuples
         throw new UnsupportedOperationException("Use bulkLoadFromTree() instead");
+    }
+
+    public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
+        // Copy page from source to target
+        int targetPageId = freePageManager.takePage(metaFrame);
+        ICachedPage targetPage =
+                bufferCache.confiscatePage(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), targetPageId));
+        // Copy entire page content
+        targetPage.setDiskPageId(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), targetPageId));
+        System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
+                    sourcePage.getBuffer().capacity());
+
+        // WRITE PAGE TO DISK
+        write(targetPage);
+        System.out.println("DEBUG: Copied page " + targetPageId + " to " + targetPageId);
     }
 
     /**
@@ -96,8 +111,7 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
     @Override
     public void end() throws HyracksDataException {
         try {
-            // Update root page ID in target tree
-            bulkLoadFromTree();
+            // Update root page ID in disk component
             super.end();
         } catch (HyracksDataException e) {
             handleException();

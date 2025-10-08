@@ -23,11 +23,18 @@ import java.util.HashSet;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilter;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
+import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
+import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 
 /**
  * LSM disk component for Vector Clustering Trees.
@@ -96,5 +103,15 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         Set<String> files = new HashSet<>();
         files.add(vcTree.getFileReference().getFile().getAbsolutePath());
         return files;
+    }
+
+    public ILSMDiskComponentBulkLoader createFlushLoader(NCConfig storageConfig, ILSMIOOperation operation,
+            boolean cleanupEmptyComponent, IPageWriteCallback callback) throws HyracksDataException {
+        LSMVCTreeDiskComponentLoader diskComponentLoader =
+                new LSMVCTreeDiskComponentLoader(operation, this, cleanupEmptyComponent);
+        diskComponentLoader.setFlushLoader(
+                (VectorClusteringTreeFlushLoader) (getIndex().createFlushLoader(0, callback)));
+        callback.initialize(diskComponentLoader);
+        return diskComponentLoader;
     }
 }

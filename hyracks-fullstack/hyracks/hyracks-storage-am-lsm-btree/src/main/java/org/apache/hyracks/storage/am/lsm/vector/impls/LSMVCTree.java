@@ -27,11 +27,8 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
-import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
-import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
-import org.apache.hyracks.storage.am.common.api.IPageManager;
-import org.apache.hyracks.storage.am.common.api.ITreeIndex;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.*;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
@@ -56,11 +53,9 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.common.IIndexAccessParameters;
-import org.apache.hyracks.storage.common.IIndexCursor;
-import org.apache.hyracks.storage.common.ISearchPredicate;
-import org.apache.hyracks.storage.common.MultiComparator;
+import org.apache.hyracks.storage.common.*;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
+import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.util.trace.ITracer;
 
 /**
@@ -192,39 +187,40 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public ILSMDiskComponent doFlush(ILSMIOOperation operation) throws HyracksDataException {
         LSMVCTreeFlushOperation flushOp = (LSMVCTreeFlushOperation) operation;
         LSMVCTreeMemoryComponent flushingComponent = (LSMVCTreeMemoryComponent) flushOp.getFlushingComponent();
+        IIndexAccessor accessor = flushingComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
         ILSMDiskComponent component = null;
-        ILSMDiskComponentBulkLoader componentBulkLoader;
+        LSMVCTreeDiskComponentLoader componentFlushLoader;
         try {
-            component = createDiskComponentFromFlushingComponent(flushingComponent, componentFactory, false);
+            component = createDiskComponent(componentFactory, flushOp.getTarget(), null,
+                    null, true);
 
-            componentBulkLoader = component.createBulkLoader(storageConfig, operation, 1.0f, false, 0L, false, false,
-                    false, pageWriteCallbackFactory.createPageWriteCallback());
+            componentFlushLoader = (LSMVCTreeDiskComponentLoader) ((LSMVCTreeDiskComponent)component).
+                    createFlushLoader(storageConfig, operation, false, pageWriteCallbackFactory.createPageWriteCallback());
+
             try {
+                VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor = (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
+                ITreeIndexMetadataFrame componentMetaFrame =
+                (vcTreeAccessor).getOpContext().getMetaFrame();
                 // Simple bulk load - just copy all pages
-                componentBulkLoader.end();
+                int maxPageId = flushingComponent.getIndex().getPageManager().getMaxPageId(componentMetaFrame);
+
+                for (int pageId = 0; pageId <= maxPageId; pageId++) {
+                    ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
+                    componentFlushLoader.copyPage(sourcePage);
+                    vcTreeAccessor.releasePage(sourcePage);
+                }
+
+                componentFlushLoader.end();
 
             } catch (Throwable e) {
-                componentBulkLoader.abort();
+                componentFlushLoader.abort();
                 throw e;
             }
         } catch (Throwable e) {
             if (component != null) {
                 component.destroy();
             }
-            throw e;
-        }
-        return component;
-    }
-
-    protected ILSMDiskComponent createDiskComponentFromFlushingComponent(LSMVCTreeMemoryComponent flushingComponent,
-            ILSMDiskComponentFactory factory, boolean createComponent) throws HyracksDataException {
-        LSMVCTreeDiskComponentFactory lsmVCTreeFactory = (LSMVCTreeDiskComponentFactory) factory;
-        ILSMDiskComponent component = lsmVCTreeFactory.createComponent(flushingComponent, this);
-        try {
-            component.activate(createComponent);
-        } catch (HyracksDataException e) {
-            component.returnPages();
             throw e;
         }
         return component;
