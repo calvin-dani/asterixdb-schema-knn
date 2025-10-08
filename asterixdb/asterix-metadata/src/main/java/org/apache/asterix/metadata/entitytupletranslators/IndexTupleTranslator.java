@@ -49,6 +49,7 @@ import org.apache.asterix.metadata.entities.Datatype;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.utils.Creator;
 import org.apache.asterix.metadata.utils.KeyFieldTypeUtil;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.base.ABoolean;
 import org.apache.asterix.om.base.ACollectionCursor;
 import org.apache.asterix.om.base.AInt32;
@@ -172,6 +173,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         switch (Index.IndexCategory.of(indexType)) {
             case VALUE:
             case TEXT:
+            case VECTOR:
                 // Read the key names from the SearchKeyName field
                 IACursor fieldNameCursor =
                         ((AOrderedList) indexRecord.getValueByPos(indexEntity.searchKeyIndex())).getCursor();
@@ -460,6 +462,17 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                         isOverridingKeyTypes, excludeUnknownKey, castDefaultNull, datetimeFormat, dateFormat,
                         timeFormat);
                 break;
+            case VECTOR:
+                keyFieldNames =
+                        searchElements.stream().map(Pair::getSecond).map(List::getFirst).collect(Collectors.toList());
+                keyFieldTypes = searchKeyType.stream().map(List::getFirst).collect(Collectors.toList());
+
+                excludeUnknownKey = OptionalBoolean.empty();
+                castDefaultNull = OptionalBoolean.empty();
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), keyFieldNames,
+                        keyFieldSourceIndicator, keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
+                        castDefaultNull, null, null, null, null);
+                break;
             case TEXT:
                 keyFieldNames =
                         searchElements.stream().map(Pair::getSecond).map(l -> l.get(0)).collect(Collectors.toList());
@@ -624,6 +637,9 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             case SAMPLE:
                 searchKey = ((Index.SampleIndexDetails) index.getIndexDetails()).getKeyFieldNames();
                 break;
+            case VECTOR:
+                searchKey = ((Index.VectorIndexDetails) index.getIndexDetails()).getKeyFieldNames();
+                break;
             default:
                 throw new AsterixException(ErrorCode.METADATA_ERROR, indexType.toString());
         }
@@ -687,8 +703,18 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             case ARRAY:
                 writeComplexSearchKeys((Index.ArrayIndexDetails) index.getIndexDetails());
                 break;
+            case VECTOR:
+                Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+                writeWithProperties(vectorIndexDetails);
+                writeIncludeFields(vectorIndexDetails);
         }
         writeSearchKeyType(index);
+
+        if (Index.IndexCategory.of(index.getIndexType()) == Index.IndexCategory.VECTOR) {
+            // Vector indexes do not have enforced keys.
+            return;
+        }
+
         writeEnforced(index);
         writeSearchKeySourceIndicator(index);
         writeExcludeUnknownKey(index);
@@ -787,6 +813,62 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
     }
 
+    private void writeWithProperties(Index.VectorIndexDetails index) throws HyracksDataException {
+        AdmObjectNode properties = index.getWithObjectNode();
+        int dimension = properties.getOptionalInt("dimension", -1);
+        int train_list = properties.getOptionalInt("train_list", -1);
+        String description = properties.getOptionalString("description", "default");
+        String similarity = properties.getOptionalString("similarity", "euclidean");
+
+        nameValue.reset();
+        aString.setValue("dimension");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        fieldValue.reset();
+        int32Serde.serialize(new AInt32(dimension), fieldValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
+
+        nameValue.reset();
+        aString.setValue("train_list");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        fieldValue.reset();
+        int32Serde.serialize(new AInt32(train_list), fieldValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
+
+        nameValue.reset();
+        aString.setValue("description");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        fieldValue.reset();
+        aString.setValue(description);
+        stringSerde.serialize(aString, fieldValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
+
+        nameValue.reset();
+        aString.setValue("similarity");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        fieldValue.reset();
+        aString.setValue(similarity);
+        stringSerde.serialize(aString, fieldValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
+    }
+
+    private void writeIncludeFields(Index.VectorIndexDetails index) throws HyracksDataException {
+        List<List<String>> includeElements = index.getIncludeFieldNames();
+        OrderedListBuilder listBuilder = new OrderedListBuilder();
+        listBuilder.reset(new AOrderedListType(BuiltinType.ASTRING, null));
+        for (List<String> field : includeElements) {
+            itemValue.reset();
+            aString.setValue(field.getFirst());
+            stringSerde.serialize(aString, itemValue.getDataOutput());
+            listBuilder.addItem(itemValue);
+        }
+        fieldValue.reset();
+        listBuilder.write(fieldValue.getDataOutput(), true);
+        nameValue.reset();
+        aString.setValue("include_fields");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
+    }
+
     private void writeSearchKeyType(Index index) throws HyracksDataException, AlgebricksException {
         if (!index.getIndexDetails().isOverridingKeyFieldTypes()) {
             return;
@@ -802,6 +884,12 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
         switch (Index.IndexCategory.of(index.getIndexType())) {
             // For value and text indexes, we persist the type as a single string (backwards compatibility).
+            case VECTOR:
+                itemValue.reset();
+                aString.setValue("vector");
+                stringSerde.serialize(aString, itemValue.getDataOutput());
+                typeListBuilder.addItem(itemValue);
+                break;
             case VALUE:
                 for (IAType type : ((Index.ValueIndexDetails) index.getIndexDetails()).getKeyFieldTypes()) {
                     itemValue.reset();

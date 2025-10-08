@@ -32,6 +32,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.btree.impls.BTreeOpContext;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
@@ -128,7 +129,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
         // TODO: Implement vector clustering tree bulk loader
-        return new VectorClusteringTreeBulkLoader(fillFactor, verifyInput, numElementsHint, this, callback);
+        return null;
+    }
+
+    public IIndexBulkLoader createFlushLoader(float fillFactor, IPageWriteCallback callback) throws HyracksDataException {
+        return new VectorClusteringTreeFlushLoader(fillFactor,  this, callback);
     }
 
     /**
@@ -1382,6 +1387,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         private final VectorClusteringTree tree;
         private final VectorClusteringOpContext ctx;
+        private boolean destroyed = false;
 
         public VectorClusteringTreeAccessor(VectorClusteringTree tree, IIndexAccessParameters iap) {
             this.tree = tree;
@@ -1453,7 +1459,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         @Override
         public void destroy() throws HyracksDataException {
-
+            if (destroyed) {
+                return;
+            }
+            destroyed = true;
+            ctx.destroy();
         }
 
         @Override
@@ -1466,6 +1476,18 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ctx.setOperation(IndexOperation.DISKORDERSCAN);
             // TODO: Implement disk order scan
             throw new UnsupportedOperationException("Disk order scan not yet implemented");
+        }
+
+        public VectorClusteringOpContext getOpContext() {
+            return ctx;
+        }
+
+        public ICachedPage getCachedPage(int pageId) throws HyracksDataException {
+            return bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), pageId));
+        }
+
+        public void releasePage(ICachedPage page) {
+            bufferCache.unpin(page);
         }
     }
 

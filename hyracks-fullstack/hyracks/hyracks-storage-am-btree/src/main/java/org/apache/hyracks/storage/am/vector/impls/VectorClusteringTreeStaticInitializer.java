@@ -598,10 +598,10 @@ public class VectorClusteringTreeStaticInitializer {
                     rightLeafIndex < leafPages.size() ? leafPages.get(rightLeafIndex).pageId : -1);
         }
 
-        // Step 4: Create root page with 2 centroids - Use actual page IDs
+        // Step 4: Create root page with 4 centroids - Use actual page IDs
         TestPage rootPage = createPage(TestPage.PageType.ROOT);
 
-        // Create proper root cluster tuples (2 centroids, each covering 2 interior pages)
+        // Create proper root cluster tuples
         for (int rootIndex = 0; rootIndex < 4; rootIndex++) {
             // Generate hierarchical centroid for root level
             double[] rootCentroid = generateHierarchicalCentroid(rootIndex, 2); // Level 2 = root
