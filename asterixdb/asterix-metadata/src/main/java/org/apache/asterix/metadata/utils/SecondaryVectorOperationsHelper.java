@@ -38,6 +38,9 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureBulkLoaderOperatorDescriptor;
+import org.apache.asterix.runtime.operators.IterationPermitState;
+import java.util.concurrent.Semaphore;
+import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -81,6 +84,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
+        System.err.println("=== SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ===");
+        System.err.println("Dataset: " + dataset.getDatasetName());
+        System.err.println("Index: " + index.getIndexName());
+        System.err.println("Creating 2-Phase Job with Permit Mechanism");
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -176,7 +183,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = targetOp;
 
         VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
-                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc);
+                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc, permitUUID);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
                 primaryPartitionConstraint);
         targetOp = vcTreeLoader;
@@ -193,6 +200,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
+        
+        System.err.println("=== 2-PHASE JOB CREATED: Phase 1 (Structure Creation) ===");
+        System.err.println("=== JOB FLOW: DataSource → K-means → StructureBuilder → Sink ===");
+        System.err.println("=== PERMIT MECHANISM: Ready for Phase 2 development ===");
         return spec;
     }
 
