@@ -139,6 +139,37 @@ public class HierarchicalClusterTree implements Serializable {
     }
 
     /**
+     * Sets the root of the tree to an existing node
+     * 
+     * FIX: This method was added to support the tree building fix where parent nodes
+     * need to be connected to the tree structure. The original setRoot(double[]) method
+     * creates a new node, but we need to set an existing node as the root.
+     */
+    public void setRoot(TreeNode node) {
+        this.root = node;
+    }
+
+    /**
+     * Adds multiple root nodes (Level 0 centroids) to the tree.
+     * This is used for the initial leaf nodes that don't have parents yet.
+     * 
+     * @param centroids List of centroids to add as root nodes
+     * @param level Level number (should be 0 for leaf nodes)
+     * @return List of created TreeNode objects
+     */
+    public List<TreeNode> addRootNodes(List<double[]> centroids, int level) {
+        List<TreeNode> rootNodes = new ArrayList<>();
+
+        for (int i = 0; i < centroids.size(); i++) {
+            TreeNode node = new TreeNode(centroids.get(i), level, i, nextGlobalId++, -1);
+            rootNodes.add(node);
+            totalNodes++;
+        }
+
+        return rootNodes;
+    }
+
+    /**
      * Adds a child to a parent node
      */
     public TreeNode addChild(TreeNode parent, double[] centroid, int level) {
@@ -152,6 +183,48 @@ public class HierarchicalClusterTree implements Serializable {
         totalNodes++;
 
         return child;
+    }
+
+    /**
+     * Adds a node without a parent (for interior levels during tree building).
+     * This is used when building the tree structure where parent nodes are created
+     * before their children are assigned to them.
+     * 
+     * @param centroid The centroid coordinates
+     * @param level The level number
+     * @return The created TreeNode
+     */
+    public TreeNode addNode(double[] centroid, int level) {
+        TreeNode node = new TreeNode(centroid, level, 0, nextGlobalId++, -1);
+        totalNodes++;
+        return node;
+    }
+
+    /**
+     * Moves a child node to a new parent.
+     * This is used during tree building to establish parent-child relationships.
+     * 
+     * @param childNode The child node to move
+     * @param newParent The new parent node
+     */
+    public void moveChildToParent(TreeNode childNode, TreeNode newParent) {
+        if (childNode == null || newParent == null) {
+            throw new IllegalArgumentException("Child and parent cannot be null");
+        }
+
+        // Remove child from its current parent (if any)
+        TreeNode currentParent = childNode.getParent();
+        if (currentParent != null) {
+            currentParent.getChildren().remove(childNode);
+        }
+
+        // FIX: Add child to new parent's children list directly (don't create new node)
+        // The previous implementation called newParent.addChild(childNode) which creates
+        // a new TreeNode instead of moving the existing childNode
+        newParent.getChildren().add(childNode);
+
+        // Update child's parent global ID
+        childNode.parentGlobalId = newParent.getGlobalId();
     }
 
     /**
