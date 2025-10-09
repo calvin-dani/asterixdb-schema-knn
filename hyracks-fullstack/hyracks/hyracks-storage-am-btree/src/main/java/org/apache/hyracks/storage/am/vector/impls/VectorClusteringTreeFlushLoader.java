@@ -46,7 +46,7 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
         // Copy entire page content
         targetPage.setDiskPageId(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), targetPageId));
         System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
-                    sourcePage.getBuffer().capacity());
+                sourcePage.getBuffer().capacity());
 
         // WRITE PAGE TO DISK
         write(targetPage);
