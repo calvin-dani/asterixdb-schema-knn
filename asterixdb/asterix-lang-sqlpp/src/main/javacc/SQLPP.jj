@@ -1507,6 +1507,7 @@ CreateIndexStatement VectorIndexSpecification(Token startStmtToken) throws Parse
        vectorField = IndexedElement(startElementToken) {
    }
    <RIGHTPAREN>
+   (
    <INC> <LEFTPAREN> { startElementToken  = token; }
         includeField = IndexedElement(startElementToken) {
             nonVectorFieldsList.add(includeField);
@@ -1516,7 +1517,8 @@ CreateIndexStatement VectorIndexSpecification(Token startStmtToken) throws Parse
             nonVectorFieldsList.add(includeField);
         }
         )*
-  <RIGHTPAREN>
+   <RIGHTPAREN>
+  )?
   <WITH> withRecord = RecordConstructor()
   {
     try {
