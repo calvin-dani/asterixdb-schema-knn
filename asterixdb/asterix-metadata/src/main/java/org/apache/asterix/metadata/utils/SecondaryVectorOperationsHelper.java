@@ -18,7 +18,9 @@
  */
 package org.apache.asterix.metadata.utils;
 
+import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
+import static org.apache.asterix.om.types.BuiltinType.AINT32;
 
 import java.util.List;
 import java.util.UUID;
@@ -35,6 +37,7 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeStaticStructureBulkLoaderOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -137,58 +140,55 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         RecordDescriptor centroidRecDesc = new RecordDescriptor(newCentSerde, newCentTraits);
 
+        // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
+        ISerializerDeserializer[] hierarchicalSerde = new ISerializerDeserializer[4];
+        ITypeTraits[] hierarchicalTraits = new ITypeTraits[4];
+
+        // Level (int)
+        hierarchicalSerde[0] = serdeProvider.getSerializerDeserializer(AINT32);
+        hierarchicalTraits[0] = typeTraitProvider.getTypeTrait(AINT32);
+
+        // ClusterId (int)
+        hierarchicalSerde[1] = serdeProvider.getSerializerDeserializer(AINT32);
+        hierarchicalTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
+
+        // CentroidId (int)
+        hierarchicalSerde[2] = serdeProvider.getSerializerDeserializer(AINT32);
+        hierarchicalTraits[2] = typeTraitProvider.getTypeTrait(AINT32);
+
+        // Embedding (float array)
+        hierarchicalSerde[3] = serdeProvider.getSerializerDeserializer(new AOrderedListType(ADOUBLE, "embedding"));
+        hierarchicalTraits[3] = typeTraitProvider.getTypeTrait(new AOrderedListType(ADOUBLE, "embedding"));
+
+        RecordDescriptor hierarchicalRecDesc = new RecordDescriptor(hierarchicalSerde, hierarchicalTraits);
+
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID,
-                        centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
+                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc, 
+                        sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        //        sourceOp = targetOp;
-        //        KCandidateCentroidsOperatorDescriptor Kcandidates =
-        //                new KCandidateCentroidsOperatorDescriptor(spec, secondaryRecDesc, sampleUUID, kCentroidsUUID,
-        //                        permitUUID, new ColumnAccessEvalFactory(0), centroidRecDesc, K, 0);
-        //        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, Kcandidates,
-        //                primaryPartitionConstraint);
-        //        targetOp = Kcandidates;
-        //        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        //
-        // ADD ITERATIVE STEPS TO CREATE THE UPPER LEVEL OF THE BTREE CLUSTER BASED ON THE OUTPUT
-        // TODO CALVIN DANI : CONTINUE FROM THE CENTROIDS OR REDO THE KMEANS ++ (CHECK DATASET SIZE)
-        //        int roundedK = (int) Math.round((double) K / (2 * 1));
-        //        for (int depth = 1; depth < 3 && roundedK > 1; depth++) {
-        //
-        //            roundedK = (int) Math.round((double) K / (2 * depth));
-        //
-        //            sourceOp = targetOp;
-        //            CandidateCentroidsOperatorDescriptor2 candidates2 =
-        //                    new CandidateCentroidsOperatorDescriptor2(spec, onlyCentroidRecDesc, sampleUUID, centroidsUUID,
-        //                            permitUUID, new ColumnAccessEvalFactory(0), roundedK);
-        //            AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates2,
-        //                    primaryPartitionConstraint);
-        //            targetOp = candidates2;
-        //            spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        //
-        //            sourceOp = targetOp;
-        //            KCandidateCentroidsOperatorDescriptor2 Kcandidates2 =
-        //                    new KCandidateCentroidsOperatorDescriptor2(spec, secondaryRecDesc, KCentroidsUUID, kCentroidsUUID,
-        //                            permitUUID, new ColumnAccessEvalFactory(0), onlyCentroidRecDesc, roundedK, depth);
-        //            AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, Kcandidates2,
-        //                    primaryPartitionConstraint);
-        //            targetOp = Kcandidates2;
-        //            spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        //        }
+        // Connect hierarchical k-means output to VCTree bulk loader
+        sourceOp = targetOp;
 
+        VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
+                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
+                primaryPartitionConstraint);
+        targetOp = vcTreeLoader;
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+        // Add sink for final output
         sourceOp = targetOp;
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
         sinkRuntimeFactory.setSourceLocation(sourceLoc);
         targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0, new IPushRuntimeFactory[] { sinkRuntimeFactory },
-                new RecordDescriptor[] { secondaryRecDesc });
+                new RecordDescriptor[] { hierarchicalRecDesc });
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
-        //        PartitionConstraintHelper.addAbsoluteLocationConstraint(spec, targetOp, metadataProvider.getClusterLocations().getLocations()[0]);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         spec.addRoot(targetOp);

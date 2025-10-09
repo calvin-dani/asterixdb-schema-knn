@@ -1,0 +1,68 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+USE HierarchicalKMeansTest;
+
+-- Create synthetic test data for hierarchical k-means clustering
+-- This includes various test scenarios for centroid update, convergence, initialization, and edge cases
+INSERT INTO TestEmbeddingDataset([
+  -- Cluster 1: Points around (1, 1, 1)
+  { "id": 1, "embedding": [1.0, 1.0, 1.0] },
+  { "id": 2, "embedding": [1.1, 1.1, 1.1] },
+  { "id": 3, "embedding": [0.9, 0.9, 0.9] },
+  { "id": 4, "embedding": [1.2, 0.8, 1.0] },
+  { "id": 5, "embedding": [0.8, 1.2, 1.0] },
+  
+  -- Cluster 2: Points around (5, 5, 5)
+  { "id": 6, "embedding": [5.0, 5.0, 5.0] },
+  { "id": 7, "embedding": [5.1, 5.1, 5.1] },
+  { "id": 8, "embedding": [4.9, 4.9, 4.9] },
+  { "id": 9, "embedding": [5.2, 4.8, 5.0] },
+  { "id": 10, "embedding": [4.8, 5.2, 5.0] },
+  
+  -- Cluster 3: Points around (10, 10, 10)
+  { "id": 11, "embedding": [10.0, 10.0, 10.0] },
+  { "id": 12, "embedding": [10.1, 10.1, 10.1] },
+  { "id": 13, "embedding": [9.9, 9.9, 9.9] },
+  { "id": 14, "embedding": [10.2, 9.8, 10.0] },
+  { "id": 15, "embedding": [9.8, 10.2, 10.0] },
+  
+  -- Additional test points for edge cases
+  { "id": 16, "embedding": [2.0, 2.0, 2.0] },
+  { "id": 17, "embedding": [3.0, 3.0, 3.0] },
+  { "id": 18, "embedding": [7.0, 7.0, 7.0] },
+  { "id": 19, "embedding": [8.0, 8.0, 8.0] },
+  { "id": 20, "embedding": [15.0, 15.0, 15.0] },
+  
+  -- Edge case: Identical points
+  { "id": 21, "embedding": [1.0, 1.0, 1.0] },
+  { "id": 22, "embedding": [1.0, 1.0, 1.0] },
+  
+  -- Edge case: Outlier points
+  { "id": 23, "embedding": [50.0, 50.0, 50.0] },
+  { "id": 24, "embedding": [100.0, 100.0, 100.0] },
+  
+  -- More points for better clustering
+  { "id": 25, "embedding": [1.05, 1.05, 1.05] },
+  { "id": 26, "embedding": [0.95, 0.95, 0.95] },
+  { "id": 27, "embedding": [5.05, 5.05, 5.05] },
+  { "id": 28, "embedding": [4.95, 4.95, 4.95] },
+  { "id": 29, "embedding": [10.05, 10.05, 10.05] },
+  { "id": 30, "embedding": [9.95, 9.95, 9.95] }
+]);

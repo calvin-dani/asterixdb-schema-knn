@@ -169,6 +169,25 @@ public class HierarchicalCentroidsState extends AbstractStateObject {
         parentMap.clear();
     }
 
+    /**
+     * Clears all centroids at a specific level
+     */
+    public void clearLevel(int level) {
+        List<HierarchicalCentroid> centroids = levelCentroids.get(level);
+        if (centroids != null) {
+            // Remove parent-child relationships for centroids at this level
+            for (HierarchicalCentroid centroid : centroids) {
+                HierarchicalClusterId clusterId = centroid.getClusterId();
+                HierarchicalClusterId parentId = parentMap.get(clusterId);
+                if (parentId != null) {
+                    childrenMap.get(parentId).remove(clusterId);
+                    parentMap.remove(clusterId);
+                }
+            }
+            centroids.clear();
+        }
+    }
+
     @Override
     public void toBytes(DataOutput out) throws IOException {
         // Write number of levels
