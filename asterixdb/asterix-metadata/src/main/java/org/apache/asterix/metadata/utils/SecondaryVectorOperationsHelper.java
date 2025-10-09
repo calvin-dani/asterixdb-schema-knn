@@ -38,9 +38,6 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureBulkLoaderOperatorDescriptor;
-import org.apache.asterix.runtime.operators.IterationPermitState;
-import java.util.concurrent.Semaphore;
-import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -172,7 +169,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc, 
+                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
@@ -183,7 +180,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = targetOp;
 
         VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
-                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc, permitUUID);
+                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
+                        hierarchicalRecDesc, permitUUID);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
                 primaryPartitionConstraint);
         targetOp = vcTreeLoader;
@@ -200,7 +198,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
-        
+
         System.err.println("=== 2-PHASE JOB CREATED: Phase 1 (Structure Creation) ===");
         System.err.println("=== JOB FLOW: DataSource → K-means → StructureBuilder → Sink ===");
         System.err.println("=== PERMIT MECHANISM: Ready for Phase 2 development ===");

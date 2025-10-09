@@ -226,10 +226,11 @@ public class CachedPage implements ICachedPageInternal {
 
     public void copyBuffer(ByteBuffer newBuffer) {
         if (newBuffer == null || newBuffer.capacity() != buffer.capacity()) {
-            throw new IllegalArgumentException("Invalid new buffer for page: " + this );
+            throw new IllegalArgumentException("Invalid new buffer for page: " + this);
         }
         buffer = newBuffer;
     }
+
     @Override
     public String toString() {
         return "CachedPage:[dpid: " + dpid + ", fileId: " + BufferedFileHandle.getFileId(dpid) + ", page:"
