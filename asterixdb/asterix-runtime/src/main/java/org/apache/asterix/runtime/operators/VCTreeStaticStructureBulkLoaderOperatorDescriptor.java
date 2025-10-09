@@ -59,6 +59,11 @@ import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import java.util.UUID;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 
 public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
@@ -181,10 +186,10 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 System.err.println("=== TOTAL TUPLES ACCUMULATED: " + tupleCount + " ===");
             } else {
                 // Process frame immediately (shouldn't happen in this pattern)
-                for (int i = 0; i < fta.getTupleCount(); i++) {
-                    tuple.reset(fta, i);
-                    processTuple(tuple);
-                }
+            for (int i = 0; i < fta.getTupleCount(); i++) {
+                tuple.reset(fta, i);
+                processTuple(tuple);
+            }
             }
 
             // Pass through the input frame to output
@@ -314,7 +319,7 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                         System.err.println("  -> VCTreeStaticStructureLoader not available, storing for later");
                     }
                     
-                } else {
+            } else {
                     System.err.println("WARNING: Empty or invalid embedding data for centroid " + centroidId);
                 }
                 
@@ -371,8 +376,8 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
                 System.err.println("  - fillFactor: " + fillFactor);
                 
-                // Store structure parameters for LSM index creation
-                storeStructureParametersForLSMIndex(numLevels, clustersPerLevel, centroidsPerCluster);
+                // Create LSM index with static structure
+                createLSMIndexWithStaticStructure(numLevels, clustersPerLevel, centroidsPerCluster);
                 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create VCTreeStaticStructureLoader with real data: " + e.getMessage());
@@ -381,39 +386,69 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         }
         
         /**
-         * Stores the structure parameters for LSM index creation.
+         * Creates the LSM index with static structure parameters.
          * 
-         * This method prepares the structure information that will be passed
-         * to the LSM index creation pipeline, following the LSMBTree pattern.
+         * This method actually creates the LSM index and calls the bulk loader
+         * to build the static structure pages, following the LSMBTree pattern.
          */
-        private void storeStructureParametersForLSMIndex(int numLevels, List<Integer> clustersPerLevel, 
+        private void createLSMIndexWithStaticStructure(int numLevels, List<Integer> clustersPerLevel, 
                 List<List<Integer>> centroidsPerCluster) {
-            System.err.println("=== STORING STRUCTURE PARAMETERS FOR LSM INDEX CREATION ===");
+            System.err.println("=== CREATING LSM INDEX WITH STATIC STRUCTURE ===");
             
-            // Create parameters map that will be passed to LSM index creation
-            Map<String, Object> structureParameters = new HashMap<>();
-            structureParameters.put("numLevels", numLevels);
-            structureParameters.put("clustersPerLevel", clustersPerLevel);
-            structureParameters.put("centroidsPerCluster", centroidsPerCluster);
-            structureParameters.put("maxEntriesPerPage", maxEntriesPerPage);
-            structureParameters.put("fillFactor", fillFactor);
-            structureParameters.put("isStaticStructureLoad", true);
-            structureParameters.put("totalTuplesProcessed", tupleCount);
-            
-            System.err.println("Structure parameters prepared for LSM index creation:");
-            System.err.println("  - numLevels: " + structureParameters.get("numLevels"));
-            System.err.println("  - clustersPerLevel: " + structureParameters.get("clustersPerLevel"));
-            System.err.println("  - centroidsPerCluster: " + structureParameters.get("centroidsPerCluster"));
-            System.err.println("  - maxEntriesPerPage: " + structureParameters.get("maxEntriesPerPage"));
-            System.err.println("  - fillFactor: " + structureParameters.get("fillFactor"));
-            System.err.println("  - isStaticStructureLoad: " + structureParameters.get("isStaticStructureLoad"));
-            System.err.println("  - totalTuplesProcessed: " + structureParameters.get("totalTuplesProcessed"));
-            
-            // TODO: Pass these parameters to the LSM index creation
-            // This would typically be done through the indexHelperFactory or
-            // by modifying the job specification to include these parameters
-            System.err.println("NOTE: Parameters need to be passed to LSM index creation pipeline");
-            System.err.println("This integration will be completed when connecting to the LSM index creation");
+            try {
+                // Create the LSM index using the indexHelperFactory
+                IIndexDataflowHelper indexHelper = indexHelperFactory.create(
+                    ctx.getJobletContext().getServiceContext(), partition);
+                
+                System.err.println("Opening LSM index...");
+                indexHelper.open();
+                ILSMIndex lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
+                System.err.println("LSM index opened successfully");
+                
+                // Create parameters map for the LSM index creation
+                Map<String, Object> structureParameters = new HashMap<>();
+                structureParameters.put("numLevels", numLevels);
+                structureParameters.put("clustersPerLevel", clustersPerLevel);
+                structureParameters.put("centroidsPerCluster", centroidsPerCluster);
+                structureParameters.put("maxEntriesPerPage", maxEntriesPerPage);
+                structureParameters.put("fillFactor", fillFactor);
+                structureParameters.put("isStaticStructureLoad", true);
+                structureParameters.put("totalTuplesProcessed", tupleCount);
+                
+                // Add required LSM component ID parameter (following LSMIndexBulkLoadOperatorNodePushable pattern)
+                structureParameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID, LSMComponentId.DEFAULT_COMPONENT_ID);
+                
+                System.err.println("Structure parameters for LSM index creation:");
+                System.err.println("  - numLevels: " + structureParameters.get("numLevels"));
+                System.err.println("  - clustersPerLevel: " + structureParameters.get("clustersPerLevel"));
+                System.err.println("  - centroidsPerCluster: " + structureParameters.get("centroidsPerCluster"));
+                System.err.println("  - maxEntriesPerPage: " + structureParameters.get("maxEntriesPerPage"));
+                System.err.println("  - fillFactor: " + structureParameters.get("fillFactor"));
+                System.err.println("  - isStaticStructureLoad: " + structureParameters.get("isStaticStructureLoad"));
+                System.err.println("  - totalTuplesProcessed: " + structureParameters.get("totalTuplesProcessed"));
+                System.err.println("  - flushedComponentId: " + structureParameters.get(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID));
+                
+                // Create the bulk loader with static structure parameters
+                System.err.println("Creating LSM bulk loader with static structure...");
+                IIndexBulkLoader bulkLoader = lsmIndex.createBulkLoader(
+                    fillFactor, false, tupleCount, false, structureParameters);
+                
+                System.err.println("LSM bulk loader created successfully");
+                
+                // Finalize the bulk loader to create the static structure
+                System.err.println("Finalizing bulk loader to create static structure pages...");
+                bulkLoader.end();
+                
+                System.err.println("Static structure pages created successfully in LSM index");
+                
+                // Close the index
+                indexHelper.close();
+                System.err.println("LSM index closed successfully");
+                
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to create LSM index with static structure: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
         
         
