@@ -1689,8 +1689,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
                 bActiveTxn = false; // doCreateIndexImpl() takes over the current transaction
                 EntityDetails entityDetails = EntityDetails.newIndex(databaseName, dataverseName, indexName);
-                doCreateVectorIndexImplSimple(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator,
-                        entityDetails);
+                doCreateIndexImpl(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator, entityDetails);
                 return;
             }
 

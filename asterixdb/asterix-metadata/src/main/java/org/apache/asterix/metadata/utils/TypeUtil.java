@@ -413,6 +413,11 @@ public class TypeUtil {
                     enforcedRecordType = appendArrayIndexTypes(enforcedRecordType,
                             (Index.ArrayIndexDetails) index.getIndexDetails(), enforcedTypeBuilder);
                     break;
+                case VECTOR:
+                    // VECTOR indexes use VectorIndexDetails, treat similar to VALUE indexes for type enforcement
+                    enforcedRecordType = appendVectorIndexType(enforcedRecordType,
+                            (Index.VectorIndexDetails) index.getIndexDetails(), enforcedTypeBuilder);
+                    break;
                 default:
                     throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,
                             String.valueOf(index.getIndexType()));
@@ -437,6 +442,31 @@ public class TypeUtil {
             enforcedTypeBuilder.reset(enforcedRecordType, keyFieldNames.get(i),
                     Collections.nCopies(keyFieldNames.get(i).size(), false), keyFieldTypes.get(i),
                     valueIndexDetails.getCastDefaultNull().getOrElse(false));
+            validateRecord(enforcedRecordType);
+            enforcedRecordType = enforcedTypeBuilder.build();
+        }
+
+        return enforcedRecordType;
+    }
+
+    private static ARecordType appendVectorIndexType(ARecordType enforcedRecordType,
+            Index.VectorIndexDetails vectorIndexDetails, EnforcedTypeBuilder enforcedTypeBuilder)
+            throws AlgebricksException {
+        // VECTOR indexes have a single key field (the vector field) and optional include fields
+        // For type enforcement, we only need to handle the include fields, not the key field
+        // The key field (vector field) doesn't have explicit types - it's just the field name
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        List<IAType> includeFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
+        List<Integer> includeSources = vectorIndexDetails.getIncludeFieldSourceIndicators();
+        
+        for (int i = 0; i < includeFieldNames.size(); i++) {
+            if (includeSources.get(i) != Index.RECORD_INDICATOR) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR,
+                        "Indexing an open field is only supported on the record part");
+            }
+            enforcedTypeBuilder.reset(enforcedRecordType, includeFieldNames.get(i),
+                    Collections.nCopies(includeFieldNames.get(i).size(), false), includeFieldTypes.get(i),
+                    vectorIndexDetails.getCastDefaultNull().getOrElse(false));
             validateRecord(enforcedRecordType);
             enforcedRecordType = enforcedTypeBuilder.build();
         }
