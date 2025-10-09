@@ -305,6 +305,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             case BTREE:
             case SAMPLE:
                 return ResourceType.LSM_BTREE;
+            case VECTOR:
+                return ResourceType.LSM_BTREE; // VECTOR uses LSM_BTREE as base structure
             case RTREE:
                 return ResourceType.LSM_RTREE;
             case LENGTH_PARTITIONED_NGRAM_INVIX:
@@ -538,6 +540,14 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         public List<List<String>> getKeyFieldNames() {
             return Collections.singletonList(keyFieldNames);
+        }
+
+        public ARecordType getIndexExpectedType() throws AlgebricksException {
+            // For VECTOR indexes, we need to create a record type that includes both the key field and include fields
+            List<List<String>> allFieldNames = new ArrayList<>();
+            allFieldNames.add(keyFieldNames); // Add the vector field as the first field
+            allFieldNames.addAll(includeFieldNames); // Add include fields
+            return ProjectionFiltrationTypeUtil.getRecordType(allFieldNames);
         }
     }
 
