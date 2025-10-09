@@ -24,9 +24,23 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-
-import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
+import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
+import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.io.IIOManager;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
+import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
+import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
+import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureLoader;
+import org.apache.hyracks.storage.common.LocalResource;
 // import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 // import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 // import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
@@ -40,6 +54,8 @@ import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
 // import org.apache.asterix.om.types.ATypeTag;
 // import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
+import org.apache.asterix.common.utils.StorageConstants;
+import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -53,18 +69,7 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
-import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
-import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
-import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
-import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
-import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
-import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureLoader;
-import org.apache.hyracks.storage.common.IIndexBulkLoader;
-
+import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
@@ -483,7 +488,7 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         }
 
         /**
-         * Writes the static structure information to .staticstructure file in LSM component directory
+         * Writes the static structure information to .staticstructure file in the same directory as the index's .metadata file
          */
         private void writeStaticStructureToFile() {
             try {
@@ -495,20 +500,23 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 // For now, we'll use a simple approach to get the base directory
                 // The LSM index should be created in the target directory
                 IIOManager ioManager = ctx.getIoManager();
-                String baseDirPath = "/target/io/dir/asterix_nc1/target/tmp/asterix_nc1/iodevice1/";
-                FileReference baseDir = ioManager.getFileReference(0, baseDirPath);
-
-                // Get the next component sequence for the .staticstructure file
-                // This ensures it matches the VCTree component that will be created
-                String componentSequence = getNextComponentSequence();
-                String staticStructureFileName = componentSequence + "_" + ".staticstructure";
-                FileReference staticStructureFile = baseDir.getChild(staticStructureFileName);
-
-                System.err.println("Writing .staticstructure file to LSM component directory:");
-                System.err.println("  - Base directory: " + baseDir.getAbsolutePath());
-                System.err.println("  - Component sequence: " + componentSequence);
+                
+                // Get the index file path from the index helper factory
+                // The .staticstructure file should be in the same directory as the .metadata file
+                FileReference indexPath = getIndexFilePath();
+                if (indexPath == null) {
+                    System.err.println("WARNING: Could not determine index file path, skipping .staticstructure file creation");
+                    return;
+                }
+                
+                // Create the .staticstructure file in the same directory as the index
+                String staticStructureFileName = StorageConstants.STATIC_STRUCTURE_FILE_NAME;
+                FileReference staticStructureFile = indexPath.getParent().getChild(staticStructureFileName);
+                
+                System.err.println("Writing .staticstructure file to index directory:");
+                System.err.println("  - Index directory: " + indexPath.getParent().getAbsolutePath());
                 System.err.println("  - Static structure file: " + staticStructureFile.getAbsolutePath());
-
+                
                 // Prepare structure data
                 Map<String, Object> structureData = new HashMap<>();
                 structureData.put("numLevels", levelDistribution.size());
@@ -517,21 +525,108 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 structureData.put("totalTuplesProcessed", tupleCount);
                 structureData.put("timestamp", System.currentTimeMillis());
                 structureData.put("partition", partition);
-                structureData.put("componentSequence", componentSequence);
-
-                // Write to LSM component directory using atomic write pattern
+                
+                // Write to index directory using atomic write pattern
                 writeStaticStructureAtomically(staticStructureFile, structureData);
-
-                System.err.println("Static structure written to LSM component directory");
+                
+                System.err.println("Static structure written to index directory");
                 System.err.println("  - Levels: " + levelDistribution.size());
                 System.err.println("  - Total centroids: "
                         + levelDistribution.values().stream().mapToInt(Integer::intValue).sum());
 
             } catch (Exception e) {
-                System.err.println(
-                        "ERROR: Failed to write static structure file to LSM component directory: " + e.getMessage());
+                System.err.println("ERROR: Failed to write static structure file to index directory: " + e.getMessage());
                 e.printStackTrace();
             }
+        }
+        
+        /**
+         * Gets the next component sequence for the LSM component.
+         * This should match the sequence used by the LSM file manager.
+         */
+        private String getNextComponentSequence() {
+            // For now, use a simple timestamp-based sequence
+            // In a real implementation, this should coordinate with the LSM file manager
+            return String.format("%020d", System.currentTimeMillis());
+        }
+        
+        /**
+         * Gets the file path for the LSM index.
+         * This is used to determine where to place the .staticstructure file.
+         */
+        private FileReference getIndexFilePath() {
+            try {
+                // Use the index helper factory to create an index helper for this partition
+                // This follows the same pattern as other LSM operators
+                IIndexDataflowHelper indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                
+                // Get the LocalResource from the index helper
+                LocalResource resource = indexHelper.getResource();
+                
+                // Get the file path from the resource
+                String resourcePath = resource.getPath();
+                
+                // Convert to FileReference using the IOManager
+                IIOManager ioManager = ctx.getIoManager();
+                return ioManager.resolve(resourcePath);
+                
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
+                e.printStackTrace();
+                return null;
+            }
+        }
+        
+        
+        /**
+         * Writes the static structure file atomically using the mask file pattern.
+         */
+        private void writeStaticStructureAtomically(FileReference staticStructureFile, Map<String, Object> structureData) 
+                throws Exception {
+            IIOManager ioManager = ctx.getIoManager();
+            
+            // Ensure parent directory exists
+            FileReference parentDir = staticStructureFile.getParent();
+            if (!ioManager.exists(parentDir)) {
+                ioManager.makeDirectories(parentDir);
+            }
+            
+            // Create mask file for atomic write
+            FileReference maskFile = getMaskFile(staticStructureFile);
+            if (ioManager.exists(maskFile)) {
+                ioManager.delete(maskFile);
+            }
+            ioManager.create(maskFile);
+            
+            try {
+                // Write structure data as JSON
+                ObjectMapper mapper = new ObjectMapper();
+                byte[] data = mapper.writeValueAsBytes(structureData);
+                ioManager.overwrite(staticStructureFile, data);
+                
+                // Remove mask file to indicate successful write
+                ioManager.delete(maskFile);
+                
+                System.err.println("Static structure file written atomically: " + staticStructureFile.getAbsolutePath());
+                
+            } catch (Exception e) {
+                // Clean up on failure
+                if (ioManager.exists(staticStructureFile)) {
+                    ioManager.delete(staticStructureFile);
+                }
+                if (ioManager.exists(maskFile)) {
+                    ioManager.delete(maskFile);
+                }
+                throw new RuntimeException("Failed to write static structure file atomically", e);
+            }
+        }
+        
+        /**
+         * Gets the mask file for a .staticstructure file.
+         */
+        private FileReference getMaskFile(FileReference staticStructureFile) {
+            String maskFileName = "." + staticStructureFile.getName();
+            return staticStructureFile.getParent().getChild(maskFileName);
         }
 
         /**
