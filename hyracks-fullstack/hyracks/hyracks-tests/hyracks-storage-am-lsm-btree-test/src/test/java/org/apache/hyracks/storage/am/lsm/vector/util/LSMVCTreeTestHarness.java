@@ -114,7 +114,7 @@ public class LSMVCTreeTestHarness {
     public void setUp() throws HyracksDataException {
         ioManager = TestStorageManagerComponentHolder.getIOManager();
         ioDeviceId = 0;
-        onDiskDir = ioManager.getIODevices().get(ioDeviceId).getMount() + sep + "lsm_btree_"
+        onDiskDir = ioManager.getIODevices().get(ioDeviceId).getMount() + sep + "lsm_vctree_"
                 + simpleDateFormat.format(new Date()) + sep;
         ctx = TestUtils.create(getHyracksFrameSize());
         TestStorageManagerComponentHolder.init(diskPageSize, diskNumPages, diskMaxOpenFiles);
