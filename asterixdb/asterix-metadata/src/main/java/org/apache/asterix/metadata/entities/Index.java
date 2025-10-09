@@ -305,6 +305,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             case BTREE:
             case SAMPLE:
                 return ResourceType.LSM_BTREE;
+            case VECTOR:
+                return ResourceType.LSM_BTREE; // VECTOR uses LSM_BTREE as base structure
             case RTREE:
                 return ResourceType.LSM_RTREE;
             case LENGTH_PARTITIONED_NGRAM_INVIX:

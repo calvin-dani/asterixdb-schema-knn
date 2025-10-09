@@ -27,7 +27,12 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
-import org.apache.hyracks.storage.am.common.api.*;
+import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
+import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
+import org.apache.hyracks.storage.am.common.api.IPageManager;
+import org.apache.hyracks.storage.am.common.api.ITreeIndex;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
@@ -53,7 +58,11 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.common.*;
+import org.apache.hyracks.storage.common.IIndexAccessParameters;
+import org.apache.hyracks.storage.common.IIndexAccessor;
+import org.apache.hyracks.storage.common.IIndexCursor;
+import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.util.trace.ITracer;
@@ -192,16 +201,16 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         ILSMDiskComponent component = null;
         LSMVCTreeDiskComponentLoader componentFlushLoader;
         try {
-            component = createDiskComponent(componentFactory, flushOp.getTarget(), null,
-                    null, true);
+            component = createDiskComponent(componentFactory, flushOp.getTarget(), null, null, true);
 
-            componentFlushLoader = (LSMVCTreeDiskComponentLoader) ((LSMVCTreeDiskComponent)component).
-                    createFlushLoader(storageConfig, operation, false, pageWriteCallbackFactory.createPageWriteCallback());
+            componentFlushLoader =
+                    (LSMVCTreeDiskComponentLoader) ((LSMVCTreeDiskComponent) component).createFlushLoader(storageConfig,
+                            operation, false, pageWriteCallbackFactory.createPageWriteCallback());
 
             try {
-                VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor = (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
-                ITreeIndexMetadataFrame componentMetaFrame =
-                (vcTreeAccessor).getOpContext().getMetaFrame();
+                VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
+                        (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
+                ITreeIndexMetadataFrame componentMetaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
                 // Simple bulk load - just copy all pages
                 int maxPageId = flushingComponent.getIndex().getPageManager().getMaxPageId(componentMetaFrame);
 

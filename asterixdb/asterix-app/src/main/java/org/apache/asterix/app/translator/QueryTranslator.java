@@ -1329,7 +1329,26 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
     public void handleCreateVectorIndexStatement(MetadataProvider metadataProvider, Statement stmt,
             IHyracksClientConnection hcc, IRequestParameters requestParameters, Creator creator) throws Exception {
-        handleCreateIndexStatement(metadataProvider, stmt, hcc, requestParameters, creator);
+        CreateIndexStatement stmtCreateIndex = (CreateIndexStatement) stmt;
+        String datasetName = stmtCreateIndex.getDatasetName().getValue();
+        String indexName = stmtCreateIndex.getIndexName().getValue();
+        String fullTextConfigName = stmtCreateIndex.getFullTextConfigName();
+        metadataProvider.validateDatabaseObjectName(stmtCreateIndex.getNamespace(), indexName,
+                stmt.getSourceLocation());
+        Namespace stmtActiveNamespace = getActiveNamespace(stmtCreateIndex.getNamespace());
+        DataverseName dataverseName = stmtActiveNamespace.getDataverseName();
+        String databaseName = stmtActiveNamespace.getDatabaseName();
+        if (isCompileOnly()) {
+            return;
+        }
+        lockUtil.createIndexBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName, datasetName,
+                fullTextConfigName);
+        try {
+            doCreateVectorIndex(metadataProvider, stmtCreateIndex, databaseName, dataverseName, datasetName, hcc,
+                    requestParameters, creator);
+        } finally {
+            metadataProvider.getLocks().unlock();
+        }
     }
 
     public void handleCreateIndexStatement(MetadataProvider metadataProvider, Statement stmt,
@@ -1749,6 +1768,14 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             }
             throw e;
         }
+    }
+
+    protected void doCreateVectorIndex(MetadataProvider metadataProvider, CreateIndexStatement stmtCreateIndex,
+            String databaseName, DataverseName dataverseName, String datasetName, IHyracksClientConnection hcc,
+            IRequestParameters requestParameters, Creator creator) throws Exception {
+        // Simply call the existing doCreateIndex method - it already has proper VECTOR index handling
+        doCreateIndex(metadataProvider, stmtCreateIndex, databaseName, dataverseName, datasetName, hcc,
+                requestParameters, creator);
     }
 
     public void handleCreateFullTextFilterStatement(MetadataProvider metadataProvider, Statement stmt)
