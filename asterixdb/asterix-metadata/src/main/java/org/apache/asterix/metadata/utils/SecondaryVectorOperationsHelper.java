@@ -98,7 +98,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
         PartitioningProperties partitioningProperties =
                 metadataProvider.getPartitioningProperties(dataset, index.getIndexName());
-        Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+        Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
         int[] fieldPermutation = createFieldPermutationForBulkLoadOp(numSecondaryKeys);
         int[] pkFields = createPkFieldPermutationForBulkLoadOp(fieldPermutation, numSecondaryKeys);
@@ -207,7 +207,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     protected int getNumSecondaryKeys() {
-        return ((Index.ValueIndexDetails) index.getIndexDetails()).getKeyFieldNames().size();
+        Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        if (includeFieldNames == null) {
+            return 0;
+        }
+        return includeFieldNames.size();
     }
 
     /**
@@ -229,7 +234,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
      */
     @Override
     protected void setSecondaryRecDescAndComparators() throws AlgebricksException {
-        Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+        Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
         secondaryFieldAccessEvalFactories = new IScalarEvaluatorFactory[numSecondaryKeys + numFilterFields];
         secondaryComparatorFactories = new IBinaryComparatorFactory[numSecondaryKeys + numPrimaryKeys];
@@ -248,12 +253,25 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Record column is 0 for external datasets, numPrimaryKeys for internal ones
         int recordColumn = dataset.getDatasetType() == DatasetType.INTERNAL ? numPrimaryKeys : 0;
         boolean isOverridingKeyFieldTypes = indexDetails.isOverridingKeyFieldTypes();
-        for (int i = 0; i < numSecondaryKeys; i++) {
+        
+        // For VECTOR indexes, we process the include fields (not the key field)
+        // The key field (vector) is handled specially and doesn't need type enforcement
+        List<List<String>> includeFieldNames = indexDetails.getIncludeFieldNames();
+        List<IAType> includeFieldTypes = indexDetails.getIncludeFieldTypes();
+        List<Integer> includeSourceIndicators = indexDetails.getIncludeFieldSourceIndicators();
+        
+        // Check if there are any include fields to process
+        if (includeFieldNames == null || includeFieldNames.isEmpty() || numSecondaryKeys == 0 ||
+            includeFieldTypes == null || includeFieldTypes.isEmpty() || 
+            includeFieldNames.size() != includeFieldTypes.size()) {
+            // No include fields - this is a simple VECTOR index with just the vector field
+            // Skip include field processing
+        } else {
+            for (int i = 0; i < includeFieldNames.size(); i++) {
             ARecordType sourceType;
             ARecordType enforcedType;
             int sourceColumn;
-            List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
-            if (keySourceIndicators == null || keySourceIndicators.get(i) == 0) {
+            if (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0) {
                 sourceType = itemType;
                 sourceColumn = recordColumn;
                 enforcedType = enforcedItemType;
@@ -262,8 +280,19 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 sourceColumn = recordColumn + 1;
                 enforcedType = enforcedMetaType;
             }
-            List<String> secFieldName = indexDetails.getKeyFieldNames().get(i);
-            IAType secFieldType = indexDetails.getKeyFieldTypes().get(i);
+            List<String> secFieldName = includeFieldNames.get(i);
+            IAType secFieldType = null;
+            
+            // Safely get the field type, handling potential index out of bounds
+            if (i < includeFieldTypes.size()) {
+                secFieldType = includeFieldTypes.get(i);
+            }
+            
+            // Skip if the field type is null or if we couldn't get it
+            if (secFieldType == null) {
+                continue;
+            }
+            
             Pair<IAType, Boolean> keyTypePair =
                     Index.getNonNullableOpenFieldType(index, secFieldType, secFieldName, sourceType);
             IAType keyType = keyTypePair.first;
@@ -275,6 +304,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             secondaryComparatorFactories[i] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
             secondaryTypeTraits[i] = typeTraitProvider.getTypeTrait(keyType);
             secondaryBloomFilterKeyFields[i] = i;
+            }
         }
         if (dataset.getDatasetType() == DatasetType.INTERNAL) {
             // Add serializers and comparators for primary index fields.
