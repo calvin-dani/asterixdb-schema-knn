@@ -57,6 +57,7 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
@@ -453,6 +454,36 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
 
                 System.err.println("LSM bulk loader created successfully");
 
+                // Process all accumulated tuples and transform them for the LSM bulk loader
+                System.err.println("Adding " + frameAccumulator.size() + " accumulated frames to bulk loader...");
+                int totalTuplesAdded = 0;
+                
+                for (int frameIndex = 0; frameIndex < frameAccumulator.size(); frameIndex++) {
+                    ByteBuffer frameBuffer = frameAccumulator.get(frameIndex);
+                    FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecDesc);
+                    frameFta.reset(frameBuffer);
+                    
+                    System.err.println("Processing frame #" + (frameIndex + 1) + " with " + frameFta.getTupleCount() + " tuples");
+                    
+                    // Transform each tuple in the frame for the LSM bulk loader
+                    for (int i = 0; i < frameFta.getTupleCount(); i++) {
+                        tuple.reset(frameFta, i);
+                        try {
+                            // Transform the hierarchical k-means tuple to the expected LSM format
+                            ITupleReference transformedTuple = transformTupleForLSM(tuple);
+                            if (transformedTuple != null) {
+                                bulkLoader.add(transformedTuple);
+                                totalTuplesAdded++;
+                            }
+                        } catch (Exception e) {
+                            System.err.println("ERROR: Failed to transform and add tuple " + (i + 1) + " from frame " + (frameIndex + 1) + " to bulk loader: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                    }
+                }
+                
+                System.err.println("Successfully added " + totalTuplesAdded + " transformed tuples to bulk loader");
+
                 // Finalize the bulk loader to create the static structure
                 System.err.println("Finalizing bulk loader to create static structure pages...");
                 bulkLoader.end();
@@ -466,6 +497,44 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create LSM index with static structure: " + e.getMessage());
                 e.printStackTrace();
+            }
+        }
+
+        /**
+         * Transforms a hierarchical k-means tuple to the format expected by the LSM bulk loader.
+         * Based on the error, the LSM index might expect only 1 field (centroidId).
+         * Let's try providing just the centroidId first to see if that resolves the issue.
+         */
+        private ITupleReference transformTupleForLSM(ITupleReference originalTuple) throws HyracksDataException {
+            try {
+                // Debug: Check original tuple structure
+                System.err.println("DEBUG: Original tuple has " + originalTuple.getFieldCount() + " fields");
+                for (int i = 0; i < originalTuple.getFieldCount(); i++) {
+                    System.err.println("  Field " + i + ": length=" + originalTuple.getFieldLength(i));
+                }
+                
+                // Try providing only the centroidId (field 2) to see if that resolves the field slots issue
+                // The error suggests the LSM index expects only 1 field, not 2
+                int[] fieldPermutation = {2}; // Map output field 0 to input field 2 (centroidId)
+                
+                PermutingFrameTupleReference permutingTuple = new PermutingFrameTupleReference(fieldPermutation);
+                
+                // Get the frame accessor and tuple index from the original tuple
+                FrameTupleReference frameTuple = (FrameTupleReference) originalTuple;
+                permutingTuple.reset(frameTuple.getFrameTupleAccessor(), frameTuple.getTupleIndex());
+                
+                // Debug: Check transformed tuple structure
+                System.err.println("DEBUG: Transformed tuple has " + permutingTuple.getFieldCount() + " fields");
+                for (int i = 0; i < permutingTuple.getFieldCount(); i++) {
+                    System.err.println("  Transformed field " + i + ": length=" + permutingTuple.getFieldLength(i));
+                }
+                
+                return permutingTuple;
+
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to transform tuple for LSM: " + e.getMessage());
+                e.printStackTrace();
+                return null;
             }
         }
 
@@ -691,4 +760,5 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             System.err.println("=== VCTreeStaticStructureBulkLoader FAILED ===");
         }
     }
+
 }
