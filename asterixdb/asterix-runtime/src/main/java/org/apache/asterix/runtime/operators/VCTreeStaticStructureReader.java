@@ -67,7 +67,8 @@ public class VCTreeStaticStructureReader {
         public final boolean isLeaf;
         public final int entryCount;
 
-        public StaticStructurePage(int pageId, int level, int clusterId, byte[] pageData, boolean isLeaf, int entryCount) {
+        public StaticStructurePage(int pageId, int level, int clusterId, byte[] pageData, boolean isLeaf,
+                int entryCount) {
             this.pageId = pageId;
             this.level = level;
             this.clusterId = clusterId;
@@ -148,7 +149,7 @@ public class VCTreeStaticStructureReader {
 
         byte[] jsonData = ioManager.readAllBytes(metadataFile);
         ObjectMapper mapper = new ObjectMapper();
-        
+
         @SuppressWarnings("unchecked")
         Map<String, Object> metadata = mapper.readValue(jsonData, Map.class);
 
@@ -236,15 +237,16 @@ public class VCTreeStaticStructureReader {
                 for (int entryIndex = 0; entryIndex < page.entryCount; entryIndex++) {
                     // Generate centroid ID based on page and entry
                     int centroidId = page.pageId * maxEntriesPerPage + entryIndex;
-                    
+
                     // Create placeholder embedding (in real implementation, extract from page data)
                     double[] embedding = createPlaceholderEmbedding(centroidId);
-                    
-                    LeafCentroid leafCentroid = new LeafCentroid(centroidId, page.level, page.clusterId, embedding, page.pageId);
+
+                    LeafCentroid leafCentroid =
+                            new LeafCentroid(centroidId, page.level, page.clusterId, embedding, page.pageId);
                     leafCentroids.add(leafCentroid);
-                    
-                    System.err.println("Created leaf centroid: ID=" + centroidId + ", level=" + page.level + 
-                                     ", cluster=" + page.clusterId + ", page=" + page.pageId);
+
+                    System.err.println("Created leaf centroid: ID=" + centroidId + ", level=" + page.level
+                            + ", cluster=" + page.clusterId + ", page=" + page.pageId);
                 }
             }
         }

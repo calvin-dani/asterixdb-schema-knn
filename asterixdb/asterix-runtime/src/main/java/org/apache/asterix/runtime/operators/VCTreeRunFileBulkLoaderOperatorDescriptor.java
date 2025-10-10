@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
@@ -38,7 +39,6 @@ import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.api.comm.VSizeFrame;
 
 /**
  * Bulk loader that creates run files for centroids after reading static structure from binary file.
@@ -145,10 +145,10 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 IIOManager ioManager = ctx.getIoManager();
                 String indexPath = getIndexPath();
-                
+
                 staticStructureReader = new VCTreeStaticStructureReader(ioManager, indexPath);
                 System.err.println("Static structure reader initialized with indexPath: " + indexPath);
-                
+
             } catch (Exception e) {
                 throw HyracksDataException.create(e);
             }
@@ -161,11 +161,11 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 staticStructureReader.readStaticStructure();
                 leafCentroids = staticStructureReader.getLeafCentroids();
-                
+
                 System.err.println("Static structure loaded:");
                 System.err.println("  - Number of levels: " + staticStructureReader.getNumLevels());
                 System.err.println("  - Leaf centroids: " + leafCentroids.size());
-                
+
             } catch (Exception e) {
                 throw HyracksDataException.create(e);
             }
@@ -176,7 +176,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
          */
         private void createRunFilesForCentroids() throws HyracksDataException {
             System.err.println("=== CREATING RUN FILES FOR CENTROIDS ===");
-            
+
             centroidRunFiles = new HashMap<>();
             centroidAppenders = new HashMap<>();
             centroidTupleCounts = new HashMap<>();
@@ -185,9 +185,9 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                 for (VCTreeStaticStructureReader.LeafCentroid centroid : leafCentroids) {
                     createRunFileForCentroid(centroid);
                 }
-                
+
                 System.err.println("Successfully created " + centroidRunFiles.size() + " run files");
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create run files: " + e.getMessage());
                 throw HyracksDataException.create(e);
@@ -197,29 +197,31 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         /**
          * Creates a run file for a specific centroid.
          */
-        private void createRunFileForCentroid(VCTreeStaticStructureReader.LeafCentroid centroid) throws HyracksDataException {
+        private void createRunFileForCentroid(VCTreeStaticStructureReader.LeafCentroid centroid)
+                throws HyracksDataException {
             try {
                 // Create run file name based on centroid ID
                 String runFileName = "centroid_" + centroid.centroidId + "_run";
                 FileReference runFile = ctx.getJobletContext().createManagedWorkspaceFile(runFileName);
-                
+
                 // Create run file writer
                 RunFileWriter runFileWriter = new RunFileWriter(runFile, ctx.getIoManager());
                 runFileWriter.open();
-                
+
                 // Create frame tuple appender for buffering
                 FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
-                
+
                 // Store references
                 centroidRunFiles.put(centroid.centroidId, runFileWriter);
                 centroidAppenders.put(centroid.centroidId, appender);
                 centroidTupleCounts.put(centroid.centroidId, 0);
-                
-                System.err.println("Created run file for centroid " + centroid.centroidId + 
-                                 " at level " + centroid.level + ", cluster " + centroid.clusterId);
-                
+
+                System.err.println("Created run file for centroid " + centroid.centroidId + " at level "
+                        + centroid.level + ", cluster " + centroid.clusterId);
+
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to create run file for centroid " + centroid.centroidId + ": " + e.getMessage());
+                System.err.println(
+                        "ERROR: Failed to create run file for centroid " + centroid.centroidId + ": " + e.getMessage());
                 throw HyracksDataException.create(e);
             }
         }
@@ -236,7 +238,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             fta.reset(buffer);
-            
+
             if (!dataProcessingStarted) {
                 dataProcessingStarted = true;
                 System.err.println("=== STARTING DATA PROCESSING ===");
@@ -261,27 +263,27 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 // Extract embedding from data tuple (assuming it's in the first field)
                 double[] dataEmbedding = extractEmbeddingFromTuple(dataTuple);
-                
+
                 // Find nearest centroid
                 VCTreeStaticStructureReader.LeafCentroid nearestCentroid = findNearestCentroid(dataEmbedding);
-                
+
                 // Calculate distance to nearest centroid
                 double distance = calculateDistance(dataEmbedding, nearestCentroid.embedding);
-                
+
                 // Create tuple with distance: <original_tuple, distance_to_centroid>
                 ITupleReference tupleWithDistance = createTupleWithDistance(dataTuple, distance);
-                
+
                 // Store in appropriate run file
                 storeTupleInRunFile(nearestCentroid.centroidId, tupleWithDistance);
-                
+
                 totalTuplesProcessed++;
-                
+
                 // Log progress every 1000 tuples
                 if (totalTuplesProcessed % 1000 == 0) {
                     System.err.println("Processed " + totalTuplesProcessed + " data tuples");
                     logRunFileStats();
                 }
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to process data tuple: " + e.getMessage());
                 e.printStackTrace();
@@ -311,7 +313,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         private VCTreeStaticStructureReader.LeafCentroid findNearestCentroid(double[] embedding) {
             VCTreeStaticStructureReader.LeafCentroid nearest = null;
             double minDistance = Double.MAX_VALUE;
-            
+
             for (VCTreeStaticStructureReader.LeafCentroid centroid : leafCentroids) {
                 double distance = calculateDistance(embedding, centroid.embedding);
                 if (distance < minDistance) {
@@ -319,7 +321,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                     nearest = centroid;
                 }
             }
-            
+
             return nearest;
         }
 
@@ -338,7 +340,8 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         /**
          * Creates a tuple containing the original tuple and distance to centroid.
          */
-        private ITupleReference createTupleWithDistance(ITupleReference originalTuple, double distance) throws HyracksDataException {
+        private ITupleReference createTupleWithDistance(ITupleReference originalTuple, double distance)
+                throws HyracksDataException {
             try {
                 // For now, return the original tuple as we can't easily create new tuples
                 // In a real implementation, we would need to properly serialize the distance
@@ -355,25 +358,26 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 RunFileWriter runFileWriter = centroidRunFiles.get(centroidId);
                 FrameTupleAppender appender = centroidAppenders.get(centroidId);
-                
+
                 if (runFileWriter == null || appender == null) {
                     System.err.println("ERROR: Run file not found for centroid " + centroidId);
                     return;
                 }
-                
+
                 // Append tuple to run file
                 if (!appender.append(tuple)) {
                     // Buffer is full, flush to run file
                     appender.write(runFileWriter, true);
                     appender.append(tuple);
                 }
-                
+
                 // Update tuple count
                 int currentCount = centroidTupleCounts.get(centroidId);
                 centroidTupleCounts.put(centroidId, currentCount + 1);
-                
+
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to store tuple in run file for centroid " + centroidId + ": " + e.getMessage());
+                System.err.println(
+                        "ERROR: Failed to store tuple in run file for centroid " + centroidId + ": " + e.getMessage());
                 throw HyracksDataException.create(e);
             }
         }
@@ -399,13 +403,11 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 // Get the base storage path from the IO manager
                 IIOManager ioManager = ctx.getIoManager();
-                
+
                 // Try to find the index directory
-                String[] possiblePaths = { 
-                    "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1",
-                    "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1/.metadata" 
-                };
-                
+                String[] possiblePaths = { "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1",
+                        "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1/.metadata" };
+
                 for (String path : possiblePaths) {
                     try {
                         FileReference testPath = ioManager.resolve(path);
@@ -416,10 +418,10 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                         // Continue to next path
                     }
                 }
-                
+
                 // Fallback: Use default path
                 return "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1";
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to get index path: " + e.getMessage());
                 return "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1";
@@ -429,24 +431,24 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         @Override
         public void close() throws HyracksDataException {
             System.err.println("=== VCTreeRunFileBulkLoader CLOSING ===");
-            
+
             try {
                 // Flush all run files
                 flushAllRunFiles();
-                
+
                 // Close all run files
                 closeAllRunFiles();
-                
+
                 // Log final statistics
                 logFinalStatistics();
-                
+
                 // Close the writer if available
                 if (writer != null) {
                     writer.close();
                 }
-                
+
                 System.err.println("VCTreeRunFileBulkLoader completed successfully");
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to close VCTreeRunFileBulkLoader: " + e.getMessage());
                 e.printStackTrace();
@@ -458,17 +460,18 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
          */
         private void flushAllRunFiles() throws HyracksDataException {
             System.err.println("Flushing all run files...");
-            
+
             for (Map.Entry<Integer, FrameTupleAppender> entry : centroidAppenders.entrySet()) {
                 int centroidId = entry.getKey();
                 FrameTupleAppender appender = entry.getValue();
                 RunFileWriter runFileWriter = centroidRunFiles.get(centroidId);
-                
+
                 try {
                     appender.write(runFileWriter, true);
                     System.err.println("Flushed run file for centroid " + centroidId);
                 } catch (Exception e) {
-                    System.err.println("ERROR: Failed to flush run file for centroid " + centroidId + ": " + e.getMessage());
+                    System.err.println(
+                            "ERROR: Failed to flush run file for centroid " + centroidId + ": " + e.getMessage());
                 }
             }
         }
@@ -478,16 +481,17 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
          */
         private void closeAllRunFiles() throws HyracksDataException {
             System.err.println("Closing all run files...");
-            
+
             for (Map.Entry<Integer, RunFileWriter> entry : centroidRunFiles.entrySet()) {
                 int centroidId = entry.getKey();
                 RunFileWriter runFileWriter = entry.getValue();
-                
+
                 try {
                     runFileWriter.close();
                     System.err.println("Closed run file for centroid " + centroidId);
                 } catch (Exception e) {
-                    System.err.println("ERROR: Failed to close run file for centroid " + centroidId + ": " + e.getMessage());
+                    System.err.println(
+                            "ERROR: Failed to close run file for centroid " + centroidId + ": " + e.getMessage());
                 }
             }
         }
@@ -499,13 +503,13 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             System.err.println("=== FINAL STATISTICS ===");
             System.err.println("Total tuples processed: " + totalTuplesProcessed);
             System.err.println("Number of run files created: " + centroidRunFiles.size());
-            
+
             int totalTuplesInRunFiles = 0;
             for (int count : centroidTupleCounts.values()) {
                 totalTuplesInRunFiles += count;
             }
             System.err.println("Total tuples in run files: " + totalTuplesInRunFiles);
-            
+
             System.err.println("Run file distribution:");
             for (Map.Entry<Integer, Integer> entry : centroidTupleCounts.entrySet()) {
                 int centroidId = entry.getKey();
@@ -519,7 +523,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         public void fail() throws HyracksDataException {
             System.err.println("=== VCTreeRunFileBulkLoader FAILING ===");
             System.err.println("Total tuples processed before failure: " + totalTuplesProcessed);
-            
+
             // Close run files on failure
             if (centroidRunFiles != null) {
                 for (RunFileWriter runFileWriter : centroidRunFiles.values()) {
@@ -530,12 +534,12 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                     }
                 }
             }
-            
+
             // Fail the writer if available
             if (writer != null) {
                 writer.fail();
             }
-            
+
             System.err.println("VCTreeRunFileBulkLoader failed");
         }
     }

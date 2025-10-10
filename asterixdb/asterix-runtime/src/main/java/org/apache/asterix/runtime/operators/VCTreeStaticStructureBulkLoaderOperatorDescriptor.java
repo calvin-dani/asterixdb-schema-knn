@@ -86,6 +86,24 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         System.err.println("VCTreeStaticStructureBulkLoaderOperatorDescriptor created with permit UUID: " + permitUUID);
     }
 
+    /**
+     * Modified constructor for integration with ExternalSortOperatorDescriptor.
+     * This version accepts sorted tuples from ExternalSortOperatorDescriptor and loads them into the index.
+     */
+    public VCTreeStaticStructureBulkLoaderOperatorDescriptor(IOperatorDescriptorRegistry spec,
+            IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
+            RecordDescriptor sortedTupleRecordDescriptor, UUID permitUUID, boolean fromExternalSort) {
+        super(spec, 1, 1); // Input arity 1, Output arity 1 (regular operator)
+        this.indexHelperFactory = indexHelperFactory;
+        this.maxEntriesPerPage = maxEntriesPerPage;
+        this.fillFactor = fillFactor;
+        this.permitUUID = permitUUID;
+        this.outRecDescs[0] = sortedTupleRecordDescriptor; // Pass through sorted tuples
+        System.err.println(
+                "VCTreeStaticStructureBulkLoaderOperatorDescriptor created for ExternalSort integration with permit UUID: "
+                        + permitUUID);
+    }
+
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
@@ -172,33 +190,43 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             fta.reset(buffer);
 
-            System.err.println("=== VCTreeStaticStructureBulkLoader: Processing frame with " + fta.getTupleCount()
-                    + " tuples ===");
-            System.err.println("=== THREAD: " + Thread.currentThread().getName() + " ===");
-            System.err.println("=== TIMESTAMP: " + System.currentTimeMillis() + " ===");
-
-            if (!dataCollectionComplete) {
-                // Accumulate the entire frame for later processing
-                ByteBuffer frameCopy = ByteBuffer.allocate(buffer.remaining());
-                frameCopy.put(buffer.duplicate());
-                frameCopy.flip();
-                frameAccumulator.add(frameCopy);
-
-                tupleCount += fta.getTupleCount();
-                System.err.println("=== ACCUMULATED FRAME #" + frameAccumulator.size() + " with " + fta.getTupleCount()
-                        + " tuples ===");
-                System.err.println("=== TOTAL TUPLES ACCUMULATED: " + tupleCount + " ===");
-            } else {
-                // Process frame immediately (shouldn't happen in this pattern)
-                for (int i = 0; i < fta.getTupleCount(); i++) {
-                    tuple.reset(fta, i);
-                    processTuple(tuple);
-                }
+            // Process sorted tuples from ExternalSortOperatorDescriptor
+            // These tuples are already sorted by distance to centroid
+            for (int i = 0; i < fta.getTupleCount(); i++) {
+                tuple.reset(fta, i);
+                processSortedTuple(tuple);
             }
 
-            // Pass through the input frame to output
+            // Pass through the sorted frame to output
             if (writer != null) {
                 writer.nextFrame(buffer);
+            }
+        }
+
+        /**
+         * Process sorted tuples from ExternalSortOperatorDescriptor.
+         * These tuples are in format: <original_tuple, distance_to_centroid>
+         */
+        private void processSortedTuple(ITupleReference tuple) throws HyracksDataException {
+            try {
+                // Extract tuple data
+                // The tuple contains: <original_tuple, distance_to_centroid>
+                // We need to extract the original tuple and load it into the index
+
+                // For now, pass through the tuple as-is
+                // TODO: Implement proper tuple extraction and index loading
+
+                tupleCount++;
+
+                // Log progress every 1000 tuples
+                if (tupleCount % 1000 == 0) {
+                    System.err
+                            .println("Processed " + tupleCount + " sorted tuples from ExternalSortOperatorDescriptor");
+                }
+
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to process sorted tuple: " + e.getMessage());
+                e.printStackTrace();
             }
         }
 
@@ -209,8 +237,6 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         }
 
         private void processAllAccumulatedTuples() throws HyracksDataException {
-            System.err.println("=== PROCESSING " + frameAccumulator.size() + " ACCUMULATED FRAMES ===");
-
             // Initialize data collection structures
             levelDistribution = new HashMap<>();
             clusterDistribution = new HashMap<>();
@@ -220,9 +246,6 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 ByteBuffer frameBuffer = frameAccumulator.get(frameIndex);
                 FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecDesc);
                 frameFta.reset(frameBuffer);
-
-                System.err.println("=== PROCESSING FRAME #" + (frameIndex + 1) + " with " + frameFta.getTupleCount()
-                        + " tuples ===");
 
                 // Process each tuple in the frame
                 for (int i = 0; i < frameFta.getTupleCount(); i++) {
@@ -242,27 +265,21 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                         int centroidId = AInt32SerializerDeserializer.getInt(centroidIdVal.getByteArray(),
                                 centroidIdVal.getStartOffset() + 1);
 
-                        System.err.println("=== FRAME #" + (frameIndex + 1) + " TUPLE #" + (i + 1) + " DATA: Level="
-                                + level + ", Cluster=" + clusterId + ", Centroid=" + centroidId + " ===");
                     } catch (Exception e) {
-                        System.err.println("=== FRAME #" + (frameIndex + 1) + " TUPLE #" + (i + 1)
-                                + " DATA: ERROR extracting data: " + e.getMessage() + " ===");
+                        System.err.println("ERROR extracting data from tuple: " + e.getMessage());
                     }
 
                     processRealTuple(tuple);
                 }
             }
 
-            System.err.println("=== COMPLETED PROCESSING ALL " + frameAccumulator.size() + " FRAMES ===");
         }
 
         private void processRealTuple(ITupleReference tuple) throws HyracksDataException {
 
             try {
-                // Cast to FrameTupleReference (it's already created in nextFrame)
-                FrameTupleReference frameTuple = (FrameTupleReference) tuple;
-
                 // Extract data using evaluators (like hierarchical k-means does)
+                FrameTupleReference frameTuple = (FrameTupleReference) tuple;
                 levelEval.evaluate(frameTuple, levelVal);
                 clusterIdEval.evaluate(frameTuple, clusterIdVal);
                 centroidIdEval.evaluate(frameTuple, centroidIdVal);
@@ -310,8 +327,6 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 if (embeddingLength > 1) {
                     // The embedding is serialized as a double array
                     // We need to deserialize it properly
-                    System.err.println("Processing real centroid: Level=" + level + ", Cluster=" + clusterId
-                            + ", Centroid=" + centroidId + ", EmbeddingSize=" + (embeddingLength - 1) + " bytes");
 
                     // TODO: Deserialize the actual double array from embeddingBytes
                     // For now, we'll create a placeholder double array
@@ -407,70 +422,49 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         private void createLSMIndexWithStaticStructure(int numLevels, List<Integer> clustersPerLevel,
                 List<List<Integer>> centroidsPerCluster) {
             System.err.println("=== CREATING LSM INDEX WITH STATIC STRUCTURE (BINARY WRITER) ===");
-            System.err.println("DEBUG: numLevels=" + numLevels + ", clustersPerLevel=" + clustersPerLevel
-                    + ", centroidsPerCluster=" + centroidsPerCluster);
 
             try {
                 // Get buffer cache and IO manager for binary writer
-                System.err.println("DEBUG: Getting buffer cache and IO manager...");
                 INcApplicationContext appCtx =
                         (INcApplicationContext) ctx.getJobletContext().getServiceContext().getApplicationContext();
                 IBufferCache bufferCache = appCtx.getBufferCache();
                 IIOManager ioManager = ctx.getIoManager();
-                System.err.println("DEBUG: Buffer cache and IO manager obtained successfully");
 
                 // Get index path for binary writer
-                System.err.println("DEBUG: Getting index file path...");
                 FileReference indexPathRef = getIndexFilePath();
                 if (indexPathRef == null) {
                     System.err.println("ERROR: Could not determine index path for binary writer");
                     return;
                 }
                 String indexPath = indexPathRef.getAbsolutePath();
-                System.err.println("DEBUG: Index path determined: " + indexPath);
 
                 // Create binary writer
-                System.err.println("DEBUG: Creating VCTreeStaticStructureBinaryWriter...");
                 VCTreeStaticStructureBinaryWriter binaryWriter = new VCTreeStaticStructureBinaryWriter(bufferCache,
                         ioManager, indexPath, numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
-                System.err.println("DEBUG: Binary writer created successfully");
 
                 // Extract tuples from accumulated frames
-                System.err
-                        .println("DEBUG: Extracting tuples from " + frameAccumulator.size() + " accumulated frames...");
                 List<ITupleReference> tuples = new ArrayList<>();
                 for (int frameIndex = 0; frameIndex < frameAccumulator.size(); frameIndex++) {
                     ByteBuffer frameBuffer = frameAccumulator.get(frameIndex);
                     FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecDesc);
                     frameFta.reset(frameBuffer);
 
-                    System.err.println("DEBUG: Processing frame #" + (frameIndex + 1) + " with "
-                            + frameFta.getTupleCount() + " tuples");
                     for (int i = 0; i < frameFta.getTupleCount(); i++) {
                         tuple.reset(frameFta, i);
                         tuples.add(tuple);
-                        System.err.println("DEBUG: Added tuple " + (i + 1) + " from frame " + (frameIndex + 1));
                     }
                 }
 
-                System.err.println("DEBUG: Extracted " + tuples.size() + " tuples for binary writer");
-
                 // Process tuples and create static structure pages
-                System.err.println("DEBUG: Processing tuples with binary writer...");
                 binaryWriter.processTuples(tuples);
-                System.err.println("DEBUG: Tuple processing completed");
 
                 // Write to binary file
-                System.err.println("DEBUG: Writing to binary file...");
                 binaryWriter.writeToBinaryFile();
-                System.err.println("DEBUG: Binary file writing completed");
 
                 System.err.println("Static structure binary file created successfully");
-                System.err.println("DEBUG: Binary writer integration completed successfully!");
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create static structure with binary writer: " + e.getMessage());
-                System.err.println("DEBUG: Exception details:");
                 e.printStackTrace();
             }
         }
@@ -482,12 +476,6 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
          */
         private ITupleReference transformTupleForLSM(ITupleReference originalTuple) throws HyracksDataException {
             try {
-                // Debug: Check original tuple structure
-                System.err.println("DEBUG: Original tuple has " + originalTuple.getFieldCount() + " fields");
-                for (int i = 0; i < originalTuple.getFieldCount(); i++) {
-                    System.err.println("  Field " + i + ": length=" + originalTuple.getFieldLength(i));
-                }
-
                 // Try providing only the centroidId (field 2) to see if that resolves the field slots issue
                 // The error suggests the LSM index expects only 1 field, not 2
                 int[] fieldPermutation = { 2 }; // Map output field 0 to input field 2 (centroidId)
@@ -497,12 +485,6 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 // Get the frame accessor and tuple index from the original tuple
                 FrameTupleReference frameTuple = (FrameTupleReference) originalTuple;
                 permutingTuple.reset(frameTuple.getFrameTupleAccessor(), frameTuple.getTupleIndex());
-
-                // Debug: Check transformed tuple structure
-                System.err.println("DEBUG: Transformed tuple has " + permutingTuple.getFieldCount() + " fields");
-                for (int i = 0; i < permutingTuple.getFieldCount(); i++) {
-                    System.err.println("  Transformed field " + i + ": length=" + permutingTuple.getFieldLength(i));
-                }
 
                 return permutingTuple;
 
@@ -614,7 +596,6 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                     try {
                         FileReference testPath = ioManager.resolve(path);
                         if (ioManager.exists(testPath)) {
-                            System.err.println("DEBUG: Found existing path: " + testPath.getAbsolutePath());
                             return testPath;
                         }
                     } catch (Exception e) {
@@ -627,10 +608,8 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                         indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                 LocalResource resource = indexHelper.getResource();
                 String resourcePath = resource.getPath();
-                System.err.println("DEBUG: Using LocalResource path: " + resourcePath);
 
                 FileReference indexPathRef = ioManager.resolve(resourcePath);
-                System.err.println("DEBUG: Resolved FileReference path: " + indexPathRef.getAbsolutePath());
                 return indexPathRef;
 
             } catch (Exception e) {
@@ -694,13 +673,8 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
 
         @Override
         public void close() throws HyracksDataException {
-            System.err.println("=== VCTreeStaticStructureBulkLoader FINALIZING ===");
-            System.err.println("Total frames accumulated: " + frameAccumulator.size());
-            System.err.println("Total tuples accumulated: " + tupleCount);
-
             // Process all accumulated tuples at once
             if (!dataCollectionComplete) {
-                System.err.println("=== PROCESSING ALL ACCUMULATED TUPLES ===");
                 processAllAccumulatedTuples();
                 dataCollectionComplete = true;
             }

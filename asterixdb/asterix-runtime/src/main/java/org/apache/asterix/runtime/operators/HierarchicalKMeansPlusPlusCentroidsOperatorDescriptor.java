@@ -386,11 +386,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     fta.reset(buffer);
                     int tupleCount = fta.getTupleCount();
 
-                    System.err.println("=== HIERARCHICAL K-MEANS NEXT FRAME ===");
-                    System.err.println("Received frame with " + tupleCount + " tuples");
-                    System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position()
-                            + ", limit: " + buffer.limit());
-
                     if (first) {
                         // CRITICAL: Perform initial K-means++ on raw data to generate K centroids
                         // This is essential for hierarchical clustering - we need multiple centroids
@@ -415,9 +410,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                     // Materialize all data to disk for subsequent processing passes
                     // This allows us to make multiple passes over the data without loading it all into memory
-                    System.err.println("Appending frame to materialized sample");
                     materializedSample.appendFrame(buffer);
-                    System.err.println("=== END HIERARCHICAL K-MEANS NEXT FRAME ===");
                 }
 
                 @Override
@@ -2214,9 +2207,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     for (HierarchicalClusterTree.TreeNode node : allNodes) {
                         tupleOutputCount++;
-                        System.err.println("=== OUTPUTTING TUPLE #" + tupleOutputCount + " ===");
-                        System.err.println("=== NODE: level=" + node.getLevel() + ", clusterId=" + node.getClusterId()
-                                + ", globalId=" + node.getGlobalId() + " ===");
 
                         double[] arr = node.getCentroid();
                         orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
@@ -2273,11 +2263,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // CRITICAL: Flush the final frame after outputting all nodes
                     // This ensures that the last batch of nodes is sent to the next operator
                     frameCount++;
-                    System.err.println("=== FLUSHING FINAL FRAME #" + frameCount + " ===");
-                    System.err.println("=== TOTAL TUPLES OUTPUT: " + tupleOutputCount + " ===");
-                    System.err.println("=== TOTAL FRAMES OUTPUT: " + frameCount + " ===");
                     FrameUtils.flushFrame(appender.getBuffer(), writer);
-                    System.err.println("=== FINAL FRAME FLUSHED ===");
                 }
 
             };

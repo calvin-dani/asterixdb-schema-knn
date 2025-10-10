@@ -233,8 +233,6 @@ public class VCTreeStaticStructureBinaryWriter {
         buffer.position(16);
         buffer.putInt(currentCount + 1);
 
-        System.err.println("Added entry to page " + page.pageId + " (level=" + page.level + ", cluster="
-                + page.clusterId + ", entries=" + (currentCount + 1) + ")");
     }
 
     /**
