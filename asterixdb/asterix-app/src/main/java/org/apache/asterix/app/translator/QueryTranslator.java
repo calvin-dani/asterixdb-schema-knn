@@ -1329,10 +1329,18 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
     public void handleCreateVectorIndexStatement(MetadataProvider metadataProvider, Statement stmt,
             IHyracksClientConnection hcc, IRequestParameters requestParameters, Creator creator) throws Exception {
+        System.err.println("=== HANDLING CREATE VECTOR INDEX STATEMENT ===");
         CreateIndexStatement stmtCreateIndex = (CreateIndexStatement) stmt;
         String datasetName = stmtCreateIndex.getDatasetName().getValue();
         String indexName = stmtCreateIndex.getIndexName().getValue();
         String fullTextConfigName = stmtCreateIndex.getFullTextConfigName();
+        System.err.println("Dataset: " + datasetName);
+        System.err.println("Index: " + indexName);
+        System.err.println("Index type: " + stmtCreateIndex.getIndexType());
+        System.err.println("Indexed elements: " + stmtCreateIndex.getIndexedElements());
+        System.err.println("Include elements: " + stmtCreateIndex.getIncludeElements());
+        System.err.println("With object node: " + stmtCreateIndex.getWithObjectNode());
+        
         metadataProvider.validateDatabaseObjectName(stmtCreateIndex.getNamespace(), indexName,
                 stmt.getSourceLocation());
         Namespace stmtActiveNamespace = getActiveNamespace(stmtCreateIndex.getNamespace());
@@ -1569,7 +1577,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                                 }
                             }
                         } else {
-                            if (indexType != IndexType.BTREE && indexType != IndexType.ARRAY) {
+                            if (indexType != IndexType.BTREE && indexType != IndexType.ARRAY && indexType != IndexType.VECTOR) {
                                 throw new CompilationException(ErrorCode.INDEX_ILLEGAL_NON_ENFORCED_TYPED,
                                         indexedElement.getSourceLocation(), indexType);
                             }
@@ -1658,6 +1666,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             if (indexType == IndexType.VECTOR) {
                 List<CreateIndexStatement.IndexedElement> includeElements = stmtCreateIndex.getIncludeElements();
                 int includeElementsCount = includeElements.size();
+                System.err.println("Include elements count: " + includeElementsCount);
+                System.err.println("Include elements: " + includeElements);
+                
                 /* process include fields */
                 List<List<String>> includeFieldNames = new ArrayList<>(includeElementsCount);
                 List<IAType> includeFieldTypes = new ArrayList<>(includeElementsCount);
@@ -1665,10 +1676,20 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
                 for (int i = 0; i < includeElementsCount; i++) {
                     CreateIndexStatement.IndexedElement includeElement = includeElements.get(i);
-                    includeFieldNames.add(includeElement.getProjectList().getFirst().first);
-                    includeFieldTypes.add(indexFieldTypes.get(i).getFirst());
-                    includeFieldSourceIndicators.add(includeElement.getSourceIndicator());
+                    List<String> fieldName = includeElement.getProjectList().getFirst().first;
+                    IAType fieldType = indexFieldTypes.get(i).getFirst();
+                    int sourceIndicator = includeElement.getSourceIndicator();
+                    
+                    includeFieldNames.add(fieldName);
+                    includeFieldTypes.add(fieldType);
+                    includeFieldSourceIndicators.add(sourceIndicator);
+                    
+                    System.err.println("Include field " + i + ": " + fieldName + ", type: " + fieldType + ", source: " + sourceIndicator);
                 }
+                
+                System.err.println("Final include field names: " + includeFieldNames);
+                System.err.println("Final include field types: " + includeFieldTypes);
+                System.err.println("Final include field source indicators: " + includeFieldSourceIndicators);
 
                 Map<String, String> castConfig = TypeUtil.validateConfiguration(stmtCreateIndex.getCastConfig(),
                         stmtCreateIndex.getSourceLocation());
@@ -1679,10 +1700,25 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 CreateIndexStatement.IndexedElement indexedElement = stmtCreateIndex.getIndexedElements().getFirst();
                 List<String> keyFieldNames = indexedElement.getProjectList().getFirst().first;
 
+                System.err.println("=== CREATING VECTOR INDEX DETAILS ===");
+                System.err.println("Key field names: " + keyFieldNames);
+                // For vector indexes, indexFieldTypes might be empty due to type validation restrictions
+                if (!indexFieldTypes.isEmpty()) {
+                    System.err.println("Key field types: " + indexFieldTypes.get(0));
+                } else {
+                    System.err.println("Key field types: [not available - using default vector type]");
+                }
+                System.err.println("Key field source indicators: " + indexedElement.getSourceIndicator());
+
                 indexDetails = new Index.VectorIndexDetails(keyFieldNames, includeFieldNames,
                         includeFieldSourceIndicators, includeFieldTypes, true, stmtCreateIndex.getExcludeUnknownKey(),
                         stmtCreateIndex.getCastDefaultNull(), datetimeFormat, dateFormat, timeFormat,
                         stmtCreateIndex.getWithObjectNode());
+                
+                System.err.println("Created vector index details: " + indexDetails);
+                System.err.println("Vector index details key field names: " + ((Index.VectorIndexDetails) indexDetails).getKeyFieldNames());
+                System.err.println("Vector index details include field names: " + ((Index.VectorIndexDetails) indexDetails).getIncludeFieldNames());
+                System.err.println("=== END VECTOR INDEX DETAILS CREATION ===");
 
                 Index newIndex = new Index(databaseName, dataverseName, datasetName, indexName, indexType, indexDetails,
                         stmtCreateIndex.isEnforced(), false, MetadataUtil.PENDING_ADD_OP, creator);
