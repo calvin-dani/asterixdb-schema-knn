@@ -133,12 +133,22 @@ public class AssignRuntimeFactory extends AbstractOneInputOneOutputRuntimeFactor
         @Override
         public void open() throws HyracksDataException {
             if (first) {
+                System.err.println("=== ASSIGN OPERATOR OPENING ===");
+                System.err.println("Number of eval factories: " + evalFactories.length);
+                for (int i = 0; i < evalFactories.length; i++) {
+                    System.err.println("Eval factory " + i + ": " + evalFactories[i]);
+                }
+                System.err.println("Out columns: " + java.util.Arrays.toString(outColumns));
+                System.err.println("Projection list: " + java.util.Arrays.toString(projectionList));
+                
                 initAccessAppendRef(ctx);
                 first = false;
                 int n = evalFactories.length;
                 for (int i = 0; i < n; i++) {
                     eval[i] = evalFactories[i].createScalarEvaluator(evalCtx);
+                    System.err.println("Created evaluator " + i + ": " + eval[i]);
                 }
+                System.err.println("=== ASSIGN OPERATOR OPENED ===");
             }
             super.open();
         }
@@ -149,10 +159,15 @@ public class AssignRuntimeFactory extends AbstractOneInputOneOutputRuntimeFactor
             //            tAccess.reset(buffer, "ASSIGN     ");
             tAccess.reset(buffer);
             int nTuple = tAccess.getTupleCount();
+            System.err.println("=== ASSIGN OPERATOR NEXT FRAME ===");
+            System.err.println("Received frame with " + nTuple + " tuples");
+            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+            
             if (nTuple < 1) {
                 if (nTuple < 0) {
                     throw new HyracksDataException("Negative number of tuples in the frame: " + nTuple);
                 }
+                System.err.println("No tuples in frame, flushing");
                 appender.flush(writer);
             } else {
                 if (nTuple > 1) {
@@ -184,17 +199,31 @@ public class AssignRuntimeFactory extends AbstractOneInputOneOutputRuntimeFactor
         protected void produceTuple(ArrayTupleBuilder tb, IFrameTupleAccessor accessor, int tIndex,
                 FrameTupleReference tupleRef) throws HyracksDataException {
             try {
+                System.err.println("=== ASSIGN OPERATOR PROCESSING TUPLE ===");
+                System.err.println("Tuple index: " + tIndex);
+                System.err.println("Projection list: " + java.util.Arrays.toString(projectionList));
+                System.err.println("Out columns: " + java.util.Arrays.toString(outColumns));
+                System.err.println("Projection to out columns: " + java.util.Arrays.toString(projectionToOutColumns));
+                System.err.println("Eval factories count: " + evalFactories.length);
+                
                 tb.reset();
                 for (int f = 0; f < projectionList.length; f++) {
                     int k = projectionToOutColumns[f];
+                    System.err.println("Processing field " + f + ", projection column " + projectionList[f] + ", out column index " + k);
                     if (k >= 0) {
+                        System.err.println("Evaluating field " + f + " using evaluator " + k);
                         eval[k].evaluate(tupleRef, result);
+                        System.err.println("Evaluation result length: " + result.getLength());
                         tb.addField(result.getByteArray(), result.getStartOffset(), result.getLength());
                     } else {
+                        System.err.println("Projecting field " + f + " directly from input");
                         tb.addField(accessor, tIndex, projectionList[f]);
                     }
                 }
+                System.err.println("=== END ASSIGN OPERATOR PROCESSING ===");
             } catch (HyracksDataException e) {
+                System.err.println("ERROR in assign operator: " + e.getMessage());
+                e.printStackTrace();
                 throw HyracksDataException.create(ErrorCode.ERROR_PROCESSING_TUPLE, e, sourceLoc, tupleIndex);
             }
         }

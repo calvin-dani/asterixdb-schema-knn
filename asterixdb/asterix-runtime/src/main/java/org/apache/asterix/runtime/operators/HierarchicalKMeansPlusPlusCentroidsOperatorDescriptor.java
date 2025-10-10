@@ -19,8 +19,6 @@
 package org.apache.asterix.runtime.operators;
 
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
-import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
-import static org.apache.asterix.om.types.BuiltinType.AINT32;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 import static org.apache.asterix.runtime.utils.VectorDistanceArrCalculation.euclidean_squared;
 
@@ -42,7 +40,6 @@ import java.util.UUID;
 import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
-import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.base.AMutableInt32;
 import org.apache.asterix.om.types.AOrderedListType;
@@ -80,8 +77,6 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.util.string.UTF8StringUtil;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 
 // Serializable distance function implementations
 class ManhattanDistanceFunction implements DistanceFunction, Serializable {
@@ -285,12 +280,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     }
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
-            RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID centroidsUUID, 
+            RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID centroidsUUID,
             IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (level, clusterId, centroidId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
-        outRecDescs[0] = outputRecDesc;       // Output format (hierarchical structure)
+        outRecDescs[0] = outputRecDesc; // Output format (hierarchical structure)
         this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
         this.sampleUUID = sampleUUID;
         this.centroidsUUID = centroidsUUID;
@@ -298,8 +293,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
     }
-
-
 
     @Override
     public void contributeActivities(IActivityGraphBuilder builder) {
@@ -393,11 +386,16 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     fta.reset(buffer);
                     int tupleCount = fta.getTupleCount();
 
+                    System.err.println("=== HIERARCHICAL K-MEANS NEXT FRAME ===");
+                    System.err.println("Received frame with " + tupleCount + " tuples");
+                    System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+
                     if (first) {
                         // CRITICAL: Perform initial K-means++ on raw data to generate K centroids
                         // This is essential for hierarchical clustering - we need multiple centroids
                         // to start the hierarchical tree building process
                         System.err.println("Starting initial K-means++ on raw data with K=" + K);
+                        System.err.println("First frame has " + tupleCount + " tuples to process");
 
                         // Perform K-means++ on the raw data
                         Random rand = new Random();
@@ -416,7 +414,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                     // Materialize all data to disk for subsequent processing passes
                     // This allows us to make multiple passes over the data without loading it all into memory
+                    System.err.println("Appending frame to materialized sample");
                     materializedSample.appendFrame(buffer);
+                    System.err.println("=== END HIERARCHICAL K-MEANS NEXT FRAME ===");
                 }
 
                 @Override
@@ -455,7 +455,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal, KMeansUtils kMeansUtils, int k,
                 Random rand, int maxIterations) throws HyracksDataException {
 
+            System.err.println("=== PERFORMING INITIAL K-MEANS++ ===");
+            System.err.println("Target K: " + k);
+            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+
             if (k <= 0) {
+                System.err.println("K <= 0, returning empty centroids");
                 return new ArrayList<>();
             }
 
@@ -465,26 +470,37 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             // First pass: collect all data points
             fta.reset(buffer);
             int tupleCount = fta.getTupleCount();
+            System.err.println("Processing " + tupleCount + " tuples for K-means++");
 
             for (int i = 0; i < tupleCount; i++) {
                 tuple.reset(fta, i);
-                eval.evaluate(tuple, inputVal);
-                ListAccessor listAccessorConstant = new ListAccessor();
+                System.err.println("Processing tuple " + i);
                 
+                eval.evaluate(tuple, inputVal);
+                System.err.println("Evaluation result length: " + inputVal.getLength());
+                System.err.println("Evaluation result type tag: " + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]));
+                
+                ListAccessor listAccessorConstant = new ListAccessor();
+
                 if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
                         .isListType()) {
+                    System.err.println("Skipping tuple " + i + " - not a list type");
                     continue; // Skip unsupported types
                 }
                 listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
                 try {
                     double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+                    System.err.println("Extracted point " + i + " with " + point.length + " dimensions: " + java.util.Arrays.toString(point));
                     allPoints.add(point);
                 } catch (IOException e) {
+                    System.err.println("Error extracting point " + i + ": " + e.getMessage());
                     throw new RuntimeException(e);
                 }
             }
 
+            System.err.println("Collected " + allPoints.size() + " data points");
             if (allPoints.isEmpty()) {
+                System.err.println("No data points collected, returning empty centroids");
                 return centroids;
             }
 
@@ -511,7 +527,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     distances[j] = minDist;
                     totalDistance += minDist;
                 }
-
 
                 // Weighted random selection
                 double r = rand.nextDouble() * totalDistance;
@@ -580,7 +595,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
             System.err.println("=== INITIAL K-MEANS++ COMPLETE ===");
             System.err.println("Generated " + centroids.size() + " centroids (target was " + k + ")");
-            System.err.println("Success rate: " + String.format("%.1f", (double)centroids.size() / k * 100) + "%");
+            System.err.println("Success rate: " + String.format("%.1f", (double) centroids.size() / k * 100) + "%");
             System.err.println("=== END INITIAL K-MEANS++ ===");
 
             return centroids;
@@ -654,6 +669,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 @Override
                 public void initialize() throws HyracksDataException {
+                    System.err.println("=== HIERARCHICAL K-MEANS INITIALIZE CALLED ===");
+                    System.err.println("=== PARTITION: " + partition + " ===");
+                    System.err.println("=== ACTIVITY: FindCandidatesActivity ===");
+                    System.err.println("=== THREAD: " + Thread.currentThread().getName() + " ===");
+                    System.err.println("=== TIMESTAMP: " + System.currentTimeMillis() + " ===");
+
                     // Get file reader for written samples
                     MaterializerTaskState sampleState =
                             (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(sampleUUID, partition));
@@ -681,8 +702,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         HierarchicalClusterIndexWriter indexWriter = new HierarchicalClusterIndexWriter(ctx, partition);
 
                         // Build complete tree clustering with parent-child relationships
+                        System.err.println("=== CALLING buildCompleteTreeClustering ===");
+                        System.err.println("=== PARTITION: " + partition + " ===");
                         buildCompleteTreeClustering(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
                                 KMeansUtils, vSizeFrame, appender, partition, indexWriter);
+                        System.err.println("=== COMPLETED buildCompleteTreeClustering ===");
 
                         // Write the hierarchical cluster index to side file
                         indexWriter.writeIndexToSideFile();
@@ -840,7 +864,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     System.err.println("Starting hierarchical levels. Current level: " + currentLevel + ", K: "
                             + currentK + ", centroids: " + currentLevelCentroids.size());
                     System.err.println("While loop condition: centroids.size() > 1 = "
-                            + (currentLevelCentroids.size() > 1) + ", K > 1 = " + (currentK > 1) + ", level < maxLevels = " + (currentLevel < maxLevels));
+                            + (currentLevelCentroids.size() > 1) + ", K > 1 = " + (currentK > 1)
+                            + ", level < maxLevels = " + (currentLevel < maxLevels));
                     System.err.println("=== CLUSTERING PROGRESS ===");
 
                     // Debug: print all centroids
@@ -856,7 +881,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         List<double[]> nextLevelCentroids = performScalableKMeansPlusPlusOnCentroids(
                                 currentLevelCentroids, currentK, rand, kMeansUtils, maxKMeansIterations);
 
-                        System.err.println("Level " + currentLevel + ": " + currentLevelCentroids.size() + " → " + nextLevelCentroids.size() + " centroids");
+                        System.err.println("Level " + currentLevel + ": " + currentLevelCentroids.size() + " → "
+                                + nextLevelCentroids.size() + " centroids");
 
                         // Use Lloyd's algorithm approach to assign current level centroids (children) to next level centroids (parents)
                         int[] parentAssignments = assignCentroidsToParents(currentLevelCentroids, nextLevelCentroids);
@@ -909,13 +935,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         currentK = Math.max(1, currentK / 2);
                     }
 
-                    System.err.println("Hierarchical clustering complete: " + (currentLevel + 1) + " levels, " + tree.getTotalNodes() + " total nodes");
+                    System.err.println("Hierarchical clustering complete: " + (currentLevel + 1) + " levels, "
+                            + tree.getTotalNodes() + " total nodes");
 
                     // Assign BFS-based IDs to all nodes (no sorting needed!)
                     tree.assignBFSIds();
 
                     // Output all nodes in BFS order
+                    System.err.println("=== CALLING outputCompleteTree ===");
+                    System.err.println("=== TREE NODES: " + tree.getTotalNodes() + " ===");
                     outputCompleteTree(tree, appender, indexWriter, partition);
+                    System.err.println("=== COMPLETED outputCompleteTree ===");
 
                     System.err.println("Tree output complete: " + tree.getTotalNodes() + " nodes");
                 }
@@ -2175,7 +2205,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
                     ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
 
+                    int tupleOutputCount = 0;
+                    int frameCount = 0;
+
                     for (HierarchicalClusterTree.TreeNode node : allNodes) {
+                        tupleOutputCount++;
+                        System.err.println("=== OUTPUTTING TUPLE #" + tupleOutputCount + " ===");
+                        System.err.println("=== NODE: level=" + node.getLevel() + ", clusterId=" + node.getClusterId()
+                                + ", globalId=" + node.getGlobalId() + " ===");
+
                         double[] arr = node.getCentroid();
                         orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
                         for (double value : arr) {
@@ -2215,16 +2253,27 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                                 tupleBuilder.getSize())) {
+                            // Frame is full, flush and reset
+                            frameCount++;
+                            System.err.println("=== FRAME #" + frameCount + " FULL, FLUSHING ===");
+                            System.err.println(
+                                    "=== FRAME #" + frameCount + " CONTAINS " + (tupleOutputCount - 1) + " TUPLES ===");
+
                             FrameUtils.flushFrame(appender.getBuffer(), writer);
                             appender.reset(new VSizeFrame(ctx), true);
                             appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                                     tupleBuilder.getSize());
                         }
                     }
-                    
+
                     // CRITICAL: Flush the final frame after outputting all nodes
                     // This ensures that the last batch of nodes is sent to the next operator
+                    frameCount++;
+                    System.err.println("=== FLUSHING FINAL FRAME #" + frameCount + " ===");
+                    System.err.println("=== TOTAL TUPLES OUTPUT: " + tupleOutputCount + " ===");
+                    System.err.println("=== TOTAL FRAMES OUTPUT: " + frameCount + " ===");
                     FrameUtils.flushFrame(appender.getBuffer(), writer);
+                    System.err.println("=== FINAL FRAME FLUSHED ===");
                 }
 
             };

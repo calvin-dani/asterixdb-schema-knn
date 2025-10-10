@@ -815,10 +815,19 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
     private void writeWithProperties(Index.VectorIndexDetails index) throws HyracksDataException {
         AdmObjectNode properties = index.getWithObjectNode();
-        int dimension = properties.getOptionalInt("dimension", -1);
-        int train_list = properties.getOptionalInt("train_list", -1);
-        String description = properties.getOptionalString("description", "default");
-        String similarity = properties.getOptionalString("similarity", "euclidean");
+        
+        // Handle case where WITH properties are null (no WITH clause was specified)
+        int dimension = -1;
+        int train_list = -1;
+        String description = "default";
+        String similarity = "euclidean";
+        
+        if (properties != null) {
+            dimension = properties.getOptionalInt("dimension", -1);
+            train_list = properties.getOptionalInt("train_list", -1);
+            description = properties.getOptionalString("description", "default");
+            similarity = properties.getOptionalString("similarity", "euclidean");
+        }
 
         nameValue.reset();
         aString.setValue("dimension");

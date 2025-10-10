@@ -32,7 +32,6 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
-import org.apache.hyracks.storage.am.btree.impls.BTreeOpContext;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
@@ -132,8 +131,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return null;
     }
 
-    public IIndexBulkLoader createFlushLoader(float fillFactor, IPageWriteCallback callback) throws HyracksDataException {
-        return new VectorClusteringTreeFlushLoader(fillFactor,  this, callback);
+    public IIndexBulkLoader createFlushLoader(float fillFactor, IPageWriteCallback callback)
+            throws HyracksDataException {
+        return new VectorClusteringTreeFlushLoader(fillFactor, this, callback);
     }
 
     /**

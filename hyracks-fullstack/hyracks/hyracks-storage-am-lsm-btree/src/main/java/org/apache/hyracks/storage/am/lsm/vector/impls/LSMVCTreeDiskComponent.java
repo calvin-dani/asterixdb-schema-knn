@@ -35,6 +35,9 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
+import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -191,6 +194,7 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             throw HyracksDataException.create(e);
         }
     }
+    
 
     static IMetadataPageManager getMetadataPageManager(VectorClusteringTree vcTree) {
         return (IMetadataPageManager) vcTree.getPageManager();

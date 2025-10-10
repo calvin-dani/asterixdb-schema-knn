@@ -81,6 +81,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
+        System.err.println("=== SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ===");
+        System.err.println("Dataset: " + dataset.getDatasetName());
+        System.err.println("Index: " + index.getIndexName());
+        System.err.println("Index type: " + index.getIndexType());
+        System.err.println("Index details: " + index.getIndexDetails());
+        System.err.println("Creating 2-Phase Job with Permit Mechanism");
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -94,7 +100,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
         PartitioningProperties partitioningProperties =
                 metadataProvider.getPartitioningProperties(dataset, index.getIndexName());
-        Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+        Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
         int[] fieldPermutation = createFieldPermutationForBulkLoadOp(numSecondaryKeys);
         int[] pkFields = createPkFieldPermutationForBulkLoadOp(fieldPermutation, numSecondaryKeys);
@@ -162,6 +168,14 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         RecordDescriptor hierarchicalRecDesc = new RecordDescriptor(hierarchicalSerde, hierarchicalTraits);
 
+        System.err.println("=== RECORD DESCRIPTOR COMPARISON ===");
+        System.err.println("Input record descriptor (from dataset): " + recordDesc);
+        System.err.println("Secondary record descriptor (from assign op): " + secondaryRecDesc);
+        System.err.println("Hierarchical record descriptor (to k-means): " + hierarchicalRecDesc);
+        System.err.println("Number of fields in input: " + recordDesc.getFieldCount());
+        System.err.println("Number of fields in secondary: " + secondaryRecDesc.getFieldCount());
+        System.err.println("Number of fields in hierarchical: " + hierarchicalRecDesc.getFieldCount());
+
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
@@ -177,7 +191,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
                 new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
-                        hierarchicalRecDesc);
+                        hierarchicalRecDesc, permitUUID);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
                 primaryPartitionConstraint);
         targetOp = vcTreeLoader;
@@ -194,12 +208,21 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
+
+        System.err.println("=== 2-PHASE JOB CREATED: Phase 1 (Structure Creation) ===");
+        System.err.println("=== JOB FLOW: DataSource → K-means → StructureBuilder → Sink ===");
+        System.err.println("=== PERMIT MECHANISM: Ready for Phase 2 development ===");
         return spec;
     }
 
     @Override
     protected int getNumSecondaryKeys() {
-        return ((Index.ValueIndexDetails) index.getIndexDetails()).getKeyFieldNames().size();
+        Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+        // For vector indexes, we always have at least 1 secondary key (the vector field itself)
+        // Include fields are additional fields beyond the vector field
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        int includeFieldsCount = (includeFieldNames == null) ? 0 : includeFieldNames.size();
+        return 1 + includeFieldsCount; // 1 for vector field + include fields
     }
 
     /**
@@ -221,7 +244,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
      */
     @Override
     protected void setSecondaryRecDescAndComparators() throws AlgebricksException {
-        Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+        Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
         secondaryFieldAccessEvalFactories = new IScalarEvaluatorFactory[numSecondaryKeys + numFilterFields];
         secondaryComparatorFactories = new IBinaryComparatorFactory[numSecondaryKeys + numPrimaryKeys];
@@ -240,12 +263,66 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Record column is 0 for external datasets, numPrimaryKeys for internal ones
         int recordColumn = dataset.getDatasetType() == DatasetType.INTERNAL ? numPrimaryKeys : 0;
         boolean isOverridingKeyFieldTypes = indexDetails.isOverridingKeyFieldTypes();
-        for (int i = 0; i < numSecondaryKeys; i++) {
+
+        // For VECTOR indexes, we process the vector field first, then include fields
+        List<List<String>> keyFieldNames = indexDetails.getKeyFieldNames();
+        List<List<String>> includeFieldNames = indexDetails.getIncludeFieldNames();
+        List<IAType> includeFieldTypes = indexDetails.getIncludeFieldTypes();
+        List<Integer> includeSourceIndicators = indexDetails.getIncludeFieldSourceIndicators();
+
+        // Process the vector field as the first secondary key
+        if (keyFieldNames != null && !keyFieldNames.isEmpty()) {
+            // Vector field is always in the record part (source indicator 0)
+            ARecordType sourceType = itemType;
+            ARecordType enforcedType = enforcedItemType;
+            int sourceColumn = recordColumn;
+
+            System.err.println("=== VECTOR FIELD PROCESSING ===");
+            System.err.println("Key field names: " + keyFieldNames);
+            System.err.println("Include field names: " + includeFieldNames);
+            System.err.println("Include field types: " + includeFieldTypes);
+            System.err.println("Source type: " + sourceType);
+            System.err.println("Record column: " + sourceColumn);
+            System.err.println("Number of secondary keys: " + numSecondaryKeys);
+
+            List<String> vectorFieldName = keyFieldNames.get(0);
+            IAType vectorFieldType = new AOrderedListType(ADOUBLE, "embedding"); // Default vector type
+
+            System.err.println("Vector field name: " + vectorFieldName);
+            System.err.println("Vector field type: " + vectorFieldType);
+
+            Pair<IAType, Boolean> keyTypePair =
+                    Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldName, sourceType);
+            IAType keyType = keyTypePair.first;
+            System.err.println("Resolved key type: " + keyType);
+
+            IScalarEvaluatorFactory vectorFieldAccessor = createFieldAccessor(sourceType, sourceColumn, vectorFieldName);
+            System.err.println("Created vector field accessor: " + vectorFieldAccessor);
+
+            secondaryFieldAccessEvalFactories[0] =
+                    createFieldCast(vectorFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
+            anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
+            secondaryRecFields[0] = serdeProvider.getSerializerDeserializer(keyType);
+            secondaryComparatorFactories[0] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
+            secondaryTypeTraits[0] = typeTraitProvider.getTypeTrait(keyType);
+            secondaryBloomFilterKeyFields[0] = 0;
+
+            System.err.println("Vector field configured as secondary key 0");
+            System.err.println("=== END VECTOR FIELD PROCESSING ===");
+        } else {
+            System.err.println("=== NO VECTOR FIELD FOUND ===");
+            System.err.println("Key field names: " + keyFieldNames);
+        }
+
+        // Process include fields (if any)
+        if (includeFieldNames != null && !includeFieldNames.isEmpty() &&
+            includeFieldTypes != null && !includeFieldTypes.isEmpty() &&
+            includeFieldNames.size() == includeFieldTypes.size()) {
+            for (int i = 0; i < includeFieldNames.size(); i++) {
             ARecordType sourceType;
             ARecordType enforcedType;
             int sourceColumn;
-            List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
-            if (keySourceIndicators == null || keySourceIndicators.get(i) == 0) {
+            if (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0) {
                 sourceType = itemType;
                 sourceColumn = recordColumn;
                 enforcedType = enforcedItemType;
@@ -254,19 +331,33 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 sourceColumn = recordColumn + 1;
                 enforcedType = enforcedMetaType;
             }
-            List<String> secFieldName = indexDetails.getKeyFieldNames().get(i);
-            IAType secFieldType = indexDetails.getKeyFieldTypes().get(i);
+            List<String> secFieldName = includeFieldNames.get(i);
+            IAType secFieldType = null;
+
+            // Safely get the field type, handling potential index out of bounds
+            if (i < includeFieldTypes.size()) {
+                secFieldType = includeFieldTypes.get(i);
+            }
+
+            // Skip if the field type is null or if we couldn't get it
+            if (secFieldType == null) {
+                continue;
+            }
+
+            // Include fields start at index 1 (index 0 is the vector field)
+            int fieldIndex = 1 + i;
             Pair<IAType, Boolean> keyTypePair =
                     Index.getNonNullableOpenFieldType(index, secFieldType, secFieldName, sourceType);
             IAType keyType = keyTypePair.first;
             IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(sourceType, sourceColumn, secFieldName);
-            secondaryFieldAccessEvalFactories[i] =
+            secondaryFieldAccessEvalFactories[fieldIndex] =
                     createFieldCast(secFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
             anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
-            secondaryRecFields[i] = serdeProvider.getSerializerDeserializer(keyType);
-            secondaryComparatorFactories[i] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
-            secondaryTypeTraits[i] = typeTraitProvider.getTypeTrait(keyType);
-            secondaryBloomFilterKeyFields[i] = i;
+            secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(keyType);
+            secondaryComparatorFactories[fieldIndex] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
+            secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(keyType);
+            secondaryBloomFilterKeyFields[fieldIndex] = fieldIndex;
+            }
         }
         if (dataset.getDatasetType() == DatasetType.INTERNAL) {
             // Add serializers and comparators for primary index fields.
