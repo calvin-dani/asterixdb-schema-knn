@@ -37,7 +37,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureLoader;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
 // import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 // import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 // import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
@@ -88,7 +88,7 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         private final int partition;
         private final int nPartitions;
 
-            private VCTreeStaticStructureLoader staticStructureLoader;
+            private VCTreeLoader staticStructureLoader;
             private boolean bulkLoadingStarted = false;
             private int tupleCount = 0;
             private FrameTupleReference tuple = new FrameTupleReference();

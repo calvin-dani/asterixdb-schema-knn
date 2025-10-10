@@ -165,7 +165,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // init centroids -(broadcast)> candidate centroids
         sourceOp = targetOp;
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc, 
+                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
@@ -176,7 +176,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = targetOp;
 
         VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
-                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f, hierarchicalRecDesc);
+                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
+                        hierarchicalRecDesc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
                 primaryPartitionConstraint);
         targetOp = vcTreeLoader;
