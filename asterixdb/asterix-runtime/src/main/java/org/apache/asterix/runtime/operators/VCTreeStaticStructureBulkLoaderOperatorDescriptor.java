@@ -26,8 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
-import org.apache.asterix.common.utils.StorageConstants;
+import org.apache.asterix.common.api.INcApplicationContext;
 // import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 // import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 // import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
@@ -62,11 +61,8 @@ import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescri
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureLoader;
-import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.LocalResource;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -106,7 +102,7 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         private final RecordDescriptor inputRecDesc;
         private final UUID permitUUID;
 
-        private VCTreeStaticStructureLoader staticStructureLoader;
+        // private VCTreeStaticStructureLoader staticStructureLoader;
         private boolean bulkLoadingStarted = false;
         private int tupleCount = 0;
         private FrameTupleReference tuple = new FrameTupleReference();
@@ -328,12 +324,12 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                     }
 
                     // Add this centroid to the VCTreeStaticStructureLoader
-                    if (staticStructureLoader != null) {
-                        // staticStructureLoader.add(tuple);
-                        System.err.println("  -> Added to VCTreeStaticStructureLoader");
-                    } else {
-                        System.err.println("  -> VCTreeStaticStructureLoader not available, storing for later");
-                    }
+                    // if (staticStructureLoader != null) {
+                    // staticStructureLoader.add(tuple);
+                    // System.err.println("  -> Added to VCTreeStaticStructureLoader");
+                    // } else {
+                    // System.err.println("  -> VCTreeStaticStructureLoader not available, storing for later");
+                    // }
 
                 } else {
                     System.err.println("WARNING: Empty or invalid embedding data for centroid " + centroidId);
@@ -403,99 +399,78 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
         }
 
         /**
-         * Creates the LSM index with static structure parameters.
+         * Creates the LSM index with static structure parameters using binary writer.
          * 
-         * This method actually creates the LSM index and calls the bulk loader
-         * to build the static structure pages, following the LSMBTree pattern.
+         * This method uses VCTreeStaticStructureBinaryWriter to create static structure pages
+         * directly to binary file, bypassing LSM component creation for page management.
          */
         private void createLSMIndexWithStaticStructure(int numLevels, List<Integer> clustersPerLevel,
                 List<List<Integer>> centroidsPerCluster) {
-            System.err.println("=== CREATING LSM INDEX WITH STATIC STRUCTURE ===");
+            System.err.println("=== CREATING LSM INDEX WITH STATIC STRUCTURE (BINARY WRITER) ===");
+            System.err.println("DEBUG: numLevels=" + numLevels + ", clustersPerLevel=" + clustersPerLevel
+                    + ", centroidsPerCluster=" + centroidsPerCluster);
 
             try {
-                // Create the LSM index using the indexHelperFactory
-                IIndexDataflowHelper indexHelper =
-                        indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                // Get buffer cache and IO manager for binary writer
+                System.err.println("DEBUG: Getting buffer cache and IO manager...");
+                INcApplicationContext appCtx =
+                        (INcApplicationContext) ctx.getJobletContext().getServiceContext().getApplicationContext();
+                IBufferCache bufferCache = appCtx.getBufferCache();
+                IIOManager ioManager = ctx.getIoManager();
+                System.err.println("DEBUG: Buffer cache and IO manager obtained successfully");
 
-                System.err.println("Opening LSM index...");
-                indexHelper.open();
-                ILSMIndex lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
-                System.err.println("LSM index opened successfully");
+                // Get index path for binary writer
+                System.err.println("DEBUG: Getting index file path...");
+                FileReference indexPathRef = getIndexFilePath();
+                if (indexPathRef == null) {
+                    System.err.println("ERROR: Could not determine index path for binary writer");
+                    return;
+                }
+                String indexPath = indexPathRef.getAbsolutePath();
+                System.err.println("DEBUG: Index path determined: " + indexPath);
 
-                // Create parameters map for the LSM index creation
-                Map<String, Object> structureParameters = new HashMap<>();
-                structureParameters.put("numLevels", numLevels);
-                structureParameters.put("clustersPerLevel", clustersPerLevel);
-                structureParameters.put("centroidsPerCluster", centroidsPerCluster);
-                structureParameters.put("maxEntriesPerPage", maxEntriesPerPage);
-                structureParameters.put("fillFactor", fillFactor);
-                structureParameters.put("isStaticStructureLoad", true);
-                structureParameters.put("totalTuplesProcessed", tupleCount);
+                // Create binary writer
+                System.err.println("DEBUG: Creating VCTreeStaticStructureBinaryWriter...");
+                VCTreeStaticStructureBinaryWriter binaryWriter = new VCTreeStaticStructureBinaryWriter(bufferCache,
+                        ioManager, indexPath, numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
+                System.err.println("DEBUG: Binary writer created successfully");
 
-                // Add required LSM component ID parameter (following LSMIndexBulkLoadOperatorNodePushable pattern)
-                structureParameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID,
-                        LSMComponentId.DEFAULT_COMPONENT_ID);
-
-                System.err.println("Structure parameters for LSM index creation:");
-                System.err.println("  - numLevels: " + structureParameters.get("numLevels"));
-                System.err.println("  - clustersPerLevel: " + structureParameters.get("clustersPerLevel"));
-                System.err.println("  - centroidsPerCluster: " + structureParameters.get("centroidsPerCluster"));
-                System.err.println("  - maxEntriesPerPage: " + structureParameters.get("maxEntriesPerPage"));
-                System.err.println("  - fillFactor: " + structureParameters.get("fillFactor"));
-                System.err.println("  - isStaticStructureLoad: " + structureParameters.get("isStaticStructureLoad"));
-                System.err.println("  - totalTuplesProcessed: " + structureParameters.get("totalTuplesProcessed"));
-                System.err.println("  - flushedComponentId: "
-                        + structureParameters.get(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID));
-
-                // Create the bulk loader with static structure parameters
-                System.err.println("Creating LSM bulk loader with static structure...");
-                IIndexBulkLoader bulkLoader =
-                        lsmIndex.createBulkLoader(fillFactor, false, tupleCount, false, structureParameters);
-
-                System.err.println("LSM bulk loader created successfully");
-
-                // Process all accumulated tuples and transform them for the LSM bulk loader
-                System.err.println("Adding " + frameAccumulator.size() + " accumulated frames to bulk loader...");
-                int totalTuplesAdded = 0;
-                
+                // Extract tuples from accumulated frames
+                System.err
+                        .println("DEBUG: Extracting tuples from " + frameAccumulator.size() + " accumulated frames...");
+                List<ITupleReference> tuples = new ArrayList<>();
                 for (int frameIndex = 0; frameIndex < frameAccumulator.size(); frameIndex++) {
                     ByteBuffer frameBuffer = frameAccumulator.get(frameIndex);
                     FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecDesc);
                     frameFta.reset(frameBuffer);
-                    
-                    System.err.println("Processing frame #" + (frameIndex + 1) + " with " + frameFta.getTupleCount() + " tuples");
-                    
-                    // Transform each tuple in the frame for the LSM bulk loader
+
+                    System.err.println("DEBUG: Processing frame #" + (frameIndex + 1) + " with "
+                            + frameFta.getTupleCount() + " tuples");
                     for (int i = 0; i < frameFta.getTupleCount(); i++) {
                         tuple.reset(frameFta, i);
-                        try {
-                            // Transform the hierarchical k-means tuple to the expected LSM format
-                            ITupleReference transformedTuple = transformTupleForLSM(tuple);
-                            if (transformedTuple != null) {
-                                bulkLoader.add(transformedTuple);
-                                totalTuplesAdded++;
-                            }
-                        } catch (Exception e) {
-                            System.err.println("ERROR: Failed to transform and add tuple " + (i + 1) + " from frame " + (frameIndex + 1) + " to bulk loader: " + e.getMessage());
-                            e.printStackTrace();
-                        }
+                        tuples.add(tuple);
+                        System.err.println("DEBUG: Added tuple " + (i + 1) + " from frame " + (frameIndex + 1));
                     }
                 }
-                
-                System.err.println("Successfully added " + totalTuplesAdded + " transformed tuples to bulk loader");
 
-                // Finalize the bulk loader to create the static structure
-                System.err.println("Finalizing bulk loader to create static structure pages...");
-                bulkLoader.end();
+                System.err.println("DEBUG: Extracted " + tuples.size() + " tuples for binary writer");
 
-                System.err.println("Static structure pages created successfully in LSM index");
+                // Process tuples and create static structure pages
+                System.err.println("DEBUG: Processing tuples with binary writer...");
+                binaryWriter.processTuples(tuples);
+                System.err.println("DEBUG: Tuple processing completed");
 
-                // Close the index
-                indexHelper.close();
-                System.err.println("LSM index closed successfully");
+                // Write to binary file
+                System.err.println("DEBUG: Writing to binary file...");
+                binaryWriter.writeToBinaryFile();
+                System.err.println("DEBUG: Binary file writing completed");
+
+                System.err.println("Static structure binary file created successfully");
+                System.err.println("DEBUG: Binary writer integration completed successfully!");
 
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to create LSM index with static structure: " + e.getMessage());
+                System.err.println("ERROR: Failed to create static structure with binary writer: " + e.getMessage());
+                System.err.println("DEBUG: Exception details:");
                 e.printStackTrace();
             }
         }
@@ -512,23 +487,23 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 for (int i = 0; i < originalTuple.getFieldCount(); i++) {
                     System.err.println("  Field " + i + ": length=" + originalTuple.getFieldLength(i));
                 }
-                
+
                 // Try providing only the centroidId (field 2) to see if that resolves the field slots issue
                 // The error suggests the LSM index expects only 1 field, not 2
-                int[] fieldPermutation = {2}; // Map output field 0 to input field 2 (centroidId)
-                
+                int[] fieldPermutation = { 2 }; // Map output field 0 to input field 2 (centroidId)
+
                 PermutingFrameTupleReference permutingTuple = new PermutingFrameTupleReference(fieldPermutation);
-                
+
                 // Get the frame accessor and tuple index from the original tuple
                 FrameTupleReference frameTuple = (FrameTupleReference) originalTuple;
                 permutingTuple.reset(frameTuple.getFrameTupleAccessor(), frameTuple.getTupleIndex());
-                
+
                 // Debug: Check transformed tuple structure
                 System.err.println("DEBUG: Transformed tuple has " + permutingTuple.getFieldCount() + " fields");
                 for (int i = 0; i < permutingTuple.getFieldCount(); i++) {
                     System.err.println("  Transformed field " + i + ": length=" + permutingTuple.getFieldLength(i));
                 }
-                
+
                 return permutingTuple;
 
             } catch (Exception e) {
@@ -577,11 +552,11 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
                 }
 
                 // Create the .staticstructure file in the same directory as the index
-                String staticStructureFileName = StorageConstants.STATIC_STRUCTURE_FILE_NAME;
-                FileReference staticStructureFile = indexPath.getParent().getChild(staticStructureFileName);
+                String staticStructureFileName = ".staticstructure"; // StorageConstants.STATIC_STRUCTURE_FILE_NAME;
+                FileReference staticStructureFile = indexPath.getChild(staticStructureFileName);
 
                 System.err.println("Writing .staticstructure file to index directory:");
-                System.err.println("  - Index directory: " + indexPath.getParent().getAbsolutePath());
+                System.err.println("  - Index directory: " + indexPath.getAbsolutePath());
                 System.err.println("  - Static structure file: " + staticStructureFile.getAbsolutePath());
 
                 // Prepare structure data
@@ -624,20 +599,39 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
          */
         private FileReference getIndexFilePath() {
             try {
-                // Use the index helper factory to create an index helper for this partition
-                // This follows the same pattern as other LSM operators
+                // Instead of relying on LocalResource path, find the actual .metadata file location
+                // This ensures we get the correct path where the .metadata file is actually created
+
+                // Get the base storage path from the IO manager
+                IIOManager ioManager = ctx.getIoManager();
+
+                // Try to find the .metadata file by searching in the expected locations
+                // The pattern is usually: storage/partition_X/DatasetName/DatasetName/0/ix1/.metadata
+                String[] possiblePaths = { "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1",
+                        "storage/partition_" + partition + "/ColumnTest/ColumnDataset/0/ix1/.metadata" };
+
+                for (String path : possiblePaths) {
+                    try {
+                        FileReference testPath = ioManager.resolve(path);
+                        if (ioManager.exists(testPath)) {
+                            System.err.println("DEBUG: Found existing path: " + testPath.getAbsolutePath());
+                            return testPath;
+                        }
+                    } catch (Exception e) {
+                        // Continue to next path
+                    }
+                }
+
+                // Fallback: Use the LocalResource approach
                 IIndexDataflowHelper indexHelper =
                         indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-
-                // Get the LocalResource from the index helper
                 LocalResource resource = indexHelper.getResource();
-
-                // Get the file path from the resource
                 String resourcePath = resource.getPath();
+                System.err.println("DEBUG: Using LocalResource path: " + resourcePath);
 
-                // Convert to FileReference using the IOManager
-                IIOManager ioManager = ctx.getIoManager();
-                return ioManager.resolve(resourcePath);
+                FileReference indexPathRef = ioManager.resolve(resourcePath);
+                System.err.println("DEBUG: Resolved FileReference path: " + indexPathRef.getAbsolutePath());
+                return indexPathRef;
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
@@ -717,17 +711,17 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             // Create VCTreeStaticStructureLoader with real structure
             createVCTreeStaticStructureLoaderWithRealData();
 
-            if (staticStructureLoader != null) {
-                try {
-                    // staticStructureLoader.end();
-                    System.err.println("VCTreeStaticStructureLoader finalized with real data");
-                } catch (Exception e) {
-                    System.err.println("ERROR: Failed to finalize VCTreeStaticStructureLoader: " + e.getMessage());
-                }
-            }
+            // if (staticStructureLoader != null) {
+            //     try {
+            //         // staticStructureLoader.end();
+            //         System.err.println("VCTreeStaticStructureLoader finalized with real data");
+            //     } catch (Exception e) {
+            //         System.err.println("ERROR: Failed to finalize VCTreeStaticStructureLoader: " + e.getMessage());
+            //     }
+            // }
 
             // Write static structure to .staticstructure file
-            writeStaticStructureToFile();
+            // writeStaticStructureToFile(); // Disabled - binary writer handles this
 
             // Close the writer if available
             if (writer != null) {
@@ -742,16 +736,16 @@ public class VCTreeStaticStructureBulkLoaderOperatorDescriptor extends AbstractS
             System.err.println("=== VCTreeStaticStructureBulkLoader FAILING ===");
             System.err.println("Total tuples processed before failure: " + tupleCount);
 
-            if (staticStructureLoader != null) {
-                System.err.println("Aborting VCTreeStaticStructureLoader...");
-                try {
-                    // staticStructureLoader.abort();
-                    System.err.println("VCTreeStaticStructureLoader aborted");
-                } catch (Exception e) {
-                    System.err.println("ERROR: Failed to abort VCTreeStaticStructureLoader: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
+            // if (staticStructureLoader != null) {
+            //     System.err.println("Aborting VCTreeStaticStructureLoader...");
+            //     try {
+            //         // staticStructureLoader.abort();
+            //         System.err.println("VCTreeStaticStructureLoader aborted");
+            //     } catch (Exception e) {
+            //         System.err.println("ERROR: Failed to abort VCTreeStaticStructureLoader: " + e.getMessage());
+            //         e.printStackTrace();
+            //     }
+            // }
 
             // Fail the writer if available
             if (writer != null) {

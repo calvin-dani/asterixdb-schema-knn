@@ -263,20 +263,20 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Record column is 0 for external datasets, numPrimaryKeys for internal ones
         int recordColumn = dataset.getDatasetType() == DatasetType.INTERNAL ? numPrimaryKeys : 0;
         boolean isOverridingKeyFieldTypes = indexDetails.isOverridingKeyFieldTypes();
-        
+
         // For VECTOR indexes, we process the vector field first, then include fields
         List<List<String>> keyFieldNames = indexDetails.getKeyFieldNames();
         List<List<String>> includeFieldNames = indexDetails.getIncludeFieldNames();
         List<IAType> includeFieldTypes = indexDetails.getIncludeFieldTypes();
         List<Integer> includeSourceIndicators = indexDetails.getIncludeFieldSourceIndicators();
-        
+
         // Process the vector field as the first secondary key
         if (keyFieldNames != null && !keyFieldNames.isEmpty()) {
             // Vector field is always in the record part (source indicator 0)
             ARecordType sourceType = itemType;
             ARecordType enforcedType = enforcedItemType;
             int sourceColumn = recordColumn;
-            
+
             System.err.println("=== VECTOR FIELD PROCESSING ===");
             System.err.println("Key field names: " + keyFieldNames);
             System.err.println("Include field names: " + includeFieldNames);
@@ -284,21 +284,22 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             System.err.println("Source type: " + sourceType);
             System.err.println("Record column: " + sourceColumn);
             System.err.println("Number of secondary keys: " + numSecondaryKeys);
-            
+
             List<String> vectorFieldName = keyFieldNames.get(0);
             IAType vectorFieldType = new AOrderedListType(ADOUBLE, "embedding"); // Default vector type
-            
+
             System.err.println("Vector field name: " + vectorFieldName);
             System.err.println("Vector field type: " + vectorFieldType);
-            
+
             Pair<IAType, Boolean> keyTypePair =
                     Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldName, sourceType);
             IAType keyType = keyTypePair.first;
             System.err.println("Resolved key type: " + keyType);
-            
-            IScalarEvaluatorFactory vectorFieldAccessor = createFieldAccessor(sourceType, sourceColumn, vectorFieldName);
+
+            IScalarEvaluatorFactory vectorFieldAccessor =
+                    createFieldAccessor(sourceType, sourceColumn, vectorFieldName);
             System.err.println("Created vector field accessor: " + vectorFieldAccessor);
-            
+
             secondaryFieldAccessEvalFactories[0] =
                     createFieldCast(vectorFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
             anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
@@ -306,57 +307,57 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             secondaryComparatorFactories[0] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
             secondaryTypeTraits[0] = typeTraitProvider.getTypeTrait(keyType);
             secondaryBloomFilterKeyFields[0] = 0;
-            
+
             System.err.println("Vector field configured as secondary key 0");
             System.err.println("=== END VECTOR FIELD PROCESSING ===");
         } else {
             System.err.println("=== NO VECTOR FIELD FOUND ===");
             System.err.println("Key field names: " + keyFieldNames);
         }
-        
+
         // Process include fields (if any)
-        if (includeFieldNames != null && !includeFieldNames.isEmpty() && 
-            includeFieldTypes != null && !includeFieldTypes.isEmpty() && 
-            includeFieldNames.size() == includeFieldTypes.size()) {
+        if (includeFieldNames != null && !includeFieldNames.isEmpty() && includeFieldTypes != null
+                && !includeFieldTypes.isEmpty() && includeFieldNames.size() == includeFieldTypes.size()) {
             for (int i = 0; i < includeFieldNames.size(); i++) {
-            ARecordType sourceType;
-            ARecordType enforcedType;
-            int sourceColumn;
-            if (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0) {
-                sourceType = itemType;
-                sourceColumn = recordColumn;
-                enforcedType = enforcedItemType;
-            } else {
-                sourceType = metaType;
-                sourceColumn = recordColumn + 1;
-                enforcedType = enforcedMetaType;
-            }
-            List<String> secFieldName = includeFieldNames.get(i);
-            IAType secFieldType = null;
-            
-            // Safely get the field type, handling potential index out of bounds
-            if (i < includeFieldTypes.size()) {
-                secFieldType = includeFieldTypes.get(i);
-            }
-            
-            // Skip if the field type is null or if we couldn't get it
-            if (secFieldType == null) {
-                continue;
-            }
-            
-            // Include fields start at index 1 (index 0 is the vector field)
-            int fieldIndex = 1 + i;
-            Pair<IAType, Boolean> keyTypePair =
-                    Index.getNonNullableOpenFieldType(index, secFieldType, secFieldName, sourceType);
-            IAType keyType = keyTypePair.first;
-            IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(sourceType, sourceColumn, secFieldName);
-            secondaryFieldAccessEvalFactories[fieldIndex] =
-                    createFieldCast(secFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
-            anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
-            secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(keyType);
-            secondaryComparatorFactories[fieldIndex] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
-            secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(keyType);
-            secondaryBloomFilterKeyFields[fieldIndex] = fieldIndex;
+                ARecordType sourceType;
+                ARecordType enforcedType;
+                int sourceColumn;
+                if (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0) {
+                    sourceType = itemType;
+                    sourceColumn = recordColumn;
+                    enforcedType = enforcedItemType;
+                } else {
+                    sourceType = metaType;
+                    sourceColumn = recordColumn + 1;
+                    enforcedType = enforcedMetaType;
+                }
+                List<String> secFieldName = includeFieldNames.get(i);
+                IAType secFieldType = null;
+
+                // Safely get the field type, handling potential index out of bounds
+                if (i < includeFieldTypes.size()) {
+                    secFieldType = includeFieldTypes.get(i);
+                }
+
+                // Skip if the field type is null or if we couldn't get it
+                if (secFieldType == null) {
+                    continue;
+                }
+
+                // Include fields start at index 1 (index 0 is the vector field)
+                int fieldIndex = 1 + i;
+                Pair<IAType, Boolean> keyTypePair =
+                        Index.getNonNullableOpenFieldType(index, secFieldType, secFieldName, sourceType);
+                IAType keyType = keyTypePair.first;
+                IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(sourceType, sourceColumn, secFieldName);
+                secondaryFieldAccessEvalFactories[fieldIndex] =
+                        createFieldCast(secFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
+                anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
+                secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(keyType);
+                secondaryComparatorFactories[fieldIndex] =
+                        comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
+                secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(keyType);
+                secondaryBloomFilterKeyFields[fieldIndex] = fieldIndex;
             }
         }
         if (dataset.getDatasetType() == DatasetType.INTERNAL) {

@@ -388,7 +388,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     System.err.println("=== HIERARCHICAL K-MEANS NEXT FRAME ===");
                     System.err.println("Received frame with " + tupleCount + " tuples");
-                    System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+                    System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position()
+                            + ", limit: " + buffer.limit());
 
                     if (first) {
                         // CRITICAL: Perform initial K-means++ on raw data to generate K centroids
@@ -457,7 +458,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
             System.err.println("=== PERFORMING INITIAL K-MEANS++ ===");
             System.err.println("Target K: " + k);
-            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position()
+                    + ", limit: " + buffer.limit());
 
             if (k <= 0) {
                 System.err.println("K <= 0, returning empty centroids");
@@ -475,11 +477,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             for (int i = 0; i < tupleCount; i++) {
                 tuple.reset(fta, i);
                 System.err.println("Processing tuple " + i);
-                
+
                 eval.evaluate(tuple, inputVal);
                 System.err.println("Evaluation result length: " + inputVal.getLength());
-                System.err.println("Evaluation result type tag: " + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]));
-                
+                System.err.println("Evaluation result type tag: "
+                        + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]));
+
                 ListAccessor listAccessorConstant = new ListAccessor();
 
                 if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
@@ -490,7 +493,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
                 try {
                     double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-                    System.err.println("Extracted point " + i + " with " + point.length + " dimensions: " + java.util.Arrays.toString(point));
+                    System.err.println("Extracted point " + i + " with " + point.length + " dimensions: "
+                            + java.util.Arrays.toString(point));
                     allPoints.add(point);
                 } catch (IOException e) {
                     System.err.println("Error extracting point " + i + ": " + e.getMessage());
