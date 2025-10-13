@@ -18,8 +18,6 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
-
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -33,12 +31,15 @@ import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDese
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.api.*;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -99,7 +100,9 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
      */
 
     public enum loadState {
-        STATIC_STRUCTURE_BUILDING, CLUSTERING, BULKLOADING
+        STATIC_STRUCTURE_BUILDING,
+        CLUSTERING,
+        BULKLOADING
     }
 
     public VCTreeLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
@@ -134,8 +137,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Initialize frames
         this.interiorFrame = (IVectorClusteringInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
         this.leafFrame = (IVectorClusteringLeafFrame) vectorTree.getLeafFrameFactory().createFrame();
-        this.currentDirectoryFrame = vectorTree.getMetadataFrameFactory()
-                .createFrame();
+        this.currentDirectoryFrame = vectorTree.getMetadataFrameFactory().createFrame();
         this.currentDataFrame = vectorTree.getDataFrameFactory().createFrame();
 
         // Precompute helper arrays for mathematical page ID calculation
@@ -228,7 +230,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Child page ID = offset for next level + cluster index within that level
         int childPageId = totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
 
-        LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex, childPageId);
+        LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
+                childPageId);
 
         return childPageId;
     }
@@ -275,7 +278,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         int centroidId = (Integer) fieldValues[0];
         float[] embedding = (float[]) fieldValues[1];
 
-        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}", centroidId, currentLevel, currentClusterInLevel, currentCentroidInCluster);
+        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}", centroidId, currentLevel,
+                currentClusterInLevel, currentCentroidInCluster);
 
         try {
             return TupleUtils.createTuple(
@@ -345,7 +349,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Create the new overflow page
         createNewPage(overflowPageId);
 
-        LOGGER.debug("Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel, currentClusterInLevel);
+        LOGGER.debug("Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
+                currentClusterInLevel);
     }
 
     /**
@@ -444,7 +449,6 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         return new ClusterResult(0, 0.0);
     }
 
-
     /**
      * ========= leaf cluster bulk loading methods =========
      */
@@ -472,7 +476,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             ((IVectorClusteringDataFrame) currentDataFrame).insertSorted(tuple);
             entriesInCurrentDataPage++;
 
-            LOGGER.debug("Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex, entriesInCurrentDataPage);
+            LOGGER.debug("Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex,
+                    entriesInCurrentDataPage);
         } catch (HyracksDataException | RuntimeException e) {
             // Log state for debugging - following BTreeNSMBulkLoader pattern
             logDataPageState(tuple, e);
@@ -508,9 +513,6 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
 
         LOGGER.debug("Moved to leaf cluster {}", currentLeafClusterIndex);
     }
-
-
-
 
     /**
      * Get the centroid ID of the first leaf level centroid.
@@ -549,18 +551,15 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // this would be the maximum distance of tuples in the data page
         // TODO: extract actual max distance from data page's last tuple
         double maxDistance = 6.6; // Placeholder
-        
+
         try {
-            ITupleReference directoryEntry = TupleUtils.createTuple(
-                new ISerializerDeserializer[] { 
-                    DoubleSerializerDeserializer.INSTANCE,
-                    IntegerSerializerDeserializer.INSTANCE 
-                },
-                maxDistance, currentDataPageId);
+            ITupleReference directoryEntry =
+                    TupleUtils.createTuple(new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE,
+                            IntegerSerializerDeserializer.INSTANCE }, maxDistance, currentDataPageId);
 
             // Check if directory page has space
             int spaceNeeded = tupleWriter.bytesRequired(directoryEntry) + slotSize;
-            int spaceAvailable =  currentDirectoryFrame.getTotalFreeSpace();
+            int spaceAvailable = currentDirectoryFrame.getTotalFreeSpace();
 
             if (spaceNeeded > spaceAvailable) {
                 // Directory page is full, need to create overflow directory page
@@ -572,14 +571,15 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             ((IVectorClusteringFrame) currentDirectoryFrame).insertSorted(directoryEntry);
             entriesInCurrentDirectoryPage++;
 
-            LOGGER.debug("Added directory entry for data page {} to directory page, entries: {}", currentDataPageId, entriesInCurrentDirectoryPage);
+            LOGGER.debug("Added directory entry for data page {} to directory page, entries: {}", currentDataPageId,
+                    entriesInCurrentDirectoryPage);
 
         } catch (Exception e) {
             throw new HyracksDataException("Failed to create directory entry");
         }
 
         int nextPageId = freePageManager.takePage(metaFrame);
-        ((IVectorClusteringDataFrame)currentDataFrame).setNextPage(nextPageId);
+        ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(nextPageId);
 
         // Write the data page
         write(currentDataPage);
@@ -605,11 +605,10 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Allocate new directory page
         int nextDirectoryPageId = freePageManager.takePage(metaFrame);
 
-
         // Set next page pointer in current directory page
         // This would depend on the specific directory frame implementation
         // For now, we'll assume it has a setNextPage method similar to leaf frames
-        ((IVectorClusteringMetadataFrame)currentDirectoryFrame).setNextPage(nextDirectoryPageId);
+        ((IVectorClusteringMetadataFrame) currentDirectoryFrame).setNextPage(nextDirectoryPageId);
 
         // Write current directory page first
         write(currentDirectoryPage);
@@ -622,7 +621,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         currentDirectoryFrame.initBuffer((byte) 0);
         entriesInCurrentDirectoryPage = 0;
 
-        LOGGER.debug("Created overflow directory page {} for leaf cluster {}", nextDirectoryPageId, currentLeafClusterIndex);
+        LOGGER.debug("Created overflow directory page {} for leaf cluster {}", nextDirectoryPageId,
+                currentLeafClusterIndex);
     }
 
     /**
@@ -635,9 +635,10 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
                 int tupleSize = currentDataFrame.getBytesRequiredToWriteTuple(tuple);
                 int spaceNeeded = tupleWriter.bytesRequired(tuple) + slotSize;
                 int spaceUsed = currentDataFrame.getBuffer().capacity() - currentDataFrame.getTotalFreeSpace();
-                
-                LOGGER.error("Data page state - tupleSize: {}, spaceNeeded: {}, spaceUsed: {}, entriesInCurrentDataPage: {}",
-                             tupleSize, spaceNeeded, spaceUsed, entriesInCurrentDataPage);
+
+                LOGGER.error(
+                        "Data page state - tupleSize: {}, spaceNeeded: {}, spaceUsed: {}, entriesInCurrentDataPage: {}",
+                        tupleSize, spaceNeeded, spaceUsed, entriesInCurrentDataPage);
             }
         } catch (Throwable t) {
             e.addSuppressed(t);
@@ -665,7 +666,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         LOGGER.debug("Structure configuration:");
         for (int level = 0; level < numLevels; level++) {
             StringBuilder sb = new StringBuilder();
-            sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level)).append(" clusters, centroids=[");
+            sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level))
+                    .append(" clusters, centroids=[");
             List<Integer> levelCentroids = centroidsPerCluster.get(level);
             for (int cluster = 0; cluster < levelCentroids.size(); cluster++) {
                 sb.append(levelCentroids.get(cluster));
@@ -689,7 +691,6 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         }
         LOGGER.debug("First leaf centroid ID: {}", getFirstLeafCentroidId());
     }
-
 
     /**
      * Result of cluster search operation.

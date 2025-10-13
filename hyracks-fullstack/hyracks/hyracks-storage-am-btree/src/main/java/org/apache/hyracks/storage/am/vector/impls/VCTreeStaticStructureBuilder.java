@@ -18,6 +18,10 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.LongPointable;
@@ -37,10 +41,6 @@ import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteCo
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
@@ -70,8 +70,6 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     // Frames for different page types
     private IVectorClusteringInteriorFrame interiorFrame;
     private IVectorClusteringLeafFrame leafFrame;
-
-
 
     public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext, int numLevels,
@@ -126,7 +124,6 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
         printStructureInfo();
     }
-
 
     /**
      * Precompute cumulative totals for efficient child page ID calculation.
@@ -188,7 +185,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         // Child page ID = offset for next level + cluster index within that level
         int childPageId = totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
 
-        LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex, childPageId);
+        LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
+                childPageId);
 
         return childPageId;
     }
@@ -300,7 +298,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         // Create the new overflow page
         createNewPage(overflowPageId);
 
-        LOGGER.debug("Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel, currentClusterInLevel);
+        LOGGER.debug("Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
+                currentClusterInLevel);
     }
 
     /**
@@ -342,10 +341,10 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         write(currentPage);
     }
 
-
     private int getNumLeafCentroids() {
         return totalCentroidsUpToLevel[numLevels] - totalCentroidsUpToLevel[numLevels - 1];
     }
+
     /**
      * Only gets called when everything is done.
      */
@@ -371,7 +370,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         LOGGER.debug("Structure configuration:");
         for (int level = 0; level < numLevels; level++) {
             StringBuilder sb = new StringBuilder();
-            sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level)).append(" clusters, centroids=[");
+            sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level))
+                    .append(" clusters, centroids=[");
             List<Integer> levelCentroids = centroidsPerCluster.get(level);
             for (int cluster = 0; cluster < levelCentroids.size(); cluster++) {
                 sb.append(levelCentroids.get(cluster));
