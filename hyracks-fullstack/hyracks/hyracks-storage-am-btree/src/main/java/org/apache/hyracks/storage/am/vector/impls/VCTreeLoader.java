@@ -51,7 +51,6 @@ import org.apache.logging.log4j.Logger;
  */
 public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
 
-    // Structure configuration - using Lists instead of arrays
     private static final Logger LOGGER = LogManager.getLogger();
     private final int numLevels;
     private final List<Integer> clustersPerLevel; // List of cluster counts per level
