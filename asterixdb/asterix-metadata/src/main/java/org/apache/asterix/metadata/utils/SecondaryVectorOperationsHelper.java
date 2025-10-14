@@ -19,7 +19,6 @@
 package org.apache.asterix.metadata.utils;
 
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
-import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
 import static org.apache.asterix.om.types.BuiltinType.AINT32;
 
 import java.util.List;
@@ -37,7 +36,7 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
-import org.apache.asterix.runtime.operators.VCTreeStaticStructureBulkLoaderOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -155,9 +154,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ISerializerDeserializer[] newCentSerde = new ISerializerDeserializer[1];
         ITypeTraits[] newCentTraits = new ITypeTraits[1];
 
-        newCentSerde[0] = serdeProvider.getSerializerDeserializer(new AOrderedListType(AFLOAT, "embedding"));
+        newCentSerde[0] = serdeProvider.getSerializerDeserializer(new AOrderedListType(ADOUBLE, "embedding"));
 
-        newCentTraits[0] = typeTraitProvider.getTypeTrait(new AOrderedListType(AFLOAT, "embedding"));
+        newCentTraits[0] = typeTraitProvider.getTypeTrait(new AOrderedListType(ADOUBLE, "embedding"));
         // Construct the new RecordDescriptor
 
         RecordDescriptor centroidRecDesc = new RecordDescriptor(newCentSerde, newCentTraits);
@@ -231,17 +230,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Branch 1 - HierarchicalKMeans: " + candidates);
         System.err.println("Connected: " + branch1Source + " output 0 → " + branch1Target + " input 0");
 
-        // Connect hierarchical k-means output to VCTree bulk loader
+        // Connect hierarchical k-means output to VCTree static structure creator
         branch1Source = branch1Target;
-        VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
-                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
+        VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
+                new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
                         hierarchicalRecDesc, permitUUID);
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeCreator,
                 primaryPartitionConstraint);
-        branch1Target = vcTreeLoader;
+        branch1Target = vcTreeCreator;
         spec.connect(new OneToOneConnectorDescriptor(spec), branch1Source, 0, branch1Target, 0);
 
-        System.err.println("Branch 1 - VCTreeBulkLoader: " + vcTreeLoader);
+        System.err.println("Branch 1 - VCTreeStaticStructureCreator: " + vcTreeCreator);
         System.err.println("Connected: " + branch1Source + " output 0 → " + branch1Target + " input 0");
 
         // Add sink for Branch 1 final output
@@ -296,7 +295,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("  Root 1: " + branch1Sink + " (Branch 1 - Structure Creation)");
         System.err.println("  Root 2: " + branch2Placeholder + " (Branch 2 - Data Loading Placeholder)");
         System.err.println("=== 2-PHASE JOB CREATED WITH REPLICATION ===");
-        System.err.println("=== BRANCH 1: DataSource → Replicate → K-means → StructureBuilder → Sink ===");
+        System.err.println("=== BRANCH 1: DataSource → Replicate → K-means → StaticStructureCreator → Sink ===");
         System.err.println("=== BRANCH 2: DataSource → Replicate → Placeholder (Data Loading) ===");
         System.err.println("=== PERMIT MECHANISM: Ready for Phase 2 coordination ===");
         System.err.println("==========================================");

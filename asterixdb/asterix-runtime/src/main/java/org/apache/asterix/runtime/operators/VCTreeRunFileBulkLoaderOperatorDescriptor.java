@@ -263,27 +263,28 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 // Extract embedding from data tuple (assuming it's in the first field)
                 double[] dataEmbedding = extractEmbeddingFromTuple(dataTuple);
-                
+
                 // Traverse tree structure to find nearest centroid (more efficient)
-                VCTreeStaticStructureReader.LeafCentroid nearestCentroid = findNearestCentroidViaTreeTraversal(dataEmbedding);
-                
+                VCTreeStaticStructureReader.LeafCentroid nearestCentroid =
+                        findNearestCentroidViaTreeTraversal(dataEmbedding);
+
                 // Calculate distance to nearest centroid
                 double distance = calculateDistance(dataEmbedding, nearestCentroid.embedding);
-                
+
                 // Create tuple with distance: <original_tuple, distance_to_centroid>
                 ITupleReference tupleWithDistance = createTupleWithDistance(dataTuple, distance);
-                
+
                 // Store in appropriate run file
                 storeTupleInRunFile(nearestCentroid.centroidId, tupleWithDistance);
-                
+
                 totalTuplesProcessed++;
-                
+
                 // Log progress every 1000 tuples
                 if (totalTuplesProcessed % 1000 == 0) {
                     System.err.println("Processed " + totalTuplesProcessed + " data tuples");
                     logRunFileStats();
                 }
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to process data tuple: " + e.getMessage());
                 e.printStackTrace();
@@ -313,8 +314,9 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
          */
         private VCTreeStaticStructureReader.LeafCentroid findNearestCentroidViaTreeTraversal(double[] embedding) {
             // Start from root level and traverse down the tree
-            List<VCTreeStaticStructureReader.StaticStructurePage> pages = staticStructureReader.getStaticStructurePages();
-            
+            List<VCTreeStaticStructureReader.StaticStructurePage> pages =
+                    staticStructureReader.getStaticStructurePages();
+
             // Find root page (level 0, typically page ID 0)
             VCTreeStaticStructureReader.StaticStructurePage rootPage = null;
             for (VCTreeStaticStructureReader.StaticStructurePage page : pages) {
@@ -323,45 +325,45 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                     break;
                 }
             }
-            
+
             if (rootPage == null) {
                 // Fallback to brute force if tree structure not available
                 return findNearestCentroidBruteForce(embedding);
             }
-            
+
             // Traverse tree from root to leaf
             VCTreeStaticStructureReader.StaticStructurePage currentPage = rootPage;
             int currentLevel = 0;
-            
+
             while (currentLevel < staticStructureReader.getNumLevels() - 1) {
                 // Find nearest centroid in current page
                 int nearestCentroidIndex = findNearestCentroidInPage(embedding, currentPage);
-                
+
                 // Get child page ID for this centroid
                 int childPageId = getChildPageId(currentPage, nearestCentroidIndex);
-                
+
                 // Move to child page
                 currentPage = findPageById(pages, childPageId);
                 if (currentPage == null) {
                     // Fallback to brute force if page not found
                     return findNearestCentroidBruteForce(embedding);
                 }
-                
+
                 currentLevel++;
             }
-            
+
             // At leaf level, find nearest centroid
             int nearestCentroidIndex = findNearestCentroidInPage(embedding, currentPage);
             return getLeafCentroidFromPage(currentPage, nearestCentroidIndex);
         }
-        
+
         /**
          * Fallback method: finds nearest centroid using brute force (O(N) comparisons).
          */
         private VCTreeStaticStructureReader.LeafCentroid findNearestCentroidBruteForce(double[] embedding) {
             VCTreeStaticStructureReader.LeafCentroid nearest = null;
             double minDistance = Double.MAX_VALUE;
-            
+
             for (VCTreeStaticStructureReader.LeafCentroid centroid : leafCentroids) {
                 double distance = calculateDistance(embedding, centroid.embedding);
                 if (distance < minDistance) {
@@ -369,32 +371,33 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                     nearest = centroid;
                 }
             }
-            
+
             return nearest;
         }
-        
+
         /**
          * Finds the nearest centroid within a specific page.
          */
-        private int findNearestCentroidInPage(double[] embedding, VCTreeStaticStructureReader.StaticStructurePage page) {
+        private int findNearestCentroidInPage(double[] embedding,
+                VCTreeStaticStructureReader.StaticStructurePage page) {
             double minDistance = Double.MAX_VALUE;
             int nearestIndex = 0;
-            
+
             // For each centroid in the page, calculate distance
             for (int i = 0; i < page.entryCount; i++) {
                 // Extract centroid embedding from page data
                 double[] centroidEmbedding = extractCentroidFromPage(page, i);
                 double distance = calculateDistance(embedding, centroidEmbedding);
-                
+
                 if (distance < minDistance) {
                     minDistance = distance;
                     nearestIndex = i;
                 }
             }
-            
+
             return nearestIndex;
         }
-        
+
         /**
          * Extracts centroid embedding from page data at given index.
          */
@@ -407,7 +410,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             }
             return embedding;
         }
-        
+
         /**
          * Gets child page ID for a centroid at given index in the page.
          */
@@ -417,11 +420,12 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             int childPageId = page.pageId * 100 + centroidIndex; // Simplified calculation
             return childPageId;
         }
-        
+
         /**
          * Finds page by ID in the list of pages.
          */
-        private VCTreeStaticStructureReader.StaticStructurePage findPageById(List<VCTreeStaticStructureReader.StaticStructurePage> pages, int pageId) {
+        private VCTreeStaticStructureReader.StaticStructurePage findPageById(
+                List<VCTreeStaticStructureReader.StaticStructurePage> pages, int pageId) {
             for (VCTreeStaticStructureReader.StaticStructurePage page : pages) {
                 if (page.pageId == pageId) {
                     return page;
@@ -429,18 +433,19 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             }
             return null;
         }
-        
+
         /**
          * Gets leaf centroid from page and centroid index.
          */
-        private VCTreeStaticStructureReader.LeafCentroid getLeafCentroidFromPage(VCTreeStaticStructureReader.StaticStructurePage page, int centroidIndex) {
+        private VCTreeStaticStructureReader.LeafCentroid getLeafCentroidFromPage(
+                VCTreeStaticStructureReader.StaticStructurePage page, int centroidIndex) {
             // Find corresponding leaf centroid
             for (VCTreeStaticStructureReader.LeafCentroid centroid : leafCentroids) {
                 if (centroid.pageId == page.pageId && centroid.centroidId % 100 == centroidIndex) {
                     return centroid;
                 }
             }
-            
+
             // Fallback: return first leaf centroid
             return leafCentroids.get(0);
         }
@@ -470,13 +475,13 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
                 // For now, we'll store the distance as metadata and return the original tuple
                 // In a real implementation, we would need to properly serialize both fields
                 // This is a limitation of the current tuple creation approach
-                
+
                 // Log the distance for debugging
                 System.err.println("DEBUG: Tuple distance to centroid: " + distance);
-                
+
                 // Return original tuple - the distance will be stored separately in run file metadata
                 return originalTuple;
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create tuple with distance: " + e.getMessage());
                 // Fallback: return original tuple

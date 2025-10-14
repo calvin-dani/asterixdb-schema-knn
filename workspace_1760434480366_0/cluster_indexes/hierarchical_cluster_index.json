@@ -1,0 +1,127 @@
+{
+  "total_levels" : 2,
+  "levels" : [ {
+    "centroids" : [ {
+      "cluster_id" : 0,
+      "level" : 1,
+      "global_id" : 0,
+      "coordinates" : [ 21.5 ],
+      "has_parent" : false,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 1,
+      "level" : 1,
+      "global_id" : 1,
+      "coordinates" : [ 47.333333333333336 ],
+      "has_parent" : false,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 2,
+      "level" : 1,
+      "global_id" : 2,
+      "coordinates" : [ 32.333333333333336 ],
+      "has_parent" : false,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 3,
+      "level" : 1,
+      "global_id" : 3,
+      "coordinates" : [ 5.5 ],
+      "has_parent" : false,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 4,
+      "level" : 1,
+      "global_id" : 4,
+      "coordinates" : [ 15.0 ],
+      "has_parent" : false,
+      "dimension" : 1
+    } ],
+    "level" : 1,
+    "centroid_count" : 5
+  }, {
+    "centroids" : [ {
+      "cluster_id" : 0,
+      "level" : 0,
+      "global_id" : 5,
+      "coordinates" : [ 21.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 10,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 1,
+      "level" : 0,
+      "global_id" : 6,
+      "coordinates" : [ 47.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 11,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 2,
+      "level" : 0,
+      "global_id" : 7,
+      "coordinates" : [ 42.0 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 11,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 3,
+      "level" : 0,
+      "global_id" : 8,
+      "coordinates" : [ 52.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 11,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 4,
+      "level" : 0,
+      "global_id" : 9,
+      "coordinates" : [ 27.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 12,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 5,
+      "level" : 0,
+      "global_id" : 10,
+      "coordinates" : [ 32.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 12,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 6,
+      "level" : 0,
+      "global_id" : 11,
+      "coordinates" : [ 37.0 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 12,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 7,
+      "level" : 0,
+      "global_id" : 12,
+      "coordinates" : [ 2.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 13,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 8,
+      "level" : 0,
+      "global_id" : 13,
+      "coordinates" : [ 8.5 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 13,
+      "dimension" : 1
+    }, {
+      "cluster_id" : 9,
+      "level" : 0,
+      "global_id" : 14,
+      "coordinates" : [ 15.0 ],
+      "has_parent" : true,
+      "parent_cluster_id" : 14,
+      "dimension" : 1
+    } ],
+    "level" : 0,
+    "centroid_count" : 10
+  } ]
+}

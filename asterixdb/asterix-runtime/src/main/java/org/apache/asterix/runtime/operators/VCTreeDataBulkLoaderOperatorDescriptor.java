@@ -45,14 +45,14 @@ import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescri
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.common.LocalResource;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
-import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
 import org.apache.hyracks.storage.am.common.impls.NoOpOperationCallback;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.common.IIndexAccessParameters;
+import org.apache.hyracks.storage.common.LocalResource;
 
 /**
  * Bulk loader that loads sorted data directly to leaf pages using centroid ID mapping.
@@ -92,8 +92,7 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
         return new VCTreeDataBulkLoaderNodePushable(ctx, partition, nPartitions, inputRecDesc, permitUUID);
     }
 
-    private class VCTreeDataBulkLoaderNodePushable
-            extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
+    private class VCTreeDataBulkLoaderNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
 
         private final IHyracksTaskContext ctx;
         private final int partition;
@@ -192,7 +191,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
                 @SuppressWarnings("unchecked")
                 List<Integer> clustersPerLevel = (List<Integer>) structureParams.get("clustersPerLevel");
                 @SuppressWarnings("unchecked")
-                List<List<Integer>> centroidsPerCluster = (List<List<Integer>>) structureParams.get("centroidsPerCluster");
+                List<List<Integer>> centroidsPerCluster =
+                        (List<List<Integer>>) structureParams.get("centroidsPerCluster");
 
                 // Create centroid-to-page mapping
                 createCentroidToPageMapping(numLevels, clustersPerLevel, centroidsPerCluster);
@@ -229,20 +229,20 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
             for (int level = 0; level < numLevels; level++) {
                 for (int cluster = 0; cluster < clustersPerLevel.get(level); cluster++) {
                     int centroidsInCluster = centroidsPerCluster.get(level).get(cluster);
-                    
+
                     for (int centroidInCluster = 0; centroidInCluster < centroidsInCluster; centroidInCluster++) {
                         if (level == leafLevel) {
                             // This is a leaf centroid
                             int leafPageId = leafPageStart + cluster;
                             centroidToPageIdMap.put(centroidId, leafPageId);
-                            
+
                             // For now, use a placeholder metadata page ID
                             // In real implementation, this would be the actual metadata page ID
                             int metadataPageId = leafPageId + 1000; // Placeholder offset
                             centroidToMetadataPageIdMap.put(centroidId, metadataPageId);
-                            
-                            System.err.println("Mapped centroid " + centroidId + " to leaf page " + leafPageId 
-                                + " (metadata page " + metadataPageId + ")");
+
+                            System.err.println("Mapped centroid " + centroidId + " to leaf page " + leafPageId
+                                    + " (metadata page " + metadataPageId + ")");
                         }
                         centroidId++;
                     }
@@ -258,8 +258,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
         private void initializeLSMIndexAndBulkLoader() throws HyracksDataException {
             try {
                 // Get LSM index
-                IIndexDataflowHelper indexHelper = indexHelperFactory.create(
-                    ctx.getJobletContext().getServiceContext(), partition);
+                IIndexDataflowHelper indexHelper =
+                        indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                 indexHelper.open();
                 lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
 
@@ -274,8 +274,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
                 parameters.put("centroidsPerCluster", staticStructureReader.getCentroidsPerCluster());
                 parameters.put("maxEntriesPerPage", maxEntriesPerPage);
 
-                bulkLoader = (LSMIndexDiskComponentBulkLoader) lsmIndex.createBulkLoader(
-                    fillFactor, false, 0, false, parameters);
+                bulkLoader = (LSMIndexDiskComponentBulkLoader) lsmIndex.createBulkLoader(fillFactor, false, 0, false,
+                        parameters);
 
                 System.err.println("LSM index and bulk loader initialized successfully");
 
@@ -360,7 +360,7 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
         /**
          * Loads a data tuple using the bulk loader.
          */
-        private void loadDataTupleToLeafPage(IPointable dataTupleVal, int leafPageId, int centroidId) 
+        private void loadDataTupleToLeafPage(IPointable dataTupleVal, int leafPageId, int centroidId)
                 throws HyracksDataException {
             try {
                 // Create tuple reference from data
@@ -368,11 +368,12 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
 
                 // Use bulk loader to add the tuple
                 bulkLoader.add(dataTuple);
-                
+
                 System.err.println("Loaded tuple for centroid " + centroidId + " using bulk loader");
 
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to load data tuple for centroid " + centroidId + ": " + e.getMessage());
+                System.err
+                        .println("ERROR: Failed to load data tuple for centroid " + centroidId + ": " + e.getMessage());
                 throw HyracksDataException.create(e);
             }
         }
@@ -391,8 +392,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
          */
         private String getIndexPath() throws HyracksDataException {
             try {
-                IIndexDataflowHelper indexHelper = indexHelperFactory.create(
-                    ctx.getJobletContext().getServiceContext(), partition);
+                IIndexDataflowHelper indexHelper =
+                        indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                 LocalResource resource = indexHelper.getResource();
                 return resource.getPath();
             } catch (Exception e) {
@@ -419,8 +420,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
 
                 // Close LSM index
                 if (lsmIndex != null) {
-                    IIndexDataflowHelper indexHelper = indexHelperFactory.create(
-                        ctx.getJobletContext().getServiceContext(), partition);
+                    IIndexDataflowHelper indexHelper =
+                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                     indexHelper.close();
                 }
 
@@ -453,8 +454,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
 
                 // Close LSM index
                 if (lsmIndex != null) {
-                    IIndexDataflowHelper indexHelper = indexHelperFactory.create(
-                        ctx.getJobletContext().getServiceContext(), partition);
+                    IIndexDataflowHelper indexHelper =
+                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                     indexHelper.close();
                 }
 
