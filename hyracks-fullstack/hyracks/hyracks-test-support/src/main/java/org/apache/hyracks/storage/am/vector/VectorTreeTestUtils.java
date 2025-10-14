@@ -33,7 +33,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.CheckTuple;
 import org.apache.hyracks.storage.am.common.IIndexTestContext;
@@ -55,11 +55,11 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     private static VectorClusteringTreeStaticInitializer staticInitializer;
 
     private static class TestClusterData {
-        final float[] clusterCentroid;
-        final List<float[]> insertedVectors;
+        final double[] clusterCentroid;
+        final List<double[]> insertedVectors;
         final String clusterId;
 
-        TestClusterData(float[] centroid, String id) {
+        TestClusterData(double[] centroid, String id) {
             this.clusterCentroid = centroid.clone();
             this.insertedVectors = new ArrayList<>();
             this.clusterId = id;
@@ -70,12 +70,12 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         List<TestClusterData> clusterData = new ArrayList<>();
 
         // Test clusters from different regions of the hierarchical structure
-        float[][] testCentroids = { { 22.0f, 22.0f, 15.0f, 10.0f }, // Root region 0, Interior 0, Leaf 0
-                { 17.0f, 19.5f, 20.0f, 10.5f }, // Root region 0, Interior 0, Leaf 0 (variation)
-                { -22.0f, -22.0f, -22.0f, -10.0f }, // Root region 1, Interior 2, Leaf 4
-                { -19.0f, -19.5f, -20.0f, -9.5f }, // Root region 1, Interior 2, Leaf 4 (variation)
-                { 25.0f, -17.0f, 22.0f, 14.0f }, // Root region 0, Interior 1, Leaf 2
-                { -17.0f, 23.0f, -18.0f, -6.0f } // Root region 1, Interior 3, Leaf 6
+        double[][] testCentroids = { { 22.0d, 22.0d, 15.0d, 10.0d }, // Root region 0, Interior 0, Leaf 0
+                { 17.0d, 19.5d, 20.0d, 10.5d }, // Root region 0, Interior 0, Leaf 0 (variation)
+                { -22.0d, -22.0d, -22.0d, -10.0d }, // Root region 1, Interior 2, Leaf 4
+                { -19.0d, -19.5d, -20.0d, -9.5d }, // Root region 1, Interior 2, Leaf 4 (variation)
+                { 25.0d, -17.0d, 22.0d, 14.0d }, // Root region 0, Interior 1, Leaf 2
+                { -17.0d, 23.0d, -18.0d, -6.0d } // Root region 1, Interior 3, Leaf 6
         };
 
         String[] clusterIds =
@@ -85,7 +85,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
             TestClusterData cluster = new TestClusterData(testCentroids[i], clusterIds[i]);
 
             // Insert 20 records near each test centroid
-            List<float[]> insertedVectors = insertRecordsIntoCluster(ctx, testCentroids[i], 20);
+            List<double[]> insertedVectors = insertRecordsIntoCluster(ctx, testCentroids[i], 20);
             cluster.insertedVectors.addAll(insertedVectors);
 
             clusterData.add(cluster);
@@ -104,16 +104,16 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      * Insert records into a cluster around the specified centroid.
      * Each record contains a vector and a primary key (string).
      */
-    private List<float[]> insertRecordsIntoCluster(AbstractVectorTreeTestContext ctx, float[] centroid, int count)
+    private List<double[]> insertRecordsIntoCluster(AbstractVectorTreeTestContext ctx, double[] centroid, int count)
             throws Exception {
-        List<float[]> vectors = new ArrayList<>();
+        List<double[]> vectors = new ArrayList<>();
         IIndexAccessor accessor = ctx.getIndexAccessor();
         /* TODO: replace arbitrary random */
         Random random = new Random();
 
         for (int i = 0; i < count; i++) {
             // Generate vector near the centroid with some noise
-            float[] vector = new float[VECTOR_DIMENSIONS];
+            double[] vector = new double[VECTOR_DIMENSIONS];
             for (int j = 0; j < VECTOR_DIMENSIONS; j++) {
                 vector[j] = centroid[j] + (random.nextFloat() - 0.5f) * 0.5f; // Small noise around centroid
             }
@@ -209,8 +209,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
             // Set vector fields
             for (int j = 0; j < numKeyFields; j++) {
-                if (ctx.getFieldSerdes()[j] instanceof FloatArraySerializerDeserializer) {
-                    float[] vector = generateRandomVector(vectorDimensions, rnd);
+                if (ctx.getFieldSerdes()[j] instanceof DoubleArraySerializerDeserializer) {
+                    double[] vector = generateRandomVector(vectorDimensions, rnd);
                     fieldValues[j] = vector;
                 } else {
                     // String field
@@ -220,8 +220,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
             // Set metadata fields
             for (int j = numKeyFields; j < fieldCount; j++) {
-                if (ctx.getFieldSerdes()[j] instanceof FloatArraySerializerDeserializer) {
-                    float[] vector = generateRandomVector(vectorDimensions, rnd);
+                if (ctx.getFieldSerdes()[j] instanceof DoubleArraySerializerDeserializer) {
+                    double[] vector = generateRandomVector(vectorDimensions, rnd);
                     fieldValues[j] = vector;
                 } else {
                     // String metadata
@@ -238,8 +238,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 // Create check tuple for validation
                 VectorCheckTuple checkTuple = new VectorCheckTuple(fieldCount, numKeyFields);
                 for (Object value : fieldValues) {
-                    if (value instanceof float[]) {
-                        checkTuple.appendField(new VectorCheckTuple.FloatArrayWrapper((float[]) value));
+                    if (value instanceof double[]) {
+                        checkTuple.appendField(new VectorCheckTuple.DoubleArrayWrapper((double[]) value));
                     } else {
                         checkTuple.appendField((Comparable) value);
                     }
@@ -276,12 +276,12 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
             // Set vector fields with edge cases
             for (int j = 0; j < numKeyFields; j++) {
-                if (ctx.getFieldSerdes()[j] instanceof FloatArraySerializerDeserializer) {
-                    float[] vector;
+                if (ctx.getFieldSerdes()[j] instanceof DoubleArraySerializerDeserializer) {
+                    double[] vector;
                     int caseType = i % 4;
                     switch (caseType) {
                         case 0: // Zero vector
-                            vector = new float[vectorDimensions];
+                            vector = new double[vectorDimensions];
                             break;
                         case 1: // Unit vector
                             vector = generateUnitVector(vectorDimensions, rnd);
@@ -311,8 +311,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
                 VectorCheckTuple checkTuple = new VectorCheckTuple(fieldCount, numKeyFields);
                 for (Object value : fieldValues) {
-                    if (value instanceof float[]) {
-                        checkTuple.appendField(new VectorCheckTuple.FloatArrayWrapper((float[]) value));
+                    if (value instanceof double[]) {
+                        checkTuple.appendField(new VectorCheckTuple.DoubleArrayWrapper((double[]) value));
                     } else {
                         checkTuple.appendField((Comparable) value);
                     }
@@ -367,31 +367,31 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     }
 
     // Utility methods for vector generation
-    private float[] generateRandomVector(int dimensions, Random rnd) {
-        float[] vector = new float[dimensions];
+    private double[] generateRandomVector(int dimensions, Random rnd) {
+        double[] vector = new double[dimensions];
         for (int i = 0; i < dimensions; i++) {
             vector[i] = rnd.nextFloat() * 100.0f - 50.0f; // Range [-50, 50]
         }
         return vector;
     }
 
-    private float[] generateUnitVector(int dimensions, Random rnd) {
-        float[] vector = new float[dimensions];
+    private double[] generateUnitVector(int dimensions, Random rnd) {
+        double[] vector = new double[dimensions];
         int nonZeroIndex = rnd.nextInt(dimensions);
         vector[nonZeroIndex] = 1.0f;
         return vector;
     }
 
-    private float[] generateLargeVector(int dimensions, Random rnd) {
-        float[] vector = new float[dimensions];
+    private double[] generateLargeVector(int dimensions, Random rnd) {
+        double[] vector = new double[dimensions];
         for (int i = 0; i < dimensions; i++) {
             vector[i] = rnd.nextFloat() * 10000.0f;
         }
         return vector;
     }
 
-    private float[] generateSmallVector(int dimensions, Random rnd) {
-        float[] vector = new float[dimensions];
+    private double[] generateSmallVector(int dimensions, Random rnd) {
+        double[] vector = new double[dimensions];
         for (int i = 0; i < dimensions; i++) {
             vector[i] = rnd.nextFloat() * 0.01f;
         }
@@ -422,7 +422,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         int totalTuples = config.numLeafPages * config.tuplesPerLeaf;
         for (int i = 0; i < totalTuples; i++) {
             int clusterId = 200 + i; // Arbitrary cluster IDs starting from 200
-            float[] centroid = generatePredictableVector(4, i); // 4D vectors
+            double[] centroid = generatePredictableVector(4, i); // 4D vectors
             int metadataPointer = 1000 + i; // Arbitrary metadata pointers
 
             clusterTuples.add(createClusterTuple(clusterId, centroid, metadataPointer));
@@ -440,8 +440,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     /**
      * Generate predictable vector for testing
      */
-    private static float[] generatePredictableVector(int dimensions, int index) {
-        float[] vector = new float[dimensions];
+    private static double[] generatePredictableVector(int dimensions, int index) {
+        double[] vector = new double[dimensions];
         for (int i = 0; i < dimensions; i++) {
             vector[i] = (float) (index + i * 0.1);
         }
@@ -468,10 +468,10 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      * Create a tuple reference containing a vector and metadata
      * This is a utility method for creating test tuples in vector cursor tests
      */
-    public static ITupleReference createVectorTuple(float[] vector, String metadata) throws HyracksDataException {
+    public static ITupleReference createVectorTuple(double[] vector, String metadata) throws HyracksDataException {
         // Create field serializers for vector and metadata
         ISerializerDeserializer[] fieldSerdes =
-                new ISerializerDeserializer[] { FloatArraySerializerDeserializer.INSTANCE,
+                new ISerializerDeserializer[] { DoubleArraySerializerDeserializer.INSTANCE,
                         new org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer() };
 
         // Create tuple builder
@@ -490,7 +490,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     /**
      * Create a cluster tuple for leaf frames with format: <cid, centroid, metadata_pointer>
      */
-    public static ITupleReference createClusterTuple(int clusterId, float[] centroid, int metadataPointer)
+    public static ITupleReference createClusterTuple(int clusterId, double[] centroid, int metadataPointer)
             throws HyracksDataException {
         try {
             // Use ArrayTupleBuilder to create proper cluster tuple
@@ -501,8 +501,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                     org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer.INSTANCE,
                     clusterId);
 
-            // Add centroid field (field 1) - using FloatArraySerializerDeserializer.INSTANCE
-            tupleBuilder.addField(FloatArraySerializerDeserializer.INSTANCE, centroid);
+            // Add centroid field (field 1) - using DoubleArraySerializerDeserializer.INSTANCE
+            tupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, centroid);
 
             // Add metadata pointer field (field 2)
             tupleBuilder.addField(

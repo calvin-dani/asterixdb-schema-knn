@@ -29,7 +29,7 @@ import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
@@ -158,7 +158,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         try {
             // Extract vector for distance calculations
-            float[] vector = extractVectorFromTuple(tuple);
+            double[] vector = extractVectorFromTuple(tuple);
 
             // Calculate distance and cosine similarity to cluster centroid
             double[] centroidDouble = accessResult.clusterResult.centroid;
@@ -178,7 +178,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Insert vector data into data pages via metadata pages. This method traverses through all linked metadata pages to
      * find the appropriate data page.
      */
-    private void insertIntoDataPages(long metadataPageId, float[] vector, double distance, double cosineSim,
+    private void insertIntoDataPages(long metadataPageId, double[] vector, double distance, double cosineSim,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         // Traverse through all linked metadata pages to find the appropriate data page
@@ -279,7 +279,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Try to insert into a specific data page. Returns true if successful, false if page is full.
      */
-    private boolean tryInsertIntoDataPage(long dataPageId, float[] vector, double distance, double cosineSim,
+    private boolean tryInsertIntoDataPage(long dataPageId, double[] vector, double distance, double cosineSim,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
@@ -484,7 +484,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         try {
             // Extract vector for debugging and verification
-            float[] vector = extractVectorFromTuple(tuple);
+            double[] vector = extractVectorFromTuple(tuple);
             System.out.println("DEBUG: Starting deleteVector with vector length=" + vector.length);
             System.out.println(
                     "DEBUG: Found target cluster at leafPageId=" + accessResult.clusterResult.leafPageId + ", clusterIndex=" + accessResult.clusterResult.clusterIndex);
@@ -509,7 +509,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Delete tuple from data pages using both vector similarity and primary key lookup. This ensures we find the
      * correct tuple by first using vector distance then confirming with primary key.
      */
-    private boolean deleteFromDataPagesWithVectorCheck(long metadataPageId, float[] targetVector, byte[] primaryKey,
+    private boolean deleteFromDataPagesWithVectorCheck(long metadataPageId, double[] targetVector, byte[] primaryKey,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
@@ -554,7 +554,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      *         The operation context
      * @return true if tuple was found and deleted, false otherwise
      */
-    private boolean deleteFromDataPageWithVectorCheck(long dataPageId, float[] targetVector, byte[] primaryKey,
+    private boolean deleteFromDataPageWithVectorCheck(long dataPageId, double[] targetVector, byte[] primaryKey,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
@@ -592,7 +592,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     int tupleVectorOffset = frameTuple.getFieldStart(vectorFieldIndex);
                     int tupleVectorLength = frameTuple.getFieldLength(vectorFieldIndex);
 
-                    float[] tupleVector = VectorUtils.bytesToFloatArray(
+                    double[] tupleVector = VectorUtils.bytesToDoubleArray(
                             Arrays.copyOfRange(tupleVectorData, tupleVectorOffset,
                                     tupleVectorOffset + tupleVectorLength));
 
@@ -638,7 +638,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Extract vector from tuple.
      */
-    private float[] extractVectorFromTuple(ITupleReference tuple) {
+    private double[] extractVectorFromTuple(ITupleReference tuple) {
         return VectorClusteringTupleUtils.extractVectorFromTuple(tuple);
     }
 
@@ -649,7 +649,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         try {
             // Extract vector for debugging
-            float[] vector = extractVectorFromTuple(tuple);
+            double[] vector = extractVectorFromTuple(tuple);
 
             // Search for the tuple in data pages of the target cluster and update
             boolean updated = updateInDataPagesWithVectorCheck(accessResult.metadataPageId, vector, tuple, ctx);
@@ -677,7 +677,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      *         The tuple containing the included field updates
      * @return true if tuple was found and updated, false otherwise
      */
-    private boolean updateInDataPagesWithVectorCheck(long metadataPageId, float[] targetVector,
+    private boolean updateInDataPagesWithVectorCheck(long metadataPageId, double[] targetVector,
             ITupleReference updateTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         // First try the closest cluster
@@ -696,7 +696,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Search a specific metadata page for the tuple to update.
      */
-    private boolean searchMetadataPageForUpdate(long metadataPageId, float[] targetVector, ITupleReference updateTuple,
+    private boolean searchMetadataPageForUpdate(long metadataPageId, double[] targetVector, ITupleReference updateTuple,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
@@ -728,7 +728,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Search all clusters for the tuple to update (fallback when not found in closest cluster).
      */
-    private boolean searchAllClustersForUpdate(float[] targetVector, ITupleReference updateTuple,
+    private boolean searchAllClustersForUpdate(double[] targetVector, ITupleReference updateTuple,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         System.out.println("DEBUG: Starting comprehensive search across all clusters");
@@ -810,7 +810,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      *         The tuple containing the included field updates
      * @return true if tuple was found and updated, false otherwise
      */
-    private boolean updateInDataPageWithVectorCheck(long dataPageId, float[] targetVector, ITupleReference updateTuple,
+    private boolean updateInDataPageWithVectorCheck(long dataPageId, double[] targetVector, ITupleReference updateTuple,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
@@ -846,14 +846,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     System.out.println("DEBUG: Found matching tuple by primary key! Performing update.");
 
                     // Extract vector from current tuple to preserve it
-                    float[] currentVector = extractVectorFromTuple(currentTuple);
+                    double[] currentVector = extractVectorFromTuple(currentTuple);
                     if (currentVector == null) {
                         System.out.println("DEBUG: currentVector is null for tuple " + i);
                         continue;
                     }
 
                     // Verify that vector embedding is not being changed
-                    float[] updateVector = extractVectorFromTuple(updateTuple);
+                    double[] updateVector = extractVectorFromTuple(updateTuple);
                     if (updateVector != null && !Arrays.equals(currentVector, updateVector)) {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                                 "Update operation cannot modify vector embedding - vector field is immutable");
@@ -912,7 +912,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
     }
 
-    private void handleDataPageOverflow(long metadataPageId, float[] vector, double distance, double cosineSim,
+    private void handleDataPageOverflow(long metadataPageId, double[] vector, double distance, double cosineSim,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
         // Use the frame factories and page manager to handle overflow
         IVectorClusteringDataFrame dataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
@@ -1029,7 +1029,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
      * interior and leaf frames.
      */
-    public ClusterSearchResult findClosestClusterFromRoot(float[] queryVector, VectorClusteringOpContext ctx)
+    public ClusterSearchResult findClosestClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx)
             throws HyracksDataException {
 
         LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
@@ -1090,7 +1090,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Find the closest centroid in a leaf cluster, handling overflow pages.
      */
-    private ClusterSearchResult findClosestCentroidInLeafCluster(int startPageId, float[] queryVector,
+    private ClusterSearchResult findClosestCentroidInLeafCluster(int startPageId, double[] queryVector,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         int currentPageId = startPageId;
@@ -1167,7 +1167,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Find the closest centroid in an interior cluster, handling overflow pages. Returns the child page ID to descend
      * to.
      */
-    private int findClosestCentroidInInteriorCluster(int startPageId, float[] queryVector,
+    private int findClosestCentroidInInteriorCluster(int startPageId, double[] queryVector,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         int currentPageId = startPageId;
@@ -1236,20 +1236,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 // Create field serializers array - specify only the centroid field we need
                 ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
                 fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-                fieldSerdes[1] = FloatArraySerializerDeserializer.INSTANCE; // Field 1: centroid
+                fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
                 fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
 
                 // Deserialize the tuple using the proper TupleUtils method
                 Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
 
                 // Extract the centroid from the deserialized fields
-                float[] floatCentroid = (float[]) fieldValues[1];
-
-                // Convert from float[] to double[]
-                double[] doubleCentroid = new double[floatCentroid.length];
-                for (int i = 0; i < floatCentroid.length; i++) {
-                    doubleCentroid[i] = floatCentroid[i];
-                }
+                double[] doubleCentroid = (double[]) fieldValues[1];
 
                 return doubleCentroid;
 
@@ -1268,20 +1262,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 // Create field serializers array - specify only the centroid field we need
                 ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
                 fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-                fieldSerdes[1] = FloatArraySerializerDeserializer.INSTANCE; // Field 1: centroid
+                fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
                 fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
 
                 // Deserialize the tuple using the proper TupleUtils method
                 Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
 
                 // Extract the centroid from the deserialized fields
-                float[] floatCentroid = (float[]) fieldValues[1];
-
-                // Convert from float[] to double[]
-                double[] doubleCentroid = new double[floatCentroid.length];
-                for (int i = 0; i < floatCentroid.length; i++) {
-                    doubleCentroid[i] = floatCentroid[i];
-                }
+                double[] doubleCentroid = (double[]) fieldValues[1];
 
                 return doubleCentroid;
 
@@ -1353,7 +1341,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         private ClusterAccessResult findClusterAndPrepareAccess (ITupleReference tuple, VectorClusteringOpContext ctx,
         boolean isWriteOperation) throws HyracksDataException {
             // Extract vector from tuple
-            float[] vector = extractVectorFromTuple(tuple);
+            double[] vector = extractVectorFromTuple(tuple);
             if (vector == null) {
                 throw HyracksDataException.create(ErrorCode.INDEX_NOT_UPDATABLE, "Failed to extract vector from tuple");
             }
@@ -1480,7 +1468,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
              * @return ClusterSearchResult containing information about the closest leaf centroid
              * @throws HyracksDataException if any error occurs during the search
              */
-            public ClusterSearchResult findClosestLeafCentroid(float[] queryVector) throws HyracksDataException {
+            public ClusterSearchResult findClosestLeafCentroid(double[] queryVector) throws HyracksDataException {
                 if (destroyed) {
                     throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
                 }

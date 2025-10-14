@@ -27,7 +27,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
@@ -540,11 +540,7 @@ public class VectorClusteringTreeStaticInitializer {
 
             // Create the cluster tuple that will be used in the leaf frame
             double[] leafCentroid = generateHierarchicalCentroid(i, 0); // Level 0 = leaf
-            float[] centroidFloat = new float[leafCentroid.length];
-            for (int j = 0; j < leafCentroid.length; j++) {
-                centroidFloat[j] = (float) leafCentroid[j];
-            }
-            ITupleReference clusterTuple = createClusterTuple(i, centroidFloat, metadataPageIds.get(i));
+            ITupleReference clusterTuple = createClusterTuple(i, leafCentroid, metadataPageIds.get(i));
 
             // Add the cluster tuple to the leafPage.tuples list so interior pages can reference it
             leafPage.addTuple(clusterTuple);
@@ -568,26 +564,18 @@ public class VectorClusteringTreeStaticInitializer {
             // Create interior cluster tuple for left child
             if (leftLeafIndex < leafPages.size()) {
                 double[] leftInteriorCentroid = generateHierarchicalCentroid(leftLeafIndex, 1); // Level 1 = interior
-                float[] leftCentroidFloat = new float[leftInteriorCentroid.length];
-                for (int j = 0; j < leftInteriorCentroid.length; j++) {
-                    leftCentroidFloat[j] = (float) leftInteriorCentroid[j];
-                }
 
                 ITupleReference leftInteriorTuple =
-                        createClusterTuple(leftLeafIndex, leftCentroidFloat, leafPages.get(leftLeafIndex).pageId);
+                        createClusterTuple(leftLeafIndex, leftInteriorCentroid, leafPages.get(leftLeafIndex).pageId);
                 interiorPage.addTuple(leftInteriorTuple);
             }
 
             // Create interior cluster tuple for right child
             if (rightLeafIndex < leafPages.size()) {
                 double[] rightInteriorCentroid = generateHierarchicalCentroid(rightLeafIndex, 1); // Level 1 = interior
-                float[] rightCentroidFloat = new float[rightInteriorCentroid.length];
-                for (int j = 0; j < rightInteriorCentroid.length; j++) {
-                    rightCentroidFloat[j] = (float) rightInteriorCentroid[j];
-                }
 
                 ITupleReference rightInteriorTuple =
-                        createClusterTuple(rightLeafIndex, rightCentroidFloat, leafPages.get(rightLeafIndex).pageId);
+                        createClusterTuple(rightLeafIndex, rightInteriorCentroid, leafPages.get(rightLeafIndex).pageId);
                 interiorPage.addTuple(rightInteriorTuple);
             }
 
@@ -605,13 +593,9 @@ public class VectorClusteringTreeStaticInitializer {
         for (int rootIndex = 0; rootIndex < 4; rootIndex++) {
             // Generate hierarchical centroid for root level
             double[] rootCentroid = generateHierarchicalCentroid(rootIndex, 2); // Level 2 = root
-            float[] centroidFloat = new float[rootCentroid.length];
-            for (int j = 0; j < rootCentroid.length; j++) {
-                centroidFloat[j] = (float) rootCentroid[j];
-            }
 
             int metadataPointer = interiorPageIds.get(rootIndex);
-            ITupleReference rootClusterTuple = createClusterTuple(rootIndex, centroidFloat, metadataPointer);
+            ITupleReference rootClusterTuple = createClusterTuple(rootIndex, rootCentroid, metadataPointer);
 
             // Add the cluster tuple to the root page
             rootPage.addTuple(rootClusterTuple);
@@ -643,15 +627,9 @@ public class VectorClusteringTreeStaticInitializer {
         leafFrame.setClusterId(leafIndex);
 
         // Create a single cluster tuple for this leaf (cid + centroid + metadata_pointer)
-        // Convert double[] centroid to float[] for the tuple
-        float[] centroidFloat = new float[leafCentroid.length];
-        for (int i = 0; i < leafCentroid.length; i++) {
-            centroidFloat[i] = (float) leafCentroid[i];
-        }
-
         // Use the actual allocated metadata page ID
         // Create cluster tuple with 3 fields: cid, centroid, metadata_pointer
-        ITupleReference clusterTuple = createClusterTuple(leafIndex, centroidFloat, metadataPageId);
+        ITupleReference clusterTuple = createClusterTuple(leafIndex, leafCentroid, metadataPageId);
 
         // Insert the cluster tuple into the leaf frame
         if (leafFrame.hasSpaceInsert(
@@ -847,7 +825,7 @@ public class VectorClusteringTreeStaticInitializer {
     /**
      * Create a cluster tuple with the format: <cid, centroid, metadata_pointer> This is needed for leaf frame tuples.
      */
-    private ITupleReference createClusterTuple(int clusterId, float[] centroid, int metadataPageId)
+    private ITupleReference createClusterTuple(int clusterId, double[] centroid, int metadataPageId)
             throws HyracksDataException {
         try {
             // Create tuple builder with 3 fields
@@ -856,8 +834,8 @@ public class VectorClusteringTreeStaticInitializer {
             // Add CID field (field 0)
             tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, clusterId);
 
-            // Add centroid field (field 1) - using FloatArraySerializerDeserializer.INSTANCE
-            tupleBuilder.addField(FloatArraySerializerDeserializer.INSTANCE, centroid);
+            // Add centroid field (field 1) - using DoubleArraySerializerDeserializer.INSTANCE
+            tupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, centroid);
 
             // Add metadata pointer field (field 2)
             tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, metadataPageId);

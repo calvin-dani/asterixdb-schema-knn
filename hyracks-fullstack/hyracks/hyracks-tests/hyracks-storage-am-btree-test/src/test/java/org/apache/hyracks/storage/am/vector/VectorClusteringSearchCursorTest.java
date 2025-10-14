@@ -26,7 +26,7 @@ import java.util.Random;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.frames.VectorTreeFrameType;
@@ -125,7 +125,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -133,11 +133,11 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
 
         try {
             // Insert records into the cluster
-            List<float[]> insertedVectors =
-                    insertRecordsIntoCluster(ctx, new float[] { 1.0f, 2.0f, 3.0f, 4.0f }, RECORDS_PER_CLUSTER);
+            List<double[]> insertedVectors =
+                    insertRecordsIntoCluster(ctx, new double[] { 1.0f, 2.0f, 3.0f, 4.0f }, RECORDS_PER_CLUSTER);
 
             // Test cursor with query vector near the cluster centroid
-            float[] queryVector = { 1.1f, 2.1f, 3.1f, 4.1f };
+            double[] queryVector = { 1.1f, 2.1f, 3.1f, 4.1f };
             testCursorIteration(ctx, queryVector, insertedVectors);
 
         } finally {
@@ -157,7 +157,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -165,19 +165,19 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
 
         try {
             // Insert records into cluster 1 (around centroid [1,1,1,1])
-            List<float[]> cluster1Vectors =
-                    insertRecordsIntoCluster(ctx, new float[] { 1.0f, 1.0f, 1.0f, 1.0f }, RECORDS_PER_CLUSTER);
+            List<double[]> cluster1Vectors =
+                    insertRecordsIntoCluster(ctx, new double[] { 1.0f, 1.0f, 1.0f, 1.0f }, RECORDS_PER_CLUSTER);
 
             // Insert records into cluster 2 (around centroid [5,5,5,5])
-            List<float[]> cluster2Vectors =
-                    insertRecordsIntoCluster(ctx, new float[] { 5.0f, 5.0f, 5.0f, 5.0f }, RECORDS_PER_CLUSTER);
+            List<double[]> cluster2Vectors =
+                    insertRecordsIntoCluster(ctx, new double[] { 5.0f, 5.0f, 5.0f, 5.0f }, RECORDS_PER_CLUSTER);
 
             // Test cursor finds cluster 1 when querying near [1,1,1,1]
-            float[] queryVector1 = { 1.1f, 1.1f, 1.1f, 1.1f };
+            double[] queryVector1 = { 1.1f, 1.1f, 1.1f, 1.1f };
             testCursorIteration(ctx, queryVector1, cluster1Vectors);
 
             // Test cursor finds cluster 2 when querying near [5,5,5,5]  
-            float[] queryVector2 = { 5.1f, 5.1f, 5.1f, 5.1f };
+            double[] queryVector2 = { 5.1f, 5.1f, 5.1f, 5.1f };
             testCursorIteration(ctx, queryVector2, cluster2Vectors);
 
         } finally {
@@ -197,7 +197,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -205,11 +205,11 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
 
         try {
             // Insert records into a specific leaf cluster
-            List<float[]> leafVectors =
-                    insertRecordsIntoCluster(ctx, new float[] { 2.0f, 3.0f, 4.0f, 5.0f }, RECORDS_PER_CLUSTER);
+            List<double[]> leafVectors =
+                    insertRecordsIntoCluster(ctx, new double[] { 2.0f, 3.0f, 4.0f, 5.0f }, RECORDS_PER_CLUSTER);
 
             // Test cursor navigation through the deep tree
-            float[] queryVector = { 2.1f, 3.1f, 4.1f, 5.1f };
+            double[] queryVector = { 2.1f, 3.1f, 4.1f, 5.1f };
             testCursorIteration(ctx, queryVector, leafVectors);
 
         } finally {
@@ -230,7 +230,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -243,33 +243,33 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
             final int LARGE_RECORD_COUNT = 150;
             final int EXTRA_LARGE_RECORD_COUNT = 200;
 
-            List<float[]> allInsertedVectors = new ArrayList<>();
+            List<double[]> allInsertedVectors = new ArrayList<>();
 
             // Insert into cluster at leaf 0 (Root region 0, Interior 0, Leaf 0) - Large batch
-            float[] centroid1 = { 22.0f, 22.0f, 22.0f, 10.0f };
+            double[] centroid1 = { 22.0f, 22.0f, 22.0f, 10.0f };
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Inserting {} records into cluster at leaf 0 with centroid [{}, {}, {}, {}]",
                         EXTRA_LARGE_RECORD_COUNT, centroid1[0], centroid1[1], centroid1[2], centroid1[3]);
             }
-            List<float[]> vectors1 = insertRecordsIntoCluster(ctx, centroid1, EXTRA_LARGE_RECORD_COUNT);
+            List<double[]> vectors1 = insertRecordsIntoCluster(ctx, centroid1, EXTRA_LARGE_RECORD_COUNT);
             allInsertedVectors.addAll(vectors1);
 
             // Insert into cluster at leaf 4 (Root region 1, Interior 2, Leaf 4) - Large batch
-            float[] centroid2 = { -22.0f, -22.0f, -22.0f, -10.0f };
+            double[] centroid2 = { -22.0f, -22.0f, -22.0f, -10.0f };
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Inserting {} records into cluster at leaf 4 with centroid [{}, {}, {}, {}]",
                         LARGE_RECORD_COUNT, centroid2[0], centroid2[1], centroid2[2], centroid2[3]);
             }
-            List<float[]> vectors2 = insertRecordsIntoCluster(ctx, centroid2, LARGE_RECORD_COUNT);
+            List<double[]> vectors2 = insertRecordsIntoCluster(ctx, centroid2, LARGE_RECORD_COUNT);
             allInsertedVectors.addAll(vectors2);
 
             // Insert into cluster at leaf 2 (Root region 0, Interior 1, Leaf 2) - Large batch
-            float[] centroid3 = { 25.0f, -17.0f, 22.0f, 14.0f };
+            double[] centroid3 = { 25.0f, -17.0f, 22.0f, 14.0f };
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Inserting {} records into cluster at leaf 2 with centroid [{}, {}, {}, {}]",
                         LARGE_RECORD_COUNT, centroid3[0], centroid3[1], centroid3[2], centroid3[3]);
             }
-            List<float[]> vectors3 = insertRecordsIntoCluster(ctx, centroid3, LARGE_RECORD_COUNT);
+            List<double[]> vectors3 = insertRecordsIntoCluster(ctx, centroid3, LARGE_RECORD_COUNT);
             allInsertedVectors.addAll(vectors3);
 
             if (LOGGER.isInfoEnabled()) {
@@ -278,21 +278,21 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
             }
 
             // Test cursor can iterate through all pages in cluster 1 (largest cluster)
-            float[] queryVector1 = { 22.1f, 22.1f, 22.1f, 10.1f }; // Close to centroid1
+            double[] queryVector1 = { 22.1f, 22.1f, 22.1f, 10.1f }; // Close to centroid1
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Testing cursor navigation for cluster 1 with {} records", vectors1.size());
             }
             testCursorIterationWithMultiplePages(ctx, queryVector1, vectors1, "cluster_leaf_0_large");
 
             // Test cursor can iterate through all pages in cluster 2
-            float[] queryVector2 = { -22.1f, -22.1f, -22.1f, -10.1f }; // Close to centroid2
+            double[] queryVector2 = { -22.1f, -22.1f, -22.1f, -10.1f }; // Close to centroid2
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Testing cursor navigation for cluster 2 with {} records", vectors2.size());
             }
             testCursorIterationWithMultiplePages(ctx, queryVector2, vectors2, "cluster_leaf_4_large");
 
             // Test cursor can iterate through all pages in cluster 3
-            float[] queryVector3 = { 25.1f, -17.1f, 22.1f, 14.1f }; // Close to centroid3
+            double[] queryVector3 = { 25.1f, -17.1f, 22.1f, 14.1f }; // Close to centroid3
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Testing cursor navigation for cluster 3 with {} records", vectors3.size());
             }
@@ -320,7 +320,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -328,12 +328,12 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
 
         try {
             // Insert records into specific cluster
-            List<float[]> clusterVectors =
-                    insertRecordsIntoCluster(ctx, new float[] { 3.0f, 3.0f, 3.0f, 3.0f }, RECORDS_PER_CLUSTER);
+            List<double[]> clusterVectors =
+                    insertRecordsIntoCluster(ctx, new double[] { 3.0f, 3.0f, 3.0f, 3.0f }, RECORDS_PER_CLUSTER);
 
             // Create cursor with initial state pointing to specific metadata page
-            VectorCursorInitialState initialState = new VectorCursorInitialState();
-            float[] queryVector = { 3.1f, 3.1f, 3.1f, 3.1f };
+            VectorCursorInitialState initialState = new VectorCursorInitialState(ctx.getIndexAccessor());
+            double[] queryVector = { 3.1f, 3.1f, 3.1f, 3.1f };
             initialState.setQueryVector(queryVector);
 
             // Test cursor with initial state
@@ -355,7 +355,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -363,7 +363,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
 
         try {
             // Test cursor with empty tree (no records)
-            float[] queryVector = { 0.0f, 0.0f, 0.0f, 0.0f };
+            double[] queryVector = { 0.0f, 0.0f, 0.0f, 0.0f };
             testCursorWithEmptyCluster(ctx, queryVector);
 
             // Test cursor lifecycle
@@ -386,7 +386,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         }
 
         ISerializerDeserializer[] fieldSerdes =
-                { FloatArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+                { DoubleArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
 
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, 1, VectorTreeFrameType.REGULAR_NSM, false);
         ctx.getIndex().create();
@@ -411,11 +411,11 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
      * Data structure to track inserted records for each cluster
      */
     private static class TestClusterData {
-        final float[] clusterCentroid;
-        final List<float[]> insertedVectors;
+        final double[] clusterCentroid;
+        final List<double[]> insertedVectors;
         final String clusterId;
 
-        TestClusterData(float[] centroid, String id) {
+        TestClusterData(double[] centroid, String id) {
             this.clusterCentroid = centroid.clone();
             this.insertedVectors = new ArrayList<>();
             this.clusterId = id;
@@ -430,7 +430,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
         List<TestClusterData> clusterData = new ArrayList<>();
 
         // Test clusters from different regions of the hierarchical structure
-        float[][] testCentroids = { { 22.0f, 22.0f, 15.0f, 10.0f }, // Root region 0, Interior 0, Leaf 0
+        double[][] testCentroids = { { 22.0f, 22.0f, 15.0f, 10.0f }, // Root region 0, Interior 0, Leaf 0
                 { 17.0f, 19.5f, 20.0f, 10.5f }, // Root region 0, Interior 0, Leaf 0 (variation)
                 { -22.0f, -22.0f, -22.0f, -10.0f }, // Root region 1, Interior 2, Leaf 4
                 { -19.0f, -19.5f, -20.0f, -9.5f }, // Root region 1, Interior 2, Leaf 4 (variation)
@@ -445,7 +445,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
             TestClusterData cluster = new TestClusterData(testCentroids[i], clusterIds[i]);
 
             // Insert 20 records near each test centroid
-            List<float[]> insertedVectors = insertRecordsIntoCluster(ctx, testCentroids[i], 20);
+            List<double[]> insertedVectors = insertRecordsIntoCluster(ctx, testCentroids[i], 20);
             cluster.insertedVectors.addAll(insertedVectors);
 
             clusterData.add(cluster);
@@ -472,7 +472,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
             }
 
             // Create query vector very close to the cluster centroid
-            float[] queryVector = new float[VECTOR_DIMENSIONS];
+            double[] queryVector = new double[VECTOR_DIMENSIONS];
             for (int i = 0; i < VECTOR_DIMENSIONS; i++) {
                 queryVector[i] = cluster.clusterCentroid[i] + 0.01f; // Very small offset
             }
@@ -488,7 +488,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
     /**
      * Validate that the cursor correctly traversed the tree hierarchy
      */
-    private void validateHierarchicalTraversal(AbstractVectorTreeTestContext ctx, float[] queryVector,
+    private void validateHierarchicalTraversal(AbstractVectorTreeTestContext ctx, double[] queryVector,
             TestClusterData expectedCluster) throws Exception {
         // Create cursor and predicate
         VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
@@ -516,15 +516,15 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
      * Insert records into a cluster around the specified centroid.
      * Each record contains a vector and a primary key (string).
      */
-    private List<float[]> insertRecordsIntoCluster(AbstractVectorTreeTestContext ctx, float[] centroid, int count)
+    private List<double[]> insertRecordsIntoCluster(AbstractVectorTreeTestContext ctx, double[] centroid, int count)
             throws Exception {
-        List<float[]> vectors = new ArrayList<>();
+        List<double[]> vectors = new ArrayList<>();
         IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         Random random = getRandom();
 
         for (int i = 0; i < count; i++) {
             // Generate vector near the centroid with some noise
-            float[] vector = new float[VECTOR_DIMENSIONS];
+            double[] vector = new double[VECTOR_DIMENSIONS];
             for (int j = 0; j < VECTOR_DIMENSIONS; j++) {
                 vector[j] = centroid[j] + (random.nextFloat() - 0.5f) * 0.5f; // Small noise around centroid
             }
@@ -545,8 +545,8 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
      * Test cursor iteration and validate it returns expected records.
      * Validates that the cursor can find records with the correct tuple structure: <vector, primary_key>
      */
-    private void testCursorIteration(AbstractVectorTreeTestContext ctx, float[] queryVector,
-            List<float[]> expectedVectors) throws Exception {
+    private void testCursorIteration(AbstractVectorTreeTestContext ctx, double[] queryVector,
+            List<double[]> expectedVectors) throws Exception {
         IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
 
@@ -589,8 +589,8 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
      * Test cursor iteration with enhanced validation for multiple data pages.
      * This method validates that the cursor properly navigates through linked data pages.
      */
-    private void testCursorIterationWithMultiplePages(AbstractVectorTreeTestContext ctx, float[] queryVector,
-            List<float[]> expectedVectors, String clusterId) throws Exception {
+    private void testCursorIterationWithMultiplePages(AbstractVectorTreeTestContext ctx, double[] queryVector,
+            List<double[]> expectedVectors, String clusterId) throws Exception {
         IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
 
@@ -676,7 +676,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
      * Test cursor with specific initial state.
      */
     private void testCursorWithInitialState(AbstractVectorTreeTestContext ctx, VectorCursorInitialState initialState,
-            VectorPointPredicate predicate, List<float[]> expectedVectors) throws Exception {
+            VectorPointPredicate predicate, List<double[]> expectedVectors) throws Exception {
         IIndexCursor cursor =
                 ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE).createSearchCursor(false);
 
@@ -705,7 +705,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
     /**
      * Test cursor with empty cluster (no data pages).
      */
-    private void testCursorWithEmptyCluster(AbstractVectorTreeTestContext ctx, float[] queryVector) throws Exception {
+    private void testCursorWithEmptyCluster(AbstractVectorTreeTestContext ctx, double[] queryVector) throws Exception {
         IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
 
@@ -731,7 +731,7 @@ public class VectorClusteringSearchCursorTest extends AbstractVectorTreeTestDriv
     /**
      * Test cursor lifecycle operations.
      */
-    private void testCursorLifecycle(AbstractVectorTreeTestContext ctx, float[] queryVector) throws Exception {
+    private void testCursorLifecycle(AbstractVectorTreeTestContext ctx, double[] queryVector) throws Exception {
         IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
 

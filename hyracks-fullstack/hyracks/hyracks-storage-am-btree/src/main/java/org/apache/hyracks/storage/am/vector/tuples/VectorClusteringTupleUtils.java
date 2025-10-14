@@ -24,7 +24,7 @@ import java.util.Arrays;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
@@ -96,9 +96,9 @@ public class VectorClusteringTupleUtils {
      * Extract vector from tuple.
      * 
      * @param tuple The tuple to extract vector from
-     * @return Float array containing the vector, or null if extraction fails
+     * @return Double array containing the vector, or null if extraction fails
      */
-    public static float[] extractVectorFromTuple(ITupleReference tuple) {
+    public static double[] extractVectorFromTuple(ITupleReference tuple) {
         if (tuple == null) {
             return null;
         }
@@ -115,14 +115,14 @@ public class VectorClusteringTupleUtils {
 
         try {
             ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
-            fieldSerdes[0] = FloatArraySerializerDeserializer.INSTANCE;
+            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
             fieldSerdes[1] = new UTF8StringSerializerDeserializer();
 
             // Deserialize the tuple using the proper TupleUtils method
             Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
 
             // Extract the vector from the deserialized fields
-            return (float[]) fieldValues[0];
+            return (double[]) fieldValues[0];
         } catch (Exception e) {
             // Log the error and return null instead of crashing
             System.err.println("ERROR: Failed to extract vector from tuple: " + e.getMessage());

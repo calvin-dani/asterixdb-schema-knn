@@ -70,4 +70,8 @@ public interface IVectorClusteringInteriorFrame extends IVectorClusteringFrame {
     void setNextPage(int nextPageId);
 
     int getNextPage();
+
+    void setOverflowFlagBit(boolean overflowFlag);
+
+    boolean getOverflowFlagBit();
 }

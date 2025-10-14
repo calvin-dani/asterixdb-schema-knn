@@ -27,8 +27,11 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
+import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
@@ -55,7 +58,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     private int entriesInCurrentDirectoryPage; // Number of entries in current directory page
     private int currentDataPageId; // Page ID of the current data page
     private ISerializerDeserializer[] dataFrameSerds;
-
+    private final VectorClusteringTree vcTreeIndex;
     public VCTreeBulkLoder(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds)
@@ -71,6 +74,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         this.currentDirectoryFrame = vectorTree.getMetadataFrameFactory().createFrame();
         this.currentDataFrame = vectorTree.getDataFrameFactory().createFrame();
         this.dataFrameSerds = dataFrameSerds;
+        this.vcTreeIndex = vectorTree;
     }
 
     public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
@@ -118,18 +122,27 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
      * ========= Clustering records to leaf centroids =======
      */
 
-    public ClusterResult findCluster(ITupleReference tuple) throws HyracksDataException {
+    public ClusterSearchResult findCluster(ITupleReference tuple) throws HyracksDataException {
         /*  use static structure to find the closest leaf centroid for the given tuple
             return the leaf centroid ID and the distance
         */
+        VectorClusteringTree.VectorClusteringTreeAccessor accessor = (VectorClusteringTree.VectorClusteringTreeAccessor)
+                vcTreeIndex.createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
-        return new ClusterResult(0, 0.0);
+        double[] vectorEmbedding = extractVector(tuple);
+        return accessor.findClosestLeafCentroid(vectorEmbedding); // Placeholder
     }
 
     private double extractDistance(ITupleReference tuple) throws HyracksDataException {
         // Assuming the distance is stored in the first field of the tuple
         Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
         return (Double) fieldValues[0];
+    }
+
+    private double[] extractVector(ITupleReference tuple) throws HyracksDataException {
+        // Assuming the vector is stored in the second field of the tuple
+        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
+        return (double[]) fieldValues[1];
     }
 
     /**
@@ -340,18 +353,5 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     public void abort() throws HyracksDataException {
         LOGGER.debug("VCTreeStaticStructureLoader aborted");
         super.handleException();
-    }
-
-    /**
-     * Result of cluster search operation.
-     */
-    public static class ClusterResult {
-        final int centroidId;
-        final double distance;
-
-        ClusterResult(int centroidId, double distance) {
-            this.centroidId = centroidId;
-            this.distance = distance;
-        }
     }
 }

@@ -95,6 +95,19 @@ public class VectorClusteringLeafFrame extends VectorClusteringNSMFrame implemen
                 frameTuple.getFieldStart(metadataPtrFieldIndex), metadataPageId);
     }
 
+    // ...existing code...
+
+    @Override
+    public int getCentroidId(int tupleIndex) throws HyracksDataException {
+        frameTuple.resetByTupleIndex(this, tupleIndex);
+        // Centroid ID is the first field in the leaf entry tuple: <cid, centroid, metadata_ptr>
+        int cidFieldIndex = 0;
+        return IntegerPointable.getInteger(frameTuple.getFieldData(cidFieldIndex),
+                frameTuple.getFieldStart(cidFieldIndex));
+    }
+
+    // ...existing code...
+
     @Override
     public void insert(ITupleReference tuple, int tupleIndex) {
         int freeSpace = buf.getInt(Constants.FREE_SPACE_OFFSET);

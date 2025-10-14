@@ -35,6 +35,8 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame implements IVectorClusteringInteriorFrame {
 
     protected static final int NEXT_PAGE_OFFSET = CENTROID_ID_OFFSET + 4;
+
+    protected static final int OVERFLOW_FLAG_OFFSET = NEXT_PAGE_OFFSET + 4;
     private final ITreeIndexTupleReference cmpFrameTuple;
 
     public VectorClusteringInteriorFrame(ITreeIndexTupleWriter tupleWriter) {
@@ -42,9 +44,17 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
         this.cmpFrameTuple = tupleWriter.createTupleReference();
     }
 
-    /**
-     * Set the next page pointer for overflow chaining
-     */
+    public void setOverflowFlagBit(boolean overflowFlag) {
+        buf.put(OVERFLOW_FLAG_OFFSET, (byte) (overflowFlag ? 1 : 0));
+    }
+
+    public boolean getOverflowFlagBit() {
+        return buf.get(OVERFLOW_FLAG_OFFSET) != 0;
+    }
+
+        /**
+         * Set the next page pointer for overflow chaining
+         */
     public void setNextPage(int nextPageId) {
         buf.putInt(NEXT_PAGE_OFFSET, nextPageId);
     }

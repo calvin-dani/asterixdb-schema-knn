@@ -82,7 +82,7 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      * @return ITupleReference representing the data tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    ITupleReference createDataTuple(float[] vector, double distance, double cosineSim, ITupleReference originalTuple)
+    ITupleReference createDataTuple(double[] vector, double distance, double cosineSim, ITupleReference originalTuple)
             throws HyracksDataException;
 
     /**
@@ -96,7 +96,7 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      * @return Updated data tuple with preserved vector/PK and updated included fields
      * @throws HyracksDataException if tuple creation fails
      */
-    ITupleReference createUpdatedDataTupleWithIncludedFields(float[] currentVector, double currentDistance,
+    ITupleReference createUpdatedDataTupleWithIncludedFields(double[] currentVector, double currentDistance,
             double currentCosine, byte[] currentPK, ITupleReference updateTuple) throws HyracksDataException;
 
     /**

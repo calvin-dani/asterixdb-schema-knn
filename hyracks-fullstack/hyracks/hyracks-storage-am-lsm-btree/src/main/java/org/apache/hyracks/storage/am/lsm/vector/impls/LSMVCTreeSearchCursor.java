@@ -64,7 +64,7 @@ public class LSMVCTreeSearchCursor implements IIndexCursor {
     // Priority queue for top-k results
     private PriorityQueue<VectorResult> resultHeap;
     private int k; // Number of results to return
-    private float[] queryVector;
+    private double[] queryVector;
 
     // Result iteration
     private VectorResult[] sortedResults;
@@ -272,7 +272,7 @@ public class LSMVCTreeSearchCursor implements IIndexCursor {
     /**
      * Calculate Euclidean distance between query vector and a result tuple.
      */
-    private double calculateDistanceFromTuple(ITupleReference tuple, float[] queryVector) {
+    private double calculateDistanceFromTuple(ITupleReference tuple, double[] queryVector) {
         try {
             // Assuming tuple format: [distance, cosine_similarity, vector_data, primary_key]
             // Extract vector data from field 2
@@ -282,7 +282,7 @@ public class LSMVCTreeSearchCursor implements IIndexCursor {
 
             // Deserialize vector using FloatArraySerializerDeserializer
             //TODO
-            float[] resultVector = new float[vectorLength / Float.BYTES];
+            double[] resultVector = new double[vectorLength / Float.BYTES];
 
             // Calculate Euclidean distance
             return VectorUtils.calculateEuclideanDistance(queryVector, resultVector);
@@ -410,7 +410,7 @@ public class LSMVCTreeSearchCursor implements IIndexCursor {
     /**
      * Get the query vector used for this search.
      */
-    public float[] getQueryVector() {
+    public double[] getQueryVector() {
         return queryVector;
     }
 

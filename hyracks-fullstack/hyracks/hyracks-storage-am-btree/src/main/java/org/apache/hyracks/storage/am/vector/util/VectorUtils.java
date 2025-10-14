@@ -60,6 +60,22 @@ public class VectorUtils {
     }
 
     /**
+     * Calculate Euclidean distance between two double vectors.
+     */
+    public static double calculateEuclideanDistance(double[] vector1, double[] vector2) {
+        if (vector1.length != vector2.length) {
+            throw new IllegalArgumentException("Vectors must have the same dimensionality");
+        }
+
+        double sum = 0.0;
+        for (int i = 0; i < vector1.length; i++) {
+            double diff = vector1[i] - vector2[i];
+            sum += diff * diff;
+        }
+        return Math.sqrt(sum);
+    }
+
+    /**
      * Calculate cosine similarity between two vectors.
      * Returns a value between -1 and 1, where 1 means identical direction.
      */
@@ -90,6 +106,32 @@ public class VectorUtils {
      * Returns a value between -1 and 1, where 1 means identical direction.
      */
     public static double calculateCosineSimilarity(float[] vector1, double[] vector2) {
+        if (vector1.length != vector2.length) {
+            throw new IllegalArgumentException("Vectors must have the same dimensionality");
+        }
+
+        double dotProduct = 0.0;
+        double normA = 0.0;
+        double normB = 0.0;
+
+        for (int i = 0; i < vector1.length; i++) {
+            dotProduct += vector1[i] * vector2[i];
+            normA += vector1[i] * vector1[i];
+            normB += vector2[i] * vector2[i];
+        }
+
+        if (normA == 0.0 || normB == 0.0) {
+            return 0.0; // Handle zero vectors
+        }
+
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    /**
+     * Calculate cosine similarity between two double vectors.
+     * Returns a value between -1 and 1, where 1 means identical direction.
+     */
+    public static double calculateCosineSimilarity(double[] vector1, double[] vector2) {
         if (vector1.length != vector2.length) {
             throw new IllegalArgumentException("Vectors must have the same dimensionality");
         }
@@ -343,6 +385,26 @@ public class VectorUtils {
             int bits = (bytes[byteOffset] << 24) | ((bytes[byteOffset + 1] & 0xFF) << 16)
                     | ((bytes[byteOffset + 2] & 0xFF) << 8) | (bytes[byteOffset + 3] & 0xFF);
             array[i] = Float.intBitsToFloat(bits);
+        }
+        return array;
+    }
+
+    /**
+     * Convert byte array to double array.
+     */
+    public static double[] bytesToDoubleArray(byte[] bytes) {
+        if (bytes.length % 8 != 0) {
+            throw new IllegalArgumentException("Byte array length must be multiple of 8");
+        }
+
+        double[] array = new double[bytes.length / 8];
+        for (int i = 0; i < array.length; i++) {
+            int byteOffset = i * 8;
+            long bits = ((long) bytes[byteOffset] << 56) | (((long) bytes[byteOffset + 1] & 0xFF) << 48)
+                    | (((long) bytes[byteOffset + 2] & 0xFF) << 40) | (((long) bytes[byteOffset + 3] & 0xFF) << 32)
+                    | (((long) bytes[byteOffset + 4] & 0xFF) << 24) | (((long) bytes[byteOffset + 5] & 0xFF) << 16)
+                    | (((long) bytes[byteOffset + 6] & 0xFF) << 8) | ((long) bytes[byteOffset + 7] & 0xFF);
+            array[i] = Double.longBitsToDouble(bits);
         }
         return array;
     }

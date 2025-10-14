@@ -29,13 +29,13 @@ import org.apache.hyracks.storage.common.MultiComparator;
 public class VectorPointPredicate implements ISearchPredicate {
     private static final long serialVersionUID = 1L;
 
-    private final float[] queryVector;
+    private final double[] queryVector;
 
-    public VectorPointPredicate(float[] queryVector) {
+    public VectorPointPredicate(double[] queryVector) {
         this.queryVector = queryVector;
     }
 
-    public float[] getQueryVector() {
+    public double[] getQueryVector() {
         return queryVector;
     }
 
