@@ -74,7 +74,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
     public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, int numLevels,
-            List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPag)
+            List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage)
             throws HyracksDataException {
 
         super(0, callback, vectorTree, leafFrame, DefaultBufferCacheWriteContext.INSTANCE );
@@ -91,6 +91,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         this.currentClusterInLevel = 0;
         this.currentCentroidInCluster = 0;
         this.entriesInCurrentPage = 0;
+        this.maxEntriesPerPage = maxEntriesPerPage;
 
         this.levelPageIds = new ArrayList<>(numLevels);
         for (int i = 0; i < numLevels; i++) {
