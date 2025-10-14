@@ -22,6 +22,7 @@ package org.apache.hyracks.storage.am.vector.impls;
 import static org.apache.hyracks.storage.common.buffercache.context.read.DefaultBufferCacheReadContextProvider.NEW;
 
 import java.util.Arrays;
+import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
@@ -55,6 +56,7 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
+import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -134,6 +136,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
         // TODO: Implement vector clustering tree bulk loader
         return null;
+    }
+
+    public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
+            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage, NoOpPageWriteCallback instance)
+            throws HyracksDataException {
+        return new VCTreeStaticStructureBuilder(instance,this, leafFrameFactory.createFrame(),
+                dataFrameFactory.createFrame(),  numLevels, clustersPerLevel, centroidsPerCluster,
+                maxEntriesPerPage);
     }
 
     public IIndexBulkLoader createFlushLoader(float fillFactor, IPageWriteCallback callback)
@@ -1291,7 +1301,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             isStaticStructureInitialized = true;
         }
 
-        /**
+
+    /**
          * Unified cluster search result that includes metadata page access.
          * This encapsulates the common pattern used by insert, delete, and update operations.
          */

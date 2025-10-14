@@ -38,6 +38,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
+import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -72,11 +73,11 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     private IVectorClusteringLeafFrame leafFrame;
 
     public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree,
-            ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext, int numLevels,
+            ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, int numLevels,
             List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPag)
             throws HyracksDataException {
 
-        super(0, callback, vectorTree, leafFrame, writeContext);
+        super(0, callback, vectorTree, leafFrame, DefaultBufferCacheWriteContext.INSTANCE );
 
         this.numLevels = numLevels;
         this.clustersPerLevel = new ArrayList<>(clustersPerLevel); // Defensive copy
@@ -117,8 +118,9 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             LOGGER.debug("Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
         }
 
+        // TODO: verify number of levels
         // Create first page (root page) - computed page ID 0
-        createNewPage(computeCurrentClusterPageId());
+        createNewPage(0);
 
         LOGGER.debug("VCTreeStaticStructureLoader initialized");
         LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
@@ -262,10 +264,12 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         // Determine frame type based on current level
         if (currentLevel == numLevels - 1) {
             // Leaf level
+            currentFrame = leafFrame;
             leafFrame.setPage(currentPage);
             leafFrame.initBuffer((byte) currentLevel);
         } else {
             // Interior/root level
+            currentFrame = interiorFrame;
             interiorFrame.setPage(currentPage);
             interiorFrame.initBuffer((byte) currentLevel);
         }
@@ -338,6 +342,9 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      * Finish current page and release resources.
      */
     private void finishCurrentPage() throws HyracksDataException {
+        if (currentPage == null) {
+            return;
+        }
         write(currentPage);
     }
 

@@ -34,15 +34,20 @@ import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.CheckTuple;
 import org.apache.hyracks.storage.am.common.IIndexTestContext;
 import org.apache.hyracks.storage.am.common.TreeIndexTestUtils;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
 import org.apache.hyracks.storage.common.IIndexAccessor;
+import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -64,6 +69,24 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
             this.insertedVectors = new ArrayList<>();
             this.clusterId = id;
         }
+    }
+
+    public void buildStaticStructure(AbstractVectorTreeTestContext ctx) throws Exception {
+        int numLevels = ctx.getNumCentroidsPerLevel().size();
+        List<Integer> clustersPerLevel = ctx.getNumClustersPerLevel();
+        List<List<Integer>> centroidsPerCluster = ctx.getNumCentroidsPerLevel();
+        List<ITupleReference> centroids = ctx.getStaticStructureCentroids();
+
+        // Create the static structure builder
+        VCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree)ctx.getIndex()).
+                createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster, 5);
+
+        // Add centroids to the builder level by level
+        for (ITupleReference tuple : centroids) {
+            ssBuilder.add(tuple);
+        }
+        
+        ssBuilder.end();
     }
 
     public List<TestClusterData> insertRecordsIntoMultipleClusters(AbstractVectorTreeTestContext ctx) throws Exception {
