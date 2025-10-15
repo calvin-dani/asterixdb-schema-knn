@@ -226,6 +226,12 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                         clusterIdVal.getStartOffset() + 1);
                 int centroidId = AInt32SerializerDeserializer.getInt(centroidIdVal.getByteArray(),
                         centroidIdVal.getStartOffset() + 1);
+                
+                // Debug: Log suspicious level values and filter them out
+                if (level < 0 || level > 100) {
+                    System.err.println("🔍 DEBUG: Suspicious level value: " + level + " (clusterId: " + clusterId + ", centroidId: " + centroidId + ") - IGNORING");
+                    return; // Skip this tuple
+                }
 
                 // Track structure for analysis
                 if (levelDistribution == null) {
@@ -310,9 +316,28 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
 
                 if (levelDistribution != null && !levelDistribution.isEmpty()) {
                     int maxLevel = levelDistribution.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+                    System.err.println("🔍 DEBUG: Raw maxLevel from levelDistribution: " + maxLevel);
+                    System.err.println("🔍 DEBUG: levelDistribution keys: " + levelDistribution.keySet());
+                    
+                    // Safety check: limit maxLevel to prevent infinite loops
+                    if (maxLevel > 1000) {
+                        System.err.println("❌ WARNING: maxLevel is too large (" + maxLevel + "), limiting to 10 to prevent infinite loop");
+                        maxLevel = 10;
+                    }
+                    
                     System.err.println("Found " + maxLevel + " levels in the hierarchical structure");
 
+                    int loopCounter = 0;
                     for (int level = 0; level <= maxLevel; level++) {
+                        loopCounter++;
+                        System.err.println("🔍 DEBUG: Processing level " + level + " (loop iteration " + loopCounter + ")");
+                        
+                        // Safety check to prevent infinite loops
+                        if (loopCounter > 100) {
+                            System.err.println("❌ CRITICAL: Loop counter exceeded 100, breaking to prevent infinite loop");
+                            break;
+                        }
+                        
                         String levelKey = "Level_" + level;
                         Map<Integer, Integer> levelClusters = clusterDistribution.get(levelKey);
 
