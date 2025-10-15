@@ -188,9 +188,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // 1. K-means operator
         System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
+        UUID materializedDataUUID = UUID.randomUUID();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
+                        sampleUUID, centroidsUUID, materializedDataUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
