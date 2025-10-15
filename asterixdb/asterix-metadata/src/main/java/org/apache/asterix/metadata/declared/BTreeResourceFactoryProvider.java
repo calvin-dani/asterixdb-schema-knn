@@ -146,13 +146,13 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                 && index.getIndexName().equals(IndexingConstants.getFilesIndexName(dataset.getDatasetName()))) {
             return new ITypeTraits[0];
         }
-        
+
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
         int numSecondaryKeys;
         List<List<String>> keyFieldNames;
         List<IAType> keyFieldTypes;
         List<Integer> keySourceIndicators;
-        
+
         if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
             // VECTOR indexes use include fields for secondary keys
             Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
@@ -177,8 +177,8 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
             } else {
                 sourceType = metaType;
             }
-            Pair<IAType, Boolean> keyTypePair = Index.getNonNullableOpenFieldType(index,
-                    keyFieldTypes.get(i), keyFieldNames.get(i), sourceType);
+            Pair<IAType, Boolean> keyTypePair =
+                    Index.getNonNullableOpenFieldType(index, keyFieldTypes.get(i), keyFieldNames.get(i), sourceType);
             IAType keyType = keyTypePair.first;
             secondaryTypeTraits[i] = typeTraitProvider.getTypeTrait(keyType);
         }
@@ -197,13 +197,13 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                 && index.getIndexName().equals(IndexingConstants.getFilesIndexName(dataset.getDatasetName()))) {
             return new IBinaryComparatorFactory[0];
         }
-        
+
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
         int numSecondaryKeys;
         List<List<String>> keyFieldNames;
         List<IAType> keyFieldTypes;
         List<Integer> keySourceIndicators;
-        
+
         if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
             // VECTOR indexes use include fields for secondary keys
             Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
@@ -230,8 +230,8 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
             } else {
                 sourceType = metaType;
             }
-            Pair<IAType, Boolean> keyTypePair = Index.getNonNullableOpenFieldType(index,
-                    keyFieldTypes.get(i), keyFieldNames.get(i), sourceType);
+            Pair<IAType, Boolean> keyTypePair =
+                    Index.getNonNullableOpenFieldType(index, keyFieldTypes.get(i), keyFieldNames.get(i), sourceType);
             IAType keyType = keyTypePair.first;
             secondaryCmpFactories[i] = cmpFactoryProvider.getBinaryComparatorFactory(keyType, true);
         }

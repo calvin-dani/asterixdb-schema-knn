@@ -458,7 +458,7 @@ public class TypeUtil {
         List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
         List<IAType> includeFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
         List<Integer> includeSources = vectorIndexDetails.getIncludeFieldSourceIndicators();
-        
+
         for (int i = 0; i < includeFieldNames.size(); i++) {
             if (includeSources.get(i) != Index.RECORD_INDICATOR) {
                 throw new CompilationException(ErrorCode.COMPILATION_ERROR,
