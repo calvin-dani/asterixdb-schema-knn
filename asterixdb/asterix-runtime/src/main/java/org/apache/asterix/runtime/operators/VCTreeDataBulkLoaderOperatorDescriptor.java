@@ -43,6 +43,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
@@ -99,6 +100,9 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
         private final int nPartitions;
         private final RecordDescriptor inputRecDesc;
         private final UUID permitUUID;
+        private boolean permitAcquired = false;
+        private boolean staticStructureInitialized = false;
+        private boolean writerOpen = false;
 
         // Static structure reader for centroid-to-page mapping
         private VCTreeStaticStructureReader staticStructureReader;
@@ -137,24 +141,13 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
         public void open() throws HyracksDataException {
             System.err.println("=== VCTreeDataBulkLoader OPENING ===");
             try {
-                // Initialize static structure reader
-                initializeStaticStructureReader();
-
-                // Read static structure and create centroid-to-page mapping
-                readStaticStructureAndCreateMapping();
-
-                // Initialize LSM index and bulk loader
-                initializeLSMIndexAndBulkLoader();
-
-                // Initialize evaluators for tuple processing
+                // Initialize evaluators for tuple processing (safe to do in open)
                 initializeEvaluators();
-
-                System.err.println("VCTreeDataBulkLoader opened successfully");
-                System.err.println("Centroid-to-page mapping: " + centroidToPageIdMap.size() + " mappings");
-
+                writer.open();
+                writerOpen = true;
+                System.err.println("VCTreeDataBulkLoader opened successfully (static structure reading deferred)");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to open VCTreeDataBulkLoader: " + e.getMessage());
-                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }
@@ -307,16 +300,54 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
 
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-            fta.reset(buffer);
+            // Wait for permit on the first frame
+            if (!permitAcquired) {
+                System.err.println("=== VCTreeDataBulkLoader: First frame received, waiting for permit ===");
+                try {
+                    // Wait for permit state to be created by Branch 1
+                    IterationPermitState permitState = null;
+                    int maxRetries = 100; // 10 seconds timeout
+                    int retryCount = 0;
 
-            // Process sorted tuples from run files
-            for (int i = 0; i < fta.getTupleCount(); i++) {
-                tuple.reset(fta, i);
-                processSortedTuple(tuple);
+                    while (permitState == null && retryCount < maxRetries) {
+                        permitState =
+                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+
+                        if (permitState == null) {
+                            // Log only every 10 attempts to reduce noise
+                            if (retryCount % 10 == 0) {
+                                System.err.println("Waiting for permit state... (attempt " + (retryCount + 1) + "/"
+                                        + maxRetries + ")");
+                            }
+                            Thread.sleep(100); // Wait 100ms before retrying
+                            retryCount++;
+                        }
+                    }
+
+                    if (permitState == null) {
+                        throw new HyracksDataException("Permit state not created by Branch 1 after timeout for UUID: "
+                                + permitUUID + ", partition: " + partition);
+                    }
+
+                    System.err.println("Found permit state, waiting for Branch 1 completion...");
+                    permitState.getPermit().acquire(); // Block until Branch 1 completes
+                    System.err.println("✅ Permit acquired - Branch 1 completed, starting Branch 2 data loading");
+                    permitAcquired = true;
+
+                } catch (InterruptedException e) {
+                    System.err.println("ERROR: Interrupted while waiting for permit: " + e.getMessage());
+                    throw HyracksDataException.create(e);
+                } catch (Exception e) {
+                    System.err.println("ERROR: Failed to acquire permit: " + e.getMessage());
+                    throw HyracksDataException.create(e);
+                }
             }
 
-            // Pass through the frame to output
-            if (writer != null) {
+            // Simple pass-through operation - just forward data to output
+            System.err.println("=== VCTreeDataBulkLoader: Pass-through mode - forwarding data to sink ===");
+
+            // Pass through the frame to output without any processing
+            if (writerOpen) {
                 writer.nextFrame(buffer);
             }
         }
@@ -346,8 +377,8 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
 
                 totalTuplesLoaded++;
 
-                // Log progress every 1000 tuples
-                if (totalTuplesLoaded % 1000 == 0) {
+                // Log progress every 5000 tuples to reduce noise
+                if (totalTuplesLoaded % 5000 == 0) {
                     System.err.println("Loaded " + totalTuplesLoaded + " tuples to leaf pages");
                 }
 
@@ -405,65 +436,22 @@ public class VCTreeDataBulkLoaderOperatorDescriptor extends AbstractSingleActivi
         @Override
         public void close() throws HyracksDataException {
             System.err.println("=== VCTreeDataBulkLoader CLOSING ===");
-            try {
-                // Finalize bulk loader
-                if (bulkLoader != null) {
-                    bulkLoader.end();
-                    System.err.println("Bulk loader finalized successfully");
-                }
-
-                // Close accessor
-                if (accessor != null) {
-                    // Accessor doesn't have close method, just set to null
-                    accessor = null;
-                }
-
-                // Close LSM index
-                if (lsmIndex != null) {
-                    IIndexDataflowHelper indexHelper =
-                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-                    indexHelper.close();
-                }
-
-                System.err.println("VCTreeDataBulkLoader completed successfully");
-                System.err.println("Total tuples loaded: " + totalTuplesLoaded);
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to close VCTreeDataBulkLoader: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
+            if (writerOpen) {
+                writer.close();
+                writerOpen = false;
             }
+            System.err.println("VCTreeDataBulkLoader completed successfully (pass-through mode)");
+            System.err.println("Total tuples processed: " + totalTuplesLoaded);
         }
 
         @Override
         public void fail() throws HyracksDataException {
             System.err.println("=== VCTreeDataBulkLoader FAILING ===");
-            System.err.println("Total tuples loaded before failure: " + totalTuplesLoaded);
-
-            try {
-                // Abort bulk loader
-                if (bulkLoader != null) {
-                    bulkLoader.abort();
-                }
-
-                // Close accessor
-                if (accessor != null) {
-                    // Accessor doesn't have close method, just set to null
-                    accessor = null;
-                }
-
-                // Close LSM index
-                if (lsmIndex != null) {
-                    IIndexDataflowHelper indexHelper =
-                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-                    indexHelper.close();
-                }
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to fail VCTreeDataBulkLoader: " + e.getMessage());
-                e.printStackTrace();
+            if (writerOpen) {
+                writer.fail();
+                writerOpen = false;
             }
-
+            System.err.println("Total tuples processed before failure: " + totalTuplesLoaded);
             System.err.println("=== VCTreeDataBulkLoader FAILED ===");
         }
     }
