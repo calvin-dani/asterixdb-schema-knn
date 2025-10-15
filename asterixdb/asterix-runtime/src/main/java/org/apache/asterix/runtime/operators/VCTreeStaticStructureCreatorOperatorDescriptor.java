@@ -48,6 +48,8 @@ import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.io.RunFileReader;
+import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
@@ -100,6 +102,585 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         this.materializedDataUUID = materializedDataUUID;
         this.outRecDescs[0] = inputRecordDescriptor;
         System.err.println("VCTreeStaticStructureCreatorOperatorDescriptor created with permit UUID: " + permitUUID);
+    }
+
+    /**
+     * Calculate number of partitions using SHAPIRO formula for VCTree centroid distribution.
+     * 
+     * @param K Total number of centroids
+     * @param inputDataBytesSize Size of input data in bytes
+     * @param frameSize Frame size in bytes
+     * @param memoryBudget Available memory budget in frames
+     * @return Number of partitions for centroid distribution
+     */
+    public int  calculatePartitionsUsingShapiro(int K, long inputDataBytesSize, int frameSize, int memoryBudget) {
+        System.err.println("=== CALCULATING PARTITIONS USING SHAPIRO FORMULA ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Input data size: " + inputDataBytesSize + " bytes");
+        System.err.println("Frame size: " + frameSize + " bytes");
+        System.err.println("Memory budget: " + memoryBudget + " frames");
+        
+        long numberOfInputFrames = inputDataBytesSize / frameSize;
+        System.err.println("Input frames: " + numberOfInputFrames);
+        
+        // SHAPIRO FORMULA
+        final double FUDGE_FACTOR = 1.1;
+        
+        if (memoryBudget >= numberOfInputFrames * FUDGE_FACTOR) {
+            // All in memory - use 2 partitions to avoid infinite loops
+            System.err.println("All data fits in memory, using 2 partitions");
+            return 2;
+        }
+        
+        // Main SHAPIRO formula: ceil((inputFrames * FUDGE_FACTOR - availableFrames) / (availableFrames - 1))
+        long numberOfPartitions = (long) (Math.ceil((numberOfInputFrames * FUDGE_FACTOR - memoryBudget) / (memoryBudget - 1)));
+        numberOfPartitions = Math.max(2, numberOfPartitions);
+        
+        if (numberOfPartitions > memoryBudget) {
+            // Fallback: use square root when too many partitions
+            numberOfPartitions = (long) Math.ceil(Math.sqrt(numberOfInputFrames * FUDGE_FACTOR));
+            numberOfPartitions = Math.max(2, Math.min(numberOfPartitions, memoryBudget));
+        }
+        
+        int numPartitions = (int) Math.min(numberOfPartitions, Integer.MAX_VALUE);
+        
+        // Calculate centroids per partition
+        int centroidsPerPartition = (int) Math.ceil(1.0 * K / numPartitions);
+        
+        System.err.println("SHAPIRO RESULT:");
+        System.err.println("  Number of partitions: " + numPartitions);
+        System.err.println("  Centroids per partition: " + centroidsPerPartition);
+        
+        // Determine frame allocation strategy
+        if (numPartitions > 1) {
+            System.err.println("  Strategy: Group multiple centroids in one run file");
+        } else {
+            System.err.println("  Strategy: Allocate 1 frame per centroid");
+        }
+        
+        return numPartitions;
+    }
+    
+    /**
+     * Create grouping strategy for VCTree centroids based on SHAPIRO formula results.
+     * 
+     * @param K Total number of centroids
+     * @param numPartitions Number of partitions from SHAPIRO
+     * @param memoryBudget Available memory budget in frames
+     * @return GroupingStrategy object with run file allocation plan
+     */
+    public GroupingStrategy createGroupingStrategy(int K, int numPartitions, int memoryBudget) {
+        System.err.println("=== CREATING GROUPING STRATEGY ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Number of partitions: " + numPartitions);
+        System.err.println("Memory budget: " + memoryBudget + " frames");
+        
+        int centroidsPerPartition = (int) Math.ceil(1.0 * K / numPartitions);
+        int numRunFiles = Math.min(numPartitions, memoryBudget);
+        
+        System.err.println("Centroids per partition: " + centroidsPerPartition);
+        System.err.println("Number of run files: " + numRunFiles);
+        
+        // Create partition assignment for centroids
+        Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
+        for (int i = 0; i < K; i++) {
+            int partition = i % numPartitions;
+            partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(i);
+        }
+        
+        // Determine strategy based on centroids per partition
+        String strategy;
+        if (centroidsPerPartition > 1) {
+            strategy = "GROUP_MULTIPLE_CENTROIDS";
+            System.err.println("Strategy: Group multiple centroids in one run file");
+        } else {
+            strategy = "ONE_FRAME_PER_CENTROID";
+            System.err.println("Strategy: Allocate 1 frame per centroid");
+        }
+        
+        return new GroupingStrategy(numRunFiles, centroidsPerPartition, partitionToCentroids, strategy);
+    }
+    
+    /**
+     * Main processing flow: dummy data -> grouping -> sorting.
+     * 
+     * @param ctx Hyracks task context for file operations
+     */
+    public void processVCTreePartitioningAndSorting(IHyracksTaskContext ctx) throws HyracksDataException {
+        System.err.println("=== VCTreePartitioningAndSorting: Starting main processing flow ===");
+        
+        try {
+            // Step 1: Generate dummy data
+            System.err.println("Step 1: Generating dummy data (K=10)");
+            DummyData dummyData = getDummyValues();
+            
+            // Step 2: Recursive grouping
+            System.err.println("Step 2: Starting recursive grouping");
+            VCTreePartitioner partitioner = new VCTreePartitioner(ctx, 32, 32768);
+            partitioner.partitionData(dummyData, 10); // K=10
+            Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
+            
+            System.err.println("Grouping complete. Created " + centroidFiles.size() + " centroid files");
+            
+            // Step 3: Sort each centroid file
+            System.err.println("Step 3: Starting sorting phase");
+            VCTreeSorter sorter = new VCTreeSorter(ctx);
+            Map<Integer, FileReference> sortedFiles = new HashMap<>();
+            
+            for (Map.Entry<Integer, FileReference> entry : centroidFiles.entrySet()) {
+                int centroidId = entry.getKey();
+                FileReference inputFile = entry.getValue();
+                FileReference sortedFile = sorter.sortCentroidFile(centroidId, inputFile);
+                sortedFiles.put(centroidId, sortedFile);
+                System.err.println("Sorted centroid " + centroidId + " to: " + sortedFile);
+            }
+            
+            System.err.println("Sorting complete. Created " + sortedFiles.size() + " sorted files");
+            
+            // Step 4: Cleanup
+            partitioner.closeAllFiles();
+            sorter.cleanupIntermediateFiles();
+            
+            System.err.println("=== VCTreePartitioningAndSorting: Processing complete ===");
+            
+        } catch (Exception e) {
+            System.err.println("ERROR: VCTreePartitioningAndSorting failed: " + e.getMessage());
+            e.printStackTrace();
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    /**
+     * Apply recursive partitioning logic with hardcoded memory budget and create run files.
+     * 
+     * @param K Total number of centroids
+     * @param inputDataBytesSize Size of input data in bytes
+     * @param frameSize Frame size in bytes
+     * @param ctx Hyracks task context for file operations
+     * @return RunFileManager with created run files and dummy data
+     */
+    public RunFileManager applyRecursivePartitioning(int K, long inputDataBytesSize, int frameSize, IHyracksTaskContext ctx) {
+        System.err.println("=== APPLYING RECURSIVE PARTITIONING LOGIC ===");
+        
+        // Hardcoded memory budget (following other operators pattern)
+        int memoryBudget = 32; // frames - typical value from other operators
+        System.err.println("Using hardcoded memory budget: " + memoryBudget + " frames");
+        
+        // Step 1: Calculate initial partitions using SHAPIRO
+        int numPartitions = calculatePartitionsUsingShapiro(K, inputDataBytesSize, frameSize, memoryBudget);
+        GroupingStrategy strategy = createGroupingStrategy(K, numPartitions, memoryBudget);
+        
+        System.err.println("Initial strategy: " + strategy);
+        
+        // Step 2: Create run files
+        RunFileManager runFileManager = new RunFileManager(ctx);
+        runFileManager.createRunFiles(strategy.numRunFiles);
+        
+        // Step 3: Generate dummy data and distribute to run files
+        DummyData dummyData = getDummyValues();
+        try {
+            runFileManager.distributeDummyData(dummyData, strategy);
+        } catch (HyracksDataException e) {
+            System.err.println("ERROR: Failed to distribute dummy data: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        // Step 4: Apply recursive logic if needed
+        int level = 0;
+        int maxLevels = 3; // Prevent infinite recursion
+        
+        while (level < maxLevels && strategy.strategy.equals("GROUP_MULTIPLE_CENTROIDS")) {
+            System.err.println("=== RECURSIVE LEVEL " + (level + 1) + " ===");
+            
+            // Check if further partitioning is needed
+            boolean needsMorePartitioning = runFileManager.checkSizeReduction(strategy.centroidsPerPartition, memoryBudget);
+            
+            if (!needsMorePartitioning) {
+                System.err.println("Size reduction effective, stopping recursion at level " + level);
+                break;
+            }
+            
+            // Apply SHAPIRO again on each large partition
+            for (int partitionId = 0; partitionId < strategy.numRunFiles; partitionId++) {
+                List<Integer> partitionCentroids = strategy.partitionToCentroids.get(partitionId);
+                if (partitionCentroids.size() > memoryBudget) {
+                    System.err.println("Partition " + partitionId + " has " + partitionCentroids.size() + " centroids, sub-partitioning...");
+                    
+                    // Calculate sub-partitions for this partition
+                    int subPartitions = calculatePartitionsUsingShapiro(
+                        partitionCentroids.size(), 
+                        inputDataBytesSize / strategy.numRunFiles, 
+                        frameSize, 
+                        memoryBudget
+                    );
+                    
+                    // Create sub-run files for this partition
+                    runFileManager.createSubRunFiles(partitionId, subPartitions);
+                }
+            }
+            
+            level++;
+        }
+        
+        System.err.println("=== RECURSIVE PARTITIONING COMPLETE ===");
+        System.err.println("Final level: " + level);
+        System.err.println("Total run files created: " + runFileManager.getTotalRunFiles());
+        
+        return runFileManager;
+    }
+    
+    /**
+     * Inner class to manage run files and dummy data distribution using actual RunFileWriter.
+     */
+    public static class RunFileManager {
+        private final Map<Integer, RunFileWriter> runFileWriters = new HashMap<>();
+        private final Map<Integer, List<Integer>> subRunFiles = new HashMap<>();
+        private final IHyracksTaskContext ctx;
+        private int totalRunFiles = 0;
+        
+        public RunFileManager(IHyracksTaskContext ctx) {
+            this.ctx = ctx;
+        }
+        
+        public void createRunFiles(int numRunFiles) {
+            try {
+                System.err.println("Creating " + numRunFiles + " run files");
+                for (int i = 0; i < numRunFiles; i++) {
+                    // Create actual RunFileWriter like MaterializerTaskState
+                    FileReference file = ctx.getJobletContext().createManagedWorkspaceFile(
+                        "VCTreeRunFile_" + i + "_" + System.currentTimeMillis());
+                    RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
+                    writer.open();
+                    
+                    runFileWriters.put(i, writer);
+                }
+                totalRunFiles = numRunFiles;
+            } catch (HyracksDataException e) {
+                System.err.println("ERROR: Failed to create run files: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+        
+        public void createSubRunFiles(int parentPartition, int numSubPartitions) {
+            try {
+                System.err.println("Creating " + numSubPartitions + " sub-run files for partition " + parentPartition);
+                List<Integer> subFiles = new ArrayList<>();
+                for (int i = 0; i < numSubPartitions; i++) {
+                    int subFileId = totalRunFiles++;
+                    
+                    // Create actual RunFileWriter for sub-file
+                    FileReference file = ctx.getJobletContext().createManagedWorkspaceFile(
+                        "VCTreeSubRunFile_" + parentPartition + "_" + i + "_" + System.currentTimeMillis());
+                    RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
+                    writer.open();
+                    
+                    runFileWriters.put(subFileId, writer);
+                    subFiles.add(subFileId);
+                }
+                subRunFiles.put(parentPartition, subFiles);
+            } catch (HyracksDataException e) {
+                System.err.println("ERROR: Failed to create sub-run files: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+        
+        public void distributeDummyData(DummyData dummyData, GroupingStrategy strategy) throws HyracksDataException {
+            System.err.println("Distributing " + dummyData.tuples.size() + " dummy tuples to run files");
+            
+            // Write tuples directly to run files
+            for (DummyTuple tuple : dummyData.tuples) {
+                int partition = tuple.centroidId % strategy.numRunFiles;
+                RunFileWriter writer = runFileWriters.get(partition);
+                
+                // Convert dummy tuple to frame and write to run file
+                MockTupleReference mockTuple = new MockTupleReference(tuple);
+                ByteBuffer frameBuffer = createFrameFromTuple(mockTuple);
+                writer.nextFrame(frameBuffer);
+            }
+            
+            System.err.println("All dummy tuples written to run files");
+        }
+        
+        private ByteBuffer createFrameFromTuple(MockTupleReference tuple) {
+            // Create a simple frame containing the tuple data
+            // This is a simplified version - in practice you'd use proper frame formatting
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            
+            // Write tuple count (1)
+            buffer.putInt(1);
+            
+            // Write tuple data
+            byte[] tupleData = tuple.getFieldData(0);
+            buffer.putInt(tupleData.length);
+            buffer.put(tupleData);
+            
+            buffer.flip();
+            return buffer;
+        }
+        
+        public boolean checkSizeReduction(int centroidsPerPartition, int memoryBudget) {
+            // 80% size reduction rule (from Hybrid Hash Join)
+            double threshold = 0.8;
+            double currentRatio = (double) centroidsPerPartition / memoryBudget;
+            
+            System.err.println("Size reduction check: ratio=" + currentRatio + ", threshold=" + threshold);
+            
+            // If ratio is still high, needs more partitioning
+            return currentRatio > threshold;
+        }
+        
+        public void closeAllRunFiles() throws HyracksDataException {
+            System.err.println("Closing all " + runFileWriters.size() + " run files");
+            for (RunFileWriter writer : runFileWriters.values()) {
+                if (writer != null) {
+                    writer.close();
+                }
+            }
+        }
+        
+        public RunFileReader getRunFileReader(int runFileId) throws HyracksDataException {
+            RunFileWriter writer = runFileWriters.get(runFileId);
+            if (writer != null) {
+                return writer.createReader();
+            }
+            return null;
+        }
+        
+        public int getTotalRunFiles() {
+            return totalRunFiles;
+        }
+        
+        
+        @Override
+        public String toString() {
+            return String.format("RunFileManager{totalFiles=%d, subFiles=%s}", 
+                totalRunFiles, subRunFiles);
+        }
+    }
+    
+    /**
+     * Inner class representing grouping strategy for VCTree centroids.
+     */
+    public static class GroupingStrategy {
+        public final int numRunFiles;
+        public final int centroidsPerPartition;
+        public final Map<Integer, List<Integer>> partitionToCentroids;
+        public final String strategy;
+        
+        public GroupingStrategy(int numRunFiles, int centroidsPerPartition, 
+                              Map<Integer, List<Integer>> partitionToCentroids, String strategy) {
+            this.numRunFiles = numRunFiles;
+            this.centroidsPerPartition = centroidsPerPartition;
+            this.partitionToCentroids = partitionToCentroids;
+            this.strategy = strategy;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("GroupingStrategy{runFiles=%d, centroidsPerPartition=%d, strategy=%s}", 
+                numRunFiles, centroidsPerPartition, strategy);
+        }
+    }
+    
+    /**
+     * Dummy function that returns dummy values for testing purposes.
+     * Returns dummy distances, centroid IDs, and tuples for VCTree structure creation.
+     * Generates K=10 centroids with multiple tuples per centroid.
+     * 
+     * @return DummyData object containing dummy distances, centroid IDs, and tuples
+     */
+    public DummyData getDummyValues() {
+        System.err.println("=== GENERATING DUMMY VALUES FOR VCTree TESTING (K=10) ===");
+        
+        // Create dummy distances (simulating vector distances)
+        List<Double> dummyDistances = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            dummyDistances.add(Math.random() * 100.0); // Random distances between 0-100
+        }
+        
+        // Create dummy centroid IDs (0-9 for K=10)
+        List<Integer> dummyCentroidIds = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            dummyCentroidIds.add(i); // Centroid IDs: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+        }
+        
+        // Create dummy tuples (simulating hierarchical clustering data)
+        List<DummyTuple> dummyTuples = new ArrayList<>();
+        
+        // Generate multiple tuples per centroid (5-10 tuples per centroid)
+        for (int centroidId = 0; centroidId < 10; centroidId++) {
+            int tuplesPerCentroid = 5 + (int)(Math.random() * 6); // 5-10 tuples per centroid
+            
+            for (int tupleIdx = 0; tupleIdx < tuplesPerCentroid; tupleIdx++) {
+                DummyTuple tuple = new DummyTuple();
+                tuple.level = 0; // All at level 0 for simplicity
+                tuple.clusterId = centroidId % 3; // Distribute across 3 clusters
+                tuple.centroidId = centroidId; // Same centroid ID for all tuples in this group
+                tuple.embedding = generateDummyEmbedding(128); // 128-dimensional vector
+                tuple.distance = Math.random() * 100.0; // Random distance between 0-100
+                dummyTuples.add(tuple);
+            }
+        }
+        
+        System.err.println("Generated " + dummyDistances.size() + " dummy distances");
+        System.err.println("Generated " + dummyCentroidIds.size() + " dummy centroid IDs (0-9)");
+        System.err.println("Generated " + dummyTuples.size() + " dummy tuples");
+        
+        // Log distribution per centroid
+        Map<Integer, Integer> centroidCounts = new HashMap<>();
+        for (DummyTuple tuple : dummyTuples) {
+            centroidCounts.put(tuple.centroidId, centroidCounts.getOrDefault(tuple.centroidId, 0) + 1);
+        }
+        
+        System.err.println("Tuples per centroid:");
+        for (int i = 0; i < 10; i++) {
+            System.err.println("  Centroid " + i + ": " + centroidCounts.getOrDefault(i, 0) + " tuples");
+        }
+        
+        return new DummyData(dummyDistances, dummyCentroidIds, dummyTuples);
+    }
+    
+    /**
+     * Generates a dummy embedding vector of specified dimension.
+     * 
+     * @param dimension The dimension of the embedding vector
+     * @return Array of random float values representing the embedding
+     */
+    private float[] generateDummyEmbedding(int dimension) {
+        float[] embedding = new float[dimension];
+        for (int i = 0; i < dimension; i++) {
+            embedding[i] = (float) (Math.random() * 2.0 - 1.0); // Random values between -1 and 1
+        }
+        return embedding;
+    }
+    
+    /**
+     * Inner class to hold dummy data for testing.
+     */
+    public static class DummyData {
+        public final List<Double> distances;
+        public final List<Integer> centroidIds;
+        public final List<DummyTuple> tuples;
+        
+        public DummyData(List<Double> distances, List<Integer> centroidIds, List<DummyTuple> tuples) {
+            this.distances = distances;
+            this.centroidIds = centroidIds;
+            this.tuples = tuples;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("DummyData{distances=%d, centroidIds=%d, tuples=%d}", 
+                distances.size(), centroidIds.size(), tuples.size());
+        }
+    }
+    
+    /**
+     * Inner class representing a dummy tuple for hierarchical clustering.
+     */
+    public static class DummyTuple {
+        public int level;
+        public int clusterId;
+        public int centroidId;
+        public float[] embedding;
+        public double distance;
+        
+        @Override
+        public String toString() {
+            return String.format("DummyTuple{level=%d, clusterId=%d, centroidId=%d, embeddingDim=%d, distance=%.2f}", 
+                level, clusterId, centroidId, 
+                embedding != null ? embedding.length : 0, distance);
+        }
+    }
+    
+    /**
+     * Mock tuple reference that adapts DummyTuple to ITupleReference interface
+     * for use with VCTreeStaticStructureCreator.
+     * VCTreeStaticStructureCreator expects exactly 2 fields:
+     * - Field 0: Integer (centroidId)
+     * - Field 1: double[] (embedding vector)
+     */
+    public static class MockTupleReference implements ITupleReference {
+        private final DummyTuple dummyTuple;
+        private final byte[] serializedData;
+        private final int[] fieldStarts;
+        private final int[] fieldLengths;
+        
+        public MockTupleReference(DummyTuple dummyTuple) {
+            this.dummyTuple = dummyTuple;
+            this.serializedData = serializeDummyTuple(dummyTuple);
+            this.fieldStarts = new int[2];
+            this.fieldLengths = new int[2];
+            calculateFieldPositions();
+        }
+        
+        private byte[] serializeDummyTuple(DummyTuple tuple) {
+            // VCTreeStaticStructureCreator expects: [centroidId(int), embedding(double[])]
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            
+            // Field 0: centroidId (4 bytes)
+            buffer.putInt(tuple.centroidId);
+            
+            // Field 1: embedding as double array
+            if (tuple.embedding != null) {
+                // Convert float[] to double[] and serialize
+                buffer.putInt(tuple.embedding.length); // length prefix
+                for (float f : tuple.embedding) {
+                    buffer.putDouble((double) f); // convert float to double
+                }
+            } else {
+                buffer.putInt(0); // empty array
+            }
+            
+            byte[] result = new byte[buffer.position()];
+            buffer.flip();
+            buffer.get(result);
+            return result;
+        }
+        
+        private void calculateFieldPositions() {
+            // Field 0: centroidId starts at 0, length 4
+            fieldStarts[0] = 0;
+            fieldLengths[0] = 4;
+            
+            // Field 1: embedding starts after centroidId, includes length prefix + data
+            fieldStarts[1] = 4;
+            fieldLengths[1] = 4 + (dummyTuple.embedding != null ? dummyTuple.embedding.length * 8 : 0); // 8 bytes per double
+        }
+        
+        @Override
+        public int getFieldCount() {
+            return 2; // centroidId, embedding
+        }
+        
+        @Override
+        public byte[] getFieldData(int fIdx) {
+            return serializedData;
+        }
+        
+        @Override
+        public int getFieldStart(int fIdx) {
+            if (fIdx >= 0 && fIdx < fieldStarts.length) {
+                return fieldStarts[fIdx];
+            }
+            return 0;
+        }
+        
+        @Override
+        public int getFieldLength(int fIdx) {
+            if (fIdx >= 0 && fIdx < fieldLengths.length) {
+                return fieldLengths[fIdx];
+            }
+            return 0;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("MockTupleReference{centroidId=%d, embeddingDim=%d, level=%d, clusterId=%d}", 
+                dummyTuple.centroidId, 
+                dummyTuple.embedding != null ? dummyTuple.embedding.length : 0,
+                dummyTuple.level, dummyTuple.clusterId);
+        }
     }
 
     @Override
@@ -260,6 +841,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== CreateStructureActivity CLOSING ===");
             System.err.println("Total tuples collected: " + tupleCount);
             System.err.println("Frames accumulated: " + frameAccumulator.size());
+
+            // Test partitioning and sorting with dummy data
+            try {
+                System.err.println("=== TESTING PARTITIONING AND SORTING ===");
+                processVCTreePartitioningAndSorting(ctx);
+                System.err.println("=== PARTITIONING AND SORTING COMPLETE ===");
+            } catch (Exception e) {
+                System.err.println("ERROR: Partitioning/sorting failed: " + e.getMessage());
+                e.printStackTrace();
+            }
 
             // Process all accumulated tuples and create static structure
                 System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
