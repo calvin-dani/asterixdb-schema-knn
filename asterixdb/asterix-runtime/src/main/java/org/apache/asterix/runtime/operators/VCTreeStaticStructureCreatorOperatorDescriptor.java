@@ -40,14 +40,15 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
-import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
@@ -56,9 +57,9 @@ import org.apache.hyracks.storage.am.common.frames.LIFOMetaDataFrameFactory;
 import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManager;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureCreator;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureCreator;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
@@ -141,7 +142,24 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
         @Override
         public void open() throws HyracksDataException {
             System.err.println("=== VCTreeStaticStructureCreator OPENING ===");
+            System.err.println("🚀 BRANCH 1 IS STARTING - This should create the permit state!");
             try {
+                // Register permit state for coordination with Branch 2
+                IterationPermitState permitState =
+                        (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+
+                if (permitState == null) {
+                    java.util.concurrent.Semaphore permit = new java.util.concurrent.Semaphore(0);
+                    permitState = new IterationPermitState(ctx.getJobletContext().getJobId(),
+                            new PartitionedUUID(permitUUID, partition), permit);
+                    ctx.setStateObject(permitState);
+                    System.err.println("✅ PERMIT STATE CREATED AND REGISTERED for UUID: " + permitUUID + ", partition: "
+                            + partition);
+                } else {
+                    System.err.println(
+                            "Found existing permit state for UUID: " + permitUUID + ", partition: " + partition);
+                }
+
                 // Initialize evaluators for extracting tuple fields
                 EvaluatorContext evalCtx = new EvaluatorContext(ctx);
                 levelEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx);
@@ -155,9 +173,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                 centroidIdVal = new VoidPointable();
                 embeddingVal = new VoidPointable();
 
-                System.err.println("Evaluators initialized for field extraction");
-                System.err.println("Expected 4 fields: level(0), clusterId(1), centroidId(2), embedding(3)");
-
                 if (writer != null) {
                     writer.open();
                 }
@@ -165,14 +180,18 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                 System.err.println("VCTreeStaticStructureCreator opened successfully");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to open VCTreeStaticStructureCreator: " + e.getMessage());
-                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }
 
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+            System.err.println("=== VCTreeStaticStructureCreator nextFrame ===");
+            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position()
+                    + ", limit: " + buffer.limit());
             fta.reset(buffer);
+            int tupleCount = fta.getTupleCount();
+            System.err.println("Processing " + tupleCount + " tuples in this frame");
 
             // Accumulate frames for batch processing
             frameAccumulator.add(buffer.duplicate());
@@ -181,6 +200,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
             for (int i = 0; i < fta.getTupleCount(); i++) {
                 tuple.reset(fta, i);
                 processTuple(tuple);
+            }
+
+            // Log progress every 1000 tuples to reduce noise
+            if (tupleCount % 1000 == 0 && tupleCount > 0) {
+                System.err.println("PROGRESS: Processed " + tupleCount + " tuples for hierarchical clustering");
             }
 
             // Pass through the frame to output
@@ -218,8 +242,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
 
                 tupleCount++;
 
-                // Log progress every 1000 tuples
-                if (tupleCount % 1000 == 0) {
+                // Log progress every 5000 tuples to reduce noise
+                if (tupleCount % 5000 == 0) {
                     System.err.println("Processed " + tupleCount + " tuples for structure analysis");
                 }
 
@@ -231,15 +255,43 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
 
         @Override
         public void close() throws HyracksDataException {
+            System.err.println("=== VCTreeStaticStructureCreator CLOSING ===");
+            System.err.println("Total tuples collected: " + tupleCount);
+            System.err.println("Frames accumulated: " + frameAccumulator.size());
+
             // Process all accumulated tuples and create static structure
             if (!dataCollectionComplete) {
+                System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
+                System.err.println("Analyzing " + tupleCount + " tuples to determine structure...");
                 createStaticStructure();
                 dataCollectionComplete = true;
+                System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
+            } else {
+                System.err.println("Static structure already created, skipping analysis");
             }
 
             // Close the writer if available
             if (writer != null) {
+                System.err.println("Closing output writer...");
                 writer.close();
+                System.err.println("Output writer closed successfully");
+            }
+
+            // Signal Branch 2 that structure creation is complete
+            try {
+                System.err.println("=== SIGNALING BRANCH 2 COMPLETION ===");
+                IterationPermitState permitState =
+                        (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+                if (permitState != null) {
+                    permitState.getPermit().release();
+                    System.err
+                            .println("✅ PERMIT RELEASED - Branch 1 (structure creation) completed, signaling Branch 2");
+                } else {
+                    System.err.println("WARNING: Permit state not found for UUID: " + permitUUID);
+                }
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to release permit: " + e.getMessage());
+                e.printStackTrace();
             }
 
             System.err.println("=== VCTreeStaticStructureCreator COMPLETE ===");
@@ -247,34 +299,44 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
 
         private void createStaticStructure() throws HyracksDataException {
             System.err.println("=== CREATING STATIC STRUCTURE WITH VCTreeStaticStructureCreator ===");
+            System.err.println("Processing " + frameAccumulator.size() + " accumulated frames");
+            System.err.println("Total tuples to process: " + tupleCount);
 
             try {
                 // Analyze collected data to determine structure
+                System.err.println("Analyzing collected data to determine hierarchical structure...");
                 List<Integer> clustersPerLevel = new ArrayList<>();
                 List<List<Integer>> centroidsPerCluster = new ArrayList<>();
 
                 if (levelDistribution != null && !levelDistribution.isEmpty()) {
                     int maxLevel = levelDistribution.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+                    System.err.println("Found " + maxLevel + " levels in the hierarchical structure");
 
                     for (int level = 0; level <= maxLevel; level++) {
                         String levelKey = "Level_" + level;
                         Map<Integer, Integer> levelClusters = clusterDistribution.get(levelKey);
 
                         if (levelClusters != null) {
-                            clustersPerLevel.add(levelClusters.size());
+                            int clusterCount = levelClusters.size();
+                            clustersPerLevel.add(clusterCount);
+                            System.err.println("Level " + level + ": " + clusterCount + " clusters");
 
                             List<Integer> centroidsInClusters = new ArrayList<>();
                             for (int clusterId : levelClusters.keySet()) {
-                                centroidsInClusters.add(levelClusters.get(clusterId));
+                                int centroidCount = levelClusters.get(clusterId);
+                                centroidsInClusters.add(centroidCount);
+                                System.err.println("  Cluster " + clusterId + ": " + centroidCount + " centroids");
                             }
                             centroidsPerCluster.add(centroidsInClusters);
                         } else {
                             clustersPerLevel.add(0);
                             centroidsPerCluster.add(new ArrayList<>());
+                            System.err.println("Level " + level + ": 0 clusters (no data)");
                         }
                     }
                 } else {
                     // Default structure if no data collected
+                    System.err.println("No level distribution found, using default structure");
                     clustersPerLevel.add(1);
                     centroidsPerCluster.add(List.of(1));
                 }
@@ -286,14 +348,17 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                 IIOManager ioManager = ctx.getIoManager();
 
                 // Get index path
+                System.err.println("Getting index file path...");
                 FileReference indexPathRef = getIndexFilePath();
                 if (indexPathRef == null) {
                     System.err.println("ERROR: Could not determine index path");
                     return;
                 }
+                System.err.println("Index path: " + indexPathRef);
 
                 // Create static structure file path (same directory as .metadata)
                 FileReference staticStructureFile = indexPathRef.getParent().getChild("static_structure.vctree");
+                System.err.println("Static structure file path: " + staticStructureFile);
 
                 // Create tuple writers with proper type traits
                 // Tuple format: [centroidId (int), embedding (float[]), childPageId (int)]
@@ -301,15 +366,15 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                 typeTraits[0] = IntegerPointable.TYPE_TRAITS; // centroidId
                 typeTraits[1] = VarLengthTypeTrait.INSTANCE; // embedding (float array) - variable length
                 typeTraits[2] = IntegerPointable.TYPE_TRAITS; // childPageId
-                
-                VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory = 
-                    new VectorClusteringLeafTupleWriterFactory(typeTraits, null, null);
-                VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory = 
-                    new VectorClusteringInteriorTupleWriterFactory(typeTraits, null, null);
-                
+
+                VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
+                        new VectorClusteringLeafTupleWriterFactory(typeTraits, null, null);
+                VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
+                        new VectorClusteringInteriorTupleWriterFactory(typeTraits, null, null);
+
                 // Create frames with proper tuple writers
-                VectorClusteringLeafFrameFactory leafFrameFactory = 
-                    new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), 128);
+                VectorClusteringLeafFrameFactory leafFrameFactory =
+                        new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), 128);
                 VectorClusteringInteriorFrameFactory interiorFrameFactory =
                         new VectorClusteringInteriorFrameFactory(interiorTupleWriterFactory.createTupleWriter(), 128);
                 ITreeIndexFrame leafFrame = leafFrameFactory.createFrame();
@@ -337,11 +402,15 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                     }
                 };
 
+                System.err.println(
+                        "Creating VCTreeStaticStructureCreator with " + clustersPerLevel.size() + " levels...");
                 structureCreator = new VCTreeStaticStructureCreator(bufferCache, ioManager, staticStructureFile, 4096,
                         fillFactor, leafFrame, interiorFrame, metaFrame, pageWriteCallback, clustersPerLevel.size(),
                         clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
 
+                System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                 // Process all accumulated tuples
+                int totalTuplesProcessed = 0;
                 for (ByteBuffer frameBuffer : frameAccumulator) {
                     FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecDesc);
                     frameFta.reset(frameBuffer);
@@ -349,17 +418,23 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                     for (int i = 0; i < frameFta.getTupleCount(); i++) {
                         tuple.reset(frameFta, i);
                         structureCreator.add(tuple);
+                        totalTuplesProcessed++;
                     }
                 }
+                System.err.println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
 
+                System.err.println("Finalizing static structure...");
                 // Finalize the structure
                 structureCreator.finalize();
+                System.err.println("✅ STATIC STRUCTURE FINALIZED SUCCESSFULLY");
 
+                System.err.println("Writing metadata file...");
                 // Write metadata file
                 writeMetadataFile(indexPathRef, clustersPerLevel, centroidsPerCluster);
+                System.err.println("✅ METADATA FILE WRITTEN SUCCESSFULLY");
 
-                System.err
-                        .println("Static structure created successfully at: " + staticStructureFile.getAbsolutePath());
+                System.err.println(
+                        "✅ STATIC STRUCTURE CREATED SUCCESSFULLY at: " + staticStructureFile.getAbsolutePath());
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to create static structure: " + e.getMessage());
@@ -371,7 +446,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
         private void writeMetadataFile(FileReference indexPathRef, List<Integer> clustersPerLevel,
                 List<List<Integer>> centroidsPerCluster) {
             try {
-                FileReference metadataFile = indexPathRef.getParent().getChild(".staticstructure");
+                // Write to index subdirectory to match where VCTreeStaticStructureReader expects it
+                FileReference metadataFile = indexPathRef.getChild(".staticstructure");
+                System.err.println("Writing metadata file to: " + metadataFile.getAbsolutePath());
 
                 Map<String, Object> metadata = new HashMap<>();
                 metadata.put("numLevels", clustersPerLevel.size());
@@ -383,13 +460,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractSing
                 metadata.put("partition", partition);
                 metadata.put("staticStructureFile", "static_structure.vctree");
 
+                System.err.println("Metadata content: " + metadata);
                 ObjectMapper mapper = new ObjectMapper();
                 byte[] data = mapper.writeValueAsBytes(metadata);
 
                 IIOManager ioManager = ctx.getIoManager();
                 ioManager.overwrite(metadataFile, data);
 
-                System.err.println("Metadata written to: " + metadataFile.getAbsolutePath());
+                System.err.println("✅ METADATA FILE WRITTEN SUCCESSFULLY to: " + metadataFile.getAbsolutePath());
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to write metadata file: " + e.getMessage());

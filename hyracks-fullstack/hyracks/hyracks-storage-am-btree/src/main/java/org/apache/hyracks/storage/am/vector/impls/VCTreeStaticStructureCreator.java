@@ -244,7 +244,7 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
             if (tuple.getFieldCount() >= 4) {
                 // Expected format: <level, clusterId, centroidId, embedding>
                 System.out.println("DEBUG: Field 3 length: " + tuple.getFieldLength(3) + " bytes");
-                
+
                 // Check if field 3 is small (likely not a proper array)
                 if (tuple.getFieldLength(3) < 100) {
                     System.out.println("DEBUG: Field 3 too small for array, using dummy embedding");
@@ -255,10 +255,11 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
                         byte[] fieldData = tuple.getFieldData(2);
                         int fieldStart = tuple.getFieldStart(2);
                         int fieldLength = tuple.getFieldLength(2);
-                        
-                        java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(fieldData, fieldStart, fieldLength);
+
+                        java.io.ByteArrayInputStream bais =
+                                new java.io.ByteArrayInputStream(fieldData, fieldStart, fieldLength);
                         java.io.DataInputStream dis = new java.io.DataInputStream(bais);
-                        
+
                         ISerializerDeserializer intSerde = IntegerSerializerDeserializer.INSTANCE;
                         Object centroidIdObj = intSerde.deserialize(dis);
                         centroidId = (Integer) centroidIdObj;
@@ -267,7 +268,7 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
                         System.out.println("DEBUG: Failed to extract centroidId: " + e.getMessage());
                         centroidId = currentCentroidInCluster;
                     }
-                    
+
                     // Create dummy embedding
                     embedding = new float[128];
                     for (int i = 0; i < embedding.length; i++) {
@@ -360,10 +361,10 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
 
         // Determine frame type based on current level
         boolean isLeaf = (currentLevel == numLevels - 1);
-        
+
         // Use the parent class method to create the page properly
         currentPage = createPage(computedPageId, isLeaf, currentLevel);
-        
+
         // Set the appropriate frame
         if (isLeaf) {
             currentFrame = leafFrame;
@@ -478,15 +479,15 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
         for (int leafPageId = leafPageStart; leafPageId < leafPageEnd; leafPageId++) {
             // Allocate metadata page
             int metadataPageId = allocatePage();
-            
+
             // Create the metadata page using the parent class method
             ICachedPage metadataPage = createPage(metadataPageId, false, 0); // false = not leaf, level 0 for metadata
-            
+
             // Set up the metadata frame
             metaFrame.setPage(metadataPage);
-            
+
             System.out.println("DEBUG: Created metadata page " + metadataPageId + " for leaf page " + leafPageId);
-            
+
             // Write the page (this will release the latch)
             writePage(metadataPage);
         }
