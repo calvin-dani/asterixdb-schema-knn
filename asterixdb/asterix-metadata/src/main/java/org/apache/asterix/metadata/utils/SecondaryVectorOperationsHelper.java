@@ -207,7 +207,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("🔧 CREATING VCTreeStaticStructureCreator");
         VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
                 new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
-                        hierarchicalRecDesc, permitUUID);
+                        hierarchicalRecDesc, permitUUID, materializedDataUUID);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeCreator,
                 primaryPartitionConstraint);
         targetOp = vcTreeCreator;
