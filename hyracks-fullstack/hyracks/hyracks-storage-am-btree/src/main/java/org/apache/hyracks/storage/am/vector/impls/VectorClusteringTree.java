@@ -31,6 +31,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
@@ -135,7 +136,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        // Create VCTreeLoader with default parameters
+        // Create VCTreeBulkLoder with default parameters
         // The LSM system will handle the actual parameters at a higher level
         List<Integer> defaultClustersPerLevel = List.of(5, 10);
         List<List<Integer>> defaultCentroidsPerCluster = List.of(
@@ -143,14 +144,20 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         );
         int defaultMaxEntriesPerPage = 100;
         
-        return new VCTreeLoader(fillFactor, callback, this, 
+        // Create serializer/deserializer array for data frame fields
+        ISerializerDeserializer[] dataFrameSerds = new ISerializerDeserializer[4];
+        dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
+        dataFrameSerds[1] = DoubleSerializerDeserializer.INSTANCE; // cosine similarity
+        dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
+        dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
+        
+        return new VCTreeBulkLoder(fillFactor, callback, this,
             leafFrameFactory.createFrame(), 
             dataFrameFactory.createFrame(),
             DefaultBufferCacheWriteContext.INSTANCE,
-            2, // numLevels
-            defaultClustersPerLevel,
-            defaultCentroidsPerCluster,
-            defaultMaxEntriesPerPage
+            4, // numLeafCentroid
+            0, // firstLeafCentroidId
+            dataFrameSerds
         );
     }
 

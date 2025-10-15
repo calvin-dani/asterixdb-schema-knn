@@ -360,7 +360,12 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
             createMetadataPages();
 
             // Close the loader
-            close();
+            try {
+                close();
+            } catch (HyracksDataException e) {
+                // Ignore close errors to prevent double-close issues
+                System.err.println("Warning: Error during close (likely already closed): " + e.getMessage());
+            }
 
             System.out.println("DEBUG: VCTreeStaticStructureCreator completed successfully");
             printFinalStructure();

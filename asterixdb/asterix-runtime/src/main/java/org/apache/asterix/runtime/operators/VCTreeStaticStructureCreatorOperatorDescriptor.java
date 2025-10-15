@@ -59,16 +59,20 @@ import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
+import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.frames.LIFOMetaDataFrameFactory;
 import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManager;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureCreator;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
 import org.apache.hyracks.storage.common.LocalResource;
@@ -995,6 +999,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 System.err.println(
                         "Creating VCTreeStaticStructureCreator with " + clustersPerLevel.size() + " levels...");
+                // REPLACE VCTreeStaticStructureCreator -> VCTreeStaticStructureBuilder
                 structureCreator = new VCTreeStaticStructureCreator(bufferCache, ioManager, staticStructureFile, 4096,
                         fillFactor, leafFrame, interiorFrame, metaFrame, pageWriteCallback, clustersPerLevel.size(),
                         clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
@@ -1151,29 +1156,25 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 private void initializeLSMBulkLoader() throws HyracksDataException {
                     try {
-                        System.err.println("=== INITIALIZING LSM Bulk Loader ===");
+                        System.err.println("=== INITIALIZING VectorClusteringTree Bulk Loader ===");
                         
                         // Get index helper and open it
                         indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                         indexHelper.open();
                         lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
                         
-                        // Create LSM bulk loader with VCTree-specific parameters
+                        // Create LSM bulk loader (which internally uses VectorClusteringTree)
                         Map<String, Object> parameters = new HashMap<>();
-                        parameters.put("numLevels", 2);
-                        parameters.put("clustersPerLevel", List.of(5, 10));
-                        parameters.put("centroidsPerCluster", List.of(List.of(10), List.of(10)));
-                        parameters.put("maxEntriesPerPage", 100);
-                        parameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID, 
-                            LSMComponentId.DEFAULT_COMPONENT_ID);
+                        parameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID, LSMComponentId.DEFAULT_COMPONENT_ID);
+                        IIndexBulkLoader vcBulkLoader = lsmIndex.createBulkLoader(fillFactor, false, 0L, false, parameters);
                         
-                        lsmBulkLoader = (LSMIndexDiskComponentBulkLoader) lsmIndex.createBulkLoader(
-                            fillFactor, false, 0, false, parameters);
+                        // End the bulk loader immediately
+                        vcBulkLoader.end();
                         
-                        System.err.println("✅ LSM Bulk Loader initialized successfully");
+                        System.err.println("✅ VectorClusteringTree Bulk Loader created and ended successfully");
                         
                     } catch (Exception e) {
-                        System.err.println("ERROR: Failed to initialize LSM Bulk Loader: " + e.getMessage());
+                        System.err.println("ERROR: Failed to initialize VectorClusteringTree Bulk Loader: " + e.getMessage());
                         e.printStackTrace();
                         throw HyracksDataException.create(e);
                     }
