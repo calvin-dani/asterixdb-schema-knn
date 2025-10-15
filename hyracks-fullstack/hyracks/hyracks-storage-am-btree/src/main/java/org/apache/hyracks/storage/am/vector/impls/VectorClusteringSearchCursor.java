@@ -33,6 +33,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
+import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -57,7 +58,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     // Cursor state fields
     private long targetMetadataPageId;
     private long currentDataPageId;
-    private float[] queryVector;
+    private double[] queryVector;
     private boolean isOpen;
     private ITupleReference currentTuple;
     private ICachedPage currentPage;
@@ -65,6 +66,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private ITreeIndexTupleReference frameTuple;
     private int currentTupleIndex;
     private int tupleCount;
+    private IIndexAccessor accessor;
 
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
@@ -98,7 +100,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.dataFrameFactory = dataFrameFactory;
     }
 
-    public void setQueryVector(float[] queryVector) {
+    public void setQueryVector(double[] queryVector) {
         this.queryVector = queryVector;
     }
 
@@ -126,6 +128,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             if (vectorState.getRootPageId() != 0) {
                 this.rootPageId = vectorState.getRootPageId();
             }
+
+            this.accessor = vectorState.getIndexAccessor();
         }
 
         // If targetMetadataPageId is not set, find the closest cluster first
@@ -136,7 +140,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
 
             // Find closest cluster via tree traversal
-            VectorClusteringTree.ClusterSearchResult clusterResult = findClosestClusterFromRoot(this.queryVector);
+            ClusterSearchResult clusterResult = ((VectorClusteringTree.VectorClusteringTreeAccessor)accessor).
+                    findClosestLeafCentroid(queryVector);
             this.targetMetadataPageId = getMetadataPageIdFromCluster(clusterResult);
         }
 
@@ -192,7 +197,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /**
      * Get the query vector used for this search.
      */
-    public float[] getQueryVector() {
+    public double[] getQueryVector() {
         return queryVector;
     }
 
@@ -317,12 +322,12 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Find the closest cluster by traversing the tree from root to leaf.
      * This integrates the centroid finding logic into the cursor.
      */
-    private VectorClusteringTree.ClusterSearchResult findClosestClusterFromRoot(float[] queryVector)
+    private ClusterSearchResult findClosestClusterFromRoot(float[] queryVector)
             throws HyracksDataException {
         // Start from root page
         int currentPageId = rootPageId;
         double bestDistance = Double.MAX_VALUE;
-        VectorClusteringTree.ClusterSearchResult bestResult = null;
+        ClusterSearchResult bestResult = null;
         int loopCounter = 0;
 
         // Traverse from root to leaf
@@ -372,8 +377,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                         ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
                         frameTuple.resetByTupleIndex(leafFrame, bestClusterIndex);
                         double[] bestCentroid = extractCentroidFromLeafTuple(frameTuple);
-                        bestResult = new VectorClusteringTree.ClusterSearchResult(currentPageId, bestClusterIndex,
-                                bestCentroid, leafBestDistance);
+                        bestResult = new ClusterSearchResult(currentPageId, bestClusterIndex,
+                                bestCentroid, leafBestDistance, 0);
                     }
                     break; // Found leaf level result
 
@@ -430,7 +435,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /**
      * Get metadata page ID from cluster search result.
      */
-    private long getMetadataPageIdFromCluster(VectorClusteringTree.ClusterSearchResult clusterResult)
+    private long getMetadataPageIdFromCluster(ClusterSearchResult clusterResult)
             throws HyracksDataException {
         ICachedPage leafPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, clusterResult.leafPageId));
         try {

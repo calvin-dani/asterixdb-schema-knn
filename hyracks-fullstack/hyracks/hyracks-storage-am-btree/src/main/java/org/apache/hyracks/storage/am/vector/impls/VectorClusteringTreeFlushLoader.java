@@ -19,7 +19,9 @@
 package org.apache.hyracks.storage.am.vector.impls;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
@@ -112,6 +114,10 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
     public void end() throws HyracksDataException {
         try {
             // Update root page ID in disk component
+            metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
+                    LongPointable.FACTORY.createPointable(7));
+            metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
+                    LongPointable.FACTORY.createPointable(7));
             super.end();
         } catch (HyracksDataException e) {
             handleException();

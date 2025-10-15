@@ -33,6 +33,7 @@ import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
@@ -454,7 +455,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     /**
      * Get vector embedding from tuple (third field).
      */
-    public float[] getVectorEmbedding(int tupleIndex) throws HyracksDataException {
+    public double[] getVectorEmbedding(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
 
         // Vector embedding is the third field (index 2)
@@ -462,7 +463,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         int offset = frameTuple.getFieldStart(2);
         int length = frameTuple.getFieldLength(2);
 
-        return VectorUtils.bytesToFloatArray(Arrays.copyOfRange(data, offset, offset + length));
+        return VectorUtils.bytesToDoubleArray(Arrays.copyOfRange(data, offset, offset + length));
     }
 
     /**
@@ -488,7 +489,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         frameTuple.resetByTupleIndex(this, tupleIndex);
 
         // Extract existing data
-        float[] vector = getVectorEmbedding(tupleIndex);
+        double[] vector = getVectorEmbedding(tupleIndex);
         byte[] primaryKey = getPrimaryKey(tupleIndex);
 
         // Create updated tuple
@@ -504,21 +505,24 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     /**
      * Create a data tuple with given parameters.
      */
-    private SimpleTupleReference createDataTuple(float[] vector, float distance, float cosine, byte[] primaryKey)
+    private SimpleTupleReference createDataTuple(double[] vector, double distance, double cosine, byte[] primaryKey)
             throws HyracksDataException {
         try {
             // Serialize fields using DataOutput
             ByteArrayOutputStream distanceStream = new ByteArrayOutputStream();
             DataOutputStream distanceOut = new DataOutputStream(distanceStream);
-            FloatSerializerDeserializer.write(distance, distanceOut);
+            DoubleSerializerDeserializer.write(distance, distanceOut);
             byte[] distanceBytes = distanceStream.toByteArray();
 
             ByteArrayOutputStream cosineStream = new ByteArrayOutputStream();
             DataOutputStream cosineOut = new DataOutputStream(cosineStream);
-            FloatSerializerDeserializer.write(cosine, cosineOut);
+            DoubleSerializerDeserializer.write(cosine, cosineOut);
             byte[] cosineBytes = cosineStream.toByteArray();
 
-            byte[] vectorBytes = VectorUtils.floatArrayToBytes(vector);
+            ByteArrayOutputStream vectorStream = new ByteArrayOutputStream();
+            DataOutputStream vectorOut = new DataOutputStream(vectorStream);
+            DoubleArraySerializerDeserializer.write(vector, vectorOut);
+            byte[] vectorBytes = vectorStream.toByteArray();
 
             // Create raw tuple data manually using SimpleTupleWriter format
             int totalSize =
@@ -585,7 +589,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
      * @return ITupleReference representing the data tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    public ITupleReference createDataTuple(float[] vector, double distance, double cosineSim,
+    public ITupleReference createDataTuple(double[] vector, double distance, double cosineSim,
             ITupleReference originalTuple) throws HyracksDataException {
         // Extract primary key from original tuple (assume last field)
         try {
@@ -644,7 +648,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
      * @return Updated data tuple with preserved vector/PK and updated included fields
      * @throws HyracksDataException if tuple creation fails
      */
-    public ITupleReference createUpdatedDataTupleWithIncludedFields(float[] currentVector, double currentDistance,
+    public ITupleReference createUpdatedDataTupleWithIncludedFields(double[] currentVector, double currentDistance,
             double currentCosine, byte[] currentPK, ITupleReference updateTuple) throws HyracksDataException {
 
         try {
@@ -666,7 +670,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
 
             // Use existing createDataTuple method and then append included fields
             SimpleTupleReference baseTuple =
-                    createDataTuple(currentVector, (float) currentDistance, (float) currentCosine, currentPK);
+                    createDataTuple(currentVector, currentDistance, currentCosine, currentPK);
 
             if (numIncludedFields == 0) {
                 // No included fields to add, return base tuple

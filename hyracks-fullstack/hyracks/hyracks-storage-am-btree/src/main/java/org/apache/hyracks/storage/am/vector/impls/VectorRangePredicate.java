@@ -27,7 +27,7 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
  */
 public abstract class VectorRangePredicate implements ISearchPredicate {
 
-    private final float[] queryVector;
+    private final double[] queryVector;
     private final double maxDistance;
     private final DistanceFunction distanceFunction;
 
@@ -37,17 +37,17 @@ public abstract class VectorRangePredicate implements ISearchPredicate {
         MANHATTAN
     }
 
-    public VectorRangePredicate(float[] queryVector, double maxDistance) {
+    public VectorRangePredicate(double[] queryVector, double maxDistance) {
         this(queryVector, maxDistance, DistanceFunction.EUCLIDEAN);
     }
 
-    public VectorRangePredicate(float[] queryVector, double maxDistance, DistanceFunction distanceFunction) {
+    public VectorRangePredicate(double[] queryVector, double maxDistance, DistanceFunction distanceFunction) {
         this.queryVector = queryVector.clone();
         this.maxDistance = maxDistance;
         this.distanceFunction = distanceFunction;
     }
 
-    public float[] getQueryVector() {
+    public double[] getQueryVector() {
         return queryVector.clone();
     }
 

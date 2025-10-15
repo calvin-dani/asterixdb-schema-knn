@@ -120,5 +120,11 @@
       <groupId>org.mockito</groupId>
       <artifactId>mockito-core</artifactId>
     </dependency>
+    <dependency>
+      <groupId>org.apache.hyracks</groupId>
+      <artifactId>hyracks-storage-am-lsm-btree</artifactId>
+      <version>0.3.10-SNAPSHOT</version>
+      <scope>compile</scope>
+    </dependency>
   </dependencies>
 </project>

@@ -19,6 +19,7 @@
 package org.apache.hyracks.storage.am.vector.impls;
 
 import org.apache.hyracks.storage.common.ICursorInitialState;
+import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
@@ -32,22 +33,29 @@ public class VectorCursorInitialState implements ICursorInitialState {
     private long metadataPageId;
     private long targetDataPageId;
     private int rootPageId;
-    private float[] queryVector;
+    private double[] queryVector;
     private double[] clusterCentroid;
     private double distanceToCentroid;
     private ICachedPage page;
     private ISearchOperationCallback searchCallback;
     private MultiComparator originalKeyCmp;
+    private final IIndexAccessor accessor;
 
-    public VectorCursorInitialState() {
+    public VectorCursorInitialState(IIndexAccessor accessor) {
+        this.accessor = accessor;
         this.targetDataPageId = -1;
         this.metadataPageId = -1;
     }
 
-    public VectorCursorInitialState(long metadataPageId, float[] queryVector) {
+    public VectorCursorInitialState(long metadataPageId, double[] queryVector, IIndexAccessor accessor) {
         this.metadataPageId = metadataPageId;
         this.targetDataPageId = -1;
         this.queryVector = queryVector != null ? queryVector.clone() : null;
+        this.accessor = accessor;
+    }
+
+    public IIndexAccessor getIndexAccessor() {
+        return accessor;
     }
 
     public void setMetadataPageId(long metadataPageId) {
@@ -66,11 +74,11 @@ public class VectorCursorInitialState implements ICursorInitialState {
         return targetDataPageId;
     }
 
-    public void setQueryVector(float[] queryVector) {
+    public void setQueryVector(double[] queryVector) {
         this.queryVector = queryVector;
     }
 
-    public float[] getQueryVector() {
+    public double[] getQueryVector() {
         return queryVector;
     }
 
@@ -132,5 +140,9 @@ public class VectorCursorInitialState implements ICursorInitialState {
     public String toString() {
         return "VectorCursorInitialState[metadataPageId=" + metadataPageId + ", targetDataPageId=" + targetDataPageId
                 + "]";
+    }
+
+    public IIndexAccessor getAccessor() {
+        return accessor;
     }
 }

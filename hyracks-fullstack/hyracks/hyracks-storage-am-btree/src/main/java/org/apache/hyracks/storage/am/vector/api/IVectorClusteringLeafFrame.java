@@ -66,6 +66,8 @@ public interface IVectorClusteringLeafFrame extends IVectorClusteringFrame {
      */
     void setMetadataPagePointer(int tupleIndex, int metadataPageId) throws HyracksDataException;
 
+    int getCentroidId(int tupleIndex) throws HyracksDataException;
+
     /**
      * Inserts a cluster entry at the specified index.
      * @param tuple the cluster entry to insert
@@ -82,6 +84,8 @@ public interface IVectorClusteringLeafFrame extends IVectorClusteringFrame {
      */
     void ensureCapacity(IBufferCache bufferCache, ITupleReference tuple, IExtraPageBlockHelper extraPageBlockHelper)
             throws HyracksDataException;
+
+    boolean getOverflowFlagBit();
 
     void setOverflowFlagBit(boolean overflowFlag);
 }

@@ -20,10 +20,12 @@
 package org.apache.hyracks.storage.am.vector;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.TreeSet;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.CheckTuple;
 import org.apache.hyracks.storage.am.common.IndexTestContext;
 import org.apache.hyracks.storage.common.IIndex;
@@ -33,6 +35,33 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
 
     protected final TreeSet<CheckTuple> checkTuples = new TreeSet<CheckTuple>();
     protected final int vectorDimensions;
+
+    public List<Integer> getNumClustersPerLevel() {
+        return numClustersPerLevel;
+    }
+
+    public void setNumClustersPerLevel(List<Integer> numClustersPerLevel) {
+        this.numClustersPerLevel = numClustersPerLevel;
+    }
+    public List<ITupleReference> getStaticStructureCentroids() {
+        return centroids;
+    }
+
+    public List<List<Integer>> getNumCentroidsPerLevel() {
+        return numCentroidsPerLevel;
+    }
+
+    public void setNumCentroidsPerLevel(List<List<Integer>> numCentroidsPerLevel) {
+        this.numCentroidsPerLevel = numCentroidsPerLevel;
+    }
+
+    public void setStaticStructureCentroids(List<ITupleReference> centroids) {
+        this.centroids = centroids;
+    }
+
+    protected List<Integer> numClustersPerLevel;
+    protected List<List<Integer>> numCentroidsPerLevel;
+    protected List<ITupleReference> centroids;
 
     public AbstractVectorTreeTestContext(ISerializerDeserializer[] fieldSerdes, IIndex index, boolean filtered,
             int vectorDimensions) throws HyracksDataException {
@@ -65,5 +94,6 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
     public int getVectorDimensions() {
         return vectorDimensions;
     }
+
 
 }
