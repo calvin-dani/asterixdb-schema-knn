@@ -57,6 +57,7 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
+import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -134,8 +135,23 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        // TODO: Implement vector clustering tree bulk loader
-        return null;
+        // Create VCTreeLoader with default parameters
+        // The LSM system will handle the actual parameters at a higher level
+        List<Integer> defaultClustersPerLevel = List.of(5, 10);
+        List<List<Integer>> defaultCentroidsPerCluster = List.of(
+            List.of(10), List.of(10)
+        );
+        int defaultMaxEntriesPerPage = 100;
+        
+        return new VCTreeLoader(fillFactor, callback, this, 
+            leafFrameFactory.createFrame(), 
+            dataFrameFactory.createFrame(),
+            DefaultBufferCacheWriteContext.INSTANCE,
+            2, // numLevels
+            defaultClustersPerLevel,
+            defaultCentroidsPerCluster,
+            defaultMaxEntriesPerPage
+        );
     }
 
     public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
