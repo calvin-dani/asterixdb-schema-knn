@@ -27,9 +27,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
-import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
-import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
@@ -59,6 +57,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     private int currentDataPageId; // Page ID of the current data page
     private ISerializerDeserializer[] dataFrameSerds;
     private final VectorClusteringTree vcTreeIndex;
+
     public VCTreeBulkLoder(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds)
@@ -126,8 +125,9 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         /*  use static structure to find the closest leaf centroid for the given tuple
             return the leaf centroid ID and the distance
         */
-        VectorClusteringTree.VectorClusteringTreeAccessor accessor = (VectorClusteringTree.VectorClusteringTreeAccessor)
-                vcTreeIndex.createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        VectorClusteringTree.VectorClusteringTreeAccessor accessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) vcTreeIndex
+                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
         double[] vectorEmbedding = extractVector(tuple);
         return accessor.findClosestLeafCentroid(vectorEmbedding); // Placeholder

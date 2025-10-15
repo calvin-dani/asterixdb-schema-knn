@@ -44,10 +44,8 @@ import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
 import org.apache.hyracks.storage.common.IIndexAccessor;
-import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
-import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -78,14 +76,14 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         List<ITupleReference> centroids = ctx.getStaticStructureCentroids();
 
         // Create the static structure builder
-        VCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree)ctx.getIndex()).
-                createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster, 5);
+        VCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree) ctx.getIndex()).createStaticStructureBuilder(numLevels,
+                clustersPerLevel, centroidsPerCluster, 5);
 
         // Add centroids to the builder level by level
         for (ITupleReference tuple : centroids) {
             ssBuilder.add(tuple);
         }
-        
+
         ssBuilder.end();
     }
 

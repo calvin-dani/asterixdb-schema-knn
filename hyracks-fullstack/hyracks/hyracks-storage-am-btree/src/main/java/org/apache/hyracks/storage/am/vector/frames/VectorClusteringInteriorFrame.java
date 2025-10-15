@@ -52,9 +52,9 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
         return buf.get(OVERFLOW_FLAG_OFFSET) != 0;
     }
 
-        /**
-         * Set the next page pointer for overflow chaining
-         */
+    /**
+     * Set the next page pointer for overflow chaining
+     */
     public void setNextPage(int nextPageId) {
         buf.putInt(NEXT_PAGE_OFFSET, nextPageId);
     }

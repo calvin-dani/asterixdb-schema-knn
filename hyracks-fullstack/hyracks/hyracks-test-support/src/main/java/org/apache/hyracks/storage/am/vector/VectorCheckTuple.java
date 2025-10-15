@@ -115,8 +115,9 @@ public class VectorCheckTuple extends CheckTuple {
         if (o instanceof VectorCheckTuple) {
             VectorCheckTuple other = (VectorCheckTuple) o;
             for (int i = 0; i < fields.length; i++) {
-                if ((fields[i] instanceof FloatArrayWrapper && other.getField(i) instanceof FloatArrayWrapper) ||
-                    (fields[i] instanceof DoubleArrayWrapper && other.getField(i) instanceof DoubleArrayWrapper)) {
+                if ((fields[i] instanceof FloatArrayWrapper && other.getField(i) instanceof FloatArrayWrapper)
+                        || (fields[i] instanceof DoubleArrayWrapper
+                                && other.getField(i) instanceof DoubleArrayWrapper)) {
                     // Special handling for array wrappers (vectors)
                     if (!fields[i].equals(other.getField(i))) {
                         return false;

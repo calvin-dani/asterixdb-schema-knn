@@ -21,12 +21,9 @@ package org.apache.asterix.metadata.utils;
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.BuiltinType.AINT32;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
-import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
@@ -38,7 +35,6 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
-import org.apache.asterix.runtime.operators.VCTreeDataBulkLoaderOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -61,7 +57,6 @@ import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
-import org.apache.hyracks.dataflow.std.misc.ReplicateOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
@@ -93,7 +88,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Index: " + index.getIndexName());
         System.err.println("Index type: " + index.getIndexType());
         System.err.println("Index details: " + index.getIndexDetails());
-        System.err.println("Creating 2-Phase Job with Permit Mechanism");
+        System.err.println("Creating Single Branch Job for Structure Creation");
         System.err.println("==========================================");
 
         IDataFormat format = metadataProvider.getDataFormat();
@@ -106,22 +101,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
 
         JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
-        PartitioningProperties partitioningProperties =
-                metadataProvider.getPartitioningProperties(dataset, index.getIndexName());
         Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
-        int[] fieldPermutation = createFieldPermutationForBulkLoadOp(numSecondaryKeys);
-        int[] pkFields = createPkFieldPermutationForBulkLoadOp(fieldPermutation, numSecondaryKeys);
         IIndexDataflowHelperFactory dataflowHelperFactory = new IndexDataflowHelperFactory(
                 metadataProvider.getStorageComponentProvider().getStorageManager(), secondaryFileSplitProvider);
         // job spec:
-        // key provider -> primary idx scan -> cast assign -> replicate -> [branch1: k-means -> bulk load -> sink] [branch2: placeholder -> sink]
+        // key provider -> primary idx scan -> cast assign -> k-means -> static structure creator -> sink
         IndexUtil.bindJobEventListener(spec, metadataProvider);
 
         System.err.println("=== INITIAL JOB SETUP ===");
         System.err.println("Dataset: " + dataset.getDatasetName());
         System.err.println("Index: " + index.getIndexName());
-        System.err.println("Creating 2-branch job with replication");
+        System.err.println("Creating single branch job for structure creation");
 
         // if format == column, then project only the indexed fields
         ITupleProjectorFactory projectorFactory =
@@ -143,32 +134,20 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Connected: PrimaryIndexScan → CastAssign");
         System.err.println("CastAssign operator: " + targetOp);
 
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
+
         UUID sampleUUID = UUID.randomUUID();
-        UUID KCentroidsUUID = UUID.randomUUID();
         UUID centroidsUUID = UUID.randomUUID();
         UUID permitUUID = UUID.randomUUID();
-        UUID kCentroidsUUID = UUID.randomUUID();
 
-        // Register permit state for coordination between branches
-        // This will be accessible to both Branch 1 and Branch 2 operators
+        // Register permit state for structure creation coordination
         System.err.println("=== REGISTERING PERMIT STATE ===");
         System.err.println("Permit UUID: " + permitUUID);
-        System.err.println("Permit state will be registered by operators at runtime");
+        System.err.println("Permit state will be used by StaticStructureCreator operator");
 
         int K = 10;
         int maxScalableKmeansIter = 2;
-
-        // _ -> init centroids (materialize sample)
-
-        ISerializerDeserializer[] newCentSerde = new ISerializerDeserializer[1];
-        ITypeTraits[] newCentTraits = new ITypeTraits[1];
-
-        newCentSerde[0] = serdeProvider.getSerializerDeserializer(new AOrderedListType(ADOUBLE, "embedding"));
-
-        newCentTraits[0] = typeTraitProvider.getTypeTrait(new AOrderedListType(ADOUBLE, "embedding"));
-        // Construct the new RecordDescriptor
-
-        RecordDescriptor centroidRecDesc = new RecordDescriptor(newCentSerde, newCentTraits);
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
         ISerializerDeserializer[] hierarchicalSerde = new ISerializerDeserializer[4];
@@ -200,135 +179,69 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Number of fields in secondary: " + secondaryRecDesc.getFieldCount());
         System.err.println("Number of fields in hierarchical: " + hierarchicalRecDesc.getFieldCount());
 
-        // ====== REPLICATION OPERATOR: Split data stream into two branches ======
-        System.out.println("*** VECTOR INDEX DEBUG: CREATING REPLICATION OPERATOR ***");
+        // ====== SINGLE BRANCH: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
+        System.out.println("*** VECTOR INDEX DEBUG: CREATING SINGLE BRANCH PIPELINE ***");
         System.err.println("==========================================");
-        System.err.println("*** CREATING REPLICATION OPERATOR ***");
+        System.err.println("*** CREATING SINGLE BRANCH PIPELINE ***");
         System.err.println("==========================================");
-        sourceOp = targetOp;
-        System.err.println("🔧 CREATING REPLICATION OPERATOR - This splits data to both branches");
-        ReplicateOperatorDescriptor replicateOp = new ReplicateOperatorDescriptor(spec, secondaryRecDesc, 2);
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, replicateOp,
-                primaryPartitionConstraint);
-        targetOp = replicateOp;
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        System.err.println("Pipeline: CastAssign → K-means → StaticStructureCreator → Sink");
 
-        System.out.println("*** VECTOR INDEX DEBUG: REPLICATION OPERATOR CREATED ***");
-        System.err.println("=== REPLICATION OPERATOR CREATED ===");
-        System.err.println("Replicate operator: " + replicateOp);
-        System.err.println("Input record descriptor: " + secondaryRecDesc);
-        System.err.println("Number of outputs: 2");
-        System.err.println("Output 0 → Branch 1 (Structure Creation)");
-        System.err.println("Output 1 → Branch 2 (Data Loading Placeholder)");
-        System.err.println("==========================================");
-
-        // ====== BRANCH 1: STRUCTURE CREATION (Phase 1) ======
-        IOperatorDescriptor branch1Source = targetOp;
-
-        System.err.println("=== BRANCH 1 SETUP: STRUCTURE CREATION ===");
-        System.err.println("Branch 1 source: " + branch1Source);
-        System.err.println("🔍 DEBUG: Branch 1 source is replicate operator: "
-                + (branch1Source instanceof ReplicateOperatorDescriptor));
-
-        // 1. K-means operator (following original K-means pattern)
-        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR FOR BRANCH 1");
+        // 1. K-means operator
+        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
-        IOperatorDescriptor branch1Target = candidates;
-        spec.connect(new OneToOneConnectorDescriptor(spec), branch1Source, 0, branch1Target, 0);
+        targetOp = candidates;
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("🔍 DEBUG: Connected Branch 1 - Replicate output 0 → K-means input 0");
-        System.err.println("🔍 DEBUG: Replicate operator: " + branch1Source);
-        System.err.println("🔍 DEBUG: K-means operator: " + branch1Target);
+        System.err.println("Connected: CastAssign → K-means");
+        System.err.println("K-means operator: " + candidates);
 
-        System.err.println("Branch 1 - HierarchicalKMeans: " + candidates);
-        System.err.println("Connected: " + branch1Source + " output 0 → " + branch1Target + " input 0");
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
 
-        // 2. VCTree static structure creator (following original K-means pattern)
-        branch1Source = branch1Target;
-        System.err.println("🔧 CREATING VCTreeStaticStructureCreator FOR BRANCH 1");
+        // 2. VCTree static structure creator
+        System.err.println("🔧 CREATING VCTreeStaticStructureCreator");
         VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
                 new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
                         hierarchicalRecDesc, permitUUID);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeCreator,
                 primaryPartitionConstraint);
-        branch1Target = vcTreeCreator;
-        spec.connect(new OneToOneConnectorDescriptor(spec), branch1Source, 0, branch1Target, 0);
+        targetOp = vcTreeCreator;
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Branch 1 - VCTreeStaticStructureCreator: " + vcTreeCreator);
-        System.err.println("Connected: " + branch1Source + " output 0 → " + branch1Target + " input 0");
+        System.err.println("Connected: K-means → StaticStructureCreator");
+        System.err.println("StaticStructureCreator operator: " + vcTreeCreator);
 
-        // 3. Final sink (following original K-means pattern)
-        branch1Source = branch1Target;
-        SinkRuntimeFactory branch1SinkRuntimeFactory = new SinkRuntimeFactory();
-        branch1SinkRuntimeFactory.setSourceLocation(sourceLoc);
-        IOperatorDescriptor branch1Sink = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
-                new IPushRuntimeFactory[] { branch1SinkRuntimeFactory },
-                new RecordDescriptor[] { hierarchicalRecDesc });
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, branch1Sink,
-                primaryPartitionConstraint);
-        spec.connect(new OneToOneConnectorDescriptor(spec), branch1Source, 0, branch1Sink, 0);
-
-        System.err.println("Branch 1 - Sink: " + branch1Sink);
-        System.err.println("Connected: " + branch1Source + " output 0 → " + branch1Sink + " input 0");
-        System.err.println("=== BRANCH 1 COMPLETE ===");
-
-        // ====== BRANCH 2: DATA LOADING WITH PERMIT WAIT (Phase 2) ======
-        IOperatorDescriptor branch2Source = targetOp; // Same replicate operator, output 1
-
-        System.err.println("=== BRANCH 2 SETUP: DATA LOADING WITH PERMIT WAIT ===");
-        System.err.println("Branch 2 source: " + branch2Source);
-        System.err.println("Using replicate operator output 1");
-        System.err.println("🔍 DEBUG: Branch 2 source is replicate operator: "
-                + (branch2Source instanceof ReplicateOperatorDescriptor));
-
-        // 1. Data bulk loader (loads data into structure, waits for permit internally)
-        Map<Integer, String> runFilePaths = new HashMap<>(); // Empty for now, will be populated by k-means
-        VCTreeDataBulkLoaderOperatorDescriptor dataBulkLoader = new VCTreeDataBulkLoaderOperatorDescriptor(spec,
-                dataflowHelperFactory, 100, 0.7f, secondaryRecDesc, permitUUID, runFilePaths);
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, dataBulkLoader,
-                primaryPartitionConstraint);
-        IOperatorDescriptor branch2Final = dataBulkLoader;
-        spec.connect(new OneToOneConnectorDescriptor(spec), branch2Source, 1, branch2Final, 0);
-
-        System.err.println("Branch 2 - VCTreeDataBulkLoader: " + dataBulkLoader);
-        System.err.println("Connected: " + branch2Source + " output 1 → " + branch2Final + " input 0");
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
 
         // 3. Final sink
-        SinkRuntimeFactory branch2SinkRuntimeFactory = new SinkRuntimeFactory();
-        branch2SinkRuntimeFactory.setSourceLocation(sourceLoc);
-        IOperatorDescriptor branch2Sink = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
-                new IPushRuntimeFactory[] { branch2SinkRuntimeFactory }, new RecordDescriptor[] { secondaryRecDesc });
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, branch2Sink,
+        SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
+        sinkRuntimeFactory.setSourceLocation(sourceLoc);
+        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
+                new IPushRuntimeFactory[] { sinkRuntimeFactory },
+                new RecordDescriptor[] { hierarchicalRecDesc });
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
                 primaryPartitionConstraint);
-        spec.connect(new OneToOneConnectorDescriptor(spec), branch2Final, 0, branch2Sink, 0);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Branch 2 - Final Sink: " + branch2Sink);
-        System.err.println("Connected: " + branch2Final + " output 0 → " + branch2Sink + " input 0");
-        System.err.println("=== BRANCH 2 COMPLETE ===");
+        System.err.println("Connected: StaticStructureCreator → Sink");
+        System.err.println("Sink operator: " + targetOp);
+        System.err.println("=== SINGLE BRANCH PIPELINE COMPLETE ===");
 
-        // ====== PERMIT MECHANISM ======
-        System.err.println("=== PERMIT MECHANISM INITIALIZED ===");
-        System.err.println("Permit UUID: " + permitUUID);
-        System.err.println("Branch 1 (Structure Creation) will complete first");
-        System.err.println("Branch 2 (Data Loading) will wait for permit before starting");
-
-        // Add both branches as roots
-        spec.addRoot(branch1Sink);
-        spec.addRoot(branch2Sink);
+        // Add single branch as root
+        spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
         System.err.println("=== JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
-        System.err.println("  Root 1: " + branch1Sink + " (Branch 1 - Structure Creation)");
-        System.err.println("  Root 2: " + branch2Sink + " (Branch 2 - Data Loading with Permit Wait)");
-        System.err.println("=== 2-PHASE JOB CREATED WITH REPLICATION ===");
-        System.err.println("=== BRANCH 1: DataSource → Replicate → K-means → StaticStructureCreator → Sink ===");
-        System.err.println("=== BRANCH 2: DataSource → Replicate → PermitWait → DataBulkLoader → Sink ===");
-        System.err.println("=== PERMIT MECHANISM: Branch 1 signals completion, Branch 2 waits for permit ===");
+        System.err.println("  Root: " + targetOp + " (Single Branch - K-means → StaticStructureCreator → Sink)");
+        System.err.println("=== SINGLE BRANCH JOB CREATED ===");
+        System.err.println("=== PIPELINE: DataSource → CastAssign → K-means → StaticStructureCreator → Sink ===");
+        System.err.println("=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");

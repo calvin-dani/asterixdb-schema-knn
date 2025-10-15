@@ -35,9 +35,9 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.*;
-import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
@@ -176,10 +176,10 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
         try {
             // Create VCTreeStaticStructureLoader with real structure
-            VCTreeLoader staticLoader = new VCTreeLoader(fillFactor, callback, vcTree,
-                    vcTree.getLeafFrameFactory().createFrame(), vcTree.getDataFrameFactory().createFrame(),
-                    DefaultBufferCacheWriteContext.INSTANCE, numLevels,
-                    clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
+            VCTreeLoader staticLoader =
+                    new VCTreeLoader(fillFactor, callback, vcTree, vcTree.getLeafFrameFactory().createFrame(),
+                            vcTree.getDataFrameFactory().createFrame(), DefaultBufferCacheWriteContext.INSTANCE,
+                            numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
 
             System.err.println("VCTreeStaticStructureLoader created successfully with real structure");
 
@@ -193,7 +193,6 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             throw HyracksDataException.create(e);
         }
     }
-    
 
     static IMetadataPageManager getMetadataPageManager(VectorClusteringTree vcTree) {
         return (IMetadataPageManager) vcTree.getPageManager();
@@ -227,6 +226,7 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
     public VCTreeStaticStructureBuilder createStaticStructureBuilder(NCConfig storageConfig, int numLevels,
             List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage,
             NoOpPageWriteCallback instance) throws HyracksDataException {
-        return getIndex().createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage, instance);
+        return getIndex().createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster,
+                maxEntriesPerPage, instance);
     }
 }

@@ -37,7 +37,6 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
-import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
@@ -73,11 +72,10 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     private IVectorClusteringLeafFrame leafFrame;
 
     public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree,
-            ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, int numLevels,
-            List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage)
-            throws HyracksDataException {
+            ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, int numLevels, List<Integer> clustersPerLevel,
+            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage) throws HyracksDataException {
 
-        super(0, callback, vectorTree, leafFrame, DefaultBufferCacheWriteContext.INSTANCE );
+        super(0, callback, vectorTree, leafFrame, DefaultBufferCacheWriteContext.INSTANCE);
 
         this.numLevels = numLevels;
         this.clustersPerLevel = new ArrayList<>(clustersPerLevel); // Defensive copy

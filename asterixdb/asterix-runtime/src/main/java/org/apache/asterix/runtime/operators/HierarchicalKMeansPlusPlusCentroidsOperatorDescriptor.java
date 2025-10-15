@@ -316,9 +316,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
                 System.err.println("🔍 DEBUG: Generating test hierarchical data for VCTreeStaticStructureCreator");
                 generateTestHierarchicalData(buffer);
 
-                // Close ourselves to signal completion
-                System.err.println("🔍 DEBUG: HierarchicalKMeans processing complete, closing");
-                close();
+                // Don't close here - let the framework handle closing when all frames are processed
+                System.err.println("🔍 DEBUG: HierarchicalKMeans test data generated, continuing...");
             } else {
                 System.err.println("❌ ERROR: Writer is NULL - cannot write output to VCTreeStaticStructureCreator!");
             }
@@ -391,7 +390,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
             if (writer != null) {
                 System.err.println("🔍 DEBUG: Closing writer to VCTreeStaticStructureCreator");
                 writer.close();
+                System.err.println("🔍 DEBUG: Writer closed successfully");
             }
+            System.err.println("=== HierarchicalKMeans CLOSED ===");
         }
 
         @Override
