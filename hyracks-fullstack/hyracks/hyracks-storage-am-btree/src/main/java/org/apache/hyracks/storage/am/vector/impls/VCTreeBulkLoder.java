@@ -27,9 +27,9 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
-import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
-import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
@@ -38,6 +38,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
+import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -58,12 +59,14 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     private int entriesInCurrentDirectoryPage; // Number of entries in current directory page
     private int currentDataPageId; // Page ID of the current data page
     private ISerializerDeserializer[] dataFrameSerds;
+    private ITreeIndexTupleWriter directoryFrameTupleWriter;
+    private ITreeIndexTupleWriter dataFrameTupleWriter;
     private final VectorClusteringTree vcTreeIndex;
     public VCTreeBulkLoder(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds)
             throws HyracksDataException {
-        super(fillFactor, callback, vectorTree, leafFrame, writeContext);
+        super(0, callback, vectorTree, leafFrame, writeContext);
         this.numLeafCentroid = numLeafCentroid;
         this.firstLeafCentroidId = firstLeafCentroidId;
 
@@ -75,6 +78,12 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         this.currentDataFrame = vectorTree.getDataFrameFactory().createFrame();
         this.dataFrameSerds = dataFrameSerds;
         this.vcTreeIndex = vectorTree;
+
+        this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
+        this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
+        this.currentLeafClusterIndex = 0;
+        createFirstDirectoryPages();
+        createNewDataPage();
     }
 
     public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
@@ -94,7 +103,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     /**
      * Create metadata pages for leaf clusters.
      */
-    private void createMetadataPages() throws HyracksDataException {
+    private void createFirstDirectoryPages() throws HyracksDataException {
         for (int leafCentroidId = 0; leafCentroidId < numLeafCentroid; leafCentroidId++) {
             // For metadata pages, use freePageManager.takePage() normally
             int metadataPageId = freePageManager.takePage(metaFrame);
@@ -152,8 +161,9 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     public void add(ITupleReference tuple) throws HyracksDataException {
         try {
             // Calculate space needed for this tuple - following BTreeNSMBulkLoader pattern
-            int spaceNeeded = tupleWriter.bytesRequired(tuple) + slotSize;
+            int spaceNeeded = dataFrameTupleWriter.bytesRequired(tuple) + slotSize;
             int spaceAvailable = currentDataFrame.getTotalFreeSpace();
+            double distance = extractDistance(tuple);
 
             // If still full, need to create new data page and update directory
             if (spaceNeeded > spaceAvailable) {
@@ -191,8 +201,14 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         // Move to next leaf cluster
         currentLeafClusterIndex++;
 
+        if (currentLeafClusterIndex == directoryPages.size()){
+            // Finished all leaf clusters
+            LOGGER.debug("Finished loading all leaf clusters");
+            return;
+        }
+
         // Check if we have more clusters to load
-        if (currentLeafClusterIndex >= directoryPages.size()) {
+        if (currentLeafClusterIndex > directoryPages.size()) {
             throw new HyracksDataException("No more leaf clusters to load");
         }
 
@@ -246,7 +262,9 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         // For now, use a placeholder distance value
         // this would be the maximum distance of tuples in the data page
         // TODO: extract actual max distance from data page's last tuple
-        double maxDistance = 6.6; // Placeholder
+
+        int tupleCount = currentDataFrame.getTupleCount();
+        double maxDistance = ((IVectorClusteringDataFrame)currentDataFrame).getDistanceToCentroid(tupleCount - 1);
 
         try {
             ITupleReference directoryEntry =
@@ -254,7 +272,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
                             IntegerSerializerDeserializer.INSTANCE }, maxDistance, currentDataPageId);
 
             // Check if directory page has space
-            int spaceNeeded = tupleWriter.bytesRequired(directoryEntry) + slotSize;
+            int spaceNeeded = directoryFrameTupleWriter.bytesRequired(directoryEntry) + slotSize;
             int spaceAvailable = currentDirectoryFrame.getTotalFreeSpace();
 
             if (spaceNeeded > spaceAvailable) {
@@ -329,7 +347,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         try {
             if (currentDataFrame != null) {
                 int tupleSize = currentDataFrame.getBytesRequiredToWriteTuple(tuple);
-                int spaceNeeded = tupleWriter.bytesRequired(tuple) + slotSize;
+                int spaceNeeded = dataFrameTupleWriter.bytesRequired(tuple) + slotSize;
                 int spaceUsed = currentDataFrame.getBuffer().capacity() - currentDataFrame.getTotalFreeSpace();
 
                 LOGGER.error(

@@ -211,7 +211,7 @@ public class LSMVCTreeUtils {
         ILSMComponentFilterFrameFactory filterFrameFactory = null; // No filtering by default
         LSMComponentFilterManager filterManager = null; // No filter manager by default
         IComponentFilterHelper filterHelper = null; // No filter helper by default
-        boolean atomic = true; // Default to atomic operations
+        boolean atomic = false; // Default to atomic operations
 
         return createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits,
                 cmpFactories, bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,

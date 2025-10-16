@@ -30,16 +30,27 @@ import java.util.TreeSet;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.CheckTuple;
 import org.apache.hyracks.storage.am.common.IIndexTestContext;
 import org.apache.hyracks.storage.am.common.TreeIndexTestUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeStaticStructureBuilder;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
@@ -47,6 +58,7 @@ import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -78,15 +90,62 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         List<ITupleReference> centroids = ctx.getStaticStructureCentroids();
 
         // Create the static structure builder
-        VCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree)ctx.getIndex()).
+        LSMVCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree)ctx.getIndex()).
                 createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster, 5);
 
         // Add centroids to the builder level by level
         for (ITupleReference tuple : centroids) {
             ssBuilder.add(tuple);
         }
-        
         ssBuilder.end();
+    }
+
+    public void bulkLoadRecords(AbstractVectorTreeTestContext ctx) throws Exception {
+        // Create the static structure builder
+        LSMVCTree lsmvcTree = (LSMVCTree)ctx.getIndex();
+        LSMVCTreeDiskComponent staticStructure = lsmvcTree.getStaticStructure();
+        IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+
+        VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
+        ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
+        // Simple bulk load - just copy all pages
+        int maxPageId = staticStructure.getIndex().getPageManager().getMaxPageId(metaFrame);
+
+        MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+        LongPointable value1 = LongPointable.FACTORY.createPointable();
+        MutableArrayValueReference key2 = new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
+        LongPointable value2 = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key1, value1);
+        metaFrame.get(key2, value2);
+        int numLeafCentroids = value1.intValue();
+        int firstLeafCentroidId = value2.intValue();
+
+        // Create field serializers and values
+        ISerializerDeserializer[] dataFrameSerdes = new ISerializerDeserializer[] {
+                DoubleSerializerDeserializer.INSTANCE,  // distance
+                DoubleSerializerDeserializer.INSTANCE,  // cosine similarity, useless for now
+                DoubleArraySerializerDeserializer.INSTANCE,  // vector
+                new UTF8StringSerializerDeserializer()       // primary key
+        };
+
+        LSMVCTreeBulkLoader bulkLoader = ((LSMVCTree)ctx.getIndex()).
+                createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes);
+
+        for (int pageId = 0; pageId <= maxPageId; pageId++) {
+            ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
+            bulkLoader.copyPage(sourcePage);
+            vcTreeAccessor.releasePage(sourcePage);
+        }
+
+        for (List<ITupleReference> records : ctx.getDataRecords()) {
+            for (ITupleReference record : records) {
+                bulkLoader.add(record);
+            }
+            bulkLoader.next();
+        }
+
+        bulkLoader.end();
     }
 
     public List<TestClusterData> insertRecordsIntoMultipleClusters(AbstractVectorTreeTestContext ctx) throws Exception {

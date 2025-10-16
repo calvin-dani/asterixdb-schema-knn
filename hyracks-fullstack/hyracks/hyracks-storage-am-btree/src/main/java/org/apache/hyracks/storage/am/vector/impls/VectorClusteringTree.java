@@ -57,6 +57,7 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
+import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -131,11 +132,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return 0;
     }
 
-    @Override
-    public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        // TODO: Implement vector clustering tree bulk loader
-        return null;
+    public VCTreeBulkLoder createBulkLoader(NoOpPageWriteCallback instance, int numLeafCentroid, int firstLeafCentroidId,
+            ISerializerDeserializer[] dataFrameSerdes)
+            throws HyracksDataException {
+        return new VCTreeBulkLoder(0,instance, this, leafFrameFactory.createFrame(),
+                dataFrameFactory.createFrame(), DefaultBufferCacheWriteContext.INSTANCE,
+                numLeafCentroid, firstLeafCentroidId, dataFrameSerdes);
     }
 
     public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
@@ -1034,6 +1036,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         // Validation logic specific to vector clustering tree
     }
 
+    @Override
+    public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+        throw new UnsupportedOperationException("Not supported");
+    }
 
     /**
      * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both

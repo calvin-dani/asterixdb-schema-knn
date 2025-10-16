@@ -124,13 +124,7 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
 
     public void insertSorted(ITupleReference tuple) {
         // Insert while maintaining sort order
-        try {
-            int insertIndex = findInsertTupleIndex(tuple);
-            insert(tuple, insertIndex);
-        } catch (HyracksDataException e) {
-            // Fallback to inserting at the end
-            insert(tuple, getTupleCount());
-        }
+        insert(tuple, getTupleCount());
     }
 
     @Override

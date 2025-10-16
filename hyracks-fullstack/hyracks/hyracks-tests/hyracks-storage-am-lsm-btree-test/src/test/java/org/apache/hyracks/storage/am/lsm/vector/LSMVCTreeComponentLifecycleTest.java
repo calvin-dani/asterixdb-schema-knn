@@ -24,6 +24,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
+import org.apache.hyracks.storage.am.lsm.btree.impl.CountingIoOperationCallback;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation.LSMIOOperationStatus;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
@@ -92,13 +93,12 @@ public class LSMVCTreeComponentLifecycleTest {
         // After flush, memory component should switch to the next one
         Assert.assertEquals(1, index.getCurrentMemoryComponentIndex());
         // Should have 1 disk component now
-        //        Assert.assertEquals(1, index.getDiskComponents().size());
+        Assert.assertEquals(1, index.getDiskComponents().size());
         //
-        //        // Verify IO operation callbacks were properly called
-        //        CountingIoOperationCallback ioCallback = (CountingIoOperationCallback) index.getIOOperationCallback();
-        //        Assert.assertEquals(ioCallback.getBeforeOperationCount(), ioCallback.getAfterOperationCount());
-        //        Assert.assertEquals(ioCallback.getBeforeOperationCount(), ioCallback.getAfterFinalizeCount());
-        //
+        // Verify IO operation callbacks were properly called
+        CountingIoOperationCallback ioCallback = (CountingIoOperationCallback) index.getIOOperationCallback();
+        Assert.assertEquals(ioCallback.getBeforeOperationCount(), ioCallback.getAfterOperationCount());
+        Assert.assertEquals(ioCallback.getBeforeOperationCount(), ioCallback.getAfterFinalizeCount());
         //        // Insert more vector tuples
         //        testUtils.insertVectorTuples(ctx, numTuplesToInsert, harness.getRandom());
         //

@@ -23,7 +23,9 @@ import java.util.HashMap;
 import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -54,6 +56,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.freepage.VirtualFreePageManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.*;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -86,6 +89,12 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     protected final IBinaryComparatorFactory[] cmpFactories;
     protected final int vectorDimensions;
     protected final boolean needKeyDupCheck;
+
+    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
+        this.staticStructure = staticStructure;
+    }
+
+    protected LSMVCTreeDiskComponent staticStructure;
 
     public LSMVCTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
@@ -126,10 +135,61 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         }
     }
 
-    public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
+    public LSMVCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
             List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage) throws HyracksDataException {
         // Get the current mutable component to build the static structure
-        // AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
+        AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
+        LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
+        LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
+        ILSMDiskComponent ssComponent = createStaticStructure(bulkLoadComponentFactory,
+                ((LSMVCTreeComponentFileReferences)componentFileRefs).getStaticStructureFileReference(), null,
+                null, true);
+        loadOp.setNewComponent(ssComponent);
+        ioOpCallback.scheduled(loadOp);
+        opCtx.setIoOperation(loadOp);
+
+        // Create the VCTreeStaticStructureBuilder with a NoOp page write callback for now
+        return new LSMVCTreeStaticStructureBuilder(storageConfig,this, opCtx, numLevels, clustersPerLevel,
+                centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
+    }
+
+    protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory, FileReference insertFileReference,
+            FileReference deleteIndexFileReference, FileReference bloomFilterFileRef, boolean createComponent)
+            throws HyracksDataException {
+        ILSMDiskComponent component = factory.createComponent(this,
+                new LSMComponentFileReferences(insertFileReference, deleteIndexFileReference, bloomFilterFileRef));
+        try {
+            ((LSMVCTreeDiskComponent)component).setStaticStructure(true);
+            component.activate(createComponent);
+        } catch (HyracksDataException e) {
+            component.returnPages();
+            throw e;
+        }
+        return component;
+    }
+
+    @Override
+    public void addBulkLoadedDiskComponent(ILSMDiskComponent c) throws HyracksDataException {
+        LSMVCTreeDiskComponent vcTreeDiskComponent = (LSMVCTreeDiskComponent) c;
+        if (vcTreeDiskComponent.isStaticStructure()) {
+            setStaticStructure(vcTreeDiskComponent);
+            return;
+        }
+        diskComponents.add(0, c);
+        validateComponentIds();
+    }
+
+    public LSMVCTreeDiskComponent getStaticStructure() {
+        if (staticStructure == null) {
+            throw new IllegalStateException("Static structure must be built before loading records");
+        }
+        return staticStructure;
+    }
+
+    public LSMVCTreeBulkLoader createBulkLoader(int numLeafCentroids, int firstLeafCentroidId,
+             ISerializerDeserializer[] dataFrameSerdes)
+            throws HyracksDataException {
+        AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
         LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
         LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
         ILSMDiskComponent diskComponent = createDiskComponent(bulkLoadComponentFactory,
@@ -137,11 +197,10 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 null, true);
         loadOp.setNewComponent(diskComponent);
         ioOpCallback.scheduled(loadOp);
-        // opCtx.setIoOperation(loadOp);
+        opCtx.setIoOperation(loadOp);
 
-        // Create the VCTreeStaticStructureBuilder with a NoOp page write callback for now
-        return ((LSMVCTreeDiskComponent) diskComponent).createStaticStructureBuilder(storageConfig, numLevels, clustersPerLevel,
-                centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
+        return new LSMVCTreeBulkLoader(storageConfig,this, opCtx, numLeafCentroids, firstLeafCentroidId,
+                dataFrameSerdes, NoOpPageWriteCallback.INSTANCE);
     }
 
     @Override

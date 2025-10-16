@@ -35,7 +35,7 @@ import org.junit.Before;
 import java.util.List;
 import java.util.Random;
 
-public class LSMVCTreeStaticStrucutureBuilderTest extends VectorIndexTestDriver {
+public class LSMVCTreeBuildTest extends VectorIndexTestDriver {
     private static final Logger LOGGER = LogManager.getLogger();
     private final LSMVCTreeTestHarness harness = new LSMVCTreeTestHarness();
     private final VectorTreeTestUtils testUtils = new VectorTreeTestUtils();
@@ -64,21 +64,26 @@ public class LSMVCTreeStaticStrucutureBuilderTest extends VectorIndexTestDriver 
     }
 
     public void runTest(ISerializerDeserializer[] fieldSerdes, List<ITupleReference> centroids,
-            List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster, int vectorDimensions)
+            List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster, int vectorDimensions,
+            List<List<ITupleReference>> dataRecords)
             throws Exception {
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, vectorDimensions);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
         ctx.setStaticStructureCentroids(centroids);
+        ctx.setDataRecords(dataRecords);
         ctx.getIndex().create();
         ctx.getIndex().activate();
 
         // Create a specialized test utils for LSM context
         testUtils.buildStaticStructure(ctx);
+
+        // start bulkloading records into leaf centroids
+        testUtils.bulkLoadRecords(ctx);
         
         ctx.getIndex().validate();
         ctx.getIndex().deactivate();
-        // ctx.getIndex().destroy();
+        //ctx.getIndex().destroy();
     }
 
 }

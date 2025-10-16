@@ -35,6 +35,7 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
 
     protected final TreeSet<CheckTuple> checkTuples = new TreeSet<CheckTuple>();
     protected final int vectorDimensions;
+    private List<List<ITupleReference>> dataRecords;
 
     public List<Integer> getNumClustersPerLevel() {
         return numClustersPerLevel;
@@ -95,5 +96,11 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
         return vectorDimensions;
     }
 
+    public List<List<ITupleReference>> getDataRecords() {
+        return dataRecords;
+    }
 
+    public void setDataRecords(List<List<ITupleReference>> dataRecords) {
+        this.dataRecords = dataRecords;
+    }
 }
