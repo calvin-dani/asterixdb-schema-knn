@@ -48,7 +48,7 @@ public class VectorClusteringInteriorTupleWriter extends TypeAwareTupleWriter im
         // CID (typically 4 bytes for int)
         totalBytes += tuple.getFieldLength(CID_FIELD);
 
-        // Centroid (vector of floats)
+        // Centroid (vector of doubles)
         totalBytes += tuple.getFieldLength(CENTROID_FIELD);
 
         // Pointer (typically 8 bytes for long)
@@ -87,20 +87,22 @@ public class VectorClusteringInteriorTupleWriter extends TypeAwareTupleWriter im
     /**
      * Get the centroid vector from the tuple
      */
-    public float[] getCentroid(ITupleReference tuple) {
+    public double[] getCentroid(ITupleReference tuple) {
         byte[] data = tuple.getFieldData(CENTROID_FIELD);
         int offset = tuple.getFieldStart(CENTROID_FIELD);
         int length = tuple.getFieldLength(CENTROID_FIELD);
 
-        // Assuming centroid is stored as array of floats
-        int numDimensions = length / 4; // 4 bytes per float
-        float[] centroid = new float[numDimensions];
+        // Assuming centroid is stored as array of doubles
+        int numDimensions = length / 8; // 8 bytes per double
+        double[] centroid = new double[numDimensions];
 
         for (int i = 0; i < numDimensions; i++) {
-            int floatOffset = offset + (i * 4);
-            int bits = (data[floatOffset] << 24) | ((data[floatOffset + 1] & 0xFF) << 16)
-                    | ((data[floatOffset + 2] & 0xFF) << 8) | (data[floatOffset + 3] & 0xFF);
-            centroid[i] = Float.intBitsToFloat(bits);
+            int doubleOffset = offset + (i * 8);
+            long bits = ((long) data[doubleOffset] << 56) | (((long) data[doubleOffset + 1] & 0xFF) << 48)
+                    | (((long) data[doubleOffset + 2] & 0xFF) << 40) | (((long) data[doubleOffset + 3] & 0xFF) << 32)
+                    | (((long) data[doubleOffset + 4] & 0xFF) << 24) | (((long) data[doubleOffset + 5] & 0xFF) << 16)
+                    | (((long) data[doubleOffset + 6] & 0xFF) << 8) | ((long) data[doubleOffset + 7] & 0xFF);
+            centroid[i] = Double.longBitsToDouble(bits);
         }
 
         return centroid;
