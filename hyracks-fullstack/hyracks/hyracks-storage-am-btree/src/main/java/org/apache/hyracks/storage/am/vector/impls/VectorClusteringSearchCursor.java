@@ -140,8 +140,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
 
             // Find closest cluster via tree traversal
-            ClusterSearchResult clusterResult = ((VectorClusteringTree.VectorClusteringTreeAccessor)accessor).
-                    findClosestLeafCentroid(queryVector);
+            ClusterSearchResult clusterResult =
+                    ((VectorClusteringTree.VectorClusteringTreeAccessor) accessor).findClosestLeafCentroid(queryVector);
             this.targetMetadataPageId = getMetadataPageIdFromCluster(clusterResult);
         }
 
@@ -322,8 +322,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Find the closest cluster by traversing the tree from root to leaf.
      * This integrates the centroid finding logic into the cursor.
      */
-    private ClusterSearchResult findClosestClusterFromRoot(float[] queryVector)
-            throws HyracksDataException {
+    private ClusterSearchResult findClosestClusterFromRoot(float[] queryVector) throws HyracksDataException {
         // Start from root page
         int currentPageId = rootPageId;
         double bestDistance = Double.MAX_VALUE;
@@ -377,8 +376,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                         ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
                         frameTuple.resetByTupleIndex(leafFrame, bestClusterIndex);
                         double[] bestCentroid = extractCentroidFromLeafTuple(frameTuple);
-                        bestResult = new ClusterSearchResult(currentPageId, bestClusterIndex,
-                                bestCentroid, leafBestDistance, 0);
+                        bestResult = new ClusterSearchResult(currentPageId, bestClusterIndex, bestCentroid,
+                                leafBestDistance, 0);
                     }
                     break; // Found leaf level result
 
@@ -435,8 +434,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /**
      * Get metadata page ID from cluster search result.
      */
-    private long getMetadataPageIdFromCluster(ClusterSearchResult clusterResult)
-            throws HyracksDataException {
+    private long getMetadataPageIdFromCluster(ClusterSearchResult clusterResult) throws HyracksDataException {
         ICachedPage leafPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, clusterResult.leafPageId));
         try {
             leafPage.acquireReadLatch();

@@ -19,13 +19,11 @@
 package org.apache.asterix.metadata.utils;
 
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
-import static org.apache.asterix.om.types.BuiltinType.AFLOAT;
 import static org.apache.asterix.om.types.BuiltinType.AINT32;
 
 import java.util.List;
 import java.util.UUID;
 
-import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
@@ -37,7 +35,7 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
-import org.apache.asterix.runtime.operators.VCTreeStaticStructureBulkLoaderOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -81,12 +79,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
-        System.err.println("=== SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ===");
+        // Force output to both System.out and System.err to ensure visibility
+        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+        System.err.println("==========================================");
+        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+        System.err.println("==========================================");
         System.err.println("Dataset: " + dataset.getDatasetName());
         System.err.println("Index: " + index.getIndexName());
         System.err.println("Index type: " + index.getIndexType());
         System.err.println("Index details: " + index.getIndexDetails());
-        System.err.println("Creating 2-Phase Job with Permit Mechanism");
+        System.err.println("Creating Single Branch Job for Structure Creation");
+        System.err.println("==========================================");
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -98,17 +101,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
 
         JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
-        PartitioningProperties partitioningProperties =
-                metadataProvider.getPartitioningProperties(dataset, index.getIndexName());
         Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
-        int[] fieldPermutation = createFieldPermutationForBulkLoadOp(numSecondaryKeys);
-        int[] pkFields = createPkFieldPermutationForBulkLoadOp(fieldPermutation, numSecondaryKeys);
         IIndexDataflowHelperFactory dataflowHelperFactory = new IndexDataflowHelperFactory(
                 metadataProvider.getStorageComponentProvider().getStorageManager(), secondaryFileSplitProvider);
         // job spec:
-        // key provider -> primary idx scan -> cast assign -> (select)? -> (sort)? -> bulk load -> sink
+        // key provider -> primary idx scan -> cast assign -> k-means -> static structure creator -> sink
         IndexUtil.bindJobEventListener(spec, metadataProvider);
+
+        System.err.println("=== INITIAL JOB SETUP ===");
+        System.err.println("Dataset: " + dataset.getDatasetName());
+        System.err.println("Index: " + index.getIndexName());
+        System.err.println("Creating single branch job for structure creation");
 
         // if format == column, then project only the indexed fields
         ITupleProjectorFactory projectorFactory =
@@ -120,31 +124,30 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
+        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
+
         sourceOp = targetOp;
         // primary index -> cast assign op (produces the secondary index entry)
         targetOp = createAssignOp(spec, numSecondaryKeys, recordDesc);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
+        System.err.println("Connected: PrimaryIndexScan → CastAssign");
+        System.err.println("CastAssign operator: " + targetOp);
+
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
+
         UUID sampleUUID = UUID.randomUUID();
-        UUID KCentroidsUUID = UUID.randomUUID();
         UUID centroidsUUID = UUID.randomUUID();
         UUID permitUUID = UUID.randomUUID();
-        UUID kCentroidsUUID = UUID.randomUUID();
+
+        // Register permit state for structure creation coordination
+        System.err.println("=== REGISTERING PERMIT STATE ===");
+        System.err.println("Permit UUID: " + permitUUID);
+        System.err.println("Permit state will be used by StaticStructureCreator operator");
 
         int K = 10;
         int maxScalableKmeansIter = 2;
-
-        // _ -> init centroids (materialize sample)
-
-        ISerializerDeserializer[] newCentSerde = new ISerializerDeserializer[1];
-        ITypeTraits[] newCentTraits = new ITypeTraits[1];
-
-        newCentSerde[0] = serdeProvider.getSerializerDeserializer(new AOrderedListType(AFLOAT, "embedding"));
-
-        newCentTraits[0] = typeTraitProvider.getTypeTrait(new AOrderedListType(AFLOAT, "embedding"));
-        // Construct the new RecordDescriptor
-
-        RecordDescriptor centroidRecDesc = new RecordDescriptor(newCentSerde, newCentTraits);
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
         ISerializerDeserializer[] hierarchicalSerde = new ISerializerDeserializer[4];
@@ -176,29 +179,48 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Number of fields in secondary: " + secondaryRecDesc.getFieldCount());
         System.err.println("Number of fields in hierarchical: " + hierarchicalRecDesc.getFieldCount());
 
-        // init centroids -(broadcast)> candidate centroids
-        sourceOp = targetOp;
+        // ====== SINGLE BRANCH: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
+        System.out.println("*** VECTOR INDEX DEBUG: CREATING SINGLE BRANCH PIPELINE ***");
+        System.err.println("==========================================");
+        System.err.println("*** CREATING SINGLE BRANCH PIPELINE ***");
+        System.err.println("==========================================");
+        System.err.println("Pipeline: CastAssign → K-means → StaticStructureCreator → Sink");
+
+        // 1. K-means operator
+        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
+        UUID materializedDataUUID = UUID.randomUUID();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, centroidsUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
+                        sampleUUID, centroidsUUID, materializedDataUUID, new ColumnAccessEvalFactory(0), K,
+                        maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        // Connect hierarchical k-means output to VCTree bulk loader
+        System.err.println("Connected: CastAssign → K-means");
+        System.err.println("K-means operator: " + candidates);
+
+        // Update sourceOp to continue the chain
         sourceOp = targetOp;
 
-        VCTreeStaticStructureBulkLoaderOperatorDescriptor vcTreeLoader =
-                new VCTreeStaticStructureBulkLoaderOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
-                        hierarchicalRecDesc, permitUUID);
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeLoader,
+        // 2. VCTree static structure creator
+        System.err.println("🔧 CREATING VCTreeStaticStructureCreator");
+        VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
+                new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
+                        hierarchicalRecDesc, permitUUID, materializedDataUUID);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeCreator,
                 primaryPartitionConstraint);
-        targetOp = vcTreeLoader;
+        targetOp = vcTreeCreator;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        // Add sink for final output
+        System.err.println("Connected: K-means → StaticStructureCreator");
+        System.err.println("StaticStructureCreator operator: " + vcTreeCreator);
+
+        // Update sourceOp to continue the chain
         sourceOp = targetOp;
+
+        // 3. Final sink
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
         sinkRuntimeFactory.setSourceLocation(sourceLoc);
         targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0, new IPushRuntimeFactory[] { sinkRuntimeFactory },
@@ -206,12 +228,26 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
+        System.err.println("Connected: StaticStructureCreator → Sink");
+        System.err.println("Sink operator: " + targetOp);
+        System.err.println("=== SINGLE BRANCH PIPELINE COMPLETE ===");
+
+        // Add single branch as root
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
-        System.err.println("=== 2-PHASE JOB CREATED: Phase 1 (Structure Creation) ===");
-        System.err.println("=== JOB FLOW: DataSource → K-means → StructureBuilder → Sink ===");
-        System.err.println("=== PERMIT MECHANISM: Ready for Phase 2 development ===");
+        System.err.println("=== JOB SPECIFICATION COMPLETE ===");
+        System.err.println("Root operators added:");
+        System.err.println("  Root: " + targetOp + " (Single Branch - K-means → StaticStructureCreator → Sink)");
+        System.err.println("=== SINGLE BRANCH JOB CREATED ===");
+        System.err.println("=== PIPELINE: DataSource → CastAssign → K-means → StaticStructureCreator → Sink ===");
+        System.err.println(
+                "=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
+        System.err.println("==========================================");
+        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
+        System.err.println("==========================================");
+        System.out
+                .println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         return spec;
     }
 
@@ -296,7 +332,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             IAType keyType = keyTypePair.first;
             System.err.println("Resolved key type: " + keyType);
 
-            IScalarEvaluatorFactory vectorFieldAccessor = createFieldAccessor(sourceType, sourceColumn, vectorFieldName);
+            IScalarEvaluatorFactory vectorFieldAccessor =
+                    createFieldAccessor(sourceType, sourceColumn, vectorFieldName);
             System.err.println("Created vector field accessor: " + vectorFieldAccessor);
 
             secondaryFieldAccessEvalFactories[0] =
@@ -315,48 +352,48 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         }
 
         // Process include fields (if any)
-        if (includeFieldNames != null && !includeFieldNames.isEmpty() &&
-            includeFieldTypes != null && !includeFieldTypes.isEmpty() &&
-            includeFieldNames.size() == includeFieldTypes.size()) {
+        if (includeFieldNames != null && !includeFieldNames.isEmpty() && includeFieldTypes != null
+                && !includeFieldTypes.isEmpty() && includeFieldNames.size() == includeFieldTypes.size()) {
             for (int i = 0; i < includeFieldNames.size(); i++) {
-            ARecordType sourceType;
-            ARecordType enforcedType;
-            int sourceColumn;
-            if (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0) {
-                sourceType = itemType;
-                sourceColumn = recordColumn;
-                enforcedType = enforcedItemType;
-            } else {
-                sourceType = metaType;
-                sourceColumn = recordColumn + 1;
-                enforcedType = enforcedMetaType;
-            }
-            List<String> secFieldName = includeFieldNames.get(i);
-            IAType secFieldType = null;
+                ARecordType sourceType;
+                ARecordType enforcedType;
+                int sourceColumn;
+                if (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0) {
+                    sourceType = itemType;
+                    sourceColumn = recordColumn;
+                    enforcedType = enforcedItemType;
+                } else {
+                    sourceType = metaType;
+                    sourceColumn = recordColumn + 1;
+                    enforcedType = enforcedMetaType;
+                }
+                List<String> secFieldName = includeFieldNames.get(i);
+                IAType secFieldType = null;
 
-            // Safely get the field type, handling potential index out of bounds
-            if (i < includeFieldTypes.size()) {
-                secFieldType = includeFieldTypes.get(i);
-            }
+                // Safely get the field type, handling potential index out of bounds
+                if (i < includeFieldTypes.size()) {
+                    secFieldType = includeFieldTypes.get(i);
+                }
 
-            // Skip if the field type is null or if we couldn't get it
-            if (secFieldType == null) {
-                continue;
-            }
+                // Skip if the field type is null or if we couldn't get it
+                if (secFieldType == null) {
+                    continue;
+                }
 
-            // Include fields start at index 1 (index 0 is the vector field)
-            int fieldIndex = 1 + i;
-            Pair<IAType, Boolean> keyTypePair =
-                    Index.getNonNullableOpenFieldType(index, secFieldType, secFieldName, sourceType);
-            IAType keyType = keyTypePair.first;
-            IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(sourceType, sourceColumn, secFieldName);
-            secondaryFieldAccessEvalFactories[fieldIndex] =
-                    createFieldCast(secFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
-            anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
-            secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(keyType);
-            secondaryComparatorFactories[fieldIndex] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
-            secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(keyType);
-            secondaryBloomFilterKeyFields[fieldIndex] = fieldIndex;
+                // Include fields start at index 1 (index 0 is the vector field)
+                int fieldIndex = 1 + i;
+                Pair<IAType, Boolean> keyTypePair =
+                        Index.getNonNullableOpenFieldType(index, secFieldType, secFieldName, sourceType);
+                IAType keyType = keyTypePair.first;
+                IScalarEvaluatorFactory secFieldAccessor = createFieldAccessor(sourceType, sourceColumn, secFieldName);
+                secondaryFieldAccessEvalFactories[fieldIndex] =
+                        createFieldCast(secFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
+                anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
+                secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(keyType);
+                secondaryComparatorFactories[fieldIndex] =
+                        comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
+                secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(keyType);
+                secondaryBloomFilterKeyFields[fieldIndex] = fieldIndex;
             }
         }
         if (dataset.getDatasetType() == DatasetType.INTERNAL) {

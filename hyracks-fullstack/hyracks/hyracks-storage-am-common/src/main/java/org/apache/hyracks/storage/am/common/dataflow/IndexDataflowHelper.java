@@ -23,6 +23,7 @@ import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.ILocalResourceRepository;
@@ -102,6 +103,53 @@ public class IndexDataflowHelper implements IIndexDataflowHelper {
                 localResourceRepository.delete(resourceRef.getRelativePath());
             }
             index.destroy();
+
+            // Clean up static structure files
+            try {
+                cleanupStaticStructureFiles();
+            } catch (Exception e) {
+                LOGGER.warn("Failed to cleanup static structure files: " + e.getMessage());
+                // Don't fail the drop operation if static file cleanup fails
+            }
+        }
+    }
+
+    /**
+     * Clean up static structure files associated with this index.
+     */
+    private void cleanupStaticStructureFiles() throws HyracksDataException {
+        try {
+            // Get the index directory
+            FileReference indexDir = resourceRef.getParent();
+            if (indexDir != null) {
+                // Look for static structure files (both old and new timestamped format)
+                try {
+                    IIOManager ioManager = ctx.getIoManager();
+                    java.util.Set<FileReference> files = ioManager.list(indexDir, null);
+                    for (FileReference file : files) {
+                        String fileName = file.getName();
+                        if (fileName.equals("static_structure.vctree")
+                                || fileName.equals("static_structure_file.vctree")
+                                || (fileName.startsWith("static_structure_") && fileName.endsWith(".vctree"))) {
+                            try {
+                                if (ioManager.exists(file)) {
+                                    ioManager.delete(file);
+                                    LOGGER.info("Deleted static structure file: " + file.getAbsolutePath());
+                                }
+                            } catch (Exception e) {
+                                LOGGER.warn("Failed to check/delete static structure file " + file.getAbsolutePath()
+                                        + ": " + e.getMessage());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to list files in index directory " + indexDir.getAbsolutePath() + ": "
+                            + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to cleanup static structure files for " + resourceRef.getRelativePath() + ": "
+                    + e.getMessage());
         }
     }
 

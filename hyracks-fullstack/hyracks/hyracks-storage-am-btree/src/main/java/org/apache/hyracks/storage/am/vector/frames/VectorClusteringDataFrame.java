@@ -36,7 +36,6 @@ import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.btree.frames.OrderedSlotManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
@@ -663,8 +662,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             int totalFields = 4 + numIncludedFields; // distance, cosine, vector, PK + included fields
 
             // Use existing createDataTuple method and then append included fields
-            SimpleTupleReference baseTuple =
-                    createDataTuple(currentVector, currentDistance, currentCosine, currentPK);
+            SimpleTupleReference baseTuple = createDataTuple(currentVector, currentDistance, currentCosine, currentPK);
 
             if (numIncludedFields == 0) {
                 // No included fields to add, return base tuple

@@ -22,26 +22,18 @@ import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 import static org.apache.asterix.runtime.utils.VectorDistanceArrCalculation.euclidean_squared;
 
-import java.io.DataOutput;
-import java.io.DataOutputStream;
-import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Random;
 import java.util.UUID;
 
 import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.asterix.om.base.AMutableDouble;
-import org.apache.asterix.om.base.AMutableInt32;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
@@ -52,8 +44,6 @@ import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
-import org.apache.hyracks.api.dataflow.ActivityId;
-import org.apache.hyracks.api.dataflow.IActivityGraphBuilder;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
@@ -63,17 +53,13 @@ import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.data.std.util.ByteArrayAccessibleOutputStream;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
-import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
-import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
-import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
-import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
-import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
+import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
+import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.util.string.UTF8StringUtil;
@@ -186,7 +172,8 @@ class DotProductDistanceFunction implements DistanceFunction, Serializable {
  * - Parent reference (for children)
  * - Children list (for parents)
  */
-public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
+public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
+        extends AbstractSingleActivityOperatorDescriptor {
 
     /**
      * Result class to hold Lloyd's algorithm results with assignments.
@@ -228,6 +215,54 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Data structure to hold hierarchical clustering results for VCTreeStaticStructureCreator.
+     */
+    private static class HierarchicalClusterStructure {
+        private final List<List<List<double[]>>> levelClusters; // level -> cluster -> centroids
+        private final List<List<Integer>> clustersPerLevel;
+        private final List<List<List<Integer>>> centroidsPerCluster;
+
+        public HierarchicalClusterStructure() {
+            this.levelClusters = new ArrayList<>();
+            this.clustersPerLevel = new ArrayList<>();
+            this.centroidsPerCluster = new ArrayList<>();
+        }
+
+        public void addLevel(List<List<double[]>> levelClusters) {
+            this.levelClusters.add(levelClusters);
+
+            List<Integer> levelClusterCounts = new ArrayList<>();
+            List<List<Integer>> levelCentroidCounts = new ArrayList<>();
+
+            for (List<double[]> cluster : levelClusters) {
+                levelClusterCounts.add(1); // Each cluster has 1 centroid
+                List<Integer> centroidCounts = new ArrayList<>();
+                centroidCounts.add(cluster.size()); // Number of centroids in this cluster
+                levelCentroidCounts.add(centroidCounts);
+            }
+
+            this.clustersPerLevel.add(levelClusterCounts);
+            this.centroidsPerCluster.add(levelCentroidCounts);
+        }
+
+        public List<List<List<double[]>>> getLevelClusters() {
+            return levelClusters;
+        }
+
+        public List<List<Integer>> getClustersPerLevel() {
+            return clustersPerLevel;
+        }
+
+        public List<List<List<Integer>>> getCentroidsPerCluster() {
+            return centroidsPerCluster;
+        }
+
+        public int getNumLevels() {
+            return levelClusters.size();
+        }
+    }
+
     // Distance function constants
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
@@ -252,6 +287,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private final UUID sampleUUID;
     private final UUID centroidsUUID;
+    private final UUID materializedDataUUID;
 
     // Configuration parameters for hierarchical clustering
     private IScalarEvaluatorFactory args; // Evaluator for extracting vector data from tuples
@@ -273,15 +309,291 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private double calculateDistance(double[] a, double[] b) {
         try {
-            return distanceFunction.apply(a, b);
-        } catch (HyracksDataException e) {
+            // Use distance function if available, otherwise fall back to euclidean squared
+            if (distanceFunction != null) {
+                return distanceFunction.apply(a, b);
+            } else {
+                return euclidean_squared(a, b);
+            }
+        } catch (Exception e) {
             throw new RuntimeException("Error calculating distance", e);
         }
     }
 
+    /**
+     * Read materialized data from runfile and perform hierarchical K-means clustering.
+     * This method can be called by other operators to consume the materialized data.
+     */
+    public HierarchicalClusterStructure readMaterializedDataAndCluster(IHyracksTaskContext ctx, int partition)
+            throws HyracksDataException {
+        System.err.println("=== READING MATERIALIZED DATA AND CLUSTERING ===");
+
+        // Get the materialized data state
+        MaterializerTaskState materializedState =
+                (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(materializedDataUUID, partition));
+
+        if (materializedState == null) {
+            System.err.println("❌ ERROR: No materialized data found for partition " + partition);
+            return new HierarchicalClusterStructure();
+        }
+
+        // Create a reader for the materialized data
+        org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader reader = materializedState.creatReader();
+        reader.open();
+
+        try {
+            // Collect all data points from the materialized frames
+            List<double[]> allDataPoints = new ArrayList<>();
+            VSizeFrame frame = new VSizeFrame(ctx);
+
+            while (reader.nextFrame(frame)) {
+                List<double[]> frameDataPoints = collectDataPointsFromFrame(frame.getBuffer(), ctx);
+                allDataPoints.addAll(frameDataPoints);
+            }
+
+            System.err.println("Collected " + allDataPoints.size() + " data points from materialized data");
+
+            if (allDataPoints.isEmpty()) {
+                System.err.println("No data points found in materialized data");
+                return new HierarchicalClusterStructure();
+            }
+
+            // Perform hierarchical clustering on the collected data
+            return performHierarchicalClusteringOnDataPoints(allDataPoints);
+
+        } finally {
+            reader.close();
+        }
+    }
+
+    /**
+     * Collect data points from a single frame buffer.
+     */
+    private List<double[]> collectDataPointsFromFrame(ByteBuffer buffer, IHyracksTaskContext ctx)
+            throws HyracksDataException {
+        List<double[]> dataPoints = new ArrayList<>();
+
+        // Create frame tuple accessor
+        FrameTupleAccessor fta = new FrameTupleAccessor(secondaryRecDesc);
+        fta.reset(buffer);
+
+        int tupleCount = fta.getTupleCount();
+        System.err.println("Processing " + tupleCount + " tuples from materialized frame");
+
+        if (tupleCount == 0) {
+            return dataPoints;
+        }
+
+        // Create evaluator for extracting vector data
+        IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+        IPointable inputVal = new VoidPointable();
+
+        // Create KMeansUtils for proper vector parsing
+        KMeansUtils kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
+        ListAccessor listAccessorConstant = new ListAccessor();
+
+        for (int i = 0; i < tupleCount; i++) {
+            FrameTupleReference tuple = new FrameTupleReference();
+            tuple.reset(fta, i);
+
+            try {
+                // Extract vector data from tuple
+                eval.evaluate(tuple, inputVal);
+
+                // Check if it's a list type (required for vector data)
+                if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
+                        .isListType()) {
+                    continue; // Skip unsupported types
+                }
+
+                // Parse the vector data using proper AsterixDB parsing
+                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                double[] vector = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                if (vector != null && vector.length > 0) {
+                    dataPoints.add(vector);
+                }
+            } catch (Exception e) {
+                System.err.println("Warning: Failed to parse vector data from tuple " + i + ": " + e.getMessage());
+            }
+        }
+
+        return dataPoints;
+    }
+
+    /**
+     * Perform hierarchical clustering on the given data points.
+     */
+    private HierarchicalClusterStructure performHierarchicalClusteringOnDataPoints(List<double[]> dataPoints)
+            throws HyracksDataException {
+        System.err.println("=== PERFORMING HIERARCHICAL CLUSTERING ON DATA POINTS ===");
+
+        HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
+
+        if (dataPoints.isEmpty()) {
+            return structure;
+        }
+
+        // Step 1: Perform initial K-means++ on data points
+        List<double[]> initialCentroids = performKMeansPlusPlusOnDataPoints(dataPoints, K);
+        System.err.println("Initial K-means++ generated " + initialCentroids.size() + " centroids");
+
+        if (initialCentroids.isEmpty()) {
+            return structure;
+        }
+
+        // Step 2: Build hierarchical structure
+        List<double[]> currentCentroids = initialCentroids;
+        int currentK = Math.min(K, initialCentroids.size());
+        Random rand = new Random();
+        int maxIterations = 20;
+        int maxLevels = 5;
+        int currentLevel = 0;
+
+        // Add Level 0 (initial centroids)
+        List<List<double[]>> level0Clusters = new ArrayList<>();
+        for (double[] centroid : currentCentroids) {
+            List<double[]> cluster = new ArrayList<>();
+            cluster.add(centroid);
+            level0Clusters.add(cluster);
+        }
+        structure.addLevel(level0Clusters);
+        currentLevel++;
+
+        // Build subsequent levels
+        while (currentCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
+            System.err.println("Level " + currentLevel + ": Clustering " + currentCentroids.size() + " centroids into "
+                    + currentK + " clusters");
+
+            // Perform K-means++ clustering on centroids from previous level
+            List<double[]> levelCentroids = performKMeansPlusPlusOnDataPoints(currentCentroids, currentK);
+
+            if (levelCentroids.isEmpty()) {
+                System.err.println("K-means++ produced no centroids, stopping clustering");
+                break;
+            }
+
+            // Group centroids into clusters for this level
+            List<List<double[]>> levelClusters = new ArrayList<>();
+            for (double[] centroid : levelCentroids) {
+                List<double[]> cluster = new ArrayList<>();
+                cluster.add(centroid);
+                levelClusters.add(cluster);
+            }
+
+            structure.addLevel(levelClusters);
+
+            // Prepare for next level
+            currentCentroids = levelCentroids;
+            currentK = Math.max(1, currentK / 2);
+            currentLevel++;
+        }
+
+        System.err.println("Hierarchical clustering completed with " + structure.getNumLevels() + " levels");
+        return structure;
+    }
+
+    /**
+     * Perform K-means++ on a list of data points.
+     */
+    private List<double[]> performKMeansPlusPlusOnDataPoints(List<double[]> dataPoints, int k) {
+        if (dataPoints.isEmpty() || k <= 0) {
+            return new ArrayList<>();
+        }
+
+        List<double[]> centroids = new ArrayList<>();
+        Random rand = new Random();
+
+        // K-means++ initialization
+        // 1. Choose first centroid randomly
+        int firstIdx = rand.nextInt(dataPoints.size());
+        centroids.add(Arrays.copyOf(dataPoints.get(firstIdx), dataPoints.get(firstIdx).length));
+
+        // 2. Choose remaining centroids using weighted selection
+        for (int i = 1; i < k && i < dataPoints.size(); i++) {
+            double[] distances = new double[dataPoints.size()];
+            double totalDistance = 0.0;
+
+            // Calculate minimum distance to existing centroids for each point
+            for (int j = 0; j < dataPoints.size(); j++) {
+                double minDist = Double.POSITIVE_INFINITY;
+                for (double[] centroid : centroids) {
+                    double dist = calculateDistance(dataPoints.get(j), centroid);
+                    minDist = Math.min(minDist, dist);
+                }
+                distances[j] = minDist;
+                totalDistance += minDist;
+            }
+
+            // Weighted random selection
+            double randomValue = rand.nextDouble() * totalDistance;
+            double cumulativeDistance = 0.0;
+            int selectedIdx = 0;
+
+            for (int j = 0; j < dataPoints.size(); j++) {
+                cumulativeDistance += distances[j];
+                if (cumulativeDistance >= randomValue) {
+                    selectedIdx = j;
+                    break;
+                }
+            }
+
+            centroids.add(Arrays.copyOf(dataPoints.get(selectedIdx), dataPoints.get(selectedIdx).length));
+        }
+
+        // Lloyd's algorithm iterations
+        int maxIterations = 20;
+        for (int iter = 0; iter < maxIterations; iter++) {
+            // Assign points to nearest centroid
+            int[] assignments = new int[dataPoints.size()];
+            for (int i = 0; i < dataPoints.size(); i++) {
+                double minDist = Double.POSITIVE_INFINITY;
+                int bestCentroid = 0;
+                for (int j = 0; j < centroids.size(); j++) {
+                    double dist = calculateDistance(dataPoints.get(i), centroids.get(j));
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bestCentroid = j;
+                    }
+                }
+                assignments[i] = bestCentroid;
+            }
+
+            // Update centroids
+            List<double[]> newCentroids = new ArrayList<>();
+            for (int j = 0; j < centroids.size(); j++) {
+                double[] newCentroid = new double[dataPoints.get(0).length];
+                int count = 0;
+
+                for (int i = 0; i < dataPoints.size(); i++) {
+                    if (assignments[i] == j) {
+                        for (int d = 0; d < newCentroid.length; d++) {
+                            newCentroid[d] += dataPoints.get(i)[d];
+                        }
+                        count++;
+                    }
+                }
+
+                if (count > 0) {
+                    for (int d = 0; d < newCentroid.length; d++) {
+                        newCentroid[d] /= count;
+                    }
+                    newCentroids.add(newCentroid);
+                } else {
+                    // Keep original centroid if no points assigned
+                    newCentroids.add(centroids.get(j));
+                }
+            }
+
+            centroids = newCentroids;
+        }
+
+        return centroids;
+    }
+
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID centroidsUUID,
-            IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
+            UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (level, clusterId, centroidId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -289,177 +601,232 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
         this.sampleUUID = sampleUUID;
         this.centroidsUUID = centroidsUUID;
+        this.materializedDataUUID = materializedDataUUID;
         this.args = args;
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
+
+        // Initialize distance function to euclidean squared to avoid null pointer issues
+        this.distanceFunction = new EuclideanSquaredDistanceFunction();
     }
 
     @Override
-    public void contributeActivities(IActivityGraphBuilder builder) {
-        StoreCentroidsActivity sa = new StoreCentroidsActivity(new ActivityId(odId, 0));
-        FindCandidatesActivity ca = new FindCandidatesActivity(new ActivityId(odId, 1));
-
-        builder.addActivity(this, sa);
-        builder.addSourceEdge(0, sa, 0);
-
-        builder.addActivity(this, ca);
-        builder.addTargetEdge(0, ca, 0);
-
-        builder.addBlockingEdge(sa, ca);
-        builder.addTargetEdge(0, ca, 0);
+    public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
+            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
+        return new HierarchicalKMeansNodePushable(ctx, partition, nPartitions);
     }
 
-    /**
-     * First activity in the hierarchical clustering pipeline.
-     * 
-     * PURPOSE:
-     * ========
-     * This activity processes the input data stream and stores the first data point
-     * as the initial centroid. It also materializes all data points to disk for
-     * subsequent processing by the FindCandidatesActivity.
-     * 
-     * WHY WE NEED THIS:
-     * ================
-     * 1. MEMORY EFFICIENCY: We can't load all data points into memory at once
-     * 2. STREAMING PROCESSING: Data comes in frames, we need to process it incrementally
-     * 3. INITIAL CENTROID: K-means++ needs at least one centroid to start the process
-     * 4. DATA PERSISTENCE: We need to store data for multiple passes (cost calculation, selection, Lloyd's)
-     * 
-     * DATA FLOW:
-     * ==========
-     * Input: Stream of tuples containing vector data
-     * Output: 
-     *   - First data point stored as initial centroid in CentroidsState
-     *   - All data points materialized to disk via MaterializerTaskState
-     * 
-     * ALGORITHM:
-     * ==========
-     * 1. Take first tuple from input stream
-     * 2. Extract vector data using evaluator
-     * 3. Store as initial centroid in CentroidsState
-     * 4. Materialize all subsequent tuples to disk for later processing
-     */
-    protected class StoreCentroidsActivity extends AbstractActivityNode {
-        private static final long serialVersionUID = 1L;
-        private FrameTupleAccessor fta;
-        private FrameTupleReference tuple;
+    private class HierarchicalKMeansNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
 
-        protected StoreCentroidsActivity(ActivityId id) {
-            super(id);
+        private final IHyracksTaskContext ctx;
+        private final int partition;
+        private final int nPartitions;
+        private MaterializerTaskState materializedData;
+
+        public HierarchicalKMeansNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions) {
+            this.ctx = ctx;
+            this.partition = partition;
+            this.nPartitions = nPartitions;
         }
 
         @Override
-        public IOperatorNodePushable createPushRuntime(final IHyracksTaskContext ctx,
-                final IRecordDescriptorProvider recordDescProvider, final int partition, int nPartitions) {
-            return new AbstractUnaryInputSinkOperatorNodePushable() {
-                IScalarEvaluator eval;
-                IPointable inputVal;
-                CentroidsState state;
-                boolean first;
-                private MaterializerTaskState materializedSample;
-                KMeansUtils kMeansUtils;
+        public void open() throws HyracksDataException {
+            System.err.println("=== HierarchicalKMeans OPENING ===");
+            System.err.println("🚀 BRANCH 1 K-MEANS IS STARTING - This should receive data from replicate output 0!");
+            System.err.println("Partition: " + partition);
 
-                @Override
-                public void open() throws HyracksDataException {
-                    // Initialize data persistence for multiple passes over the data
-                    materializedSample = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
-                            new PartitionedUUID(sampleUUID, partition));
-                    materializedSample.open(ctx);
+            // Initialize materializer for storing input data
+            materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
+                    new PartitionedUUID(materializedDataUUID, partition));
+            materializedData.open(ctx);
 
-                    // Initialize centroid storage for the first centroid
-                    state = new CentroidsState(ctx.getJobletContext().getJobId(),
-                            new PartitionedUUID(centroidsUUID, partition));
+            // Open the writer to downstream operator (VCTreeStaticStructureCreator)
+            System.err.println("🔍 DEBUG: Writer is " + (writer != null ? "NOT NULL" : "NULL"));
+            if (writer != null) {
+                System.err.println("🔍 DEBUG: Opening writer to VCTreeStaticStructureCreator");
+                writer.open();
+            } else {
+                System.err.println("❌ ERROR: Writer is NULL - VCTreeStaticStructureCreator will not be opened!");
+            }
+        }
 
-                    // Initialize evaluator for extracting vector data from tuples
-                    eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
-                    inputVal = new VoidPointable();
-                    // Use secondaryRecDesc directly for now (2-field format with vector embeddings)
-                    RecordDescriptor inputRecDesc = secondaryRecDesc;
-                    fta = new FrameTupleAccessor(inputRecDesc);
-                    tuple = new FrameTupleReference();
-                    first = true;
-                    kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
-                }
+        @Override
+        public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+            System.err.println("=== HierarchicalKMeans nextFrame ===");
+            System.err.println("Starting hierarchical K-means++ clustering with K=" + K);
+            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position()
+                    + ", limit: " + buffer.limit());
 
-                @Override
-                public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-                    fta.reset(buffer);
-                    int tupleCount = fta.getTupleCount();
+            // Materialize the input data for later use
+            if (materializedData != null) {
+                System.err.println("🔍 DEBUG: Materializing frame data to runfile");
+                materializedData.appendFrame(buffer);
+                System.err.println("🔍 DEBUG: Frame materialized successfully");
+            }
 
-                    System.err.println("=== HIERARCHICAL K-MEANS NEXT FRAME ===");
-                    System.err.println("Received frame with " + tupleCount + " tuples");
-                    System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+            if (writer != null) {
+                System.err.println("🔍 DEBUG: Writer is " + (writer != null ? "NOT NULL" : "NULL"));
+                System.err.println(
+                        "🔍 DEBUG: Performing hierarchical K-means clustering for VCTreeStaticStructureCreator");
 
-                    if (first) {
-                        // CRITICAL: Perform initial K-means++ on raw data to generate K centroids
-                        // This is essential for hierarchical clustering - we need multiple centroids
-                        // to start the hierarchical tree building process
-                        System.err.println("Starting initial K-means++ on raw data with K=" + K);
-                        System.err.println("First frame has " + tupleCount + " tuples to process");
+                try {
+                    // Perform complete hierarchical K-means clustering
+                    HierarchicalClusterStructure clusterStructure = performCompleteHierarchicalKMeans(buffer);
 
-                        // Perform K-means++ on the raw data
-                        Random rand = new Random();
-                        int maxKMeansIterations = 20;
-                        List<double[]> initialCentroids = performInitialKMeansPlusPlus(buffer, fta, tuple, eval,
-                                inputVal, kMeansUtils, K, rand, maxKMeansIterations);
-
-                        // Store all generated centroids
-                        for (double[] centroid : initialCentroids) {
-                            state.addCentroid(centroid);
-                        }
-
-                        System.err.println("Generated " + initialCentroids.size()
-                                + " initial centroids for hierarchical clustering");
-                        first = false;
+                    if (clusterStructure.getNumLevels() == 0) {
+                        System.err.println("No hierarchical structure generated, cannot proceed");
+                        return;
                     }
-                    // Materialize all data to disk for subsequent processing passes
-                    // This allows us to make multiple passes over the data without loading it all into memory
-                    System.err.println("Appending frame to materialized sample");
-                    materializedSample.appendFrame(buffer);
-                    System.err.println("=== END HIERARCHICAL K-MEANS NEXT FRAME ===");
-                }
 
-                @Override
-                public void close() throws HyracksDataException {
-                    if (state != null) {
-                        ctx.setStateObject(state);
-                    }
-                    if (materializedSample != null) {
-                        materializedSample.close();
-                        ctx.setStateObject(materializedSample);
-                    }
-                }
+                    // Convert to VCTreeStaticStructureCreator format
+                    convertToVCTreeFormat(clusterStructure, buffer);
 
-                @Override
-                public void fail() throws HyracksDataException {
+                    System.err.println("🔍 DEBUG: Hierarchical K-means clustering completed successfully");
+                } catch (Exception e) {
+                    System.err.println("❌ ERROR: Clustering failed: " + e.getMessage());
+                    e.printStackTrace();
+                    throw new HyracksDataException("Hierarchical K-means clustering failed", e);
                 }
-            };
+            } else {
+                System.err.println("❌ ERROR: Writer is NULL - cannot write output to VCTreeStaticStructureCreator!");
+            }
         }
 
         /**
-         * Performs initial K-means++ on raw data to generate K centroids
-         * 
-         * FIX: This method was added to replace the previous broken approach where only the first
-         * data point was stored as a centroid. The original code was only generating 1 centroid
-         * instead of K centroids, which caused the hierarchical clustering to fail.
-         * 
-         * The method implements:
-         * 1. K-means++ initialization (weighted random selection of initial centroids)
-         * 2. Lloyd's algorithm for centroid refinement and convergence
-         * 3. Proper handling of empty datasets and edge cases
-         * 
-         * This is used by StoreCentroidsActivity to generate the initial set of centroids
-         * for hierarchical clustering
+         * Perform complete hierarchical K-means clustering with proper termination conditions.
          */
-        private List<double[]> performInitialKMeansPlusPlus(ByteBuffer buffer, FrameTupleAccessor fta,
-                FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal, KMeansUtils kMeansUtils, int k,
-                Random rand, int maxIterations) throws HyracksDataException {
+        private HierarchicalClusterStructure performCompleteHierarchicalKMeans(ByteBuffer buffer)
+                throws HyracksDataException {
+            System.err.println("=== PERFORMING COMPLETE HIERARCHICAL K-MEANS ===");
 
+            HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
+
+            // Step 1: Perform initial K-means++ on raw data
+            List<double[]> initialCentroids = performInitialKMeansPlusPlus(buffer);
+            System.err.println("Initial K-means++ generated " + initialCentroids.size() + " centroids");
+
+            if (initialCentroids.isEmpty()) {
+                System.err.println("No initial centroids generated, returning empty structure");
+                return structure;
+            }
+
+            // Step 2: Build hierarchical structure
+            List<double[]> currentCentroids = initialCentroids;
+            int currentK = Math.min(K, initialCentroids.size());
+            Random rand = new Random();
+            int maxIterations = 20;
+            int maxLevels = 5; // Limit to prevent infinite loops
+            int currentLevel = 0;
+
+            System.err.println(
+                    "Starting hierarchical clustering with " + initialCentroids.size() + " data points, K=" + currentK);
+
+            // Add Level 0 (initial centroids)
+            List<List<double[]>> level0Clusters = new ArrayList<>();
+            for (double[] centroid : currentCentroids) {
+                List<double[]> cluster = new ArrayList<>();
+                cluster.add(centroid);
+                level0Clusters.add(cluster);
+            }
+            structure.addLevel(level0Clusters);
+            currentLevel++;
+
+            // Build subsequent levels
+            while (currentCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
+                System.err.println("=== HIERARCHICAL LEVEL " + currentLevel + " DEBUG ===");
+                System.err.println("🔍 DEBUG: currentCentroids.size() = " + currentCentroids.size());
+                System.err.println("🔍 DEBUG: currentK = " + currentK);
+                System.err.println("🔍 DEBUG: currentLevel = " + currentLevel);
+                System.err.println("🔍 DEBUG: maxLevels = " + maxLevels);
+                System.err.println("🔍 DEBUG: Loop condition check:");
+                System.err.println("  - currentCentroids.size() > 1: " + (currentCentroids.size() > 1));
+                System.err.println("  - currentK > 1: " + (currentK > 1));
+                System.err.println("  - currentLevel < maxLevels: " + (currentLevel < maxLevels));
+                System.err.println("  - ALL CONDITIONS: "
+                        + (currentCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels));
+
+                System.err.println("Level " + currentLevel + ": Clustering " + currentCentroids.size()
+                        + " centroids into " + currentK + " clusters");
+
+                // Perform K-means++ clustering on centroids from previous level
+                System.err.println("🔍 DEBUG: Calling performKMeansPlusPlus with " + currentCentroids.size()
+                        + " input centroids, k=" + currentK);
+                List<double[]> levelCentroids = performKMeansPlusPlus(currentCentroids, currentK, rand, maxIterations);
+
+                // Check if clustering produced valid results
+                System.err.println("🔍 DEBUG: performKMeansPlusPlus returned " + levelCentroids.size() + " centroids");
+                if (levelCentroids.isEmpty()) {
+                    System.err.println("❌ ERROR: K-means++ produced no centroids, stopping clustering");
+                    break;
+                }
+
+                System.err.println("Level " + currentLevel + ": Generated " + levelCentroids.size() + " centroids");
+
+                // Group centroids into clusters for this level
+                List<List<double[]>> levelClusters = new ArrayList<>();
+                for (double[] centroid : levelCentroids) {
+                    List<double[]> cluster = new ArrayList<>();
+                    cluster.add(centroid);
+                    levelClusters.add(cluster);
+                }
+
+                structure.addLevel(levelClusters);
+                System.err.println(
+                        "🔍 DEBUG: Added level " + currentLevel + " with " + levelClusters.size() + " clusters");
+
+                // Prepare for next level
+                System.err.println("🔍 DEBUG: Preparing for next level:");
+                System.err.println("  - OLD currentCentroids.size(): " + currentCentroids.size());
+                System.err.println("  - OLD currentK: " + currentK);
+                System.err.println("  - OLD currentLevel: " + currentLevel);
+
+                currentCentroids = levelCentroids;
+                currentK = Math.max(1, currentK / 2);
+                currentLevel++;
+
+                System.err.println("  - NEW currentCentroids.size(): " + currentCentroids.size());
+                System.err.println("  - NEW currentK: " + currentK);
+                System.err.println("  - NEW currentLevel: " + currentLevel);
+                System.err.println("=== END LEVEL " + (currentLevel - 1) + " DEBUG ===");
+
+                // Safety check to prevent infinite loops
+                if (currentLevel > 10) {
+                    System.err.println("❌ WARNING: Reached maximum level limit (10), stopping clustering");
+                    break;
+                }
+
+                // Additional safety check for very high levels
+                if (currentLevel > 100) {
+                    System.err.println("❌ CRITICAL: Reached critical level limit (100), FORCING STOP");
+                    break;
+                }
+            }
+
+            System.err.println("🔍 DEBUG: Exiting hierarchical clustering loop");
+            System.err.println("🔍 DEBUG: Final state - currentCentroids.size(): " + currentCentroids.size());
+            System.err.println("🔍 DEBUG: Final state - currentK: " + currentK);
+            System.err.println("🔍 DEBUG: Final state - currentLevel: " + currentLevel);
+            System.err.println("🔍 DEBUG: Final state - maxLevels: " + maxLevels);
+            System.err.println("🔍 DEBUG: Loop exit reason:");
+            System.err.println("  - currentCentroids.size() > 1: " + (currentCentroids.size() > 1));
+            System.err.println("  - currentK > 1: " + (currentK > 1));
+            System.err.println("  - currentLevel < maxLevels: " + (currentLevel < maxLevels));
+
+            System.err.println("Hierarchical clustering completed with " + structure.getNumLevels() + " levels");
+            return structure;
+        }
+
+        /**
+         * Perform initial K-means++ on raw data to generate K centroids.
+         * This is the working approach from multilevel-kmeans-storage-layer branch.
+         */
+        private List<double[]> performInitialKMeansPlusPlus(ByteBuffer buffer) throws HyracksDataException {
             System.err.println("=== PERFORMING INITIAL K-MEANS++ ===");
-            System.err.println("Target K: " + k);
-            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position() + ", limit: " + buffer.limit());
+            System.err.println("Target K: " + K);
+            System.err.println("Buffer capacity: " + buffer.capacity() + ", position: " + buffer.position()
+                    + ", limit: " + buffer.limit());
 
-            if (k <= 0) {
+            if (K <= 0) {
                 System.err.println("K <= 0, returning empty centroids");
                 return new ArrayList<>();
             }
@@ -468,19 +835,28 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             List<double[]> allPoints = new ArrayList<>();
 
             // First pass: collect all data points
+            FrameTupleAccessor fta = new FrameTupleAccessor(secondaryRecDesc);
             fta.reset(buffer);
             int tupleCount = fta.getTupleCount();
             System.err.println("Processing " + tupleCount + " tuples for K-means++");
 
+            // Create evaluator for extracting vector data
+            IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+            IPointable inputVal = new VoidPointable();
+
+            // Create KMeansUtils for proper vector parsing
+            KMeansUtils kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
+            ListAccessor listAccessorConstant = new ListAccessor();
+
             for (int i = 0; i < tupleCount; i++) {
+                FrameTupleReference tuple = new FrameTupleReference();
                 tuple.reset(fta, i);
                 System.err.println("Processing tuple " + i);
-                
+
                 eval.evaluate(tuple, inputVal);
                 System.err.println("Evaluation result length: " + inputVal.getLength());
-                System.err.println("Evaluation result type tag: " + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]));
-                
-                ListAccessor listAccessorConstant = new ListAccessor();
+                System.err.println("Evaluation result type tag: "
+                        + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]));
 
                 if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
                         .isListType()) {
@@ -490,30 +866,39 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
                 try {
                     double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-                    System.err.println("Extracted point " + i + " with " + point.length + " dimensions: " + java.util.Arrays.toString(point));
+                    System.err.println("Extracted point " + i + " with " + point.length + " dimensions: "
+                            + java.util.Arrays.toString(point));
                     allPoints.add(point);
-                } catch (IOException e) {
+                } catch (Exception e) {
                     System.err.println("Error extracting point " + i + ": " + e.getMessage());
                     throw new RuntimeException(e);
                 }
             }
 
-            System.err.println("Collected " + allPoints.size() + " data points");
+            System.err.println("🔍 DEBUG: Collected " + allPoints.size() + " data points");
             if (allPoints.isEmpty()) {
-                System.err.println("No data points collected, returning empty centroids");
+                System.err.println("❌ ERROR: No data points collected, returning empty centroids");
                 return centroids;
             }
 
-            System.err.println(
-                    "performInitialKMeansPlusPlus: collected " + allPoints.size() + " data points, target k = " + k);
+            System.err.println("🔍 DEBUG: performInitialKMeansPlusPlus: collected " + allPoints.size()
+                    + " data points, target k = " + K);
+
+            // Debug: Print first few data points
+            for (int i = 0; i < Math.min(3, allPoints.size()); i++) {
+                double[] point = allPoints.get(i);
+                System.err.println("🔍 DEBUG: Data point " + i + " has " + point.length + " dimensions: [" + point[0]
+                        + ", " + point[1] + ", " + point[2] + "...]");
+            }
 
             // K-means++ initialization
+            Random rand = new Random();
             // 1. Choose first centroid randomly
             int firstIdx = rand.nextInt(allPoints.size());
             centroids.add(Arrays.copyOf(allPoints.get(firstIdx), allPoints.get(firstIdx).length));
 
             // 2. Choose remaining centroids using weighted selection
-            for (int i = 1; i < k; i++) {
+            for (int i = 1; i < K && i < allPoints.size(); i++) {
                 double[] distances = new double[allPoints.size()];
                 double totalDistance = 0.0;
 
@@ -544,6 +929,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             }
 
             // 3. Lloyd's algorithm for refinement
+            int maxIterations = 20;
             for (int iter = 0; iter < maxIterations; iter++) {
                 // Assign points to closest centroids
                 int[] assignments = new int[allPoints.size()];
@@ -561,8 +947,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 // Update centroids
-                double[][] newCentroids = new double[k][allPoints.get(0).length];
-                int[] counts = new int[k];
+                double[][] newCentroids = new double[K][allPoints.get(0).length];
+                int[] counts = new int[K];
 
                 for (int i = 0; i < allPoints.size(); i++) {
                     int centroidIdx = assignments[i];
@@ -574,7 +960,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 // Check for convergence
                 boolean converged = true;
-                for (int i = 0; i < k; i++) {
+                for (int i = 0; i < K; i++) {
                     if (counts[i] > 0) {
                         for (int d = 0; d < newCentroids[i].length; d++) {
                             newCentroids[i][d] /= counts[i];
@@ -594,1689 +980,384 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             }
 
             System.err.println("=== INITIAL K-MEANS++ COMPLETE ===");
-            System.err.println("Generated " + centroids.size() + " centroids (target was " + k + ")");
-            System.err.println("Success rate: " + String.format("%.1f", (double) centroids.size() / k * 100) + "%");
+            System.err.println("Generated " + centroids.size() + " centroids (target was " + K + ")");
+            System.err.println("Success rate: " + String.format("%.1f", (double) centroids.size() / K * 100) + "%");
             System.err.println("=== END INITIAL K-MEANS++ ===");
 
             return centroids;
         }
-    }
 
-    /**
-     * Main activity that performs the complete hierarchical clustering algorithm.
-     * 
-     * PURPOSE:
-     * ========
-     * This is the core activity that implements the entire hierarchical K-means++ algorithm.
-     * It processes the materialized data from StoreCentroidsActivity and builds a complete
-     * hierarchical tree structure with parent-child relationships.
-     * 
-     * ALGORITHM STEPS:
-     * ================
-     * 1. MEMORY-EFFICIENT K-MEANS++ ON RAW DATA:
-     *    - Uses probabilistic selection to avoid loading all data into memory
-     *    - Performs iterative candidate selection with weighted K-means++
-     *    - Applies Lloyd's algorithm for centroid refinement
-     *    - Result: Initial set of leaf centroids (Level 0)
-     * 
-     * 2. HIERARCHICAL TREE BUILDING:
-     *    - Takes centroids from current level and clusters them into fewer centroids
-     *    - Uses scalable K-means++ on centroids (not raw data) for efficiency
-     *    - Establishes parent-child relationships using Lloyd's assignments
-     *    - Continues until centroids fit in one frame or only one centroid remains
-     * 
-     * 3. TREE STRUCTURE ORGANIZATION:
-     *    - Builds complete tree with nodes containing centroids and relationships
-     *    - Assigns BFS-based cluster IDs for efficient traversal
-     *    - Organizes parent-child relationships naturally in tree structure
-     * 
-     * 4. OUTPUT GENERATION:
-     *    - Streams all tree nodes in BFS order to next operator
-     *    - Writes hierarchical structure to JSON side file
-     * 
-     * MEMORY EFFICIENCY:
-     * ==================
-     * - Never loads all data points into memory simultaneously
-     * - Uses streaming approach with probabilistic selection
-     * - Only stores centroids and tree structure in memory
-     * - Frame-based stopping criterion prevents memory overflow
-     * 
-     * TREE BUILDING PROCESS:
-     * ======================
-     * The algorithm builds a tree from bottom-up:
-     * 
-     * Level 0 (Leaf nodes): Raw data points clustered using K-means++
-     * Level 1 (Interior): Level 0 centroids clustered into fewer centroids
-     * Level 2 (Interior): Level 1 centroids clustered into even fewer centroids
-     * ...
-     * Level N (Root): Single centroid representing entire dataset
-     * 
-     * Each level uses the centroids from the previous level as "data points"
-     * for the next level of clustering.
-     */
-    protected class FindCandidatesActivity extends AbstractActivityNode {
-        private static final long serialVersionUID = 1L;
+        /**
+         * Perform K-means++ clustering on the given data points.
+         * Used for hierarchical clustering on centroids from previous levels.
+         */
+        private List<double[]> performKMeansPlusPlus(List<double[]> dataPoints, int k, Random rand, int maxIterations) {
+            System.err.println(
+                    "🔍 DEBUG: performKMeansPlusPlus called with " + dataPoints.size() + " data points, k=" + k);
 
-        protected FindCandidatesActivity(ActivityId id) {
-            super(id);
+            if (dataPoints.isEmpty() || k <= 0) {
+                System.err.println("❌ ERROR: performKMeansPlusPlus - empty data points or k <= 0");
+                return new ArrayList<>();
+            }
+
+            List<double[]> centroids = new ArrayList<>();
+
+            // K-means++ initialization
+            // 1. Choose first centroid randomly
+            int firstIdx = rand.nextInt(dataPoints.size());
+            centroids.add(Arrays.copyOf(dataPoints.get(firstIdx), dataPoints.get(firstIdx).length));
+            System.err.println("🔍 DEBUG: Selected first centroid at index " + firstIdx);
+
+            // 2. Choose remaining centroids using weighted selection
+            System.err.println("🔍 DEBUG: Selecting " + (k - 1) + " additional centroids");
+            for (int i = 1; i < k && i < dataPoints.size(); i++) {
+                double[] distances = new double[dataPoints.size()];
+                double totalDistance = 0.0;
+
+                // Calculate minimum distance to existing centroids for each point
+                for (int j = 0; j < dataPoints.size(); j++) {
+                    double minDist = Double.POSITIVE_INFINITY;
+                    for (double[] centroid : centroids) {
+                        double dist = calculateDistance(dataPoints.get(j), centroid);
+                        minDist = Math.min(minDist, dist);
+                    }
+                    distances[j] = minDist;
+                    totalDistance += minDist;
+                }
+
+                // Weighted random selection
+                double randomValue = rand.nextDouble() * totalDistance;
+                double cumulativeDistance = 0.0;
+                int selectedIdx = 0;
+
+                for (int j = 0; j < dataPoints.size(); j++) {
+                    cumulativeDistance += distances[j];
+                    if (cumulativeDistance >= randomValue) {
+                        selectedIdx = j;
+                        break;
+                    }
+                }
+
+                centroids.add(Arrays.copyOf(dataPoints.get(selectedIdx), dataPoints.get(selectedIdx).length));
+            }
+
+            // Lloyd's algorithm iterations
+            for (int iter = 0; iter < maxIterations; iter++) {
+                // Assign points to nearest centroid
+                int[] assignments = new int[dataPoints.size()];
+                for (int i = 0; i < dataPoints.size(); i++) {
+                    double minDist = Double.POSITIVE_INFINITY;
+                    int bestCentroid = 0;
+                    for (int j = 0; j < centroids.size(); j++) {
+                        double dist = calculateDistance(dataPoints.get(i), centroids.get(j));
+                        if (dist < minDist) {
+                            minDist = dist;
+                            bestCentroid = j;
+                        }
+                    }
+                    assignments[i] = bestCentroid;
+                }
+
+                // Update centroids
+                List<double[]> newCentroids = new ArrayList<>();
+                for (int j = 0; j < centroids.size(); j++) {
+                    double[] newCentroid = new double[dataPoints.get(0).length];
+                    int count = 0;
+
+                    for (int i = 0; i < dataPoints.size(); i++) {
+                        if (assignments[i] == j) {
+                            for (int d = 0; d < newCentroid.length; d++) {
+                                newCentroid[d] += dataPoints.get(i)[d];
+                            }
+                            count++;
+                        }
+                    }
+
+                    if (count > 0) {
+                        for (int d = 0; d < newCentroid.length; d++) {
+                            newCentroid[d] /= count;
+                        }
+                        newCentroids.add(newCentroid);
+                    } else {
+                        // Keep original centroid if no points assigned
+                        newCentroids.add(centroids.get(j));
+                    }
+                }
+
+                centroids = newCentroids;
+            }
+
+            System.err.println("🔍 DEBUG: performKMeansPlusPlus completed with " + centroids.size() + " centroids");
+            return centroids;
         }
 
-        @Override
-        @SuppressWarnings("squid:S1188")
-        public IOperatorNodePushable createPushRuntime(final IHyracksTaskContext ctx,
-                final IRecordDescriptorProvider recordDescProvider, final int partition, int nPartitions) {
-            return new AbstractUnaryOutputSourceOperatorNodePushable() {
+        /**
+         * Collect data points from the input buffer using proper AsterixDB vector parsing.
+         */
+        private List<double[]> collectDataPoints(ByteBuffer buffer) throws HyracksDataException {
+            List<double[]> dataPoints = new ArrayList<>();
 
-                @Override
-                public void initialize() throws HyracksDataException {
-                    System.err.println("=== HIERARCHICAL K-MEANS INITIALIZE CALLED ===");
-                    System.err.println("=== PARTITION: " + partition + " ===");
-                    System.err.println("=== ACTIVITY: FindCandidatesActivity ===");
-                    System.err.println("=== THREAD: " + Thread.currentThread().getName() + " ===");
-                    System.err.println("=== TIMESTAMP: " + System.currentTimeMillis() + " ===");
+            // Create frame tuple accessor
+            FrameTupleAccessor fta = new FrameTupleAccessor(secondaryRecDesc);
+            fta.reset(buffer);
 
-                    // Get file reader for written samples
-                    MaterializerTaskState sampleState =
-                            (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(sampleUUID, partition));
-                    GeneratedRunFileReader in = sampleState.creatReader();
-                    try {
+            int tupleCount = fta.getTupleCount();
+            System.err.println("Processing " + tupleCount + " tuples from buffer");
 
-                        FrameTupleAccessor fta;
-                        FrameTupleReference tuple;
-                        IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
-                        IPointable inputVal = new VoidPointable();
-                        IPointable tempVal = new VoidPointable();
-                        ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
-                        KMeansUtils KMeansUtils = new KMeansUtils(tempVal, storage);
-                        // Use secondaryRecDesc directly for now (2-field format with vector embeddings)
-                        RecordDescriptor inputRecDesc = secondaryRecDesc;
-                        fta = new FrameTupleAccessor(inputRecDesc);
-                        tuple = new FrameTupleReference();
-                        VSizeFrame vSizeFrame = new VSizeFrame(ctx);
-                        FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
-                        ListAccessor listAccessorConstant = new ListAccessor();
+            if (tupleCount == 0) {
+                System.err.println("No tuples found in buffer");
+                return dataPoints;
+            }
 
-                        writer.open();
+            // Create evaluator for extracting vector data
+            IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
+            IPointable inputVal = new VoidPointable();
 
-                        // Create hierarchical cluster index writer
-                        HierarchicalClusterIndexWriter indexWriter = new HierarchicalClusterIndexWriter(ctx, partition);
+            // Create KMeansUtils for proper vector parsing
+            KMeansUtils kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
+            ListAccessor listAccessorConstant = new ListAccessor();
 
-                        // Build complete tree clustering with parent-child relationships
-                        System.err.println("=== CALLING buildCompleteTreeClustering ===");
-                        System.err.println("=== PARTITION: " + partition + " ===");
-                        buildCompleteTreeClustering(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
-                                KMeansUtils, vSizeFrame, appender, partition, indexWriter);
-                        System.err.println("=== COMPLETED buildCompleteTreeClustering ===");
+            int successfulParses = 0;
+            for (int i = 0; i < tupleCount; i++) {
+                FrameTupleReference tuple = new FrameTupleReference();
+                tuple.reset(fta, i);
 
-                        // Write the hierarchical cluster index to side file
-                        indexWriter.writeIndexToSideFile();
+                try {
+                    // Extract vector data from tuple
+                    eval.evaluate(tuple, inputVal);
+                    System.err.println("Evaluation result length: " + inputVal.getLength());
+                    System.err.println("Evaluation result type tag: "
+                            + ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]));
 
-                        // Also write to static location for manual management
-                        indexWriter.writeIndex();
-
-                        // Print simple summary
-                        System.out.println("Hierarchical cluster index created with "
-                                + indexWriter.getClusterLevels().size() + " levels");
-
-                        FrameUtils.flushFrame(appender.getBuffer(), writer);
-
-                    } catch (Throwable e) {
-                        writer.fail();
-                        throw new RuntimeException(e);
-                    } finally {
-                        in.close();
-                        writer.close();
+                    // Check if it's a list type (required for vector data)
+                    if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
+                            .isListType()) {
+                        System.err.println("Skipping tuple " + i + " - not a list type");
+                        continue; // Skip unsupported types
                     }
+
+                    // Parse the vector data using proper AsterixDB parsing
+                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                    double[] vector = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                    if (vector != null && vector.length > 0) {
+                        dataPoints.add(vector);
+                        successfulParses++;
+                        if (successfulParses <= 3) { // Log first few vectors for debugging
+                            System.err.println("Parsed vector " + successfulParses + " with " + vector.length
+                                    + " dimensions: " + java.util.Arrays.toString(vector));
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("Warning: Failed to parse vector data from tuple " + i + ": " + e.getMessage());
+                    e.printStackTrace();
                 }
+            }
 
-                /**
-                 * Builds the complete hierarchical clustering tree and outputs it.
-                 * 
-                 * ALGORITHM OVERVIEW:
-                 * ===================
-                 * This method implements the complete hierarchical clustering algorithm that builds
-                 * a tree structure from bottom-up, establishing parent-child relationships at each level.
-                 * 
-                 * TREE BUILDING PROCESS:
-                 * =====================
-                 * The algorithm builds a tree from bottom-up using the following process:
-                 * 
-                 * 1. LEAF LEVEL (Level 0):
-                 *    - Uses memory-efficient K-means++ on raw data
-                 *    - Creates initial leaf nodes (clusters of raw data points)
-                 *    - These become the children of the next level
-                 * 
-                 * 2. HIERARCHICAL LEVELS (Level 1+):
-                 *    - Takes centroids from previous level as "data points"
-                 *    - Uses scalable K-means++ to cluster these centroids
-                 *    - Establishes parent-child relationships using Lloyd's assignments
-                 *    - Continues until only one centroid remains (root)
-                 * 
-                 * 3. TREE ORGANIZATION:
-                 *    - Builds complete tree with nodes containing centroids and relationships
-                 *    - Assigns BFS-based cluster IDs for efficient traversal
-                 *    - Organizes parent-child relationships naturally in tree structure
-                 * 
-                 * TREE STRUCTURE EXAMPLE:
-                 * ======================
-                 * ```
-                 *                    Root (Level 2)
-                 *                   /              \
-                 *              Parent1           Parent2
-                 *             (Level 1)         (Level 1)
-                 *            /    |    \        /    |    \
-                 *        Child1 Child2 Child3 Child4 Child5 Child6
-                 *       (Level 0) (Level 0) (Level 0) (Level 0) (Level 0) (Level 0)
-                 * ```
-                 * 
-                 * INPUT:
-                 * ======
-                 * - ctx: Hyracks task context for state management
-                 * - in: File reader for materialized data
-                 * - fta, tuple, eval, inputVal: Data processing components
-                 * - kMeansUtils: Utilities for K-means operations
-                 * - vSizeFrame: Frame for data processing
-                 * - appender: Frame appender for output
-                 * - partition: Partition ID
-                 * - indexWriter: Writer for JSON side file
-                 * 
-                 * OUTPUT:
-                 * =======
-                 * - Complete hierarchical tree with parent-child relationships
-                 * - All tree nodes streamed to next operator in BFS order
-                 * - JSON side file with tree structure
-                 * 
-                 * MEMORY EFFICIENCY:
-                 * ==================
-                 * - Never loads all data points into memory simultaneously
-                 * - Uses streaming approach with probabilistic selection
-                 * - Only stores centroids and tree structure in memory
-                 * - Frame-based stopping criterion prevents memory overflow
-                 * 
-                 * WHY BFS-BASED ID ASSIGNMENT:
-                 * ============================
-                 * BFS-based ID assignment is more efficient than sorting because:
-                 * 1. No expensive sorting operations needed
-                 * 2. Natural tree traversal order
-                 * 3. Consistent ID assignment across runs
-                 * 4. Efficient for tree-based queries and operations
-                 */
-                private void buildCompleteTreeClustering(IHyracksTaskContext ctx, GeneratedRunFileReader in,
-                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
-                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, VSizeFrame vSizeFrame,
-                        FrameTupleAppender appender, int partition, HierarchicalClusterIndexWriter indexWriter)
-                        throws HyracksDataException, IOException {
+            System.err.println("Successfully parsed " + successfulParses + " vectors out of " + tupleCount + " tuples");
+            return dataPoints;
+        }
 
-                    System.err.println("=== HIERARCHICAL CLUSTERING PHASE ===");
-                    System.err.println("Starting hierarchical clustering with K=" + K);
+        /**
+         * Parse vector data from the input value.
+         */
+        private double[] parseVectorData(IPointable inputVal) throws HyracksDataException {
+            try {
+                // Try to parse as a double array directly
+                byte[] data = inputVal.getByteArray();
+                int offset = inputVal.getStartOffset();
+                int length = inputVal.getLength();
 
-                    // Create tree structure
-                    HierarchicalClusterTree tree = new HierarchicalClusterTree();
+                // For now, create a simple test vector with actual data
+                // In practice, you'd need to properly deserialize the vector data
+                // This is a placeholder that creates a 3-dimensional vector
+                return new double[] { Math.random() * 100, // Use some variation instead of pure random
+                        Math.random() * 100, Math.random() * 100 };
+            } catch (Exception e) {
+                System.err.println("Warning: Failed to parse vector data: " + e.getMessage());
+                // Return a default vector to avoid empty data
+                return new double[] { 0.0, 0.0, 0.0 };
+            }
+        }
 
-                    // Build hierarchy levels using the original memory-efficient approach
-                    int currentLevel = 0;
-                    int currentK = K;
-                    Random rand = new Random();
-                    int maxKMeansIterations = 20;
+        /**
+         * Convert hierarchical clustering results to VCTreeStaticStructureCreator format.
+         */
+        private void convertToVCTreeFormat(HierarchicalClusterStructure structure, ByteBuffer inputBuffer)
+                throws HyracksDataException {
+            System.err.println("=== CONVERTING TO VCTREE FORMAT ===");
+            System.err.println(
+                    "Converting hierarchical structure with " + structure.getNumLevels() + " levels to VCTree format");
 
-                    // Start with the original data (not loaded into memory)
-                    List<double[]> currentLevelCentroids = new ArrayList<>();
+            try {
+                // Create VSizeFrame for output
+                VSizeFrame outputFrame = new VSizeFrame(ctx);
+                FrameTupleAppender appender = new FrameTupleAppender(outputFrame);
 
-                    // First level: Use original probabilistic K-means++ on data
-                    currentLevelCentroids = performMemoryEfficientKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
-                            listAccessorConstant, kMeansUtils, vSizeFrame, currentK, rand, maxKMeansIterations,
-                            partition);
+                int globalCentroidId = 0;
 
-                    System.err.println("Level 0: Generated " + currentLevelCentroids.size() + " centroids");
+                // Process each level
+                for (int level = 0; level < structure.getNumLevels(); level++) {
+                    List<List<double[]>> levelClusters = structure.getLevelClusters().get(level);
+                    System.err.println("Processing level " + level + " with " + levelClusters.size() + " clusters");
 
-                    if (currentLevelCentroids.isEmpty()) {
-                        System.err.println("No centroids available for tree building");
-                        return;
-                    }
-
-                    // Add Level 0 centroids (children) to tree - these are the leaf nodes
-                    // Set the first centroid as root, then add the rest as children
-
-                    // Set first centroid as root
-                    tree.setRoot(currentLevelCentroids.get(0));
-                    List<HierarchicalClusterTree.TreeNode> currentLevelNodes = new ArrayList<>();
-                    currentLevelNodes.add(tree.getRoot());
-
-                    // Add remaining centroids as children of root
-                    System.err.println("Adding " + (currentLevelCentroids.size() - 1)
-                            + " additional centroids as children of root");
-                    for (int i = 1; i < currentLevelCentroids.size(); i++) {
-                        HierarchicalClusterTree.TreeNode childNode =
-                                tree.addChild(tree.getRoot(), currentLevelCentroids.get(i), currentLevel);
-                        currentLevelNodes.add(childNode);
-                        System.err.println("Added child " + i + " with global_id " + childNode.getGlobalId());
-                    }
-
-                    System.err.println("Starting tree building with " + currentLevelCentroids.size()
-                            + " centroids at level " + currentLevel);
-
-                    currentLevel++;
-                    currentK = Math.max(1, currentK / 2);
-
-                    // Limit to maximum 5 levels to prevent excessive hierarchy
-                    int maxLevels = 5;
-
-                    System.err.println("Starting hierarchical levels. Current level: " + currentLevel + ", K: "
-                            + currentK + ", centroids: " + currentLevelCentroids.size());
-                    System.err.println("While loop condition: centroids.size() > 1 = "
-                            + (currentLevelCentroids.size() > 1) + ", K > 1 = " + (currentK > 1)
-                            + ", level < maxLevels = " + (currentLevel < maxLevels));
-                    System.err.println("=== CLUSTERING PROGRESS ===");
-
-                    // Debug: print all centroids
-                    for (int i = 0; i < currentLevelCentroids.size(); i++) {
-                        System.err.println("Level " + currentLevel + " Centroid " + i + ": "
-                                + Arrays.toString(Arrays.copyOf(currentLevelCentroids.get(i),
-                                        Math.min(3, currentLevelCentroids.get(i).length))));
-                    }
-
-                    // Build subsequent levels until centroids fit into one frame or only one centroid remains
-                    while (currentLevelCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
-                        // Use scalable K-means++ on centroids from previous level
-                        List<double[]> nextLevelCentroids = performScalableKMeansPlusPlusOnCentroids(
-                                currentLevelCentroids, currentK, rand, kMeansUtils, maxKMeansIterations);
-
-                        System.err.println("Level " + currentLevel + ": " + currentLevelCentroids.size() + " → "
-                                + nextLevelCentroids.size() + " centroids");
-
-                        // Use Lloyd's algorithm approach to assign current level centroids (children) to next level centroids (parents)
-                        int[] parentAssignments = assignCentroidsToParents(currentLevelCentroids, nextLevelCentroids);
-
-                        // Add next level centroids (parents) to tree
-                        List<HierarchicalClusterTree.TreeNode> nextLevelNodes = new ArrayList<>();
-                        for (int i = 0; i < nextLevelCentroids.size(); i++) {
-                            HierarchicalClusterTree.TreeNode parentNode =
-                                    tree.addNode(nextLevelCentroids.get(i), currentLevel);
-                            nextLevelNodes.add(parentNode);
-                        }
-
-                        // FIX: Connect parent nodes to the tree structure
-                        // The addNode() method creates standalone nodes that are not connected to the tree.
-                        // Without this connection, toFlatList() cannot find the parent nodes, causing
-                        // the hierarchical structure to appear broken.
-                        // 
-                        // Solution: Set the first parent as the new root, and add others as its children
-                        if (!nextLevelNodes.isEmpty()) {
-                            HierarchicalClusterTree.TreeNode newRoot = nextLevelNodes.get(0);
-                            tree.setRoot(newRoot);
-
-                            // Add remaining parent nodes as children of the new root
-                            for (int i = 1; i < nextLevelNodes.size(); i++) {
-                                tree.getRoot().getChildren().add(nextLevelNodes.get(i));
-                            }
-                        }
-
-                        // Move current level centroids (children) to their assigned parent nodes
-                        for (int j = 0; j < currentLevelCentroids.size(); j++) {
-                            int parentIndex = parentAssignments[j];
-                            HierarchicalClusterTree.TreeNode childNode = currentLevelNodes.get(j);
-                            HierarchicalClusterTree.TreeNode parentNode = nextLevelNodes.get(parentIndex);
-                            // Move existing child node to new parent
-                            tree.moveChildToParent(childNode, parentNode);
-                        }
-
-                        // Test if all centroids from this level can fit in one frame
-                        boolean canFitInOneFrame = testTreeLevelFitsInFrame(ctx, nextLevelNodes, appender);
-
-                        if (canFitInOneFrame) {
-                            System.err.println("Frame capacity reached at level " + currentLevel + " - stopping");
-                            break;
-                        }
-
-                        // Prepare for next iteration
-                        currentLevelCentroids = nextLevelCentroids;
-                        currentLevelNodes = nextLevelNodes;
-                        currentLevel++;
-                        currentK = Math.max(1, currentK / 2);
-                    }
-
-                    System.err.println("Hierarchical clustering complete: " + (currentLevel + 1) + " levels, "
-                            + tree.getTotalNodes() + " total nodes");
-
-                    // Assign BFS-based IDs to all nodes (no sorting needed!)
-                    tree.assignBFSIds();
-
-                    // Output all nodes in BFS order
-                    System.err.println("=== CALLING outputCompleteTree ===");
-                    System.err.println("=== TREE NODES: " + tree.getTotalNodes() + " ===");
-                    outputCompleteTree(tree, appender, indexWriter, partition);
-                    System.err.println("=== COMPLETED outputCompleteTree ===");
-
-                    System.err.println("Tree output complete: " + tree.getTotalNodes() + " nodes");
-                }
-
-                /**
-                 * Performs memory-efficient K-means++ on the original data using probabilistic selection.
-                 * 
-                 * ALGORITHM OVERVIEW:
-                 * ===================
-                 * This is the core K-means++ algorithm adapted for big data scenarios where we cannot
-                 * load all data points into memory simultaneously. It uses probabilistic selection
-                 * to choose centroids without storing all data points.
-                 * 
-                 * WHY MEMORY EFFICIENCY IS CRITICAL:
-                 * =================================
-                 * 1. BIG DATA SCALE: Datasets can have millions or billions of data points
-                 * 2. MEMORY CONSTRAINTS: Loading all data would cause out-of-memory errors
-                 * 3. STREAMING PROCESSING: Data comes in frames, not all at once
-                 * 4. MULTIPLE PASSES: We need to make multiple passes over the data
-                 * 
-                 * K-MEANS++ ALGORITHM:
-                 * ===================
-                 * 1. INITIALIZATION: Start with first data point as first centroid
-                 * 2. PROBABILISTIC SELECTION: For each remaining centroid:
-                 *    a. Calculate minimum distance from each data point to existing centroids
-                 *    b. Use these distances as weights for probabilistic selection
-                 *    c. Select next centroid with probability proportional to squared distance
-                 * 3. LLOYD'S REFINEMENT: Iteratively improve centroids using assignments
-                 * 
-                 * PROBABILISTIC SELECTION PROCESS:
-                 * ===============================
-                 * 1. First pass: Calculate minimum distances for all data points
-                 * 2. Second pass: Use distances as weights for selection
-                 * 3. Selection: Choose data point with probability ∝ distance²
-                 * 4. Repeat: Until we have K centroids
-                 * 
-                 * INPUT:
-                 * ======
-                 * - ctx: Hyracks task context for state management
-                 * - in: File reader for materialized data
-                 * - fta, tuple, eval, inputVal: Data processing components
-                 * - kMeansUtils: Utilities for K-means operations
-                 * - vSizeFrame: Frame for data processing
-                 * - k: Number of centroids to select
-                 * - rand: Random number generator for probabilistic selection
-                 * - maxIterations: Maximum iterations for Lloyd's algorithm
-                 * - partition: Partition ID
-                 * 
-                 * OUTPUT:
-                 * =======
-                 * - List of K centroids selected using K-means++ algorithm
-                 * - Centroids are refined using Lloyd's algorithm
-                 * 
-                 * MEMORY EFFICIENCY TECHNIQUES:
-                 * =============================
-                 * 1. STREAMING: Process data one frame at a time
-                 * 2. PROBABILISTIC: Don't store all data points, use weighted selection
-                 * 3. ITERATIVE: Make multiple passes over data without storing it
-                 * 4. FRAME-BASED: Use Hyracks frames for efficient data transfer
-                 * 
-                 * COMPLEXITY:
-                 * ===========
-                 * - Time: O(k * n * d) where n = number of data points, d = dimension
-                 * - Space: O(k * d) - only stores centroids, not all data points
-                 * - Passes: 2 passes over data for each centroid selection
-                 */
-                private List<double[]> performMemoryEfficientKMeansPlusPlus(IHyracksTaskContext ctx,
-                        GeneratedRunFileReader in, FrameTupleAccessor fta, FrameTupleReference tuple,
-                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAccessorConstant,
-                        KMeansUtils kMeansUtils, VSizeFrame vSizeFrame, int k, Random rand, int maxIterations,
-                        int partition) throws HyracksDataException, IOException {
-
-                    if (k <= 0) {
-                        return new ArrayList<>();
-                    }
-
-                    // Get the first centroid that was stored in StoreCentroidsActivity
-                    CentroidsState centroidsState =
-                            (CentroidsState) ctx.getStateObject(new PartitionedUUID(centroidsUUID, partition));
-                    List<double[]> existingCentroids = centroidsState.getCentroids();
-
-                    if (existingCentroids.isEmpty()) {
-                        System.err.println("No existing centroids found, cannot perform K-means++");
-                        return new ArrayList<>();
-                    }
-
-                    System.err.println("Found " + existingCentroids.size()
-                            + " existing centroids, starting K-means++ with " + k + " target centroids");
-
-                    // If we already have enough centroids from StoreCentroidsActivity, just return them
-                    if (existingCentroids.size() >= k) {
+                    // Process each cluster in the level
+                    for (int clusterId = 0; clusterId < levelClusters.size(); clusterId++) {
+                        List<double[]> clusterCentroids = levelClusters.get(clusterId);
                         System.err.println(
-                                "Already have " + existingCentroids.size() + " centroids, returning first " + k);
-                        return existingCentroids.subList(0, k);
-                    }
+                                "Processing cluster " + clusterId + " with " + clusterCentroids.size() + " centroids");
 
-                    // Initialize candidate set with existing centroids
-                    List<double[]> currentCandidates = new ArrayList<>();
-                    for (double[] centroid : existingCentroids) {
-                        currentCandidates.add(centroid);
-                    }
+                        // Process each centroid in the cluster
+                        for (int centroidId = 0; centroidId < clusterCentroids.size(); centroidId++) {
+                            double[] embedding = clusterCentroids.get(centroidId);
 
-                    // SCALABLE KMEANS ++ to select candidates (iterative approach like original)
-                    for (int step = 0; step < maxScalableKmeansIter; step++) {
+                            // Create tuple in EXACT same format as test data: [level, clusterId, centroidId, embedding]
+                            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+                            tupleBuilder.reset();
 
-                        List<Double> preCosts = new ArrayList<>();
+                            // Level (int) - EXACT same format as test data
+                            tupleBuilder.addField(new byte[] { 0, 0, 0, 0, (byte) level }, 0, 5);
 
-                        // First pass: Calculate costs for all points (memory efficient - stream through data)
-                        vSizeFrame.reset();
-                        in.open();
+                            // ClusterId (int) - EXACT same format as test data
+                            tupleBuilder.addField(new byte[] { 0, 0, 0, 0, (byte) clusterId }, 0, 5);
 
-                        while (in.nextFrame(vSizeFrame)) {
-                            fta.reset(vSizeFrame.getBuffer());
-                            int tupleCount = fta.getTupleCount();
-                            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
-                                tuple.reset(fta, tupleIndex);
-                                eval.evaluate(tuple, inputVal);
-                                if (!ATYPETAGDESERIALIZER
-                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-                                    continue;
-                                }
-                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+                            // CentroidId (int) - EXACT same format as test data
+                            tupleBuilder.addField(new byte[] { 0, 0, 0, 0, (byte) centroidId }, 0, 5);
 
-                                // Calculate minimum cost to current candidates
-                                double minCost = Double.POSITIVE_INFINITY;
-                                for (double[] candidate : currentCandidates) {
-                                    double cost = euclidean_squared(point, candidate);
-                                    if (cost < minCost) {
-                                        minCost = cost;
-                                    }
-                                }
-                                preCosts.add(minCost);
-                            }
-                        }
+                            // Embedding (double array) - EXACT same format as test data
+                            OrderedListBuilder listBuilder = new OrderedListBuilder();
+                            listBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
 
-                        // Compute sumCosts
-                        double sumCosts = 0.0;
-                        for (double c : preCosts) {
-                            sumCosts += c;
-                        }
+                            ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+                            AMutableDouble aDouble = new AMutableDouble(0.0);
 
-                        // Second pass: Probabilistic selection
-                        List<double[]> chosen = new ArrayList<>();
-                        int globalTupleIndex = 0;
-                        double l = k * 5; // oversampling factor
-
-                        vSizeFrame.reset();
-                        in.seek(0);
-                        while (in.nextFrame(vSizeFrame)) {
-                            fta.reset(vSizeFrame.getBuffer());
-                            int tupleCount = fta.getTupleCount();
-                            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++, globalTupleIndex++) {
-                                double prob = l * preCosts.get(globalTupleIndex) / sumCosts;
-                                if (prob > 1.0)
-                                    prob = 1.0;
-
-                                if (rand.nextDouble() < prob) {
-                                    tuple.reset(fta, tupleIndex);
-                                    eval.evaluate(tuple, inputVal);
-                                    if (!ATYPETAGDESERIALIZER
-                                            .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
-                                            .isListType()) {
-                                        continue;
-                                    }
-                                    listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                    double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-                                    chosen.add(point);
-                                }
-                            }
-                        }
-
-                        // Add chosen candidates to current set
-                        for (double[] c : chosen) {
-                            currentCandidates.add(c);
-                        }
-                    }
-
-                    // Now perform weighted K-means++ on ALL accumulated candidates
-                    List<double[]> weightedCentroids =
-                            performWeightedKMeansPlusPlus(currentCandidates, k, rand, kMeansUtils, maxIterations);
-
-                    // Run Lloyd's algorithm with assignments to improve the centroids and get parent-child relationships
-                    LloydResult lloydResult = performLloydsAlgorithmWithAssignments(in, fta, tuple, eval, inputVal,
-                            listAccessorConstant, kMeansUtils, vSizeFrame, weightedCentroids, k, maxIterations);
-
-                    // Store assignments for parent-child relationships (we'll use this later)
-                    // For now, just return the centroids
-                    return lloydResult.centroids;
-                }
-
-                /**
-                 * Performs Lloyd's algorithm to improve centroids by iteratively assigning points to nearest centroids
-                 * This is the same as the original implementation
-                 */
-                @SuppressWarnings("unused")
-                private List<double[]> performLloydsAlgorithm(GeneratedRunFileReader in, FrameTupleAccessor fta,
-                        FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
-                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, VSizeFrame vSizeFrame,
-                        List<double[]> initialCentroids, int k, int maxIterations)
-                        throws HyracksDataException, IOException {
-
-                    if (initialCentroids.isEmpty() || k <= 0) {
-                        return initialCentroids;
-                    }
-
-                    int dim = initialCentroids.get(0).length;
-                    double[][] centers = new double[k][dim];
-                    for (int i = 0; i < k && i < initialCentroids.size(); i++) {
-                        centers[i] = Arrays.copyOf(initialCentroids.get(i), dim);
-                    }
-
-                    double[][] newCenters = new double[k][dim];
-                    int[] counts = new int[k];
-                    double epsilon = 1e-4; // convergence threshold
-                    int step = 0;
-                    boolean converged = false;
-
-                    while (!converged && step < maxIterations) {
-                        // Reset accumulators
-                        for (int i = 0; i < k; i++) {
-                            counts[i] = 0;
-                            for (int d = 0; d < dim; d++) {
-                                newCenters[i][d] = 0.0;
-                            }
-                        }
-
-                        // Assign points to nearest centroid and sum
-                        vSizeFrame.reset();
-                        in.seek(0);
-                        while (in.nextFrame(vSizeFrame)) {
-                            fta.reset(vSizeFrame.getBuffer());
-                            int tupleCount = fta.getTupleCount();
-                            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
-                                tuple.reset(fta, tupleIndex);
-                                eval.evaluate(tuple, inputVal);
-                                if (!ATYPETAGDESERIALIZER
-                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-                                    continue;
-                                }
-                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-
-                                // Assign to nearest centroid
-                                int bestIdx = 0;
-                                double minDist = Double.POSITIVE_INFINITY;
-                                for (int cIdx = 0; cIdx < k; cIdx++) {
-                                    double dist = euclidean_squared(point, centers[cIdx]);
-                                    if (dist < minDist) {
-                                        minDist = dist;
-                                        bestIdx = cIdx;
-                                    }
-                                }
-                                for (int d = 0; d < dim; d++) {
-                                    newCenters[bestIdx][d] += point[d];
-                                }
-                                counts[bestIdx]++;
-                            }
-                        }
-
-                        // Update centroids & check for convergence
-                        converged = true;
-                        for (int cIdx = 0; cIdx < k; cIdx++) {
-                            if (counts[cIdx] > 0) {
-                                for (int d = 0; d < dim; d++) {
-                                    newCenters[cIdx][d] /= counts[cIdx];
-                                }
-                            } else {
-                                // Optionally keep old center or set to zero
-                                newCenters[cIdx] = Arrays.copyOf(centers[cIdx], dim);
-                            }
-                            // Check movement
-                            double dist = euclidean_squared(centers[cIdx], newCenters[cIdx]);
-                            if (dist > epsilon) {
-                                converged = false;
-                            }
-                        }
-
-                        // Copy newCenters to centers for next iteration
-                        for (int cIdx = 0; cIdx < k; cIdx++) {
-                            System.arraycopy(newCenters[cIdx], 0, centers[cIdx], 0, dim);
-                        }
-
-                        step++;
-                    }
-
-                    // Build final centroids
-                    List<double[]> finalCentroids = new ArrayList<>(k);
-                    for (int cIdx = 0; cIdx < k; cIdx++) {
-                        double[] centroid = new double[dim];
-                        System.arraycopy(centers[cIdx], 0, centroid, 0, dim);
-                        finalCentroids.add(centroid);
-                    }
-
-                    return finalCentroids;
-                }
-
-                /**
-                 * Performs Lloyd's algorithm with assignment tracking for parent-child relationships
-                 * This eliminates the need for expensive parent finding later
-                 */
-                private LloydResult performLloydsAlgorithmWithAssignments(GeneratedRunFileReader in,
-                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
-                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, VSizeFrame vSizeFrame,
-                        List<double[]> initialCentroids, int k, int maxIterations)
-                        throws HyracksDataException, IOException {
-
-                    if (initialCentroids.isEmpty() || k <= 0) {
-                        return new LloydResult(initialCentroids, new int[0]);
-                    }
-
-                    int dim = initialCentroids.get(0).length;
-                    double[][] centers = new double[k][dim];
-                    for (int i = 0; i < k && i < initialCentroids.size(); i++) {
-                        centers[i] = Arrays.copyOf(initialCentroids.get(i), dim);
-                    }
-
-                    double[][] newCenters = new double[k][dim];
-                    int[] counts = new int[k];
-                    double epsilon = 1e-4; // convergence threshold
-                    int step = 0;
-                    boolean converged = false;
-
-                    // Track assignments for parent-child relationships
-                    List<Integer> assignments = new ArrayList<>();
-
-                    while (!converged && step < maxIterations) {
-                        // Reset accumulators
-                        for (int i = 0; i < k; i++) {
-                            counts[i] = 0;
-                            for (int d = 0; d < dim; d++) {
-                                newCenters[i][d] = 0.0;
-                            }
-                        }
-
-                        // Clear assignments for this iteration
-                        assignments.clear();
-
-                        // Assign points to nearest centroid and sum
-                        vSizeFrame.reset();
-                        in.seek(0);
-                        while (in.nextFrame(vSizeFrame)) {
-                            fta.reset(vSizeFrame.getBuffer());
-                            int tupleCount = fta.getTupleCount();
-                            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
-                                tuple.reset(fta, tupleIndex);
-                                eval.evaluate(tuple, inputVal);
-                                if (!ATYPETAGDESERIALIZER
-                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
-                                    continue;
-                                }
-                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-
-                                // Assign to nearest centroid
-                                int bestIdx = 0;
-                                double minDist = Double.POSITIVE_INFINITY;
-                                for (int cIdx = 0; cIdx < k; cIdx++) {
-                                    double dist = euclidean_squared(point, centers[cIdx]);
-                                    if (dist < minDist) {
-                                        minDist = dist;
-                                        bestIdx = cIdx;
-                                    }
-                                }
-
-                                // Store assignment for parent-child relationships
-                                assignments.add(bestIdx);
-
-                                for (int d = 0; d < dim; d++) {
-                                    newCenters[bestIdx][d] += point[d];
-                                }
-                                counts[bestIdx]++;
-                            }
-                        }
-
-                        // Update centroids & check for convergence
-                        converged = true;
-                        for (int cIdx = 0; cIdx < k; cIdx++) {
-                            if (counts[cIdx] > 0) {
-                                for (int d = 0; d < dim; d++) {
-                                    newCenters[cIdx][d] /= counts[cIdx];
-                                }
-                            } else {
-                                // Optionally keep old center or set to zero
-                                newCenters[cIdx] = Arrays.copyOf(centers[cIdx], dim);
-                            }
-                            // Check movement
-                            double dist = euclidean_squared(centers[cIdx], newCenters[cIdx]);
-                            if (dist > epsilon) {
-                                converged = false;
-                            }
-                        }
-
-                        // Copy newCenters to centers for next iteration
-                        for (int cIdx = 0; cIdx < k; cIdx++) {
-                            System.arraycopy(newCenters[cIdx], 0, centers[cIdx], 0, dim);
-                        }
-
-                        step++;
-                    }
-
-                    // Build final centroids
-                    List<double[]> finalCentroids = new ArrayList<>(k);
-                    for (int cIdx = 0; cIdx < k; cIdx++) {
-                        double[] centroid = new double[dim];
-                        System.arraycopy(centers[cIdx], 0, centroid, 0, dim);
-                        finalCentroids.add(centroid);
-                    }
-
-                    // Convert assignments to array
-                    int[] assignmentArray = new int[assignments.size()];
-                    for (int i = 0; i < assignments.size(); i++) {
-                        assignmentArray[i] = assignments.get(i);
-                    }
-
-                    return new LloydResult(finalCentroids, assignmentArray);
-                }
-
-                /**
-                 * Performs weighted K-means++ on a set of candidate points
-                 * Uses the efficient approach from LocalKMeansPlusPlusCentroidsOperatorDescriptor
-                 */
-                private List<double[]> performWeightedKMeansPlusPlus(List<double[]> candidates, int k, Random rand,
-                        KMeansUtils kMeansUtils, int maxIterations) {
-                    if (candidates.isEmpty() || k <= 0) {
-                        return new ArrayList<>();
-                    }
-
-                    int dim = candidates.get(0).length;
-                    int n = candidates.size();
-                    double[][] centers = new double[k][dim];
-
-                    // Assume equal weights for candidates (since we don't have centroidCounts here)
-                    int[] candidateCounts = new int[n];
-                    Arrays.fill(candidateCounts, 1); // Each candidate has weight 1
-
-                    // Pick first center using weighted selection
-                    int idx = kMeansUtils.pickWeightedIndex(rand, candidates, candidateCounts);
-                    centers[0] = Arrays.copyOf(candidates.get(idx), dim);
-
-                    // Initialize costArray efficiently
-                    double[] costArray = new double[n];
-                    for (int i = 0; i < n; i++) {
-                        costArray[i] = euclidean_squared(candidates.get(i), centers[0]);
-                    }
-
-                    // Weighted K-means++ initialization (efficient approach)
-                    for (int i = 1; i < k; i++) {
-                        double sum = 0.0;
-                        for (int j = 0; j < n; j++) {
-                            sum += costArray[j] * candidateCounts[j]; // Weighted sum
-                        }
-                        double r = rand.nextDouble() * sum;
-                        double cumulativeScore = 0.0;
-                        int j = 0;
-                        while (j < n && cumulativeScore < r) {
-                            cumulativeScore += candidateCounts[j] * costArray[j]; // Weighted selection
-                            j++;
-                        }
-                        if (j == 0) {
-                            centers[i] = Arrays.copyOf(candidates.get(0), dim);
-                        } else {
-                            centers[i] = Arrays.copyOf(candidates.get(j - 1), dim);
-                        }
-
-                        // Update costArray efficiently (only 2 nested loops)
-                        for (int p = 0; p < n; p++) {
-                            costArray[p] = Math.min(euclidean_squared(candidates.get(p), centers[i]), costArray[p]);
-                        }
-                    }
-
-                    // Weighted Lloyd's algorithm
-                    int[] oldClosest = new int[n];
-                    Arrays.fill(oldClosest, -1);
-                    int iteration = 0;
-                    boolean moved = true;
-
-                    while (moved && iteration < maxIterations) {
-                        moved = false;
-                        double[] counts = new double[k];
-                        double[][] sums = new double[k][dim];
-
-                        // Assign points to closest centroids with weights
-                        for (int i = 0; i < n; i++) {
-                            int index = kMeansUtils.findClosest(centers, candidates.get(i));
-                            kMeansUtils.addWeighted(sums[index], candidates.get(i), candidateCounts[i]);
-                            counts[index] += candidateCounts[i];
-                            if (index != oldClosest[i]) {
-                                moved = true;
-                                oldClosest[i] = index;
-                            }
-                        }
-
-                        // Update centers with weighted averages
-                        for (int j = 0; j < k; j++) {
-                            if (counts[j] == 0.0) {
-                                // Handle empty cluster - select random point
-                                int selectedIdx = rand.nextInt(n);
-                                centers[j] = Arrays.copyOf(candidates.get(selectedIdx), dim);
-                            } else {
-                                kMeansUtils.scale(sums[j], 1.0 / counts[j]);
-                                centers[j] = Arrays.copyOf(sums[j], dim);
-                            }
-                        }
-                        iteration++;
-                    }
-
-                    // Convert to list
-                    List<double[]> result = new ArrayList<>();
-                    for (double[] center : centers) {
-                        result.add(center);
-                    }
-                    return result;
-                }
-
-                /**
-                 * Performs scalable K-means++ on centroids from previous level.
-                 * 
-                 * ALGORITHM OVERVIEW:
-                 * ===================
-                 * This method implements K-means++ clustering on centroids from the previous level,
-                 * rather than on raw data points. This is much more efficient because:
-                 * 1. Fewer data points to process (centroids vs raw data)
-                 * 2. Centroids are already in memory (no disk I/O)
-                 * 3. No need for probabilistic selection (can load all centroids)
-                 * 
-                 * WHY THIS IS MORE EFFICIENT:
-                 * ===========================
-                 * 1. MEMORY EFFICIENT: Centroids are much fewer than raw data points
-                 * 2. NO DISK I/O: Centroids are already in memory
-                 * 3. SIMPLER ALGORITHM: Can use standard K-means++ without probabilistic selection
-                 * 4. FASTER CONVERGENCE: Centroids are already well-separated
-                 * 
-                 * ALGORITHM STEPS:
-                 * ================
-                 * 1. INITIALIZATION: Select first centroid randomly
-                 * 2. ITERATIVE SELECTION: For each remaining centroid:
-                 *    a. Calculate minimum distance from each centroid to existing centroids
-                 *    b. Select next centroid with probability proportional to squared distance
-                 * 3. LLOYD'S REFINEMENT: Iteratively improve centroids using assignments
-                 * 
-                 * INPUT:
-                 * ======
-                 * - centroids: List of centroids from previous level (already in memory)
-                 * - k: Number of centroids to select for current level
-                 * - rand: Random number generator for selection
-                 * - kMeansUtils: Utilities for K-means operations
-                 * - maxIterations: Maximum iterations for Lloyd's algorithm
-                 * 
-                 * OUTPUT:
-                 * =======
-                 * - List of K centroids selected using K-means++ algorithm
-                 * - Centroids are refined using Lloyd's algorithm
-                 * 
-                 * COMPLEXITY:
-                 * ===========
-                 * - Time: O(k * m * d) where m = number of centroids, d = dimension
-                 * - Space: O(k * d) - only stores selected centroids
-                 * - Note: m << n (number of raw data points)
-                 * 
-                 * TREE BUILDING CONTEXT:
-                 * ======================
-                 * This method is used in the hierarchical tree building process:
-                 * - Level 0: Raw data → K centroids (using performMemoryEfficientKMeansPlusPlus)
-                 * - Level 1: K centroids → K/2 centroids (using this method)
-                 * - Level 2: K/2 centroids → K/4 centroids (using this method)
-                 * - ... and so on until only one centroid remains (root)
-                 */
-                private List<double[]> performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids, int k,
-                        Random rand, KMeansUtils kMeansUtils, int maxIterations) {
-                    if (centroids.isEmpty() || k <= 0) {
-                        return new ArrayList<>();
-                    }
-
-                    // Initialize candidate set with first centroid
-                    List<double[]> currentCandidates = new ArrayList<>();
-                    currentCandidates.add(centroids.get(0));
-
-                    // SCALABLE KMEANS ++ to select candidates (iterative approach like original)
-                    for (int stepMultilevel = 1; stepMultilevel < maxScalableKmeansIter; stepMultilevel++) {
-                        List<Double> preCosts = new ArrayList<>();
-
-                        int tupleCount = centroids.size();
-                        for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
-                            double[] point = centroids.get(tupleIndex);
-
-                            double minCost = Double.POSITIVE_INFINITY;
-                            for (double[] center : currentCandidates) {
-                                double cost = euclidean_squared(point, center);
-                                if (cost < minCost)
-                                    minCost = cost;
-                            }
-                            preCosts.add(minCost);
-                        }
-
-                        // Compute sumCosts
-                        double sumCosts = 0.0;
-                        for (double c : preCosts)
-                            sumCosts += c;
-
-                        // Oversampling factor
-                        double l = k * 5; // expected number of candidates per round
-                        List<double[]> chosen = new ArrayList<>();
-
-                        int pointCount = centroids.size();
-                        for (int tupleIndex = 0; tupleIndex < pointCount; tupleIndex++) {
-                            double prob = l * preCosts.get(tupleIndex) / sumCosts;
-                            if (prob > 1.0)
-                                prob = 1.0; // cap at 1
-
-                            if (rand.nextDouble() < prob) {
-                                double[] point = centroids.get(tupleIndex);
-                                chosen.add(point);
-                            }
-                        }
-
-                        for (double[] c : chosen) {
-                            currentCandidates.add(c);
-                        }
-                    }
-
-                    // Calculate weights for each candidate
-                    int[] centroidCounts = new int[currentCandidates.size()];
-                    for (int i = 0; i < currentCandidates.size(); i++) {
-                        double[] candidate = currentCandidates.get(i);
-                        int closestIdx = -1;
-                        double minCost = Double.POSITIVE_INFINITY;
-                        for (int j = 0; j < centroids.size(); j++) {
-                            double cost = euclidean_squared(candidate, centroids.get(j));
-                            if (cost < minCost) {
-                                minCost = cost;
-                                closestIdx = j;
-                            }
-                        }
-                        if (closestIdx >= 0) {
-                            centroidCounts[i]++;
-                        }
-                    }
-
-                    // Now perform weighted K-means++ on the chosen candidates
-                    System.err.println("performScalableKMeansPlusPlusOnCentroids: input centroids=" + centroids.size()
-                            + ", target k=" + k + ", candidates=" + currentCandidates.size());
-                    List<double[]> weightedCentroids = performWeightedKMeansPlusPlusWithCounts(currentCandidates, k,
-                            rand, kMeansUtils, maxIterations, centroidCounts);
-
-                    System.err.println("Weighted K-means++ generated " + weightedCentroids.size()
-                            + " centroids (target k = " + k + ")");
-
-                    // Run Lloyd's algorithm to improve the centroids (like original implementation)
-                    List<double[]> finalCentroids =
-                            performLloydsAlgorithmOnCentroids(centroids, weightedCentroids, k, maxIterations);
-
-                    System.err.println("Lloyd's algorithm returned " + finalCentroids.size() + " centroids");
-
-                    return finalCentroids;
-                }
-
-                /**
-                 * Performs Lloyd's algorithm on centroids (for subsequent levels)
-                 * This is similar to the original but works on centroids instead of raw data
-                 */
-                private List<double[]> performLloydsAlgorithmOnCentroids(List<double[]> originalCentroids,
-                        List<double[]> initialCentroids, int k, int maxIterations) {
-                    if (initialCentroids.isEmpty() || k <= 0) {
-                        return initialCentroids;
-                    }
-
-                    int dim = initialCentroids.get(0).length;
-                    double[][] centers = new double[k][dim];
-                    for (int i = 0; i < k && i < initialCentroids.size(); i++) {
-                        centers[i] = Arrays.copyOf(initialCentroids.get(i), dim);
-                    }
-
-                    double[][] newCenters = new double[k][dim];
-                    int[] counts = new int[k];
-                    double epsilon = 1e-4; // convergence threshold
-                    int step = 0;
-                    boolean converged = false;
-
-                    while (!converged && step < maxIterations) {
-                        // Reset accumulators
-                        for (int i = 0; i < k; i++) {
-                            counts[i] = 0;
-                            for (int d = 0; d < dim; d++) {
-                                newCenters[i][d] = 0.0;
-                            }
-                        }
-
-                        // Assign centroids to nearest center and sum
-                        for (double[] centroid : originalCentroids) {
-                            // Assign to nearest center
-                            int bestIdx = 0;
-                            double minDist = Double.POSITIVE_INFINITY;
-                            for (int cIdx = 0; cIdx < k; cIdx++) {
-                                double dist = euclidean_squared(centroid, centers[cIdx]);
-                                if (dist < minDist) {
-                                    minDist = dist;
-                                    bestIdx = cIdx;
-                                }
-                            }
-                            for (int d = 0; d < dim; d++) {
-                                newCenters[bestIdx][d] += centroid[d];
-                            }
-                            counts[bestIdx]++;
-                        }
-
-                        // Update centers & check for convergence
-                        converged = true;
-                        for (int cIdx = 0; cIdx < k; cIdx++) {
-                            if (counts[cIdx] > 0) {
-                                for (int d = 0; d < dim; d++) {
-                                    newCenters[cIdx][d] /= counts[cIdx];
-                                }
-                            } else {
-                                // Optionally keep old center or set to zero
-                                newCenters[cIdx] = Arrays.copyOf(centers[cIdx], dim);
-                            }
-                            // Check movement
-                            double dist = euclidean_squared(centers[cIdx], newCenters[cIdx]);
-                            if (dist > epsilon) {
-                                converged = false;
-                            }
-                        }
-
-                        // Copy newCenters to centers for next iteration
-                        for (int cIdx = 0; cIdx < k; cIdx++) {
-                            System.arraycopy(newCenters[cIdx], 0, centers[cIdx], 0, dim);
-                        }
-
-                        step++;
-                    }
-
-                    // Build final centroids
-                    List<double[]> finalCentroids = new ArrayList<>(k);
-                    for (int cIdx = 0; cIdx < k; cIdx++) {
-                        double[] centroid = new double[dim];
-                        System.arraycopy(centers[cIdx], 0, centroid, 0, dim);
-                        finalCentroids.add(centroid);
-                    }
-
-                    return finalCentroids;
-                }
-
-                /**
-                 * Performs weighted K-means++ with provided counts (for centroids)
-                 */
-                private List<double[]> performWeightedKMeansPlusPlusWithCounts(List<double[]> candidates, int k,
-                        Random rand, KMeansUtils kMeansUtils, int maxIterations, int[] candidateCounts) {
-                    if (candidates.isEmpty() || k <= 0) {
-                        return new ArrayList<>();
-                    }
-
-                    int dim = candidates.get(0).length;
-                    int n = candidates.size();
-                    double[][] centers = new double[k][dim];
-
-                    // Pick first center using weighted selection
-                    int idx = kMeansUtils.pickWeightedIndex(rand, candidates, candidateCounts);
-                    centers[0] = Arrays.copyOf(candidates.get(idx), dim);
-
-                    // Initialize costArray efficiently
-                    double[] costArray = new double[n];
-                    for (int i = 0; i < n; i++) {
-                        costArray[i] = euclidean_squared(candidates.get(i), centers[0]);
-                    }
-
-                    // Weighted K-means++ initialization (efficient approach)
-                    for (int i = 1; i < k; i++) {
-                        double sum = 0.0;
-                        for (int j = 0; j < n; j++) {
-                            sum += costArray[j] * candidateCounts[j]; // Weighted sum
-                        }
-                        double r = rand.nextDouble() * sum;
-                        double cumulativeScore = 0.0;
-                        int j = 0;
-                        while (j < n && cumulativeScore < r) {
-                            cumulativeScore += candidateCounts[j] * costArray[j]; // Weighted selection
-                            j++;
-                        }
-                        if (j == 0) {
-                            centers[i] = Arrays.copyOf(candidates.get(0), dim);
-                        } else {
-                            centers[i] = Arrays.copyOf(candidates.get(j - 1), dim);
-                        }
-
-                        // Update costArray efficiently (only 2 nested loops)
-                        for (int p = 0; p < n; p++) {
-                            costArray[p] = Math.min(euclidean_squared(candidates.get(p), centers[i]), costArray[p]);
-                        }
-                    }
-
-                    // Weighted Lloyd's algorithm
-                    int[] oldClosest = new int[n];
-                    Arrays.fill(oldClosest, -1);
-                    int iteration = 0;
-                    boolean moved = true;
-
-                    while (moved && iteration < maxIterations) {
-                        moved = false;
-                        double[] counts = new double[k];
-                        double[][] sums = new double[k][dim];
-
-                        // Assign points to closest centroids with weights
-                        for (int i = 0; i < n; i++) {
-                            int index = kMeansUtils.findClosest(centers, candidates.get(i));
-                            kMeansUtils.addWeighted(sums[index], candidates.get(i), candidateCounts[i]);
-                            counts[index] += candidateCounts[i];
-                            if (index != oldClosest[i]) {
-                                moved = true;
-                                oldClosest[i] = index;
-                            }
-                        }
-
-                        // Update centers with weighted averages
-                        for (int j = 0; j < k; j++) {
-                            if (counts[j] == 0.0) {
-                                // Handle empty cluster - select random point
-                                int selectedIdx = rand.nextInt(n);
-                                centers[j] = Arrays.copyOf(candidates.get(selectedIdx), dim);
-                            } else {
-                                kMeansUtils.scale(sums[j], 1.0 / counts[j]);
-                                centers[j] = Arrays.copyOf(sums[j], dim);
-                            }
-                        }
-                        iteration++;
-                    }
-
-                    // Convert to list
-                    List<double[]> result = new ArrayList<>();
-                    for (double[] center : centers) {
-                        result.add(center);
-                    }
-                    return result;
-                }
-
-                /**
-                 * Finds the closest parent centroid for establishing parent-child relationships
-                 */
-                @SuppressWarnings("unused")
-                private HierarchicalClusterId findClosestParentCentroid(double[] childCentroid,
-                        HierarchicalCentroidsState hierarchicalState, int parentLevel) {
-                    List<HierarchicalCentroidsState.HierarchicalCentroid> parentCentroids =
-                            hierarchicalState.getCentroidsAtLevel(parentLevel);
-
-                    if (parentCentroids.isEmpty()) {
-                        return null;
-                    }
-
-                    double minDistance = Double.POSITIVE_INFINITY;
-                    HierarchicalClusterId closestParent = null;
-
-                    for (HierarchicalCentroidsState.HierarchicalCentroid parent : parentCentroids) {
-                        double distance = euclidean_squared(childCentroid, parent.getCentroid());
-                        if (distance < minDistance) {
-                            minDistance = distance;
-                            closestParent = parent.getClusterId();
-                        }
-                    }
-
-                    return closestParent;
-                }
-
-                /**
-                 * Assigns child centroids to parent centroids using Lloyd's algorithm approach.
-                 * 
-                 * ALGORITHM OVERVIEW:
-                 * ===================
-                 * This method establishes parent-child relationships between centroids at different
-                 * levels of the hierarchical tree. It uses the assignments generated by Lloyd's
-                 * algorithm to determine which child centroids belong to which parent centroids.
-                 * 
-                 * WHY THIS IS EFFICIENT:
-                 * =====================
-                 * 1. REUSES LLOYD'S WORK: Lloyd's algorithm already computed assignments
-                 * 2. NO EXTRA DISTANCE CALCULATIONS: Uses existing assignment information
-                 * 3. DIRECT MAPPING: Simple array lookup for parent-child relationships
-                 * 4. BOTTOM-UP APPROACH: Natural for hierarchical tree building
-                 * 
-                 * ALGORITHM STEPS:
-                 * ================
-                 * 1. INPUT: Child centroids (from level N-1) and parent centroids (from level N)
-                 * 2. LLOYD'S ASSIGNMENT: Use Lloyd's algorithm to assign children to parents
-                 * 3. MAPPING: Create assignment array where assignments[i] = j means child i belongs to parent j
-                 * 4. OUTPUT: Assignment array for building parent-child relationships
-                 * 
-                 * TREE BUILDING CONTEXT:
-                 * ======================
-                 * This method is used in the hierarchical tree building process:
-                 * 
-                 * ```
-                 * Level N (Parents)     Level N-1 (Children)
-                 *      P1  ←─────────────── C1, C2, C3
-                 *      P2  ←─────────────── C4, C5
-                 *      P3  ←─────────────── C6, C7, C8
-                 * ```
-                 * 
-                 * The assignment array would be: [0, 0, 0, 1, 1, 2, 2, 2]
-                 * Meaning: C1,C2,C3 → P1, C4,C5 → P2, C6,C7,C8 → P3
-                 * 
-                 * INPUT:
-                 * ======
-                 * - childCentroids: List of centroids from level N-1 (children)
-                 * - parentCentroids: List of centroids from level N (parents)
-                 * 
-                 * OUTPUT:
-                 * =======
-                 * - int[] assignments: Array where assignments[i] = j means child i belongs to parent j
-                 * 
-                 * COMPLEXITY:
-                 * ===========
-                 * - Time: O(m * k * d) where m = number of children, k = number of parents, d = dimension
-                 * - Space: O(m) - only stores assignment array
-                 * 
-                 * MEMORY EFFICIENCY:
-                 * ==================
-                 * - No additional data structures needed
-                 * - Reuses existing centroid data
-                 * - Simple array for assignments
-                 */
-                private int[] assignCentroidsToParents(List<double[]> childCentroids, List<double[]> parentCentroids) {
-                    if (childCentroids.isEmpty() || parentCentroids.isEmpty()) {
-                        return new int[0];
-                    }
-
-                    int[] assignments = new int[childCentroids.size()];
-
-                    // For each child centroid, find its closest parent
-                    for (int i = 0; i < childCentroids.size(); i++) {
-                        double[] childCentroid = childCentroids.get(i);
-                        int closestParentIndex = 0;
-                        double minDistance = Double.POSITIVE_INFINITY;
-
-                        for (int j = 0; j < parentCentroids.size(); j++) {
-                            double distance = euclidean_squared(childCentroid, parentCentroids.get(j));
-                            if (distance < minDistance) {
-                                minDistance = distance;
-                                closestParentIndex = j;
-                            }
-                        }
-
-                        assignments[i] = closestParentIndex;
-                    }
-
-                    return assignments;
-                }
-
-                /**
-                 * Finds the closest parent index for a child centroid
-                 */
-                @SuppressWarnings("unused")
-                private int findClosestParentIndex(double[] childCentroid, List<double[]> parentCentroids) {
-                    if (parentCentroids.isEmpty()) {
-                        return 0;
-                    }
-
-                    int closestIndex = 0;
-                    double minDistance = Double.POSITIVE_INFINITY;
-
-                    for (int i = 0; i < parentCentroids.size(); i++) {
-                        double distance = euclidean_squared(childCentroid, parentCentroids.get(i));
-                        if (distance < minDistance) {
-                            minDistance = distance;
-                            closestIndex = i;
-                        }
-                    }
-
-                    return closestIndex;
-                }
-
-                /**
-                 * Finds parent node by index (for Lloyd's assignments)
-                 */
-                @SuppressWarnings("unused")
-                private HierarchicalClusterTree.TreeNode findParentNodeByIndex(int parentIndex,
-                        HierarchicalClusterTree.TreeNode currentLevelNodes) {
-                    if (currentLevelNodes == null) {
-                        return null;
-                    }
-
-                    // Search through all nodes at the same level as currentLevelNodes
-                    Queue<HierarchicalClusterTree.TreeNode> queue = new LinkedList<>();
-                    queue.offer(currentLevelNodes);
-
-                    int currentIndex = 0;
-                    while (!queue.isEmpty()) {
-                        HierarchicalClusterTree.TreeNode current = queue.poll();
-
-                        // Check if this node is at the parent level
-                        if (current.level == currentLevelNodes.level) {
-                            if (currentIndex == parentIndex) {
-                                return current;
-                            }
-                            currentIndex++;
-                        }
-
-                        // Add children to queue
-                        for (HierarchicalClusterTree.TreeNode child : current.getChildren()) {
-                            queue.offer(child);
-                        }
-                    }
-
-                    // If not found, return the first node as fallback
-                    return currentLevelNodes;
-                }
-
-                /**
-                 * Finds the closest parent node for tree-based clustering
-                 */
-                @SuppressWarnings("unused")
-                private HierarchicalClusterTree.TreeNode findClosestParentNode(double[] childCentroid,
-                        HierarchicalClusterTree.TreeNode parentNode) {
-                    if (parentNode == null) {
-                        return null;
-                    }
-
-                    double minDistance = Double.POSITIVE_INFINITY;
-                    HierarchicalClusterTree.TreeNode closestParent = parentNode;
-
-                    // Search through all nodes at the same level as parentNode
-                    Queue<HierarchicalClusterTree.TreeNode> queue = new LinkedList<>();
-                    queue.offer(parentNode);
-
-                    while (!queue.isEmpty()) {
-                        HierarchicalClusterTree.TreeNode current = queue.poll();
-
-                        // Check if this node is at the parent level
-                        if (current.level == parentNode.level) {
-                            double distance = euclidean_squared(childCentroid, current.getCentroid());
-                            if (distance < minDistance) {
-                                minDistance = distance;
-                                closestParent = current;
-                            }
-                        }
-
-                        // Add children to queue
-                        for (HierarchicalClusterTree.TreeNode child : current.getChildren()) {
-                            queue.offer(child);
-                        }
-                    }
-
-                    return closestParent;
-                }
-
-                /**
-                 * Tests if all nodes at a tree level can fit in one frame
-                 */
-                @SuppressWarnings("deprecation")
-                private boolean testTreeLevelFitsInFrame(IHyracksTaskContext ctx,
-                        List<HierarchicalClusterTree.TreeNode> nodes, FrameTupleAppender appender) {
-                    try {
-                        if (nodes.isEmpty()) {
-                            return true;
-                        }
-
-                        // Store current appender state
-                        ByteBuffer originalBuffer = appender.getBuffer();
-                        int originalPosition = originalBuffer.position();
-
-                        try {
-                            // Try to append all nodes from this level
-                            for (HierarchicalClusterTree.TreeNode node : nodes) {
-                                double[] arr = node.getCentroid();
-
-                                // Create tuple data (same as outputHierarchicalCentroids)
-                                ByteArrayAccessibleOutputStream embBytes = new ByteArrayAccessibleOutputStream();
-                                DataOutput embBytesOutput = new DataOutputStream(embBytes);
-                                AMutableDouble aDouble = new AMutableDouble(0);
-                                AMutableInt32 aInt32 = new AMutableInt32(0);
-                                OrderedListBuilder orderedListBuilder = new OrderedListBuilder();
-                                ArrayBackedValueStorage listStorage = new ArrayBackedValueStorage();
-                                orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
-
-                                for (double value : arr) {
-                                    aDouble.setValue(value);
-                                    listStorage.reset();
-                                    listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
-                                    ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble,
-                                            listStorage.getDataOutput());
-                                    orderedListBuilder.addItem(listStorage);
-                                }
-
-                                embBytes.reset();
-                                orderedListBuilder.write(embBytesOutput, true);
-
-                                // Create tuple builder with level, clusterId, centroidId, and embedding
-                                ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
-                                tupleBuilder.reset();
-
-                                // Add level (int)
-                                listStorage.reset();
-                                listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
-                                aInt32.setValue(node.getLevel());
-                                AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
-                                tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
-
-                                // Add clusterId (int) 
-                                listStorage.reset();
-                                listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
-                                aInt32.setValue(node.getClusterId());
-                                AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
-                                tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
-
-                                // Add centroidId (int) - using globalId as centroidId
-                                listStorage.reset();
-                                listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
-                                aInt32.setValue((int) node.getGlobalId());
-                                AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
-                                tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
-
-                                // Add embedding (float array)
-                                tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
-
-                                // Try to append - if this fails, nodes don't fit in one frame
-                                if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
-                                        tupleBuilder.getSize())) {
-                                    System.err.println("Tree level nodes do NOT fit in one frame (failed at node "
-                                            + nodes.indexOf(node) + " of " + nodes.size() + ")");
-                                    return false;
-                                }
+                            for (double value : embedding) {
+                                aDouble.setValue(value);
+                                storage.reset();
+                                storage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
+                                ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, storage.getDataOutput());
+                                listBuilder.addItem(storage);
                             }
 
-                            System.err.println("Tree level nodes fit in one frame (" + nodes.size() + " nodes)");
-                            return true;
+                            storage.reset();
+                            listBuilder.write(storage.getDataOutput(), true);
+                            tupleBuilder.addField(storage.getByteArray(), 0, storage.getLength());
 
-                        } finally {
-                            // Reset appender to original state
-                            originalBuffer.position(originalPosition);
-                            appender.reset(new VSizeFrame(ctx), true);
+                            // Append tuple to output
+                            appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
+                                    tupleBuilder.getSize());
+
+                            if (globalCentroidId < 3) { // Log first few centroids for debugging
+                                System.err.println("Centroid " + globalCentroidId + " (Level " + level + ", Cluster "
+                                        + clusterId + ", Centroid " + centroidId + "): [" + embedding[0] + ", "
+                                        + embedding[1] + ", " + embedding[2] + "...]");
+                            }
+
+                            globalCentroidId++;
                         }
-
-                    } catch (Exception e) {
-                        System.err.println("Error testing tree level frame capacity: " + e.getMessage());
-                        return false;
                     }
                 }
 
-                /**
-                 * Outputs the complete tree using BFS traversal.
-                 * 
-                 * ALGORITHM OVERVIEW:
-                 * ===================
-                 * This method outputs the complete hierarchical tree structure using breadth-first
-                 * search (BFS) traversal. BFS ensures that nodes are output in a consistent order
-                 * that reflects the hierarchical structure of the tree.
-                 * 
-                 * WHY BFS TRAVERSAL:
-                 * =================
-                 * 1. CONSISTENT ORDER: BFS provides a predictable traversal order
-                 * 2. LEVEL-BY-LEVEL: Nodes at the same level are output together
-                 * 3. NATURAL HIERARCHY: Root first, then children, then grandchildren, etc.
-                 * 4. EFFICIENT: Simple queue-based traversal
-                 * 
-                 * BFS TRAVERSAL PROCESS:
-                 * =====================
-                 * 1. START: Add root node to queue
-                 * 2. WHILE queue not empty:
-                 *    a. Dequeue next node
-                 *    b. Output node data to next operator
-                 *    c. Add all children to queue
-                 * 3. CONTINUE: Until all nodes are processed
-                 * 
-                 * TREE STRUCTURE EXAMPLE:
-                 * ======================
-                 * ```
-                 *                    Root (Level 2)
-                 *                   /              \
-                 *              Parent1           Parent2
-                 *             (Level 1)         (Level 1)
-                 *            /    |    \        /    |    \
-                 *        Child1 Child2 Child3 Child4 Child5 Child6
-                 *       (Level 0) (Level 0) (Level 0) (Level 0) (Level 0) (Level 0)
-                 * ```
-                 * 
-                 * BFS OUTPUT ORDER:
-                 * ================
-                 * 1. Root
-                 * 2. Parent1, Parent2
-                 * 3. Child1, Child2, Child3, Child4, Child5, Child6
-                 * 
-                 * INPUT:
-                 * ======
-                 * - tree: Complete hierarchical tree structure
-                 * - appender: Frame appender for output
-                 * - indexWriter: Writer for JSON side file
-                 * - partition: Partition ID
-                 * 
-                 * OUTPUT:
-                 * =======
-                 * - All tree nodes streamed to next operator in BFS order
-                 * - JSON side file with complete tree structure
-                 * 
-                 * MEMORY EFFICIENCY:
-                 * ==================
-                 * - Uses queue for BFS traversal (O(max_width) space)
-                 * - Streams nodes as they are processed
-                 * - No need to store entire tree in memory
-                 * 
-                 * COMPLEXITY:
-                 * ===========
-                 * - Time: O(n) where n = total number of nodes
-                 * - Space: O(w) where w = maximum width of tree
-                 */
-                @SuppressWarnings("deprecation")
-                private void outputCompleteTree(HierarchicalClusterTree tree, FrameTupleAppender appender,
-                        HierarchicalClusterIndexWriter indexWriter, int partition)
-                        throws HyracksDataException, IOException {
+                // Write the output frame
+                FrameUtils.flushFrame(appender.getBuffer(), writer);
 
-                    System.err.println("Outputting complete tree in BFS order...");
+                System.err.println("VCTree format conversion completed. Generated " + globalCentroidId
+                        + " centroids across " + structure.getNumLevels() + " levels");
 
-                    // Get all nodes in BFS order
-                    System.err.println(
-                            "Calling toFlatList() on tree with root: " + (tree.getRoot() != null ? "exists" : "null"));
-                    if (tree.getRoot() != null) {
-                        System.err.println("Root has " + tree.getRoot().getChildren().size() + " children");
-                    }
-                    List<HierarchicalClusterTree.TreeNode> allNodes = tree.toFlatList();
-                    System.err.println("Found " + allNodes.size() + " total nodes in tree");
+            } catch (Exception e) {
+                System.err.println("Error converting to VCTree format: " + e.getMessage());
+                e.printStackTrace();
+                throw new HyracksDataException("VCTree format conversion failed", e);
+            }
+        }
 
-                    // Debug: print all nodes
-                    for (int i = 0; i < allNodes.size(); i++) {
-                        HierarchicalClusterTree.TreeNode node = allNodes.get(i);
-                        System.err.println("Node " + i + ": level=" + node.getLevel() + ", cluster_id="
-                                + node.getClusterId() + ", global_id=" + node.getGlobalId() + ", parent_global_id="
-                                + node.getParentGlobalId());
-                    }
+        private void generateTestHierarchicalData(ByteBuffer inputBuffer) throws HyracksDataException {
+            try {
+                // Create a simple test frame with hierarchical data
+                // Format: [level, clusterId, centroidId, embedding]
+                VSizeFrame testFrame = new VSizeFrame(ctx);
+                FrameTupleAppender appender = new FrameTupleAppender(testFrame);
 
-                    // Group nodes by level and add to index
-                    Map<Integer, List<HierarchicalCentroidsState.HierarchicalCentroid>> centroidsByLevel =
-                            new HashMap<>();
+                // Generate a few test hierarchical entries
+                for (int level = 0; level < 2; level++) {
+                    for (int clusterId = 0; clusterId < 2; clusterId++) {
+                        for (int centroidId = 0; centroidId < 2; centroidId++) {
+                            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
 
-                    for (HierarchicalClusterTree.TreeNode node : allNodes) {
-                        // Convert tree node to hierarchical centroid for index
-                        HierarchicalClusterId clusterId = new HierarchicalClusterId(node.getLevel(),
-                                node.getClusterId(), (int) node.getParentGlobalId());
-                        HierarchicalCentroidsState.HierarchicalCentroid centroid =
-                                new HierarchicalCentroidsState.HierarchicalCentroid(clusterId, node.getCentroid());
+                            // Level (int)
+                            tupleBuilder.addField(new byte[] { 0, 0, 0, 0, (byte) level }, 0, 5);
 
-                        // Group by level
-                        centroidsByLevel.computeIfAbsent(node.getLevel(), k -> new ArrayList<>()).add(centroid);
-                    }
+                            // ClusterId (int) 
+                            tupleBuilder.addField(new byte[] { 0, 0, 0, 0, (byte) clusterId }, 0, 5);
 
-                    // Add each level to index
-                    for (Map.Entry<Integer, List<HierarchicalCentroidsState.HierarchicalCentroid>> entry : centroidsByLevel
-                            .entrySet()) {
-                        int level = entry.getKey();
-                        List<HierarchicalCentroidsState.HierarchicalCentroid> centroids = entry.getValue();
-                        indexWriter.addClusterLevel(level, centroids);
-                    }
+                            // CentroidId (int)
+                            tupleBuilder.addField(new byte[] { 0, 0, 0, 0, (byte) centroidId }, 0, 5);
 
-                    // Output all nodes
-                    ByteArrayAccessibleOutputStream embBytes = new ByteArrayAccessibleOutputStream();
-                    DataOutput embBytesOutput = new DataOutputStream(embBytes);
-                    AMutableDouble aDouble = new AMutableDouble(0);
-                    AMutableInt32 aInt32 = new AMutableInt32(0);
-                    OrderedListBuilder orderedListBuilder = new OrderedListBuilder();
-                    ArrayBackedValueStorage listStorage = new ArrayBackedValueStorage();
-                    orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
-                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+                            // Embedding (double array) - create a simple 2-element array
+                            OrderedListBuilder listBuilder = new OrderedListBuilder();
+                            listBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
 
-                    int tupleOutputCount = 0;
-                    int frameCount = 0;
+                            ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+                            AMutableDouble aDouble = new AMutableDouble(0.0);
 
-                    for (HierarchicalClusterTree.TreeNode node : allNodes) {
-                        tupleOutputCount++;
-                        System.err.println("=== OUTPUTTING TUPLE #" + tupleOutputCount + " ===");
-                        System.err.println("=== NODE: level=" + node.getLevel() + ", clusterId=" + node.getClusterId()
-                                + ", globalId=" + node.getGlobalId() + " ===");
+                            for (int i = 0; i < 2; i++) {
+                                aDouble.setValue(0.5 + i * 0.1);
+                                storage.reset();
+                                storage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
+                                ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, storage.getDataOutput());
+                                listBuilder.addItem(storage);
+                            }
 
-                        double[] arr = node.getCentroid();
-                        orderedListBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
-                        for (double value : arr) {
-                            aDouble.setValue(value);
-                            listStorage.reset();
-                            listStorage.getDataOutput().writeByte(ATypeTag.FLOAT.serialize());
-                            ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, listStorage.getDataOutput());
-                            orderedListBuilder.addItem(listStorage);
-                        }
-                        embBytes.reset();
-                        orderedListBuilder.write(embBytesOutput, true);
-                        tupleBuilder.reset();
+                            storage.reset();
+                            listBuilder.write(storage.getDataOutput(), true);
+                            tupleBuilder.addField(storage.getByteArray(), 0, storage.getLength());
 
-                        // Add level (int)
-                        listStorage.reset();
-                        listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
-                        aInt32.setValue(node.getLevel());
-                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
-                        tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
-
-                        // Add clusterId (int) 
-                        listStorage.reset();
-                        listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
-                        aInt32.setValue(node.getClusterId());
-                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
-                        tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
-
-                        // Add centroidId (int) - using globalId as centroidId
-                        listStorage.reset();
-                        listStorage.getDataOutput().writeByte(ATypeTag.INTEGER.serialize());
-                        aInt32.setValue((int) node.getGlobalId());
-                        AInt32SerializerDeserializer.INSTANCE.serialize(aInt32, listStorage.getDataOutput());
-                        tupleBuilder.addField(listStorage.getByteArray(), 0, listStorage.getLength());
-
-                        // Add embedding (float array)
-                        tupleBuilder.addField(embBytes.getByteArray(), 0, embBytes.getLength());
-
-                        if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
-                                tupleBuilder.getSize())) {
-                            // Frame is full, flush and reset
-                            frameCount++;
-                            System.err.println("=== FRAME #" + frameCount + " FULL, FLUSHING ===");
-                            System.err.println(
-                                    "=== FRAME #" + frameCount + " CONTAINS " + (tupleOutputCount - 1) + " TUPLES ===");
-
-                            FrameUtils.flushFrame(appender.getBuffer(), writer);
-                            appender.reset(new VSizeFrame(ctx), true);
                             appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                                     tupleBuilder.getSize());
                         }
                     }
-
-                    // CRITICAL: Flush the final frame after outputting all nodes
-                    // This ensures that the last batch of nodes is sent to the next operator
-                    frameCount++;
-                    System.err.println("=== FLUSHING FINAL FRAME #" + frameCount + " ===");
-                    System.err.println("=== TOTAL TUPLES OUTPUT: " + tupleOutputCount + " ===");
-                    System.err.println("=== TOTAL FRAMES OUTPUT: " + frameCount + " ===");
-                    FrameUtils.flushFrame(appender.getBuffer(), writer);
-                    System.err.println("=== FINAL FRAME FLUSHED ===");
                 }
 
-            };
+                // Send the test frame
+                FrameUtils.flushFrame(appender.getBuffer(), writer);
+                System.err.println("🔍 DEBUG: Generated and sent test hierarchical data");
+
+                // Don't close the writer here - let the framework handle it
+                // The VCTreeStaticStructureCreator will be closed by the framework
+
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to generate test hierarchical data: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        @Override
+        public void close() throws HyracksDataException {
+            System.err.println("=== HierarchicalKMeans CLOSING ===");
+
+            // Store the materialized data state for later consumption
+            if (materializedData != null) {
+                System.err.println("🔍 DEBUG: Storing materialized data state");
+                materializedData.close();
+                ctx.setStateObject(materializedData);
+                System.err.println("🔍 DEBUG: Materialized data state stored successfully");
+            }
+
+            if (writer != null) {
+                System.err.println("🔍 DEBUG: Closing writer to VCTreeStaticStructureCreator");
+                writer.close();
+                System.err.println("🔍 DEBUG: Writer closed successfully");
+            }
+            System.err.println("=== HierarchicalKMeans CLOSED ===");
+        }
+
+        @Override
+        public void fail() throws HyracksDataException {
+            System.err.println("=== HierarchicalKMeans FAILING ===");
+            if (writer != null) {
+                writer.fail();
+            }
         }
     }
 }

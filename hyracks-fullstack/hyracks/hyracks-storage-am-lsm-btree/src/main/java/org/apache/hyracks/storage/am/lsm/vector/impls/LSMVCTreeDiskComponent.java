@@ -36,11 +36,8 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.*;
-import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
+import org.apache.hyracks.storage.am.vector.impls.*;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
@@ -178,10 +175,10 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
         try {
             // Create VCTreeStaticStructureLoader with real structure
-            VCTreeLoader staticLoader = new VCTreeLoader(fillFactor, callback, vcTree,
-                    vcTree.getLeafFrameFactory().createFrame(), vcTree.getDataFrameFactory().createFrame(),
-                    DefaultBufferCacheWriteContext.INSTANCE, numLevels,
-                    clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
+            VCTreeLoader staticLoader =
+                    new VCTreeLoader(fillFactor, callback, vcTree, vcTree.getLeafFrameFactory().createFrame(),
+                            vcTree.getDataFrameFactory().createFrame(), DefaultBufferCacheWriteContext.INSTANCE,
+                            numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
 
             System.err.println("VCTreeStaticStructureLoader created successfully with real structure");
 
@@ -195,7 +192,6 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             throw HyracksDataException.create(e);
         }
     }
-    
 
     static IMetadataPageManager getMetadataPageManager(VectorClusteringTree vcTree) {
         return (IMetadataPageManager) vcTree.getPageManager();

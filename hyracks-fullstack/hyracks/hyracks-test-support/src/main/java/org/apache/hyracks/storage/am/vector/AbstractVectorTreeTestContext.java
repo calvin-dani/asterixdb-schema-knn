@@ -44,6 +44,7 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
     public void setNumClustersPerLevel(List<Integer> numClustersPerLevel) {
         this.numClustersPerLevel = numClustersPerLevel;
     }
+
     public List<ITupleReference> getStaticStructureCentroids() {
         return centroids;
     }

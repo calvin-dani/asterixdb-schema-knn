@@ -28,7 +28,6 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeser
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
@@ -62,6 +61,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     private ITreeIndexTupleWriter directoryFrameTupleWriter;
     private ITreeIndexTupleWriter dataFrameTupleWriter;
     private final VectorClusteringTree vcTreeIndex;
+
     public VCTreeBulkLoder(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds)
@@ -163,7 +163,6 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
             // Calculate space needed for this tuple - following BTreeNSMBulkLoader pattern
             int spaceNeeded = dataFrameTupleWriter.bytesRequired(tuple) + slotSize;
             int spaceAvailable = currentDataFrame.getTotalFreeSpace();
-            double distance = extractDistance(tuple);
 
             // If still full, need to create new data page and update directory
             if (spaceNeeded > spaceAvailable) {

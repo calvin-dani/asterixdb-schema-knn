@@ -31,6 +31,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
@@ -140,12 +141,33 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 numLeafCentroid, firstLeafCentroidId, dataFrameSerdes);
     }
 
+    @Override
+    public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+        // Create VCTreeBulkLoder with default parameters
+        // The LSM system will handle the actual parameters at a higher level
+        List<Integer> defaultClustersPerLevel = List.of(5, 10);
+        List<List<Integer>> defaultCentroidsPerCluster = List.of(List.of(10), List.of(10));
+        int defaultMaxEntriesPerPage = 100;
+
+        // Create serializer/deserializer array for data frame fields
+        ISerializerDeserializer[] dataFrameSerds = new ISerializerDeserializer[4];
+        dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
+        dataFrameSerds[1] = DoubleSerializerDeserializer.INSTANCE; // cosine similarity
+        dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
+        dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
+
+        return new VCTreeBulkLoder(fillFactor, callback, this, leafFrameFactory.createFrame(),
+                dataFrameFactory.createFrame(), DefaultBufferCacheWriteContext.INSTANCE, 4, // numLeafCentroid
+                0, // firstLeafCentroidId
+                dataFrameSerds);
+    }
+
     public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
             List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage, NoOpPageWriteCallback instance)
             throws HyracksDataException {
-        return new VCTreeStaticStructureBuilder(instance,this, leafFrameFactory.createFrame(),
-                dataFrameFactory.createFrame(),  numLevels, clustersPerLevel, centroidsPerCluster,
-                maxEntriesPerPage);
+        return new VCTreeStaticStructureBuilder(instance, this, leafFrameFactory.createFrame(),
+                dataFrameFactory.createFrame(), numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
     }
 
     public IIndexBulkLoader createFlushLoader(float fillFactor, IPageWriteCallback callback)
@@ -1036,11 +1058,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         // Validation logic specific to vector clustering tree
     }
 
-    @Override
-    public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        throw new UnsupportedOperationException("Not supported");
-    }
 
     /**
      * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both

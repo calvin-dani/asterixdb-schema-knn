@@ -34,7 +34,7 @@ import java.util.List;
 
 public class LSMVCTreeBulkLoader {
     private final LSMVCTree lsmvcTree;
-    private final IIndexBulkLoader bulkLoader;
+    private final VCTreeBulkLoder bulkLoader;
     private final ILSMIndexOperationContext opCtx;
     private boolean failed = false;
 

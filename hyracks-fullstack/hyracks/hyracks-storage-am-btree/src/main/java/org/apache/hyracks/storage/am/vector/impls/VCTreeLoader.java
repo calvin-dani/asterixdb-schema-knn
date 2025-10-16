@@ -21,6 +21,7 @@ package org.apache.hyracks.storage.am.vector.impls;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -161,6 +162,76 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         createNewPage(computeCurrentClusterPageId());
 
         LOGGER.debug("VCTreeStaticStructureLoader initialized");
+        LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
+        printStructureInfo();
+    }
+
+    /**
+     * Constructor for LSM integration - extracts parameters from Map
+     */
+    @SuppressWarnings("unchecked")
+    public VCTreeLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
+            ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
+            Map<String, Object> parameters) throws HyracksDataException {
+        super(fillFactor, callback, vectorTree, leafFrame, writeContext);
+
+        // Extract parameters from Map with defaults
+        this.numLevels = (Integer) parameters.getOrDefault("numLevels", 2);
+        List<Integer> tempClustersPerLevel =
+                (List<Integer>) parameters.getOrDefault("clustersPerLevel", List.of(5, 10));
+        List<List<Integer>> tempCentroidsPerCluster =
+                (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster", List.of(List.of(10), List.of(10)));
+        this.maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
+
+        // Defensive copy
+        this.clustersPerLevel = new ArrayList<>(tempClustersPerLevel);
+        this.centroidsPerCluster = new ArrayList<>();
+        for (List<Integer> levelCentroids : tempCentroidsPerCluster) {
+            this.centroidsPerCluster.add(new ArrayList<>(levelCentroids));
+        }
+
+        // Calculate max tuple size based on page size and frame requirements
+        this.maxTupleSize = bufferCache.getPageSize() / 2;
+
+        this.currentLevel = 0; // Start from root level (level 0)
+        this.currentClusterInLevel = 0;
+        this.currentCentroidInCluster = 0;
+        this.entriesInCurrentPage = 0;
+
+        this.levelPageIds = new ArrayList<>(numLevels);
+        for (int i = 0; i < numLevels; i++) {
+            levelPageIds.add(new ArrayList<>());
+        }
+
+        this.directoryPages = new ArrayList<>();
+
+        // Initialize frames
+        this.interiorFrame = (IVectorClusteringInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
+        this.leafFrame = (IVectorClusteringLeafFrame) vectorTree.getLeafFrameFactory().createFrame();
+        this.currentDirectoryFrame = vectorTree.getMetadataFrameFactory().createFrame();
+        this.currentDataFrame = vectorTree.getDataFrameFactory().createFrame();
+
+        // Precompute helper arrays for mathematical page ID calculation
+        computeHelperArrays();
+
+        // Calculate total number of clusters (pages) across all levels
+        int totalClusters = 0;
+        for (int level = 0; level < numLevels; level++) {
+            totalClusters += clustersPerLevel.get(level);
+        }
+
+        LOGGER.debug("Total clusters in structure: {}", totalClusters);
+
+        // Call freePageManager.takePage() for each cluster to update metadata frame
+        for (int i = 0; i < totalClusters; i++) {
+            int allocatedPageId = freePageManager.takePage(metaFrame);
+            LOGGER.debug("Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
+        }
+
+        // Create first page (root page) - computed page ID 0
+        createNewPage(computeCurrentClusterPageId());
+
+        LOGGER.debug("VCTreeLoader initialized with LSM parameters");
         LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
         printStructureInfo();
     }
