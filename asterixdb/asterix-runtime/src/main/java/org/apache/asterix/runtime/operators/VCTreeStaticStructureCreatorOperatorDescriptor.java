@@ -71,7 +71,9 @@ import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFact
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
@@ -166,6 +168,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
     /**
      * Create grouping strategy for VCTree centroids based on SHAPIRO formula results.
+     * Uses range partitioning instead of round-robin.
      * 
      * @param K Total number of centroids
      * @param numPartitions Number of partitions from SHAPIRO
@@ -173,21 +176,21 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
      * @return GroupingStrategy object with run file allocation plan
      */
     public GroupingStrategy createGroupingStrategy(int K, int numPartitions, int memoryBudget) {
-        System.err.println("=== CREATING GROUPING STRATEGY ===");
+        System.err.println("=== CREATING GROUPING STRATEGY (RANGE PARTITIONING) ===");
         System.err.println("K (centroids): " + K);
         System.err.println("Number of partitions: " + numPartitions);
         System.err.println("Memory budget: " + memoryBudget + " frames");
 
-        int centroidsPerPartition = (int) Math.ceil(1.0 * K / numPartitions);
+        int centroidsPerPartition = (int) Math.ceil((double) K / numPartitions);
         int numRunFiles = Math.min(numPartitions, memoryBudget);
 
         System.err.println("Centroids per partition: " + centroidsPerPartition);
         System.err.println("Number of run files: " + numRunFiles);
 
-        // Create partition assignment for centroids
+        // Create range partition assignment for centroids
         Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
         for (int i = 0; i < K; i++) {
-            int partition = i % numPartitions;
+            int partition = i / centroidsPerPartition;
             partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(i);
         }
 
@@ -195,59 +198,75 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         String strategy;
         if (centroidsPerPartition > 1) {
             strategy = "GROUP_MULTIPLE_CENTROIDS";
-            System.err.println("Strategy: Group multiple centroids in one run file");
+            System.err.println("Strategy: Group multiple centroids in one run file (range partitioning)");
         } else {
             strategy = "ONE_FRAME_PER_CENTROID";
-            System.err.println("Strategy: Allocate 1 frame per centroid");
+            System.err.println("Strategy: Allocate 1 frame per centroid (range partitioning)");
         }
 
         return new GroupingStrategy(numRunFiles, centroidsPerPartition, partitionToCentroids, strategy);
     }
 
     /**
-     * Main processing flow: dummy data -> grouping -> sorting.
+     * Create range partitioning for a list of centroids.
+     * 
+     * @param centroids List of centroid IDs to partition
+     * @param numPartitions Number of partitions to create
+     * @return Map of partition ID to list of centroid IDs
+     */
+    public Map<Integer, List<Integer>> createRangePartitioning(List<Integer> centroids, int numPartitions) {
+        System.err.println("=== CREATING RANGE PARTITIONING ===");
+        System.err.println("Centroids to partition: " + centroids.size());
+        System.err.println("Number of partitions: " + numPartitions);
+
+        int centroidsPerPartition = (int) Math.ceil((double) centroids.size() / numPartitions);
+        Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
+
+        for (int i = 0; i < centroids.size(); i++) {
+            int partition = i / centroidsPerPartition;
+            int originalCentroidId = centroids.get(i); // Keep original ID
+            partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(originalCentroidId);
+        }
+
+        System.err.println("Range partitioning complete:");
+        for (Map.Entry<Integer, List<Integer>> entry : partitionToCentroids.entrySet()) {
+            System.err.println("  Partition " + entry.getKey() + ": " + entry.getValue().size() + " centroids");
+        }
+
+        return partitionToCentroids;
+    }
+
+    /**
+     * Main processing flow: dummy data -> partitioning.
      * 
      * @param ctx Hyracks task context for file operations
+     * @return Map of centroid ID to file reference
      */
-    public void processVCTreePartitioningAndSorting(IHyracksTaskContext ctx) throws HyracksDataException {
-        System.err.println("=== VCTreePartitioningAndSorting: Starting main processing flow ===");
+    public Map<Integer, FileReference> processVCTreePartitioning(IHyracksTaskContext ctx) throws HyracksDataException {
+        System.err.println("=== VCTreePartitioning: Starting main processing flow ===");
 
         try {
             // Step 1: Generate dummy data
             System.err.println("Step 1: Generating dummy data (K=10)");
             DummyData dummyData = getDummyValues();
 
-            // Step 2: Recursive grouping
-            System.err.println("Step 2: Starting recursive grouping");
+            // Step 2: Recursive partitioning
+            System.err.println("Step 2: Starting recursive partitioning");
             VCTreePartitioner partitioner = new VCTreePartitioner(ctx, 32, 32768);
             partitioner.partitionData(dummyData, 10); // K=10
             Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
 
-            System.err.println("Grouping complete. Created " + centroidFiles.size() + " centroid files");
+            System.err.println("Partitioning complete. Created " + centroidFiles.size() + " centroid files");
 
-            // Step 3: Sort each centroid file
-            System.err.println("Step 3: Starting sorting phase");
-            VCTreeSorter sorter = new VCTreeSorter(ctx);
-            Map<Integer, FileReference> sortedFiles = new HashMap<>();
-
-            for (Map.Entry<Integer, FileReference> entry : centroidFiles.entrySet()) {
-                int centroidId = entry.getKey();
-                FileReference inputFile = entry.getValue();
-                FileReference sortedFile = sorter.sortCentroidFile(centroidId, inputFile);
-                sortedFiles.put(centroidId, sortedFile);
-                System.err.println("Sorted centroid " + centroidId + " to: " + sortedFile);
-            }
-
-            System.err.println("Sorting complete. Created " + sortedFiles.size() + " sorted files");
-
-            // Step 4: Cleanup
+            // Step 3: Cleanup
             partitioner.closeAllFiles();
-            sorter.cleanupIntermediateFiles();
 
-            System.err.println("=== VCTreePartitioningAndSorting: Processing complete ===");
+            System.err.println("=== VCTreePartitioning: Processing complete ===");
+
+            return centroidFiles;
 
         } catch (Exception e) {
-            System.err.println("ERROR: VCTreePartitioningAndSorting failed: " + e.getMessage());
+            System.err.println("ERROR: VCTreePartitioning failed: " + e.getMessage());
             e.printStackTrace();
             throw HyracksDataException.create(e);
         }
@@ -291,7 +310,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
         // Step 4: Apply recursive logic if needed
         int level = 0;
-        int maxLevels = 3; // Prevent infinite recursion
+        // Calculate max recursion depth based on memory budget approach
+        int maxLevels = (int) Math.ceil(Math.log(memoryBudget) / Math.log(2)); // log base 2
+        maxLevels = Math.max(2, Math.min(maxLevels, 10)); // reasonable bounds
 
         while (level < maxLevels && strategy.strategy.equals("GROUP_MULTIPLE_CENTROIDS")) {
             System.err.println("=== RECURSIVE LEVEL " + (level + 1) + " ===");
@@ -305,19 +326,37 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 break;
             }
 
-            // Apply SHAPIRO again on each large partition
+            // Apply SHAPIRO again on each large partition using range partitioning
             for (int partitionId = 0; partitionId < strategy.numRunFiles; partitionId++) {
                 List<Integer> partitionCentroids = strategy.partitionToCentroids.get(partitionId);
-                if (partitionCentroids.size() > memoryBudget) {
-                    System.err.println("Partition " + partitionId + " has " + partitionCentroids.size()
-                            + " centroids, sub-partitioning...");
+
+                // Check if this partition needs sub-partitioning using frame-based calculation
+                int bytesPerCentroid = 4 + (256 * 8); // centroidId + embedding = 2052 bytes
+                long partitionDataSize = partitionCentroids.size() * bytesPerCentroid;
+                long partitionFramesNeeded = (partitionDataSize + frameSize - 1) / frameSize;
+                double threshold = 0.6;
+
+                if (partitionFramesNeeded > (memoryBudget * threshold)) {
+                    System.err.println("Partition " + partitionId + " has " + partitionCentroids.size() + " centroids ("
+                            + partitionFramesNeeded + " frames), sub-partitioning...");
 
                     // Calculate sub-partitions for this partition
-                    int subPartitions = calculatePartitionsUsingShapiro(partitionCentroids.size(),
-                            inputDataBytesSize / strategy.numRunFiles, frameSize, memoryBudget);
+                    int subPartitions = calculatePartitionsUsingShapiro(partitionCentroids.size(), partitionDataSize,
+                            frameSize, memoryBudget);
+
+                    // Apply range partitioning to sub-partition the centroids
+                    Map<Integer, List<Integer>> subPartitionToCentroids =
+                            createRangePartitioning(partitionCentroids, subPartitions);
 
                     // Create sub-run files for this partition
                     runFileManager.createSubRunFiles(partitionId, subPartitions);
+
+                    // Update the strategy with sub-partitioned centroids
+                    strategy.partitionToCentroids.put(partitionId, subPartitionToCentroids.get(0));
+                    for (int subPart = 1; subPart < subPartitions; subPart++) {
+                        strategy.partitionToCentroids.put(strategy.numRunFiles + subPart - 1,
+                                subPartitionToCentroids.get(subPart));
+                    }
                 }
             }
 
@@ -421,11 +460,18 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         }
 
         public boolean checkSizeReduction(int centroidsPerPartition, int memoryBudget) {
-            // 80% size reduction rule (from Hybrid Hash Join)
-            double threshold = 0.8;
-            double currentRatio = (double) centroidsPerPartition / memoryBudget;
+            // Calculate actual memory usage for this partition
+            int bytesPerCentroid = 4 + (256 * 8); // centroidId + embedding = 2052 bytes
+            int frameSize = 32768; // 32KB configurable frame size
+            long partitionDataSize = centroidsPerPartition * bytesPerCentroid;
+            long partitionFramesNeeded = (partitionDataSize + frameSize - 1) / frameSize;
 
-            System.err.println("Size reduction check: ratio=" + currentRatio + ", threshold=" + threshold);
+            // 60% threshold for aggressive memory management
+            double threshold = 0.6;
+            double currentRatio = (double) partitionFramesNeeded / memoryBudget;
+
+            System.err.println("Size reduction check: framesNeeded=" + partitionFramesNeeded + ", memoryBudget="
+                    + memoryBudget + ", ratio=" + currentRatio + ", threshold=" + threshold);
 
             // If ratio is still high, needs more partitioning
             return currentRatio > threshold;
@@ -842,13 +888,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("Total tuples collected: " + tupleCount);
                     System.err.println("Frames accumulated: " + frameAccumulator.size());
 
-                    // Test partitioning and sorting with dummy data
+                    // Test partitioning with dummy data
                     try {
-                        System.err.println("=== TESTING PARTITIONING AND SORTING ===");
-                        processVCTreePartitioningAndSorting(ctx);
-                        System.err.println("=== PARTITIONING AND SORTING COMPLETE ===");
+                        System.err.println("=== TESTING PARTITIONING ===");
+                        Map<Integer, FileReference> centroidFiles = processVCTreePartitioning(ctx);
+                        System.err.println("=== PARTITIONING COMPLETE ===");
+                        System.err.println("Created " + centroidFiles.size() + " centroid files");
                     } catch (Exception e) {
-                        System.err.println("ERROR: Partitioning/sorting failed: " + e.getMessage());
+                        System.err.println("ERROR: Partitioning failed: " + e.getMessage());
                         e.printStackTrace();
                     }
 
@@ -1061,6 +1108,27 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         // Finalize the structure
                         structureCreator.end();
                         System.err.println("✅ STATIC STRUCTURE FINALIZED SUCCESSFULLY");
+
+                        // Create navigator for static structure access
+                        System.err.println("Creating VCTreeStaticStructureNavigator...");
+                        VCTreeStaticStructureNavigator navigator = new VCTreeStaticStructureNavigator(bufferCache,
+                                fileId, interiorFrameFactory, leafFrameFactory);
+
+                        // Test the navigator with a sample vector
+                        System.err.println("Testing navigator with sample vector...");
+                        double[] testVector = new double[128];
+                        for (int i = 0; i < 128; i++) {
+                            testVector[i] = Math.random();
+                        }
+
+                        try {
+                            ClusterSearchResult result = navigator.findClosestCentroid(testVector);
+                            System.err.println("✅ NAVIGATOR TEST SUCCESSFUL");
+                            System.err.println("   Closest cluster: pageId=" + result.leafPageId + ", clusterIndex="
+                                    + result.clusterIndex + ", distance=" + result.distance);
+                        } catch (Exception e) {
+                            System.err.println("WARNING: Navigator test failed: " + e.getMessage());
+                        }
 
                         // Close the file
                         System.err.println("Closing static structure file...");

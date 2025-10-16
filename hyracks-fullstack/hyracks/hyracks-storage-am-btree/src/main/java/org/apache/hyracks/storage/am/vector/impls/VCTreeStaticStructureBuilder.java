@@ -356,11 +356,42 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
+        // Write existing metadata
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
                 LongPointable.FACTORY.createPointable(totalCentroidsUpToLevel[numLevels - 1]));
+
+        // Write root page ID (always 0 for VCTreeStaticStructureBuilder)
+        metaFrame.put(new MutableArrayValueReference("root_page_id".getBytes()),
+                LongPointable.FACTORY.createPointable(0));
+
+        // Write structure configuration for navigator
+        writeStructureMetadata();
+
         super.end();
+    }
+
+    /**
+     * Write structure metadata for navigator use.
+     */
+    private void writeStructureMetadata() throws HyracksDataException {
+        // Write number of levels
+        metaFrame.put(new MutableArrayValueReference("num_levels".getBytes()),
+                LongPointable.FACTORY.createPointable(numLevels));
+
+        // Write clusters per level as comma-separated string
+        StringBuilder clustersPerLevelStr = new StringBuilder();
+        for (int i = 0; i < clustersPerLevel.size(); i++) {
+            if (i > 0)
+                clustersPerLevelStr.append(",");
+            clustersPerLevelStr.append(clustersPerLevel.get(i));
+        }
+        metaFrame.put(new MutableArrayValueReference("clusters_per_level".getBytes()),
+                LongPointable.FACTORY.createPointable(clustersPerLevelStr.toString().hashCode()));
+
+        LOGGER.debug("Wrote structure metadata: numLevels={}, clustersPerLevel={}", numLevels,
+                clustersPerLevelStr.toString());
     }
 
     @Override
