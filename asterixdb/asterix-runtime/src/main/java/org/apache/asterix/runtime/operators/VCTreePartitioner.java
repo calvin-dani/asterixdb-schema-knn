@@ -18,18 +18,14 @@
  */
 package org.apache.asterix.runtime.operators;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.hyracks.api.comm.FixedSizeFrame;
-import org.apache.hyracks.api.comm.IFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
-import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 
 /**
@@ -61,15 +57,14 @@ public class VCTreePartitioner {
     }
 
     /**
-     * Main entry point: partition dummy data using recursive SHAPIRO formula.
+     * Main entry point: partition data using recursive SHAPIRO formula.
+     * This method is designed to work with real data, not dummy data.
      */
-    public void partitionData(VCTreeStaticStructureCreatorOperatorDescriptor.DummyData dummyData, int K)
-            throws HyracksDataException {
+    public void partitionData(int K, long estimatedDataSize) throws HyracksDataException {
         System.err.println("=== VCTreePartitioner: Starting partitioning for K=" + K + " centroids ===");
 
         // Step 1: Calculate initial partitions using SHAPIRO
-        int numPartitions =
-                calculatePartitionsUsingShapiro(K, dummyData.tuples.size() * 1024L, frameSize, memoryBudget);
+        int numPartitions = calculatePartitionsUsingShapiro(K, estimatedDataSize, frameSize, memoryBudget);
         System.err.println("Initial partitions calculated: " + numPartitions);
 
         // Step 2: Distribute centroids to partitions
@@ -78,8 +73,8 @@ public class VCTreePartitioner {
         // Step 3: Create initial partition files
         createInitialPartitionFiles(numPartitions);
 
-        // Step 4: Write dummy data to partition files
-        writeDataToPartitions(dummyData);
+        // Step 4: Data writing will be handled by external callers
+        // writeDataToPartitions() - commented out, to be implemented by callers
 
         // Step 5: Recursively separate centroids
         for (int partitionId = 0; partitionId < numPartitions; partitionId++) {
@@ -140,7 +135,8 @@ public class VCTreePartitioner {
                 partitionFiles.put(subFileId, writer);
 
                 // Write data for this sub-partition
-                writeCentroidDataToPartition(subFileId, subCentroids);
+                // COMMENTED OUT: writeCentroidDataToPartition() used dummy data
+                // writeCentroidDataToPartition(subFileId, subCentroids);
 
                 // Recursively process this sub-partition
                 recursivelySeparateCentroids(subFileId, subCentroids, level + 1);
@@ -155,13 +151,16 @@ public class VCTreePartitioner {
             throws HyracksDataException {
         System.err.println("Base case: Separating " + centroids.size() + " centroids into individual files");
 
+        // COMMENTED OUT: Data reading and processing using DummyTuple
+        // To be implemented for real data processing
+        /*
         // Read data from partition file
         List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple> allData = readPartitionData(partitionId);
-
+        
         // Group by centroid ID
         Map<Integer, List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple>> centroidGroups =
                 groupByCentroidId(allData);
-
+        
         // Create individual file for each centroid
         for (int centroidId : centroids) {
             List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple> centroidData =
@@ -172,47 +171,53 @@ public class VCTreePartitioner {
                         "VCTreeCentroid_" + centroidId + "_unsorted_" + System.currentTimeMillis());
                 RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
                 writer.open();
-
+        
                 // Write centroid data
                 for (VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple tuple : centroidData) {
                     ByteBuffer frame = createFrameFromTuple(tuple);
                     writer.nextFrame(frame);
                 }
-
+        
                 writer.close();
                 centroidFiles.put(centroidId, file);
                 System.err.println("Created file for centroid " + centroidId + ": " + file);
             }
         }
+        */
     }
 
     /**
      * Group tuples by centroid ID.
+     * COMMENTED OUT: This method used DummyTuple, to be implemented for real data.
      */
+    /*
     private Map<Integer, List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple>> groupByCentroidId(
             List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple> allData) {
         Map<Integer, List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple>> groups = new HashMap<>();
-
+    
         for (VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple tuple : allData) {
             groups.computeIfAbsent(tuple.centroidId, k -> new ArrayList<>()).add(tuple);
         }
-
+    
         return groups;
     }
+    */
 
     /**
      * Read data from partition file.
+     * COMMENTED OUT: This method used DummyTuple, to be implemented for real data.
      */
+    /*
     private List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple> readPartitionData(int partitionId)
             throws HyracksDataException {
         List<VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple> data = new ArrayList<>();
-
+    
         RunFileWriter writer = partitionFiles.get(partitionId);
         if (writer != null) {
             // Create reader from writer
             RunFileReader reader = writer.createReader();
             reader.open();
-
+    
             IFrame frame = new FixedSizeFrame(ByteBuffer.allocate(frameSize));
             while (reader.nextFrame(frame)) {
                 // Parse frame and extract tuples (simplified)
@@ -222,16 +227,19 @@ public class VCTreePartitioner {
                     data.add(tuple);
                 }
             }
-
+    
             reader.close();
         }
-
+    
         return data;
     }
+    */
 
     /**
      * Write centroid data to partition file.
+     * COMMENTED OUT: This method used DummyTuple, to be implemented for real data.
      */
+    /*
     private void writeCentroidDataToPartition(int partitionId, List<Integer> centroids) throws HyracksDataException {
         // This is a simplified version - in practice, you'd read from the original data source
         // For now, we'll create dummy data for the centroids
@@ -246,12 +254,13 @@ public class VCTreePartitioner {
                 tuple.embedding = generateDummyEmbedding(128);
                 tuple.level = 0;
                 tuple.clusterId = centroidId % 3;
-
+    
                 ByteBuffer frame = createFrameFromTuple(tuple);
                 writer.nextFrame(frame);
             }
         }
     }
+    */
 
     /**
      * Distribute centroids to partitions.
@@ -283,34 +292,39 @@ public class VCTreePartitioner {
     }
 
     /**
-     * Write dummy data to partition files.
+     * Write data to partition files.
+     * COMMENTED OUT: This method used dummy data, to be implemented for real data.
      */
+    /*
     private void writeDataToPartitions(VCTreeStaticStructureCreatorOperatorDescriptor.DummyData dummyData)
             throws HyracksDataException {
         for (VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple tuple : dummyData.tuples) {
             int partition = centroidToPartition.get(tuple.centroidId);
             RunFileWriter writer = partitionFiles.get(partition);
-
+    
             ByteBuffer frame = createFrameFromTuple(tuple);
             writer.nextFrame(frame);
         }
     }
+    */
 
     /**
      * Create frame from tuple (simplified version).
+     * COMMENTED OUT: This method used DummyTuple, to be implemented for real data.
      */
+    /*
     private ByteBuffer createFrameFromTuple(VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple tuple) {
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-
+    
         // Write tuple count (1)
         buffer.putInt(1);
-
+    
         // Write centroid ID
         buffer.putInt(tuple.centroidId);
-
+    
         // Write distance
         buffer.putDouble(tuple.distance);
-
+    
         // Write embedding length and data
         if (tuple.embedding != null) {
             buffer.putInt(tuple.embedding.length);
@@ -320,28 +334,31 @@ public class VCTreePartitioner {
         } else {
             buffer.putInt(0);
         }
-
+    
         buffer.flip();
         return buffer;
     }
+    */
 
     /**
      * Parse tuple from frame (simplified version).
+     * COMMENTED OUT: This method used DummyTuple, to be implemented for real data.
      */
+    /*
     private VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple parseTupleFromFrame(ByteBuffer frame) {
         try {
             VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple tuple =
                     new VCTreeStaticStructureCreatorOperatorDescriptor.DummyTuple();
-
+    
             // Read tuple count
             int tupleCount = frame.getInt();
             if (tupleCount > 0) {
                 // Read centroid ID
                 tuple.centroidId = frame.getInt();
-
+    
                 // Read distance
                 tuple.distance = frame.getDouble();
-
+    
                 // Read embedding
                 int embeddingLength = frame.getInt();
                 if (embeddingLength > 0) {
@@ -350,22 +367,25 @@ public class VCTreePartitioner {
                         tuple.embedding[i] = (float) frame.getDouble();
                     }
                 }
-
+    
                 tuple.level = 0;
                 tuple.clusterId = tuple.centroidId % 3;
-
+    
                 return tuple;
             }
         } catch (Exception e) {
             System.err.println("Error parsing tuple from frame: " + e.getMessage());
         }
-
+    
         return null;
     }
+    */
 
     /**
      * Generate dummy embedding vector.
+     * COMMENTED OUT: This method generated dummy data, to be implemented for real data.
      */
+    /*
     private float[] generateDummyEmbedding(int dimension) {
         float[] embedding = new float[dimension];
         for (int i = 0; i < dimension; i++) {
@@ -373,6 +393,7 @@ public class VCTreePartitioner {
         }
         return embedding;
     }
+    */
 
     /**
      * Calculate partitions using SHAPIRO formula.

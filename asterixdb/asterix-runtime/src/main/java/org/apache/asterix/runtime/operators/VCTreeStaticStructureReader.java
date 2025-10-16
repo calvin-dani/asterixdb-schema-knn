@@ -40,6 +40,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public class VCTreeStaticStructureReader {
 
+    private static final int VECTOR_DIMENSION = 256;
     // Core infrastructure
     private final IIOManager ioManager;
     private final String indexPath;
@@ -259,7 +260,7 @@ public class VCTreeStaticStructureReader {
      * In a real implementation, this would extract the actual embedding from page data.
      */
     private double[] createPlaceholderEmbedding(int centroidId) {
-        double[] embedding = new double[128]; // Standard embedding size
+        double[] embedding = new double[VECTOR_DIMENSION]; // 256-dimensional embedding
         for (int i = 0; i < embedding.length; i++) {
             // Use centroid ID as seed for consistent placeholder values
             embedding[i] = Math.sin(centroidId * 0.1 + i * 0.01) * 0.5;

@@ -48,6 +48,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public class VCTreeStaticStructureBinaryWriter {
 
+    private static final int VECTOR_DIMENSION = 256;
     // Core infrastructure
     private final IBufferCache bufferCache;
     private final IIOManager ioManager;
@@ -183,7 +184,7 @@ public class VCTreeStaticStructureBinaryWriter {
             int centroidId = nextPageId; // Use page ID as centroid ID
 
             // Create a dummy embedding (in real implementation, extract from tuple)
-            double[] embedding = new double[128]; // Standard embedding size
+            double[] embedding = new double[VECTOR_DIMENSION]; // 256-dimensional embedding
             for (int i = 0; i < embedding.length; i++) {
                 embedding[i] = Math.random() * 2 - 1; // Random values between -1 and 1
             }

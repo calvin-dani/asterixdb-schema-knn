@@ -50,7 +50,7 @@ public class LSMVCTreeComponentLifecycleTest {
             FloatArraySerializerDeserializer.INSTANCE // Vector field
     };
 
-    private final int vectorDimensions = 4; // 128-dimensional vectors
+    private final int vectorDimensions = 256; // 256-dimensional vectors
     private static final int numTuplesToInsert = 100;
 
     @Before

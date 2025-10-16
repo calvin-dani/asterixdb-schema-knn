@@ -35,6 +35,7 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -80,7 +81,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     @Override
     public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
         // Force output to both System.out and System.err to ensure visibility
-        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
+        System.out.println(
+                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
         System.err.println("==========================================");
@@ -246,8 +248,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
         System.err.println("==========================================");
-        System.out
-                .println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
+        System.out.println(
+                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
         return spec;
     }
 
@@ -262,25 +264,28 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Index: " + index.getIndexName());
         System.err.println("Index type: " + index.getIndexType());
         System.err.println("Index details: " + index.getIndexDetails());
-        System.err.println("Creating Data Loading Job (simplified - no K-means or structure creation)");
+        System.err.println("Creating Data Loading Job with Bulk Loader and Grouping (Job 3)");
         System.err.println("==========================================");
 
         JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
         Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numSecondaryKeys = getNumSecondaryKeys();
-        // job spec:
-        // key provider -> primary idx scan -> cast assign -> sink (future: data loading operator)
+        IIndexDataflowHelperFactory dataflowHelperFactory = new IndexDataflowHelperFactory(
+                metadataProvider.getStorageComponentProvider().getStorageManager(), secondaryFileSplitProvider);
+
+        // Job spec: key provider -> primary idx scan -> cast assign -> bulk loader and grouping -> sink
         IndexUtil.bindJobEventListener(spec, metadataProvider);
 
         System.err.println("=== DATA LOADING JOB SETUP ===");
         System.err.println("Dataset: " + dataset.getDatasetName());
         System.err.println("Index: " + index.getIndexName());
-        System.err.println("Creating data loading job (simplified version)");
+        System.err.println("Creating data loading job with bulk loader and grouping functionality");
 
         // if format == column, then project only the indexed fields
         ITupleProjectorFactory projectorFactory =
                 IndexUtil.createPrimaryIndexScanTupleProjectorFactory(dataset.getDatasetFormatInfo(),
                         indexDetails.getIndexExpectedType(), itemType, metaType, numPrimaryKeys);
+
         // dummy key provider -> primary index scan
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
         IOperatorDescriptor targetOp =
@@ -300,35 +305,42 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
 
-        // ====== DATA LOADING JOB: CAST ASSIGN → SINK (future: data loading operator) ======
+        // ====== DATA LOADING JOB: CAST ASSIGN → BULK LOADER AND GROUPING → SINK ======
         System.out.println("*** VECTOR INDEX DEBUG: CREATING DATA LOADING PIPELINE ***");
         System.err.println("==========================================");
         System.err.println("*** CREATING DATA LOADING PIPELINE ***");
         System.err.println("==========================================");
-        System.err.println("Pipeline: CastAssign → Sink (future: data loading operator)");
+        System.err.println("Pipeline: CastAssign → BulkLoaderAndGrouping → Sink");
 
-        // Final sink (future: will be replaced with data loading operator)
-        SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
-        sinkRuntimeFactory.setSourceLocation(sourceLoc);
-        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0, new IPushRuntimeFactory[] { sinkRuntimeFactory },
-                new RecordDescriptor[] { secondaryRecDesc });
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        // Create permit UUIDs for coordination
+        UUID permitUUID = UUID.randomUUID();
+        UUID materializedDataUUID = UUID.randomUUID();
 
-        System.err.println("Connected: CastAssign → Sink");
-        System.err.println("Sink operator: " + targetOp);
+        // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
+        VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
+                new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
+                        secondaryRecDesc, permitUUID, materializedDataUUID);
+        bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
+                primaryPartitionConstraint);
+
+        // Connect CastAssign → BulkLoaderAndGrouping (which is a sink operator)
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, bulkLoaderAndGroupingOp, 0);
+        System.err.println("Connected: CastAssign → BulkLoaderAndGrouping");
+        System.err.println("BulkLoaderAndGrouping operator: " + bulkLoaderAndGroupingOp);
         System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
 
-        // Add single branch as root
-        spec.addRoot(targetOp);
+        // Add single branch as root (BulkLoaderAndGrouping is the sink)
+        spec.addRoot(bulkLoaderAndGroupingOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
         System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
-        System.err.println("  Root: " + targetOp + " (Data Loading - CastAssign → Sink)");
+        System.err
+                .println("  Root: " + bulkLoaderAndGroupingOp + " (Data Loading - CastAssign → BulkLoaderAndGrouping)");
         System.err.println("=== DATA LOADING JOB CREATED ===");
-        System.err.println("=== PIPELINE: DataSource → CastAssign → Sink (future: data loading operator) ===");
-        System.err.println("=== DATA LOADING: Will load actual data into the index ===");
+        System.err.println("=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping ===");
+        System.err.println("=== DATA LOADING: Initializes bulk loader and groups data into run files ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");
