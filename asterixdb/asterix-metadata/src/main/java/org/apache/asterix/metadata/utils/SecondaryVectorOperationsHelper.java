@@ -317,9 +317,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID materializedDataUUID = UUID.randomUUID();
 
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
+        // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
+        // This matches the approach used in HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
+        IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
-                        secondaryRecDesc, permitUUID, materializedDataUUID);
+                        secondaryRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);
