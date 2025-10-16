@@ -23,12 +23,14 @@ import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
@@ -61,6 +63,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     private ITreeIndexTupleWriter directoryFrameTupleWriter;
     private ITreeIndexTupleWriter dataFrameTupleWriter;
     private final VectorClusteringTree vcTreeIndex;
+    private int firstDirectoryPageId;
 
     public VCTreeBulkLoder(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
@@ -105,6 +108,10 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         for (int leafCentroidId = 0; leafCentroidId < numLeafCentroid; leafCentroidId++) {
             // For metadata pages, use freePageManager.takePage() normally
             int metadataPageId = freePageManager.takePage(metaFrame);
+            if (leafCentroidId == 0) {
+                // set the first directory page ID
+                firstDirectoryPageId = metadataPageId;
+            }
             long dpid = BufferedFileHandle.getDiskPageId(fileId, metadataPageId);
             ICachedPage directoryPage = bufferCache.confiscatePage(dpid);
 
@@ -121,6 +128,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
             entriesInCurrentDirectoryPage = 0;
             // Initialize data page state
             entriesInCurrentDataPage = 0;
+            currentDirectoryPage = directoryPages.getFirst();
             LOGGER.debug("Initialized bulk loading with {} directory pages", directoryPages.size());
         }
     }
@@ -173,7 +181,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
                     bufferCache.returnPage(currentDataPage, false);
                 }
                 // Write current data page and add entry to directory
-                writeDataPageToDirectory();
+                writeDataPageToDirectory(false);
                 // TODO: For now we don't handle large tuples exceeds page size
             }
             // TODO: skip verify tuple
@@ -194,7 +202,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     public void loadToNextLeafCluster() throws HyracksDataException {
         // Finish current data page if it exists and has data
         if (currentDataPage != null && entriesInCurrentDataPage > 0) {
-            writeDataPageToDirectory();
+            writeDataPageToDirectory(true);
         }
 
         // Move to next leaf cluster
@@ -210,6 +218,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         if (currentLeafClusterIndex > directoryPages.size()) {
             throw new HyracksDataException("No more leaf clusters to load");
         }
+        write(currentDirectoryPage);
 
         // Set current directory page to the next cluster's directory page
         currentDirectoryPage = directoryPages.get(currentLeafClusterIndex);
@@ -256,11 +265,10 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     /**
      * Write the current data page information to the directory page.
      */
-    private void writeDataPageToDirectory() throws HyracksDataException {
+    private void writeDataPageToDirectory(boolean lastPage) throws HyracksDataException {
         // Create directory entry tuple with max distance and page ID
         // For now, use a placeholder distance value
         // this would be the maximum distance of tuples in the data page
-        // TODO: extract actual max distance from data page's last tuple
 
         int tupleCount = currentDataFrame.getTupleCount();
         double maxDistance = ((IVectorClusteringDataFrame)currentDataFrame).getDistanceToCentroid(tupleCount - 1);
@@ -292,7 +300,12 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         }
 
         int nextPageId = freePageManager.takePage(metaFrame);
-        ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(nextPageId);
+
+        if(lastPage) {
+            ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(-1);
+        } else {
+            ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(nextPageId);
+        }
 
         // Write the data page
         write(currentDataPage);
@@ -363,9 +376,14 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
-        for(ICachedPage directoryPage : directoryPages) {
-            write(directoryPage);
-        }
+        write(currentDirectoryPage);
+        write(currentDataPage);
+        metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
+                LongPointable.FACTORY.createPointable(numLeafCentroid));
+        metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
+                LongPointable.FACTORY.createPointable(firstLeafCentroidId));
+        metaFrame.put(new MutableArrayValueReference("first_directory_page_id".getBytes()),
+                LongPointable.FACTORY.createPointable(firstDirectoryPageId));
         super.end();
     }
 
