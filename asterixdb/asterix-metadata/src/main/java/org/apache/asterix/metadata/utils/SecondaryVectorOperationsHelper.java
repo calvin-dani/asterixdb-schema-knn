@@ -78,17 +78,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     }
 
     @Override
-    public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
+    public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
         // Force output to both System.out and System.err to ensure visibility
-        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
         System.err.println("==========================================");
-        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+        System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
         System.err.println("==========================================");
         System.err.println("Dataset: " + dataset.getDatasetName());
         System.err.println("Index: " + index.getIndexName());
         System.err.println("Index type: " + index.getIndexType());
         System.err.println("Index details: " + index.getIndexDetails());
-        System.err.println("Creating Single Branch Job for Structure Creation");
+        System.err.println("Creating Static Structure Job for K-means + Structure Creation");
         System.err.println("==========================================");
 
         IDataFormat format = metadataProvider.getDataFormat();
@@ -109,10 +109,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // key provider -> primary idx scan -> cast assign -> k-means -> static structure creator -> sink
         IndexUtil.bindJobEventListener(spec, metadataProvider);
 
-        System.err.println("=== INITIAL JOB SETUP ===");
+        System.err.println("=== STATIC STRUCTURE JOB SETUP ===");
         System.err.println("Dataset: " + dataset.getDatasetName());
         System.err.println("Index: " + index.getIndexName());
-        System.err.println("Creating single branch job for structure creation");
+        System.err.println("Creating static structure job for K-means + structure creation");
 
         // if format == column, then project only the indexed fields
         ITupleProjectorFactory projectorFactory =
@@ -179,10 +179,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Number of fields in secondary: " + secondaryRecDesc.getFieldCount());
         System.err.println("Number of fields in hierarchical: " + hierarchicalRecDesc.getFieldCount());
 
-        // ====== SINGLE BRANCH: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
-        System.out.println("*** VECTOR INDEX DEBUG: CREATING SINGLE BRANCH PIPELINE ***");
+        // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
+        System.out.println("*** VECTOR INDEX DEBUG: CREATING STATIC STRUCTURE PIPELINE ***");
         System.err.println("==========================================");
-        System.err.println("*** CREATING SINGLE BRANCH PIPELINE ***");
+        System.err.println("*** CREATING STATIC STRUCTURE PIPELINE ***");
         System.err.println("==========================================");
         System.err.println("Pipeline: CastAssign → K-means → StaticStructureCreator → Sink");
 
@@ -230,19 +230,105 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         System.err.println("Connected: StaticStructureCreator → Sink");
         System.err.println("Sink operator: " + targetOp);
-        System.err.println("=== SINGLE BRANCH PIPELINE COMPLETE ===");
+        System.err.println("=== STATIC STRUCTURE PIPELINE COMPLETE ===");
 
         // Add single branch as root
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
-        System.err.println("=== JOB SPECIFICATION COMPLETE ===");
+        System.err.println("=== STATIC STRUCTURE JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
-        System.err.println("  Root: " + targetOp + " (Single Branch - K-means → StaticStructureCreator → Sink)");
-        System.err.println("=== SINGLE BRANCH JOB CREATED ===");
+        System.err.println("  Root: " + targetOp + " (Static Structure - K-means → StaticStructureCreator → Sink)");
+        System.err.println("=== STATIC STRUCTURE JOB CREATED ===");
         System.err.println("=== PIPELINE: DataSource → CastAssign → K-means → StaticStructureCreator → Sink ===");
         System.err.println(
                 "=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
+        System.err.println("==========================================");
+        System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
+        System.err.println("==========================================");
+        System.out
+                .println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
+        return spec;
+    }
+
+    @Override
+    public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
+        // Force output to both System.out and System.err to ensure visibility
+        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+        System.err.println("==========================================");
+        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+        System.err.println("==========================================");
+        System.err.println("Dataset: " + dataset.getDatasetName());
+        System.err.println("Index: " + index.getIndexName());
+        System.err.println("Index type: " + index.getIndexType());
+        System.err.println("Index details: " + index.getIndexDetails());
+        System.err.println("Creating Data Loading Job (simplified - no K-means or structure creation)");
+        System.err.println("==========================================");
+
+        JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
+        Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+        int numSecondaryKeys = getNumSecondaryKeys();
+        // job spec:
+        // key provider -> primary idx scan -> cast assign -> sink (future: data loading operator)
+        IndexUtil.bindJobEventListener(spec, metadataProvider);
+
+        System.err.println("=== DATA LOADING JOB SETUP ===");
+        System.err.println("Dataset: " + dataset.getDatasetName());
+        System.err.println("Index: " + index.getIndexName());
+        System.err.println("Creating data loading job (simplified version)");
+
+        // if format == column, then project only the indexed fields
+        ITupleProjectorFactory projectorFactory =
+                IndexUtil.createPrimaryIndexScanTupleProjectorFactory(dataset.getDatasetFormatInfo(),
+                        indexDetails.getIndexExpectedType(), itemType, metaType, numPrimaryKeys);
+        // dummy key provider -> primary index scan
+        IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
+        IOperatorDescriptor targetOp =
+                DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
+
+        sourceOp = targetOp;
+        // primary index -> cast assign op (produces the secondary index entry)
+        targetOp = createAssignOp(spec, numSecondaryKeys, recordDesc);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+        System.err.println("Connected: PrimaryIndexScan → CastAssign");
+        System.err.println("CastAssign operator: " + targetOp);
+
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
+
+        // ====== DATA LOADING JOB: CAST ASSIGN → SINK (future: data loading operator) ======
+        System.out.println("*** VECTOR INDEX DEBUG: CREATING DATA LOADING PIPELINE ***");
+        System.err.println("==========================================");
+        System.err.println("*** CREATING DATA LOADING PIPELINE ***");
+        System.err.println("==========================================");
+        System.err.println("Pipeline: CastAssign → Sink (future: data loading operator)");
+
+        // Final sink (future: will be replaced with data loading operator)
+        SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
+        sinkRuntimeFactory.setSourceLocation(sourceLoc);
+        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0, new IPushRuntimeFactory[] { sinkRuntimeFactory },
+                new RecordDescriptor[] { secondaryRecDesc });
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+        System.err.println("Connected: CastAssign → Sink");
+        System.err.println("Sink operator: " + targetOp);
+        System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
+
+        // Add single branch as root
+        spec.addRoot(targetOp);
+        spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
+
+        System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
+        System.err.println("Root operators added:");
+        System.err.println("  Root: " + targetOp + " (Data Loading - CastAssign → Sink)");
+        System.err.println("=== DATA LOADING JOB CREATED ===");
+        System.err.println("=== PIPELINE: DataSource → CastAssign → Sink (future: data loading operator) ===");
+        System.err.println("=== DATA LOADING: Will load actual data into the index ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");

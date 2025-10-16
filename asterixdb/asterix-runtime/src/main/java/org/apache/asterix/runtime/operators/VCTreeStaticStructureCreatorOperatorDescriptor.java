@@ -81,6 +81,8 @@ import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
+import org.apache.hyracks.storage.common.file.IFileMapManager;
+import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 
 /**
  * Operator that creates VCTree static structure files using VCTreeStaticStructureBuilder.
@@ -1190,6 +1192,67 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             System.err.println("ERROR: Failed to close materialized data: " + e.getMessage());
                         }
                     }
+
+                    // Clean up static structure file if it was created but registration failed
+                    try {
+                        System.err.println("Cleaning up static structure file due to failure...");
+                        FileReference indexPathRef = getIndexFilePath();
+                        if (indexPathRef != null) {
+                            FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
+                            System.err.println("Static structure file path for cleanup: " + staticStructureFile.getAbsolutePath());
+                            
+                            INcApplicationContext appCtx = (INcApplicationContext) ctx.getJobletContext()
+                                    .getServiceContext().getApplicationContext();
+                            IBufferCache bufferCache = appCtx.getBufferCache();
+                            IVirtualBufferCache virtualBufferCache = appCtx.getVirtualBufferCache();
+                            IIOManager ioManager = appCtx.getIoManager();
+                            
+                            if (ioManager.exists(staticStructureFile)) {
+                                System.err.println("Static structure file exists, attempting cleanup...");
+                                
+                                // Try to find and unregister the file from FileMapManager directly
+                                try {
+                                    IFileMapManager fileMapManager = virtualBufferCache.getFileMapProvider();
+                                    if (fileMapManager.isMapped(staticStructureFile)) {
+                                        System.err.println("File is mapped in FileMapManager, attempting direct unregistration...");
+                                        try {
+                                            int fileId = fileMapManager.lookupFileId(staticStructureFile);
+                                            fileMapManager.unregisterFile(fileId);
+                                            System.err.println("Successfully unregistered file from FileMapManager: " + staticStructureFile.getAbsolutePath());
+                                        } catch (Exception e) {
+                                            System.err.println("ERROR: Failed to unregister file from FileMapManager: " + e.getMessage());
+                                        }
+                                    } else {
+                                        System.err.println("File is not mapped in FileMapManager");
+                                    }
+                                } catch (Exception e) {
+                                    System.err.println("ERROR: Failed to access FileMapManager: " + e.getMessage());
+                                }
+                                
+                                // Try BufferCache deletion
+                                try {
+                                    bufferCache.deleteFile(staticStructureFile);
+                                    System.err.println("Successfully cleaned up static structure file via BufferCache: " + staticStructureFile.getAbsolutePath());
+                                } catch (Exception e) {
+                                    System.err.println("ERROR: Failed to cleanup static structure file via BufferCache: " + e.getMessage());
+                                    // Try direct deletion as fallback
+                                    try {
+                                        ioManager.delete(staticStructureFile);
+                                        System.err.println("Cleaned up static structure file via direct deletion: " + staticStructureFile.getAbsolutePath());
+                                    } catch (Exception fallbackException) {
+                                        System.err.println("ERROR: Failed to cleanup static structure file via direct deletion: " + fallbackException.getMessage());
+                                    }
+                                }
+                            } else {
+                                System.err.println("Static structure file does not exist, no cleanup needed");
+                            }
+                        } else {
+                            System.err.println("Could not determine index path for cleanup");
+                        }
+                    } catch (Exception e) {
+                        System.err.println("ERROR: Failed to cleanup static structure file during failure: " + e.getMessage());
+                    }
+                    
                     System.err.println("=== CreateStructureActivity FAILED ===");
                 }
             };
