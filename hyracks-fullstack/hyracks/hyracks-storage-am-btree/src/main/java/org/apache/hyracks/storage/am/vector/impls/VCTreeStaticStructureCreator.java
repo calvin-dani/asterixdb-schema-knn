@@ -241,7 +241,8 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
         double[] embedding = (double[]) fieldValues[1];
 
         System.out.println("DEBUG: Adding centroid " + centroidId + " at level=" + currentLevel + ", cluster="
-                + currentClusterInLevel + ", position=" + currentCentroidInCluster + ", embedding length=" + embedding.length);
+                + currentClusterInLevel + ", position=" + currentCentroidInCluster + ", embedding length="
+                + embedding.length);
 
         try {
             return TupleUtils.createTuple(

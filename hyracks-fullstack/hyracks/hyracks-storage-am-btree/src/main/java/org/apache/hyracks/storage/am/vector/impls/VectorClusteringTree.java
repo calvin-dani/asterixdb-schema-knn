@@ -139,26 +139,20 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         // Create VCTreeBulkLoder with default parameters
         // The LSM system will handle the actual parameters at a higher level
         List<Integer> defaultClustersPerLevel = List.of(5, 10);
-        List<List<Integer>> defaultCentroidsPerCluster = List.of(
-            List.of(10), List.of(10)
-        );
+        List<List<Integer>> defaultCentroidsPerCluster = List.of(List.of(10), List.of(10));
         int defaultMaxEntriesPerPage = 100;
-        
+
         // Create serializer/deserializer array for data frame fields
         ISerializerDeserializer[] dataFrameSerds = new ISerializerDeserializer[4];
         dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
         dataFrameSerds[1] = DoubleSerializerDeserializer.INSTANCE; // cosine similarity
         dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
         dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
-        
-        return new VCTreeBulkLoder(fillFactor, callback, this,
-            leafFrameFactory.createFrame(), 
-            dataFrameFactory.createFrame(),
-            DefaultBufferCacheWriteContext.INSTANCE,
-            4, // numLeafCentroid
-            0, // firstLeafCentroidId
-            dataFrameSerds
-        );
+
+        return new VCTreeBulkLoder(fillFactor, callback, this, leafFrameFactory.createFrame(),
+                dataFrameFactory.createFrame(), DefaultBufferCacheWriteContext.INSTANCE, 4, // numLeafCentroid
+                0, // firstLeafCentroidId
+                dataFrameSerds);
     }
 
     public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,

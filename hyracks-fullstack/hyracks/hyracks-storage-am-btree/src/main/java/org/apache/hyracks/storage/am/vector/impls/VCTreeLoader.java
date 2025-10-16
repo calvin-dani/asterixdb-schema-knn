@@ -177,9 +177,10 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
 
         // Extract parameters from Map with defaults
         this.numLevels = (Integer) parameters.getOrDefault("numLevels", 2);
-        List<Integer> tempClustersPerLevel = (List<Integer>) parameters.getOrDefault("clustersPerLevel", List.of(5, 10));
-        List<List<Integer>> tempCentroidsPerCluster = (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster", 
-            List.of(List.of(10), List.of(10)));
+        List<Integer> tempClustersPerLevel =
+                (List<Integer>) parameters.getOrDefault("clustersPerLevel", List.of(5, 10));
+        List<List<Integer>> tempCentroidsPerCluster =
+                (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster", List.of(List.of(10), List.of(10)));
         this.maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
 
         // Defensive copy

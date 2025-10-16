@@ -18,189 +18,111 @@
  */
 package org.apache.asterix.common.storage;
 
-import java.util.Map;
+import java.util.logging.Logger;
 
-import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Manages the .staticstructure file for VCTree indexes.
- * This file stores the hierarchical structure information including:
- * - Number of levels
- * - Clusters per level
- * - Centroids per cluster
- * - Structure parameters
+ * Manages static structure files for VCTree indexes.
+ * This class provides utilities for creating, reading, and cleaning up static structure files.
  */
 public class StaticStructureFileManager {
-    private static final Logger LOGGER = LogManager.getLogger();
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Logger LOGGER = Logger.getLogger(StaticStructureFileManager.class.getName());
+
+    public static final String STATIC_STRUCTURE_FILE_NAME = "static_structure.vctree";
 
     private final IIOManager ioManager;
-    private final String indexPath;
 
-    public StaticStructureFileManager(IIOManager ioManager, String indexPath) {
+    public StaticStructureFileManager(IIOManager ioManager) {
         this.ioManager = ioManager;
-        this.indexPath = indexPath;
     }
 
     /**
-     * Writes the static structure information to .staticstructure file
+     * Get the static structure file path for a given index directory.
      * 
-     * @param structureData Map containing structure parameters
-     * @throws HyracksDataException if writing fails
+     * @param indexDir The index directory
+     * @return FileReference to the static structure file
      */
-    public void writeStaticStructure(Map<String, Object> structureData) throws HyracksDataException {
-        try {
-            FileReference structureFile = getStaticStructureFile();
-
-            // Ensure parent directory exists
-            FileReference parentDir = structureFile.getParent();
-            if (!ioManager.exists(parentDir)) {
-                ioManager.makeDirectories(parentDir);
-            }
-
-            // Create mask file for atomic write
-            FileReference maskFile = getMaskFile();
-            if (ioManager.exists(maskFile)) {
-                ioManager.delete(maskFile);
-            }
-            ioManager.create(maskFile);
-
-            try {
-                // Write structure data as JSON
-                byte[] data = OBJECT_MAPPER.writeValueAsBytes(structureData);
-                ioManager.overwrite(structureFile, data);
-
-                // Remove mask file to indicate successful write
-                ioManager.delete(maskFile);
-
-                LOGGER.info("Static structure written to: {}", structureFile.getAbsolutePath());
-
-            } catch (Exception e) {
-                // Clean up on failure
-                if (ioManager.exists(structureFile)) {
-                    ioManager.delete(structureFile);
-                }
-                if (ioManager.exists(maskFile)) {
-                    ioManager.delete(maskFile);
-                }
-                throw HyracksDataException.create(e);
-            }
-
-        } catch (Exception e) {
-            throw HyracksDataException.create(e);
-        }
+    public FileReference getStaticStructureFile(FileReference indexDir) {
+        return indexDir.getChild(STATIC_STRUCTURE_FILE_NAME);
     }
 
     /**
-     * Reads the static structure information from .staticstructure file
+     * Check if a static structure file exists for the given index directory.
      * 
-     * @return Map containing structure parameters
-     * @throws HyracksDataException if reading fails
+     * @param indexDir The index directory
+     * @return true if the static structure file exists
      */
-    @SuppressWarnings("unchecked")
-    public Map<String, Object> readStaticStructure() throws HyracksDataException {
+    public boolean exists(FileReference indexDir) {
         try {
-            FileReference structureFile = getStaticStructureFile();
-
-            if (!ioManager.exists(structureFile)) {
-                LOGGER.warn("Static structure file not found: {}", structureFile.getAbsolutePath());
-                return null;
-            }
-
-            // Check for mask file (indicates incomplete write)
-            FileReference maskFile = getMaskFile();
-            if (ioManager.exists(maskFile)) {
-                LOGGER.warn("Static structure file is being written (mask file exists): {}",
-                        maskFile.getAbsolutePath());
-                return null;
-            }
-
-            byte[] data = ioManager.readAllBytes(structureFile);
-            return OBJECT_MAPPER.readValue(data, Map.class);
-
+            FileReference staticStructureFile = getStaticStructureFile(indexDir);
+            return ioManager.exists(staticStructureFile);
         } catch (Exception e) {
-            throw HyracksDataException.create(e);
-        }
-    }
-
-    /**
-     * Checks if the static structure file exists
-     * 
-     * @return true if file exists and is not being written
-     */
-    public boolean exists() {
-        try {
-            FileReference structureFile = getStaticStructureFile();
-            FileReference maskFile = getMaskFile();
-
-            return ioManager.exists(structureFile) && !ioManager.exists(maskFile);
-        } catch (Exception e) {
+            LOGGER.warning("Failed to check if static structure file exists: " + e.getMessage());
             return false;
         }
     }
 
     /**
-     * Deletes the static structure file
+     * Delete the static structure file for the given index directory.
      * 
+     * @param indexDir The index directory
+     * @return true if the file was deleted, false if it didn't exist
      * @throws HyracksDataException if deletion fails
      */
-    public void delete() throws HyracksDataException {
+    public boolean delete(FileReference indexDir) throws HyracksDataException {
         try {
-            FileReference structureFile = getStaticStructureFile();
-            FileReference maskFile = getMaskFile();
-
-            if (ioManager.exists(structureFile)) {
-                ioManager.delete(structureFile);
+            FileReference staticStructureFile = getStaticStructureFile(indexDir);
+            if (ioManager.exists(staticStructureFile)) {
+                ioManager.delete(staticStructureFile);
+                LOGGER.info("Deleted static structure file: " + staticStructureFile.getAbsolutePath());
+                return true;
             }
-            if (ioManager.exists(maskFile)) {
-                ioManager.delete(maskFile);
-            }
-
-            LOGGER.info("Static structure file deleted: {}", structureFile.getAbsolutePath());
-
+            return false;
         } catch (Exception e) {
+            LOGGER.warning("Failed to delete static structure file: " + e.getMessage());
             throw HyracksDataException.create(e);
         }
     }
 
     /**
-     * Gets the FileReference for the .staticstructure file
-     * Uses a simple approach that doesn't trigger AsterixDB path parsing
-     */
-    private FileReference getStaticStructureFile() throws HyracksDataException {
-        // Use the first available IO device to avoid path parsing issues
-        int deviceId = 0; // Use first device
-        String structureFilePath = indexPath + "/" + StorageConstants.STATIC_STRUCTURE_FILE_NAME;
-        return ioManager.getFileReference(deviceId, structureFilePath);
-    }
-
-    /**
-     * Gets the FileReference for the mask file
-     * Uses a simple approach that doesn't trigger AsterixDB path parsing
-     */
-    private FileReference getMaskFile() throws HyracksDataException {
-        // Use the first available IO device to avoid path parsing issues
-        int deviceId = 0; // Use first device
-        String maskFilePath =
-                indexPath + "/" + StorageConstants.MASK_FILE_PREFIX + StorageConstants.STATIC_STRUCTURE_FILE_NAME;
-        return ioManager.getFileReference(deviceId, maskFilePath);
-    }
-
-    /**
-     * Creates a StaticStructureFileManager for a given index path
+     * Clean up all static structure files in the given directory tree.
+     * This method recursively searches for and deletes static structure files.
      * 
-     * @param ioManager IOManager instance
-     * @param indexPath Path to the index directory
-     * @return StaticStructureFileManager instance
+     * @param baseDir The base directory to search
+     * @return Number of files deleted
+     * @throws HyracksDataException if cleanup fails
      */
-    public static StaticStructureFileManager create(IIOManager ioManager, String indexPath) {
-        return new StaticStructureFileManager(ioManager, indexPath);
+    public int cleanupAll(FileReference baseDir) throws HyracksDataException {
+        int deletedCount = 0;
+        try {
+            // Get all files in the directory
+            java.util.Set<FileReference> files = ioManager.list(baseDir, null);
+
+            for (FileReference file : files) {
+                String fileName = file.getName();
+                // Look for both old format and new timestamped format
+                if (STATIC_STRUCTURE_FILE_NAME.equals(fileName)
+                        || fileName.startsWith("static_structure_") && fileName.endsWith(".vctree")) {
+                    // Found a static structure file, delete it
+                    try {
+                        ioManager.delete(file);
+                        LOGGER.info("Deleted static structure file: " + file.getAbsolutePath());
+                        deletedCount++;
+                    } catch (Exception e) {
+                        LOGGER.warning("Failed to delete static structure file " + file.getAbsolutePath() + ": "
+                                + e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warning(
+                    "Failed to cleanup static structure files in " + baseDir.getAbsolutePath() + ": " + e.getMessage());
+            throw HyracksDataException.create(e);
+        }
+
+        return deletedCount;
     }
 }

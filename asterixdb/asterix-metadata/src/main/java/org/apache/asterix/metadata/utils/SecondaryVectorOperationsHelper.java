@@ -191,7 +191,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID materializedDataUUID = UUID.randomUUID();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, centroidsUUID, materializedDataUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter);
+                        sampleUUID, centroidsUUID, materializedDataUUID, new ColumnAccessEvalFactory(0), K,
+                        maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -222,11 +223,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 3. Final sink
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
         sinkRuntimeFactory.setSourceLocation(sourceLoc);
-        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
-                new IPushRuntimeFactory[] { sinkRuntimeFactory },
+        targetOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0, new IPushRuntimeFactory[] { sinkRuntimeFactory },
                 new RecordDescriptor[] { hierarchicalRecDesc });
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
-                primaryPartitionConstraint);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         System.err.println("Connected: StaticStructureCreator → Sink");
@@ -242,7 +241,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("  Root: " + targetOp + " (Single Branch - K-means → StaticStructureCreator → Sink)");
         System.err.println("=== SINGLE BRANCH JOB CREATED ===");
         System.err.println("=== PIPELINE: DataSource → CastAssign → K-means → StaticStructureCreator → Sink ===");
-        System.err.println("=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
+        System.err.println(
+                "=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");
