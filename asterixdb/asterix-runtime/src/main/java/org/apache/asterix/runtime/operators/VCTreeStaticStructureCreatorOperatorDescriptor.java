@@ -42,9 +42,11 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
-import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.RawBinaryComparatorFactory;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
+import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
@@ -69,6 +71,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 // import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.frames.LIFOMetaDataFrameFactory;
 import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManager;
@@ -83,8 +86,10 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringDataTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
+import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -571,7 +576,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 tuple.level = 0; // All at level 0 for simplicity
                 tuple.clusterId = centroidId % 3; // Distribute across 3 clusters
                 tuple.centroidId = centroidId; // Same centroid ID for all tuples in this group
-                tuple.embedding = generateDummyEmbedding(128); // 128-dimensional vector
+                tuple.embedding = generateDummyEmbedding(256); // 256-dimensional vector for actual data
                 tuple.distance = Math.random() * 100.0; // Random distance between 0-100
                 dummyTuples.add(tuple);
             }
@@ -937,11 +942,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                 new org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder(2);
                         ArrayTupleReference tupleRef = new ArrayTupleReference();
                         
-                        // Create field serializers and values - same as test code
+                        // Create field serializers and values - use double array for full precision
                         @SuppressWarnings("rawtypes")
                         ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[] { 
                                 IntegerSerializerDeserializer.INSTANCE, // centroid ID
-                                DoubleArraySerializerDeserializer.INSTANCE // embedding
+                                DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
                         };
                         Object[] fieldValues = new Object[] { centroidId, embedding };
                         
@@ -1111,48 +1116,62 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             throw HyracksDataException.create(e);
                         }
 
-                        // Create tuple writers with proper type traits
-                        // Tuple format: [centroidId (int), embedding (float[]), childPageId (int)]
-                        ITypeTraits[] typeTraits = new ITypeTraits[3];
-                        typeTraits[0] = IntegerPointable.TYPE_TRAITS; // centroidId
-                        typeTraits[1] = VarLengthTypeTrait.INSTANCE; // embedding (float array) - variable length
-                        typeTraits[2] = IntegerPointable.TYPE_TRAITS; // childPageId
+                        // Create specific type traits for different frame types following test pattern
+                        // Cluster tuples (Interior/Leaf): <cid, centroid, pointer>
+                        ITypeTraits[] clusterTypeTraits = new ITypeTraits[3];
+                        clusterTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID
+                        clusterTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array)
+                        clusterTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer
 
-                        VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
-                                new VectorClusteringLeafTupleWriterFactory(typeTraits, null, null);
+                        // Metadata tuples: <max_distance, page_pointer>
+                        ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];
+                        metadataTypeTraits[0] = FloatPointable.TYPE_TRAITS; // max distance
+                        metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer
+
+                        // Data tuples: <distance, cosine_similarity, vector, primary_key>
+                        ITypeTraits[] dataTypeTraits = new ITypeTraits[4];
+                        dataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // distance
+                        dataTypeTraits[1] = DoublePointable.TYPE_TRAITS; // cosine similarity
+                        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector
+                        dataTypeTraits[3] = VarLengthTypeTrait.INSTANCE; // primary key
+
+                        // Create tuple writer factories for each frame type
                         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
-                                new VectorClusteringInteriorTupleWriterFactory(typeTraits, null, null);
+                                new VectorClusteringInteriorTupleWriterFactory(clusterTypeTraits, null, null);
+                        VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
+                                new VectorClusteringLeafTupleWriterFactory(clusterTypeTraits, null, null);
+                        VectorClusteringMetadataTupleWriterFactory metadataTupleWriterFactory =
+                                new VectorClusteringMetadataTupleWriterFactory(metadataTypeTraits, null, null);
+                        VectorClusteringDataTupleWriterFactory dataTupleWriterFactory =
+                                new VectorClusteringDataTupleWriterFactory(dataTypeTraits, null, null);
 
-                        // Create frames with proper tuple writers
-                        VectorClusteringLeafFrameFactory leafFrameFactory =
-                                new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), 128);
-                        VectorClusteringInteriorFrameFactory interiorFrameFactory =
-                                new VectorClusteringInteriorFrameFactory(interiorTupleWriterFactory.createTupleWriter(),
-                                        128);
-
-                        // Create data frame factory (needed for VectorClusteringTree)
-                        VectorClusteringDataFrameFactory dataFrameFactory =
-                                new VectorClusteringDataFrameFactory(leafTupleWriterFactory, 128); // 128 dimensions
-
-                        // Create metadata frame factory
-                        VectorClusteringMetadataFrameFactory metadataFrameFactory =
-                                new VectorClusteringMetadataFrameFactory(leafTupleWriterFactory.createTupleWriter(),
-                                        128);
+                        // Create frame factories with proper tuple writers
+                        // Use 256 dimensions for actual data - need larger frame size
+                        int vectorDimensions = 256;
+                        ITreeIndexFrameFactory interiorFrameFactory =
+                                new VectorClusteringInteriorFrameFactory(interiorTupleWriterFactory.createTupleWriter(), vectorDimensions);
+                        ITreeIndexFrameFactory leafFrameFactory =
+                                new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), vectorDimensions);
+                        ITreeIndexFrameFactory metadataFrameFactory =
+                                new VectorClusteringMetadataFrameFactory(metadataTupleWriterFactory.createTupleWriter(), vectorDimensions);
+                        ITreeIndexFrameFactory dataFrameFactory =
+                                new VectorClusteringDataFrameFactory(dataTupleWriterFactory, vectorDimensions);
 
                         // Create page manager
                         AppendOnlyLinkedMetadataPageManager pageManager =
                                 new AppendOnlyLinkedMetadataPageManager(bufferCache, new LIFOMetaDataFrameFactory());
 
-                        // Create comparator factories (needed for VectorClusteringTree)
-                        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[3];
-                        cmpFactories[0] = IntegerBinaryComparatorFactory.INSTANCE; // centroidId
-                        cmpFactories[1] = RawBinaryComparatorFactory.INSTANCE; // embedding
-                        cmpFactories[2] = IntegerBinaryComparatorFactory.INSTANCE; // childPageId
+                        // Create comparator factories for DATA tuples (4 fields)
+                        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[4];
+                        cmpFactories[0] = DoubleBinaryComparatorFactory.INSTANCE; // distance
+                        cmpFactories[1] = DoubleBinaryComparatorFactory.INSTANCE; // cosine similarity
+                        cmpFactories[2] = RawBinaryComparatorFactory.INSTANCE; // vector
+                        cmpFactories[3] = RawBinaryComparatorFactory.INSTANCE; // primary key
 
-                        // Create VectorClusteringTree
+                        // Create VectorClusteringTree with correct parameters
                         VectorClusteringTree vectorTree = new VectorClusteringTree(bufferCache, pageManager,
                                 interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory,
-                                cmpFactories, 3, 128, staticStructureFile);
+                                cmpFactories, 4, vectorDimensions, staticStructureFile);
 
                         // Activate the tree (this makes the file available for operations)
                         // Note: We skip create() since we already created and opened the file
@@ -1161,11 +1180,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("VectorClusteringTree activated successfully");
 
                         // Create static structure builder using the tree's factory method
+                        // Reduce maxEntriesPerPage for 256-dimensional vectors to fit in frame
+                        int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10); // Limit to 10 entries for large vectors
                         System.err.println(
                                 "Creating VCTreeStaticStructureBuilder with " + clustersPerLevel.size() + " levels...");
+                        System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to " + adjustedMaxEntriesPerPage + " for 256-dimensional vectors");
                         structureCreator =
                                 vectorTree.createStaticStructureBuilder(clustersPerLevel.size(), clustersPerLevel,
-                                        centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
+                                        centroidsPerCluster, adjustedMaxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
 
                         System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                         // Process all accumulated tuples
@@ -1231,8 +1253,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                         // Test the navigator with a sample vector
                         System.err.println("Testing navigator with sample vector...");
-                        double[] testVector = new double[128];
-                        for (int i = 0; i < 128; i++) {
+                        double[] testVector = new double[vectorDimensions];
+                        for (int i = 0; i < vectorDimensions; i++) {
                             testVector[i] = Math.random();
                         }
 
