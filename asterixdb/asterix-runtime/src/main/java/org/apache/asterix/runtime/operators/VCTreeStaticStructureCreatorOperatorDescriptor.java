@@ -1014,21 +1014,25 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("Index path: " + indexPathRef);
 
                         // Create static structure file path
-                        FileReference staticStructureFile = indexPathRef.getChild("static_structure.vctree");
+                        FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
                         System.err.println("Static structure file path: " + staticStructureFile);
 
-                        // Create the file (using unique timestamp, so no conflicts expected)
-                        System.err.println("Creating static structure file...");
+                        // Create or open the static structure file with proper coordination
+                        System.err.println("Creating/opening static structure file...");
                         int fileId;
                         try {
-                            fileId = bufferCache.createFile(staticStructureFile);
-                            System.err.println("Created file with ID: " + fileId);
-
-                            // Open the file to make it available in buffer cache
-                            bufferCache.openFile(fileId);
-                            System.err.println("Opened file with ID: " + fileId);
+                            // Check if file already exists in the file system
+                            IIOManager ioManager = appCtx.getIoManager();
+                            if (ioManager.exists(staticStructureFile)) {
+                                System.err.println("Static structure file already exists, opening it...");
+                                fileId = bufferCache.openFile(staticStructureFile);
+                            } else {
+                                System.err.println("Static structure file doesn't exist, creating it...");
+                                fileId = bufferCache.createFile(staticStructureFile);
+                            }
+                            System.err.println("File ready with ID: " + fileId);
                         } catch (Exception e) {
-                            System.err.println("ERROR: Failed to create static structure file: " + e.getMessage());
+                            System.err.println("ERROR: Failed to create/open static structure file: " + e.getMessage());
                             throw HyracksDataException.create(e);
                         }
 

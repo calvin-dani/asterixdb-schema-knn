@@ -31,6 +31,7 @@ import org.apache.hyracks.storage.common.IResource;
 import org.apache.hyracks.storage.common.IResourceLifecycleManager;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.LocalResource;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -41,12 +42,14 @@ public class IndexDataflowHelper implements IIndexDataflowHelper {
     private final INCServiceContext ctx;
     private final IResourceLifecycleManager<IIndex> lcManager;
     private final ILocalResourceRepository localResourceRepository;
+    private final IStorageManager storageManager;
     private final FileReference resourceRef;
     private IIndex index;
 
     public IndexDataflowHelper(final INCServiceContext ctx, IStorageManager storageMgr, FileReference resourceRef)
             throws HyracksDataException {
         this.ctx = ctx;
+        this.storageManager = storageMgr;
         this.lcManager = storageMgr.getLifecycleManager(ctx);
         this.localResourceRepository = storageMgr.getLocalResourceRepository(ctx);
         this.resourceRef = resourceRef;
@@ -122,19 +125,39 @@ public class IndexDataflowHelper implements IIndexDataflowHelper {
             // Get the index directory
             FileReference indexDir = resourceRef.getParent();
             if (indexDir != null) {
-                // Look for static structure files (both old and new timestamped format)
+                // Look for .static_structure_vctree files only
                 try {
                     IIOManager ioManager = ctx.getIoManager();
                     java.util.Set<FileReference> files = ioManager.list(indexDir, null);
                     for (FileReference file : files) {
                         String fileName = file.getName();
-                        if (fileName.equals("static_structure.vctree")
-                                || fileName.equals("static_structure_file.vctree")
-                                || (fileName.startsWith("static_structure_") && fileName.endsWith(".vctree"))) {
+                        if (fileName.equals(".static_structure_vctree")) {
                             try {
                                 if (ioManager.exists(file)) {
-                                    ioManager.delete(file);
-                                    LOGGER.info("Deleted static structure file: " + file.getAbsolutePath());
+                                    // Use BufferCache.deleteFile() which properly handles file mapping
+                                    try {
+                                        IBufferCache bufferCache = storageManager.getBufferCache(ctx);
+                                        if (bufferCache != null) {
+                                            // Use BufferCache.deleteFile() which handles file mapping properly
+                                            bufferCache.deleteFile(file);
+                                            LOGGER.info("Deleted static structure file: " + file.getAbsolutePath());
+                                        } else {
+                                            // Fallback to direct file deletion if buffer cache is not available
+                                            ioManager.delete(file);
+                                            LOGGER.info("Deleted static structure file (fallback): " + file.getAbsolutePath());
+                                        }
+                                    } catch (Exception e) {
+                                        // If BufferCache.deleteFile() fails, try direct deletion as fallback
+                                        LOGGER.warn("Failed to delete static structure file via BufferCache " + file.getAbsolutePath()
+                                                + ": " + e.getMessage() + ", trying direct deletion");
+                                        try {
+                                            ioManager.delete(file);
+                                            LOGGER.info("Deleted static structure file (direct fallback): " + file.getAbsolutePath());
+                                        } catch (Exception fallbackException) {
+                                            LOGGER.warn("Failed to delete static structure file directly " + file.getAbsolutePath()
+                                                    + ": " + fallbackException.getMessage());
+                                        }
+                                    }
                                 }
                             } catch (Exception e) {
                                 LOGGER.warn("Failed to check/delete static structure file " + file.getAbsolutePath()

@@ -31,7 +31,7 @@ import org.apache.hyracks.api.io.IIOManager;
 public class StaticStructureFileManager {
     private static final Logger LOGGER = Logger.getLogger(StaticStructureFileManager.class.getName());
 
-    public static final String STATIC_STRUCTURE_FILE_NAME = "static_structure.vctree";
+    public static final String STATIC_STRUCTURE_FILE_NAME = ".static_structure_vctree";
 
     private final IIOManager ioManager;
 
@@ -105,7 +105,7 @@ public class StaticStructureFileManager {
                 String fileName = file.getName();
                 // Look for both old format and new timestamped format
                 if (STATIC_STRUCTURE_FILE_NAME.equals(fileName)
-                        || fileName.startsWith("static_structure_") && fileName.endsWith(".vctree")) {
+                        || fileName.startsWith(".static_structure_") && fileName.endsWith(".vctree")) {
                     // Found a static structure file, delete it
                     try {
                         ioManager.delete(file);
