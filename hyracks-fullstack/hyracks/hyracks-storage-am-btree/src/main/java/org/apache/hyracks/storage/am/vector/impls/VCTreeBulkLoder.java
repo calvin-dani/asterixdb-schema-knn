@@ -82,8 +82,6 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
-        createFirstDirectoryPages();
-        createNewDataPage();
     }
 
     public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
@@ -159,6 +157,10 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
      */
 
     public void add(ITupleReference tuple) throws HyracksDataException {
+        if (directoryPages.isEmpty()) {
+            createFirstDirectoryPages();
+            createNewDataPage();
+        }
         try {
             // Calculate space needed for this tuple - following BTreeNSMBulkLoader pattern
             int spaceNeeded = dataFrameTupleWriter.bytesRequired(tuple) + slotSize;
@@ -173,8 +175,6 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
                 // Write current data page and add entry to directory
                 writeDataPageToDirectory();
                 // TODO: For now we don't handle large tuples exceeds page size
-                // Create new regular data page
-                createNewDataPage();
             }
             // TODO: skip verify tuple
             // Insert tuple into current data page (tuples are pre-sorted by distance)
@@ -363,6 +363,9 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
+        for(ICachedPage directoryPage : directoryPages) {
+            write(directoryPage);
+        }
         super.end();
     }
 
