@@ -27,7 +27,6 @@ import java.util.UUID;
 
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -49,7 +48,16 @@ import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
@@ -58,7 +66,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
-import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
+// import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
@@ -93,7 +101,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     private final int maxEntriesPerPage;
     private final float fillFactor;
     private final UUID permitUUID;
-    private final UUID materializedDataUUID;
+    // private final UUID materializedDataUUID;
 
     public VCTreeStaticStructureCreatorOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
@@ -103,7 +111,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         this.maxEntriesPerPage = maxEntriesPerPage;
         this.fillFactor = fillFactor;
         this.permitUUID = permitUUID;
-        this.materializedDataUUID = materializedDataUUID;
+        // this.materializedDataUUID = materializedDataUUID;
         this.outRecDescs[0] = inputRecordDescriptor;
         System.err.println("VCTreeStaticStructureCreatorOperatorDescriptor created with permit UUID: " + permitUUID);
     }
@@ -767,29 +775,29 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private Map<Integer, Integer> levelDistribution = null;
                 private Map<String, Map<Integer, Integer>> clusterDistribution = null;
                 private VCTreeStaticStructureBuilder structureCreator;
-                private MaterializerTaskState materializedData;
+                // private MaterializerTaskState materializedData;
 
                 @Override
                 public void open() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity OPENING ===");
                     try {
                         // Register permit state for coordination
-                        IterationPermitState permitState =
-                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-
-                        if (permitState == null) {
-                            java.util.concurrent.Semaphore permit = new java.util.concurrent.Semaphore(0);
-                            permitState = new IterationPermitState(ctx.getJobletContext().getJobId(),
-                                    new PartitionedUUID(permitUUID, partition), permit);
-                            ctx.setStateObject(permitState);
-                            System.err.println("✅ PERMIT STATE CREATED AND REGISTERED for UUID: " + permitUUID
-                                    + ", partition: " + partition);
-                        }
+//                        IterationPermitState permitState =
+//                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+//
+//                        if (permitState == null) {
+//                            java.util.concurrent.Semaphore permit = new java.util.concurrent.Semaphore(0);
+//                            permitState = new IterationPermitState(ctx.getJobletContext().getJobId(),
+//                                    new PartitionedUUID(permitUUID, partition), permit);
+//                            ctx.setStateObject(permitState);
+//                            System.err.println("✅ PERMIT STATE CREATED AND REGISTERED for UUID: " + permitUUID
+//                                    + ", partition: " + partition);
+//                        }
 
                         // Initialize materialized data state
-                        materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
-                                new PartitionedUUID(materializedDataUUID, partition));
-                        materializedData.open(ctx);
+//                        materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
+//                                new PartitionedUUID(materializedDataUUID, partition));
+//                        materializedData.open(ctx);
 
                         // Initialize evaluators for extracting tuple fields
                         EvaluatorContext evalCtx = new EvaluatorContext(ctx);
@@ -832,7 +840,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     }
 
                     // Store frame in materialized data
-                    materializedData.appendFrame(buffer);
+                    // materializedData.appendFrame(buffer);
                 }
 
                 private void processTuple(ITupleReference tuple) throws HyracksDataException {
@@ -843,12 +851,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         clusterIdEval.evaluate(frameTuple, clusterIdVal);
                         centroidIdEval.evaluate(frameTuple, centroidIdVal);
 
-                        int level = AInt32SerializerDeserializer.getInt(levelVal.getByteArray(),
-                                levelVal.getStartOffset() + 1);
-                        int clusterId = AInt32SerializerDeserializer.getInt(clusterIdVal.getByteArray(),
-                                clusterIdVal.getStartOffset() + 1);
-                        int centroidId = AInt32SerializerDeserializer.getInt(centroidIdVal.getByteArray(),
-                                centroidIdVal.getStartOffset() + 1);
+                        int level = IntegerPointable.getInteger(levelVal.getByteArray(), levelVal.getStartOffset());
+                        int clusterId = IntegerPointable.getInteger(clusterIdVal.getByteArray(), clusterIdVal.getStartOffset());
+                        int centroidId = IntegerPointable.getInteger(centroidIdVal.getByteArray(), centroidIdVal.getStartOffset());
 
                         // Debug: Log suspicious level values and filter them out
                         if (level < 0 || level > 100) {
@@ -883,6 +888,75 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     }
                 }
 
+                /**
+                 * Convert 4-field tuple [level, clusterId, centroidId, embedding] to 2-field tuple [centroidId, embedding]
+                 * for VCTreeStaticStructureBuilder, following the same pattern as the test code.
+                 * Uses proper AsterixDB AOrderedList deserialization for the embedding field.
+                 */
+                private ITupleReference convertToVCTreeBuilderFormat(ITupleReference inputTuple) throws HyracksDataException {
+                    try {
+                        // Extract centroidId from field 2
+                        int centroidId = IntegerPointable.getInteger(inputTuple.getFieldData(2), 
+                                inputTuple.getFieldStart(2));
+                        
+                        // Extract embedding from field 3 using proper AsterixDB AOrderedList deserialization
+                        // Following the same pattern as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
+                        byte[] embeddingData = inputTuple.getFieldData(3);
+                        int embeddingStart = inputTuple.getFieldStart(3);
+                        int embeddingLength = inputTuple.getFieldLength(3);
+                        
+                        // Check if it's a list type (required for vector data)
+                        if (!ATYPETAGDESERIALIZER.deserialize(embeddingData[embeddingStart]).isListType()) {
+                            System.err.println("WARNING: Embedding field is not a list type, skipping tuple");
+                            throw new HyracksDataException("Embedding field is not a list type");
+                        }
+                        
+                        // Parse the vector data using proper AsterixDB parsing
+                        ListAccessor listAccessor = new ListAccessor();
+                        listAccessor.reset(embeddingData, embeddingStart);
+                        
+                        // Create primitive list directly (copied from KMeansUtils.createPrimitveList)
+                        ATypeTag typeTag = listAccessor.getItemType();
+                        double[] embedding = new double[listAccessor.size()];
+                        ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+                        VoidPointable tempVal = new VoidPointable();
+                        
+                        storage.reset();
+                        for (int i = 0; i < listAccessor.size(); i++) {
+                            listAccessor.getOrWriteItem(i, tempVal, storage);
+                            embedding[i] = extractNumericVector(tempVal, typeTag);
+                        }
+                        
+                        if (embedding == null || embedding.length == 0) {
+                            System.err.println("WARNING: Failed to extract embedding from AOrderedList, skipping tuple");
+                            throw new HyracksDataException("Failed to extract embedding from AOrderedList");
+                        }
+                        
+                        // Create 2-field tuple: [centroidId, embedding] - same format as test code
+                        org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder tupleBuilder = 
+                                new org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder(2);
+                        ArrayTupleReference tupleRef = new ArrayTupleReference();
+                        
+                        // Create field serializers and values - same as test code
+                        @SuppressWarnings("rawtypes")
+                        ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[] { 
+                                IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                                DoubleArraySerializerDeserializer.INSTANCE // embedding
+                        };
+                        Object[] fieldValues = new Object[] { centroidId, embedding };
+                        
+                        // Build the tuple using TupleUtils - same as test code
+                        TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
+                        
+                        return tupleRef;
+                        
+                    } catch (Exception e) {
+                        System.err.println("ERROR: Failed to convert tuple to VCTreeBuilder format: " + e.getMessage());
+                        e.printStackTrace();
+                        throw new HyracksDataException("Failed to convert tuple to VCTreeBuilder format", e);
+                    }
+                }
+
                 @Override
                 public void close() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity CLOSING ===");
@@ -907,10 +981,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
 
                     // Close materialized data
-                    if (materializedData != null) {
-                        materializedData.close();
-                        ctx.setStateObject(materializedData);
-                    }
+                    // if (materializedData != null) {
+                    //     materializedData.close();
+                    //     ctx.setStateObject(materializedData);
+                    // }
 
                     // Signal Branch 2 that structure creation is complete
                     try {
@@ -1100,11 +1174,47 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             FrameTupleAccessor frameFta = new FrameTupleAccessor(outRecDescs[0]);
                             frameFta.reset(frameBuffer);
 
+                            System.err.println("Frame has " + frameFta.getTupleCount() + " tuples");
+                            
                             for (int i = 0; i < frameFta.getTupleCount(); i++) {
                                 tuple.reset(frameFta, i);
-                                structureCreator.add(tuple);
+                                
+                                // Debug the tuple being processed
+                                System.err.println("=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
+                                System.err.println("Input tuple field count: " + tuple.getFieldCount());
+                                for (int fieldIndex = 0; fieldIndex < tuple.getFieldCount(); fieldIndex++) {
+                                    int fieldLength = tuple.getFieldLength(fieldIndex);
+                                    int fieldStart = tuple.getFieldStart(fieldIndex);
+                                    System.err.println("Field " + fieldIndex + ": length=" + fieldLength + ", start=" + fieldStart);
+                                    
+                                    // Show first few bytes of each field
+                                    if (fieldLength > 0) {
+                                        byte[] fieldData = tuple.getFieldData(fieldIndex);
+                                        int bytesToShow = Math.min(16, fieldLength);
+                                        System.err.print("Field " + fieldIndex + " data (first " + bytesToShow + " bytes): ");
+                                        for (int j = 0; j < bytesToShow; j++) {
+                                            System.err.printf("%02X ", fieldData[fieldStart + j] & 0xFF);
+                                        }
+                                        System.err.println();
+                                    }
+                                }
+                                
+                                // Convert 4-field tuple to 3-field tuple for VCTreeStaticStructureBuilder
+                                ITupleReference convertedTuple = convertToVCTreeBuilderFormat(tuple);
+                                System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
+                                
+                                structureCreator.add(convertedTuple);
                                 totalTuplesProcessed++;
+                                
+                                // Only show first few tuples to avoid spam
+                                if (totalTuplesProcessed >= 3) {
+                                    System.err.println("... (showing first 3 tuples only)");
+                                    break;
+                                }
                             }
+                            
+                            // Only process first frame to avoid spam
+                            // Process all tuples for static structure creation
                         }
                         System.err
                                 .println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
@@ -1133,6 +1243,15 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                     + result.clusterIndex + ", distance=" + result.distance);
                         } catch (Exception e) {
                             System.err.println("WARNING: Navigator test failed: " + e.getMessage());
+                        }
+
+                        // Force all data to disk before closing
+                        System.err.println("Forcing static structure data to disk...");
+                        try {
+                            bufferCache.force(fileId, true);
+                            System.err.println("✅ STATIC STRUCTURE DATA FORCED TO DISK SUCCESSFULLY");
+                        } catch (Exception e) {
+                            System.err.println("WARNING: Failed to force data to disk: " + e.getMessage());
                         }
 
                         // Close the file
@@ -1184,13 +1303,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         }
                     }
 
-                    if (materializedData != null) {
-                        try {
-                            materializedData.close();
-                        } catch (Exception e) {
-                            System.err.println("ERROR: Failed to close materialized data: " + e.getMessage());
-                        }
-                    }
+                    // if (materializedData != null) {
+                    //     try {
+                    //         materializedData.close();
+                    //     } catch (Exception e) {
+                    //         System.err.println("ERROR: Failed to close materialized data: " + e.getMessage());
+                    //     }
+                    // }
                     System.err.println("=== CreateStructureActivity FAILED ===");
                 }
             };
@@ -1283,5 +1402,36 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 }
             };
         }
+    }
+
+    /**
+     * Extract numeric vector from pointable (copied from KMeansUtils.extractNumericVector)
+     */
+    private double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws HyracksDataException {
+        byte[] data = pointable.getByteArray();
+        int offset = pointable.getStartOffset();
+        if (derivedTypeTag.isNumericType()) {
+            return getValueFromTag(derivedTypeTag, data, offset);
+        } else if (derivedTypeTag == ATypeTag.ANY) {
+            ATypeTag typeTag = ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            return getValueFromTag(typeTag, data, offset);
+        } else {
+            throw new HyracksDataException("Unsupported type tag for numeric vector extraction: " + derivedTypeTag);
+        }
+    }
+
+    /**
+     * Get value from tag (copied from KMeansUtils.getValueFromTag)
+     */
+    private double getValueFromTag(ATypeTag typeTag, byte[] data, int offset) throws HyracksDataException {
+        return switch (typeTag) {
+            case TINYINT -> org.apache.asterix.dataflow.data.nontagged.serde.AInt8SerializerDeserializer.getByte(data, offset + 1);
+            case SMALLINT -> org.apache.asterix.dataflow.data.nontagged.serde.AInt16SerializerDeserializer.getShort(data, offset + 1);
+            case INTEGER -> org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer.getInt(data, offset + 1);
+            case BIGINT -> org.apache.asterix.dataflow.data.nontagged.serde.AInt64SerializerDeserializer.getLong(data, offset + 1);
+            case FLOAT -> org.apache.asterix.dataflow.data.nontagged.serde.AFloatSerializerDeserializer.getFloat(data, offset + 1);
+            case DOUBLE -> org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+            default -> Float.NaN;
+        };
     }
 }
