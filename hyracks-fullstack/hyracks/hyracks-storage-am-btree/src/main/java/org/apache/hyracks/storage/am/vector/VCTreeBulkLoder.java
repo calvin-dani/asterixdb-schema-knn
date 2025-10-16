@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.hyracks.storage.am.vector.impls;
+package org.apache.hyracks.storage.am.vector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +33,8 @@ import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
+import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;

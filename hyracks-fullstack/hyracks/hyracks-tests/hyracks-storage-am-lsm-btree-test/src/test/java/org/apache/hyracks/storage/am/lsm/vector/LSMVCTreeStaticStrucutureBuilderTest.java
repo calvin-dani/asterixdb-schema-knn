@@ -19,6 +19,9 @@
 
 package org.apache.hyracks.storage.am.lsm.vector;
 
+import java.util.List;
+import java.util.Random;
+
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -31,9 +34,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.junit.Before;
-
-import java.util.List;
-import java.util.Random;
 
 public class LSMVCTreeStaticStrucutureBuilderTest extends VectorIndexTestDriver {
     private static final Logger LOGGER = LogManager.getLogger();
@@ -75,7 +75,7 @@ public class LSMVCTreeStaticStrucutureBuilderTest extends VectorIndexTestDriver 
 
         // Create a specialized test utils for LSM context
         testUtils.buildStaticStructure(ctx);
-        
+
         ctx.getIndex().validate();
         ctx.getIndex().deactivate();
         // ctx.getIndex().destroy();

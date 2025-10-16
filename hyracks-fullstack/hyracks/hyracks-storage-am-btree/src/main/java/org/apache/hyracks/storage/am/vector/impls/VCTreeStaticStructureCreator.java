@@ -27,7 +27,6 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
@@ -227,126 +226,31 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
 
     /**
      * Create entry tuple with centroid info and child page pointer.
+     * Follows the same simple pattern as VCTreeStaticStructureBuilder.
      */
     private ITupleReference createEntryTuple(ITupleReference tuple, int childPageId) throws HyracksDataException {
+        ISerializerDeserializer<?>[] fieldSerdes = new ISerializerDeserializer<?>[2];
+        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
+        fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
+
+        // Deserialize the tuple using the proper TupleUtils method
+        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+
+        // Extract the vector from the deserialized fields
+        int centroidId = (Integer) fieldValues[0];
+        double[] embedding = (double[]) fieldValues[1];
+
+        System.out.println("DEBUG: Adding centroid " + centroidId + " at level=" + currentLevel + ", cluster="
+                + currentClusterInLevel + ", position=" + currentCentroidInCluster + ", embedding length="
+                + embedding.length);
+
         try {
-            // Debug: Print tuple information
-            System.out.println("DEBUG: Processing tuple with " + tuple.getFieldCount() + " fields");
-            for (int i = 0; i < tuple.getFieldCount(); i++) {
-                System.out.println("DEBUG: Field " + i + " length: " + tuple.getFieldLength(i));
-            }
-
-            // Try to deserialize field by field to identify the issue
-            int centroidId = 0;
-            float[] embedding = null;
-
-            // Try different approaches based on tuple structure
-            if (tuple.getFieldCount() >= 4) {
-                // Expected format: <level, clusterId, centroidId, embedding>
-                System.out.println("DEBUG: Field 3 length: " + tuple.getFieldLength(3) + " bytes");
-
-                // Check if field 3 is small (likely not a proper array)
-                if (tuple.getFieldLength(3) < 100) {
-                    System.out.println("DEBUG: Field 3 too small for array, using dummy embedding");
-                    // Field 3 is too small to be a proper embedding array
-                    // Extract centroidId from field 2 and create dummy embedding
-                    try {
-                        // Use ByteArrayInputStream for proper deserialization
-                        byte[] fieldData = tuple.getFieldData(2);
-                        int fieldStart = tuple.getFieldStart(2);
-                        int fieldLength = tuple.getFieldLength(2);
-
-                        java.io.ByteArrayInputStream bais =
-                                new java.io.ByteArrayInputStream(fieldData, fieldStart, fieldLength);
-                        java.io.DataInputStream dis = new java.io.DataInputStream(bais);
-
-                        ISerializerDeserializer intSerde = IntegerSerializerDeserializer.INSTANCE;
-                        Object centroidIdObj = intSerde.deserialize(dis);
-                        centroidId = (Integer) centroidIdObj;
-                        System.out.println("DEBUG: Extracted centroidId: " + centroidId);
-                    } catch (Exception e) {
-                        System.out.println("DEBUG: Failed to extract centroidId: " + e.getMessage());
-                        centroidId = currentCentroidInCluster;
-                    }
-
-                    // Create dummy embedding
-                    embedding = new float[128];
-                    for (int i = 0; i < embedding.length; i++) {
-                        embedding[i] = (float) (Math.random() - 0.5) * 2;
-                    }
-                    System.out.println("DEBUG: Using dummy embedding of length " + embedding.length);
-                } else {
-                    // Field 3 is large enough to be an array, try deserialization
-                    try {
-                        // Use TupleUtils.deserializeTuple for proper deserialization
-                        ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[4];
-                        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // level
-                        fieldSerdes[1] = IntegerSerializerDeserializer.INSTANCE; // clusterId
-                        fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // centroidId
-                        fieldSerdes[3] = DoubleArraySerializerDeserializer.INSTANCE; // embedding (DOUBLE array)
-
-                        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-
-                        // Extract values
-                        Object levelObj = fieldValues[0];
-                        Object clusterIdObj = fieldValues[1];
-                        Object centroidIdObj = fieldValues[2];
-                        Object embeddingObj = fieldValues[3];
-
-                        System.out.println("DEBUG: Level: " + levelObj);
-                        System.out.println("DEBUG: ClusterId: " + clusterIdObj);
-                        System.out.println("DEBUG: CentroidId: " + centroidIdObj);
-
-                        centroidId = (Integer) centroidIdObj;
-
-                        // Convert double array to float array
-                        if (embeddingObj instanceof double[]) {
-                            double[] doubleEmbedding = (double[]) embeddingObj;
-                            embedding = new float[doubleEmbedding.length];
-                            for (int i = 0; i < doubleEmbedding.length; i++) {
-                                embedding[i] = (float) doubleEmbedding[i];
-                            }
-                            System.out.println("DEBUG: Embedding length: " + embedding.length);
-                        } else {
-                            System.out.println("DEBUG: Unexpected embedding type: " + embeddingObj.getClass());
-                            // Create dummy embedding
-                            embedding = new float[128];
-                            for (int i = 0; i < embedding.length; i++) {
-                                embedding[i] = (float) (Math.random() - 0.5) * 2;
-                            }
-                        }
-                    } catch (Exception e) {
-                        System.out.println("DEBUG: Failed to deserialize tuple fields: " + e.getMessage());
-                        // Fallback: create dummy values
-                        centroidId = currentCentroidInCluster;
-                        embedding = new float[128];
-                        for (int i = 0; i < embedding.length; i++) {
-                            embedding[i] = (float) (Math.random() - 0.5) * 2;
-                        }
-                    }
-                }
-            } else {
-                // Fallback for unexpected tuple format
-                System.out.println("DEBUG: Unexpected tuple format, using fallback values");
-                centroidId = currentCentroidInCluster;
-                embedding = new float[128];
-                for (int i = 0; i < embedding.length; i++) {
-                    embedding[i] = (float) (Math.random() - 0.5) * 2;
-                }
-            }
-
-            System.out.println("DEBUG: Adding centroid " + centroidId + " at level=" + currentLevel + ", cluster="
-                    + currentClusterInLevel + ", position=" + currentCentroidInCluster);
-
             return TupleUtils.createTuple(
                     new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
-                            FloatArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
+                            DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
                     centroidId, embedding, childPageId);
-
         } catch (Exception e) {
-            System.out.println("DEBUG: Exception in createEntryTuple: " + e.getMessage());
-            e.printStackTrace();
-            throw new HyracksDataException("Failed to create entry tuple", e);
+            throw HyracksDataException.create(e);
         }
     }
 
@@ -457,14 +361,19 @@ public class VCTreeStaticStructureCreator extends AbstractTreeIndexLoader {
             createMetadataPages();
 
             // Close the loader
-            close();
+            try {
+                close();
+            } catch (HyracksDataException e) {
+                // Ignore close errors to prevent double-close issues
+                System.err.println("Warning: Error during close (likely already closed): " + e.getMessage());
+            }
 
             System.out.println("DEBUG: VCTreeStaticStructureCreator completed successfully");
             printFinalStructure();
 
         } catch (Exception e) {
             handleException();
-            throw new HyracksDataException("Failed to finalize structure", e);
+            throw HyracksDataException.create(e);
         }
     }
 
