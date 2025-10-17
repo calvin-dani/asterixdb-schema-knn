@@ -40,20 +40,19 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
         super(typeTraits, nullTypeTraits, nullIntrospector);
     }
 
-
-//    @Override
-//    public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
-//        int totalBytes = 0;
-//
-//        for (int i = startField; i < startField + numFields; i++) {
-//            totalBytes += tuple.getFieldLength(i);
-//        }
-//
-//        // Add field offset array overhead
-//        totalBytes += (numFields + 1) * 4;
-//
-//        return totalBytes;
-//    }
+    //    @Override
+    //    public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
+    //        int totalBytes = 0;
+    //
+    //        for (int i = startField; i < startField + numFields; i++) {
+    //            totalBytes += tuple.getFieldLength(i);
+    //        }
+    //
+    //        // Add field offset array overhead
+    //        totalBytes += (numFields + 1) * 4;
+    //
+    //        return totalBytes;
+    //    }
 
     /**
      * Get the cluster ID from the tuple
@@ -70,13 +69,14 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
      */
     public double[] getCentroid(ITupleReference tuple) {
         System.err.println("=== VectorClusteringLeafTupleWriter.getCentroid ===");
-        
+
         byte[] data = tuple.getFieldData(CENTROID_FIELD);
         int offset = tuple.getFieldStart(CENTROID_FIELD);
         int length = tuple.getFieldLength(CENTROID_FIELD);
 
-        System.err.println("Centroid field data: length=" + length + ", offset=" + offset + ", data.length=" + data.length);
-        
+        System.err.println(
+                "Centroid field data: length=" + length + ", offset=" + offset + ", data.length=" + data.length);
+
         // Show first few bytes for analysis
         int bytesToShow = Math.min(16, length);
         System.err.print("First " + bytesToShow + " bytes: ");
@@ -88,20 +88,20 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
         // Assuming centroid is stored as array of doubles
         int numDimensions = length / 8; // 8 bytes per double
         System.err.println("Calculated dimensions (double): " + numDimensions);
-        
+
         if (numDimensions <= 0) {
             System.err.println("ERROR: Invalid dimensions for double array, trying float interpretation");
             int floatDimensions = length / 4; // 4 bytes per float
             System.err.println("Calculated dimensions (float): " + floatDimensions);
-            
+
             if (floatDimensions > 0) {
                 return getCentroidAsFloatArray(data, offset, length, floatDimensions);
             } else {
-                throw new RuntimeException("Invalid centroid dimensions: double=" + numDimensions + 
-                                         ", float=" + floatDimensions + ", length=" + length);
+                throw new RuntimeException("Invalid centroid dimensions: double=" + numDimensions + ", float="
+                        + floatDimensions + ", length=" + length);
             }
         }
-        
+
         double[] centroid = new double[numDimensions];
 
         for (int i = 0; i < numDimensions; i++) {
@@ -111,7 +111,7 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
                     | (((long) data[doubleOffset + 4] & 0xFF) << 24) | (((long) data[doubleOffset + 5] & 0xFF) << 16)
                     | (((long) data[doubleOffset + 6] & 0xFF) << 8) | ((long) data[doubleOffset + 7] & 0xFF);
             centroid[i] = Double.longBitsToDouble(bits);
-            
+
             if (i < 3) { // Show first 3 values
                 System.err.println("Double[" + i + "] = " + centroid[i]);
             }
@@ -120,7 +120,7 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
         System.err.println("Successfully extracted " + numDimensions + " dimensions as double array");
         return centroid;
     }
-    
+
     private double[] getCentroidAsFloatArray(byte[] data, int offset, int length, int numDimensions) {
         System.err.println("Extracting as FLOAT array with " + numDimensions + " dimensions");
         double[] centroid = new double[numDimensions];
@@ -131,7 +131,7 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
                     | ((data[floatOffset + 2] & 0xFF) << 8) | (data[floatOffset + 3] & 0xFF);
             float floatValue = Float.intBitsToFloat(bits);
             centroid[i] = (double) floatValue; // Convert float to double
-            
+
             if (i < 3) { // Show first 3 values
                 System.err.println("Float[" + i + "] = " + floatValue + " (as double: " + centroid[i] + ")");
             }

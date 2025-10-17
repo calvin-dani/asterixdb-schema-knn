@@ -37,7 +37,11 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.*;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
@@ -236,7 +240,7 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
     }
 
     public boolean isStaticStructure() {
-        return  isStaticStructure;
+        return isStaticStructure;
     }
 
     public void setStaticStructure(boolean isStaticStructure) {

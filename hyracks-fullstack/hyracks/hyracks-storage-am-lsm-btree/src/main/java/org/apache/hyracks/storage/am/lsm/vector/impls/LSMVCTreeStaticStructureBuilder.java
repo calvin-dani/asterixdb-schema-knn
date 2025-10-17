@@ -18,6 +18,8 @@
  */
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
+import java.util.List;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -27,23 +29,20 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 
-import java.util.List;
-
-public class LSMVCTreeStaticStructureBuilder{
+public class LSMVCTreeStaticStructureBuilder {
     private final LSMVCTree lsmvcTree;
     private final IIndexBulkLoader staticStructureBuilder;
     private final ILSMIndexOperationContext opCtx;
     private boolean failed = false;
 
-    public LSMVCTreeStaticStructureBuilder(NCConfig storageConfig,  LSMVCTree lsmvcTree,  ILSMIndexOperationContext opCtx,
-            int numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage,
-            NoOpPageWriteCallback instance)
-            throws HyracksDataException {
+    public LSMVCTreeStaticStructureBuilder(NCConfig storageConfig, LSMVCTree lsmvcTree, ILSMIndexOperationContext opCtx,
+            int numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster,
+            int maxEntriesPerPage, NoOpPageWriteCallback instance) throws HyracksDataException {
         this.lsmvcTree = lsmvcTree;
         this.opCtx = opCtx;
-        this.staticStructureBuilder = ((LSMVCTreeDiskComponent)opCtx.getIoOperation().getNewComponent()).
-                createStaticStructureBuilder(storageConfig, numLevels, clustersPerLevel, centroidsPerCluster,
-                maxEntriesPerPage, instance);
+        this.staticStructureBuilder =
+                ((LSMVCTreeDiskComponent) opCtx.getIoOperation().getNewComponent()).createStaticStructureBuilder(
+                        storageConfig, numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage, instance);
     }
 
     public ILSMDiskComponent getComponent() {

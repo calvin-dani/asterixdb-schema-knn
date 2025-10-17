@@ -39,7 +39,6 @@ public class VectorClusteringMetadataTupleWriter extends TypeAwareTupleWriter im
         super(typeTraits, nullTypeTraits, nullIntrospector);
     }
 
-
     @Override
     public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
         int totalBytes = 0;

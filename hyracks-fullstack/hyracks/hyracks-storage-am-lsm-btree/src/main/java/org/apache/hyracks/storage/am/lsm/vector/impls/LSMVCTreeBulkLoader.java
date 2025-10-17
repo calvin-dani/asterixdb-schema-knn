@@ -26,11 +26,8 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
-import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
-
-import java.util.List;
 
 public class LSMVCTreeBulkLoader {
     private final LSMVCTree lsmvcTree;
@@ -38,14 +35,13 @@ public class LSMVCTreeBulkLoader {
     private final ILSMIndexOperationContext opCtx;
     private boolean failed = false;
 
-    public LSMVCTreeBulkLoader(NCConfig storageConfig,  LSMVCTree lsmvcTree,  ILSMIndexOperationContext opCtx,
+    public LSMVCTreeBulkLoader(NCConfig storageConfig, LSMVCTree lsmvcTree, ILSMIndexOperationContext opCtx,
             int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerdes,
-            NoOpPageWriteCallback instance)
-            throws HyracksDataException {
+            NoOpPageWriteCallback instance) throws HyracksDataException {
         this.lsmvcTree = lsmvcTree;
         this.opCtx = opCtx;
-        this.bulkLoader = ((LSMVCTreeDiskComponent)opCtx.getIoOperation().getNewComponent()).
-                createBulkLoader(numLeafCentroid, firstLeafCentroidId, dataFrameSerdes, instance);
+        this.bulkLoader = ((LSMVCTreeDiskComponent) opCtx.getIoOperation().getNewComponent())
+                .createBulkLoader(numLeafCentroid, firstLeafCentroidId, dataFrameSerdes, instance);
     }
 
     public ILSMDiskComponent getComponent() {
@@ -63,7 +59,7 @@ public class LSMVCTreeBulkLoader {
 
     public void next() throws HyracksDataException {
         try {
-            ((VCTreeBulkLoder)bulkLoader).loadToNextLeafCluster();
+            ((VCTreeBulkLoder) bulkLoader).loadToNextLeafCluster();
         } catch (Throwable th) {
             fail(th);
             throw th;
@@ -72,7 +68,7 @@ public class LSMVCTreeBulkLoader {
 
     public void copyPage(ICachedPage page) throws HyracksDataException {
         try {
-            ((VCTreeBulkLoder)bulkLoader).copyPage(page);
+            ((VCTreeBulkLoder) bulkLoader).copyPage(page);
         } catch (Throwable th) {
             fail(th);
             throw th;

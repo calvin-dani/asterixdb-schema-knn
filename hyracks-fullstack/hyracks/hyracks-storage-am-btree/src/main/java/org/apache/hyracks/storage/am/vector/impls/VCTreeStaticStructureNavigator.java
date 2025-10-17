@@ -56,7 +56,7 @@ public class VCTreeStaticStructureNavigator {
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory) {
         this.bufferCache = bufferCache;
         this.fileId = fileId;
-        this.rootPageId = 0; // VCTreeStaticStructureBuilder always uses page 0 as root
+        this.rootPageId = 1; // VCTreeStaticStructureBuilder always uses page 0 as root
         this.interiorFrameFactory = interiorFrameFactory;
         this.leafFrameFactory = leafFrameFactory;
     }

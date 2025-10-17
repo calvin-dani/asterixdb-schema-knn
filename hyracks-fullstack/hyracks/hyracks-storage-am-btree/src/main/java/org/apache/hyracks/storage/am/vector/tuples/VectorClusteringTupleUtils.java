@@ -26,8 +26,8 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
 
 /**
@@ -109,19 +109,19 @@ public class VectorClusteringTupleUtils {
         // 2. Input tuples: <vector, PK> - vector is in field 0
         // 3. Update tuples with included fields: <vector, included_field1, ..., included_fieldN, PK> - vector is in field 0
 
-//        if (tuple.getFieldCount() != 2) {
-//            System.err.println("ERROR: unsupported tuple format");
-//            return null;
-//        }
+        //        if (tuple.getFieldCount() != 2) {
+        //            System.err.println("ERROR: unsupported tuple format");
+        //            return null;
+        //        }
 
         try {
             ISerializerDeserializer[] fieldSerdes =
                     new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
                             DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
                     };
-//            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
-//            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
-//            fieldSerdes[1] = new UTF8StringSerializerDeserializer();
+            //            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
+            //            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
+            //            fieldSerdes[1] = new UTF8StringSerializerDeserializer();
 
             // Deserialize the tuple using the proper TupleUtils method
             Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
@@ -132,6 +132,35 @@ public class VectorClusteringTupleUtils {
             // Log the error and return null instead of crashing
             System.err.println("ERROR: Failed to extract vector from tuple: " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Extract vector from tuple.
+     *
+     * @param tuple The tuple to extract vector from
+     * @return Double array containing the vector, or null if extraction fails
+     */
+    private double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
+        // Centroid is the second field in interior frame tuples
+        try {
+            // Create field serializers array - specify only the centroid field we need
+            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
+            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
+            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
+            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
+
+            // Deserialize the tuple using the proper TupleUtils method
+            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+
+            // Extract the centroid from the deserialized fields
+            double[] doubleCentroid = (double[]) fieldValues[1];
+
+            return doubleCentroid;
+
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
         }
     }
 }

@@ -584,7 +584,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             successfulExtractions++;
 
                             // Find closest centroid using the extracted embedding
-//                            ClusterSearchResult result = findClosestCentroid(embedding);
+                            //                            ClusterSearchResult result = findClosestCentroid(embedding);
                             ClusterSearchResult result = null;
                             if (result != null) {
                                 successfulQueries++;

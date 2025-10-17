@@ -39,7 +39,6 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
-import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -141,8 +140,9 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         /*  use static structure to find the closest leaf centroid for the given tuple
             return the leaf centroid ID and the distance
         */
-        VectorClusteringTree.VectorClusteringTreeAccessor accessor = (VectorClusteringTree.VectorClusteringTreeAccessor)
-                vcTreeIndex.createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        VectorClusteringTree.VectorClusteringTreeAccessor accessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) vcTreeIndex
+                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
         double[] vectorEmbedding = extractVector(tuple);
         return accessor.findClosestLeafCentroid(vectorEmbedding); // Placeholder
@@ -208,7 +208,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         // Move to next leaf cluster
         currentLeafClusterIndex++;
 
-        if (currentLeafClusterIndex == directoryPages.size()){
+        if (currentLeafClusterIndex == directoryPages.size()) {
             // Finished all leaf clusters
             LOGGER.debug("Finished loading all leaf clusters");
             return;
@@ -271,7 +271,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         // this would be the maximum distance of tuples in the data page
 
         int tupleCount = currentDataFrame.getTupleCount();
-        double maxDistance = ((IVectorClusteringDataFrame)currentDataFrame).getDistanceToCentroid(tupleCount - 1);
+        double maxDistance = ((IVectorClusteringDataFrame) currentDataFrame).getDistanceToCentroid(tupleCount - 1);
 
         try {
             ITupleReference directoryEntry =
@@ -301,7 +301,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
 
         int nextPageId = freePageManager.takePage(metaFrame);
 
-        if(lastPage) {
+        if (lastPage) {
             ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(-1);
         } else {
             ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(nextPageId);

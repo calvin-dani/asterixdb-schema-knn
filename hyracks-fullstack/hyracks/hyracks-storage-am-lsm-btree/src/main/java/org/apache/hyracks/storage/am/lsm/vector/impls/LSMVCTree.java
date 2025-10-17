@@ -42,7 +42,8 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentBulkLoader;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentFactory;import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallback;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
@@ -54,10 +55,13 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTracker;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.freepage.VirtualFreePageManager;
-import org.apache.hyracks.storage.am.lsm.common.impls.*;
+import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
+import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
+import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexAccessor;
@@ -66,7 +70,8 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
-import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;import org.apache.hyracks.util.trace.ITracer;
+import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
+import org.apache.hyracks.util.trace.ITracer;
 
 /**
  * LSM Vector Clustering Tree implementation for hierarchical vector clustering with LSM storage.
@@ -136,16 +141,17 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         // Get the current mutable component to build the static structure
         AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
         LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
-        LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
+        LoadOperation loadOp =
+                new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
         ILSMDiskComponent ssComponent = createStaticStructure(bulkLoadComponentFactory,
-                ((LSMVCTreeComponentFileReferences)componentFileRefs).getStaticStructureFileReference(), null,
-                null, true);
+                ((LSMVCTreeComponentFileReferences) componentFileRefs).getStaticStructureFileReference(), null, null,
+                true);
         loadOp.setNewComponent(ssComponent);
         ioOpCallback.scheduled(loadOp);
         opCtx.setIoOperation(loadOp);
 
         // Create the VCTreeStaticStructureBuilder with a NoOp page write callback for now
-        return new LSMVCTreeStaticStructureBuilder(storageConfig,this, opCtx, numLevels, clustersPerLevel,
+        return new LSMVCTreeStaticStructureBuilder(storageConfig, this, opCtx, numLevels, clustersPerLevel,
                 centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
     }
 
@@ -154,18 +160,17 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         staticStructure.setInitialized();
     }
 
-    public void setInitialized(LSMVCTreeDiskComponent diskComponent){
+    public void setInitialized(LSMVCTreeDiskComponent diskComponent) {
         diskComponent.setInitialized();
     }
 
-
-    protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory, FileReference insertFileReference,
-            FileReference deleteIndexFileReference, FileReference bloomFilterFileRef, boolean createComponent)
-            throws HyracksDataException {
+    protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory,
+            FileReference insertFileReference, FileReference deleteIndexFileReference, FileReference bloomFilterFileRef,
+            boolean createComponent) throws HyracksDataException {
         ILSMDiskComponent component = factory.createComponent(this,
                 new LSMComponentFileReferences(insertFileReference, deleteIndexFileReference, bloomFilterFileRef));
         try {
-            ((LSMVCTreeDiskComponent)component).setStaticStructure(true);
+            ((LSMVCTreeDiskComponent) component).setStaticStructure(true);
             component.activate(createComponent);
         } catch (HyracksDataException e) {
             component.returnPages();
@@ -194,19 +199,18 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     }
 
     public LSMVCTreeBulkLoader createBulkLoader(int numLeafCentroids, int firstLeafCentroidId,
-             ISerializerDeserializer[] dataFrameSerdes)
-            throws HyracksDataException {
+            ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
         AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
         LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
-        LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
+        LoadOperation loadOp =
+                new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
         ILSMDiskComponent diskComponent = createDiskComponent(bulkLoadComponentFactory,
-                componentFileRefs.getInsertIndexFileReference(), null,
-                null, true);
+                componentFileRefs.getInsertIndexFileReference(), null, null, true);
         loadOp.setNewComponent(diskComponent);
         ioOpCallback.scheduled(loadOp);
         opCtx.setIoOperation(loadOp);
 
-        return new LSMVCTreeBulkLoader(storageConfig,this, opCtx, numLeafCentroids, firstLeafCentroidId,
+        return new LSMVCTreeBulkLoader(storageConfig, this, opCtx, numLeafCentroids, firstLeafCentroidId,
                 dataFrameSerdes, NoOpPageWriteCallback.INSTANCE);
     }
 
