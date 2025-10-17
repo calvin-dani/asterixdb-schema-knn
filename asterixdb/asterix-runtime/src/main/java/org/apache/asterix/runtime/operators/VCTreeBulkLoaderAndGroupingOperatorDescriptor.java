@@ -19,7 +19,11 @@
 package org.apache.asterix.runtime.operators;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.apache.asterix.om.types.EnumDeserializer;
@@ -30,6 +34,7 @@ import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -37,15 +42,22 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
+import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
-import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
+import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
@@ -83,6 +95,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final UUID materializedDataUUID;
     private final IScalarEvaluatorFactory args;
     private final RecordDescriptor inputRecDesc;
+    private final RecordDescriptor outputRecDesc;
 
     // Navigation components
     private IBufferCache bufferCache;
@@ -95,12 +108,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
     public VCTreeBulkLoaderAndGroupingOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
-            RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID,
-            IScalarEvaluatorFactory args) {
-        super(spec, 1, 0);
+            RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID, 
+            UUID materializedDataUUID, IScalarEvaluatorFactory args) {
+        super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
         this.inputRecDesc = inputRecordDescriptor;
+        this.outputRecDesc = outputRecordDescriptor;
         this.permitUUID = permitUUID;
         this.materializedDataUUID = materializedDataUUID;
         this.args = args;
@@ -273,6 +287,51 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     }
 
     /**
+     * Create transformed tuple with centroidId and distance added to the front.
+     * This follows the AssignOperator pattern for adding computed fields to tuples.
+     * 
+     * @param originalTuple Input tuple with original fields
+     * @param searchResult ClusterSearchResult containing centroidId and distance
+     * @return Transformed tuple with format [centroidId, distance, ...original fields...]
+     * @throws HyracksDataException if tuple creation fails
+     */
+    public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
+            throws HyracksDataException {
+        try {
+            // Create tuple builder for the new tuple
+            // Format: [centroidId, distance, ...original fields...]
+            int totalFields = 2 + originalTuple.getFieldCount(); // 2 new fields + all original fields
+            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(totalFields);
+            ArrayTupleReference tupleRef = new ArrayTupleReference();
+            
+            // Reset the tuple builder (following AssignOperator pattern)
+            tupleBuilder.reset();
+            
+            // Add computed fields using serializers (following AssignOperator pattern)
+            // Add centroidId field
+            tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, searchResult.centroidId);
+            
+            // Add distance field
+            tupleBuilder.addField(DoubleSerializerDeserializer.INSTANCE, searchResult.distance);
+            
+            // Add all original fields by copying them from the original tuple
+            for (int i = 0; i < originalTuple.getFieldCount(); i++) {
+                tupleBuilder.addField(originalTuple, i);
+            }
+            
+            // Reset the tuple reference with the final data
+            tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
+            
+            return tupleRef;
+            
+        } catch (Exception e) {
+            System.err.println("ERROR: Failed to create transformed tuple: " + e.getMessage());
+            e.printStackTrace();
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    /**
      * Extract embedding from input tuple using IScalarEvaluator and KMeansUtils.
      * This method follows the same pattern as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.
      * 
@@ -376,7 +435,36 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     }
 
     /**
-     * Process data using VCTreePartitioner for recursive partitioning.
+     * Process data using VCTreePartitioner for recursive partitioning with real data.
+     * 
+     * @param inputTuples List of input tuples to partition
+     * @param K Number of centroids
+     * @param centroidIdColumn Column index containing centroid ID (0 for first, -1 for last)
+     * @return Map of centroid ID to file reference
+     * @throws HyracksDataException if partitioning fails
+     */
+    public Map<Integer, FileReference> processDataWithPartitioner(List<ITupleReference> inputTuples, int K, int centroidIdColumn) throws HyracksDataException {
+        System.err.println("=== PROCESSING DATA WITH VCTreePartitioner (REAL DATA) ===");
+        System.err.println("Input tuples: " + inputTuples.size());
+        System.err.println("K (centroids): " + K);
+        System.err.println("Centroid ID column: " + centroidIdColumn);
+        
+        if (partitioner == null) {
+            throw new IllegalStateException("VCTreePartitioner not initialized. Call initializePartitioner() first.");
+        }
+        
+        // Use VCTreePartitioner for recursive partitioning with real data
+        partitioner.partitionData(inputTuples, K, centroidIdColumn);
+        Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
+        
+        System.err.println("✅ VCTreePartitioner processing complete");
+        System.err.println("Created " + centroidFiles.size() + " centroid files");
+        
+        return centroidFiles;
+    }
+
+    /**
+     * Process data using VCTreePartitioner for recursive partitioning (legacy method).
      * 
      * @param K Number of centroids
      * @param estimatedDataSize Estimated data size in bytes
@@ -412,6 +500,58 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             System.err.println("=== CLOSING VCTreePartitioner ===");
             partitioner.closeAllFiles();
             System.err.println("✅ VCTreePartitioner closed successfully");
+        }
+    }
+
+    /**
+     * Calculate K (number of centroids) from actual data.
+     * 
+     * @param inputTuples List of input tuples
+     * @param centroidIdColumn Column index containing centroid ID
+     * @return Number of unique centroids found
+     */
+    private int calculateKFromData(List<ITupleReference> inputTuples, int centroidIdColumn) {
+        Set<Integer> uniqueCentroids = new HashSet<>();
+        
+        for (ITupleReference tuple : inputTuples) {
+            try {
+                int actualColumnIndex = (centroidIdColumn == -1) ? tuple.getFieldCount() - 1 : centroidIdColumn;
+                int centroidId = extractCentroidIdFromTuple(tuple, actualColumnIndex);
+                uniqueCentroids.add(centroidId);
+            } catch (Exception e) {
+                System.err.println("WARNING: Failed to extract centroid ID from tuple: " + e.getMessage());
+            }
+        }
+        
+        int K = uniqueCentroids.size();
+        System.err.println("Found " + K + " unique centroids in data");
+        return Math.max(K, 1); // Ensure at least 1 centroid
+    }
+
+    /**
+     * Extract centroid ID from tuple at specified column.
+     * 
+     * @param tuple Input tuple
+     * @param columnIndex Column index containing centroid ID
+     * @return Centroid ID as integer
+     */
+    private int extractCentroidIdFromTuple(ITupleReference tuple, int columnIndex) {
+        try {
+            byte[] fieldData = tuple.getFieldData(columnIndex);
+            int fieldStart = tuple.getFieldStart(columnIndex);
+            int fieldLength = tuple.getFieldLength(columnIndex);
+            
+            // Simple integer extraction (assuming 4-byte integer)
+            if (fieldLength >= 4) {
+                ByteBuffer buffer = ByteBuffer.wrap(fieldData, fieldStart, fieldLength);
+                return buffer.getInt();
+            }
+            
+            // Fallback: use column index as centroid ID
+            return columnIndex;
+        } catch (Exception e) {
+            System.err.println("WARNING: Failed to extract centroid ID from column " + columnIndex + ", using column index");
+            return columnIndex;
         }
     }
 
@@ -477,14 +617,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         RecordDescriptor inputRecDesc = recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0);
-        return new VCTreeBulkLoaderAndGroupingNodePushable(ctx, partition, nPartitions, inputRecDesc, permitUUID,
+        VCTreeBulkLoaderAndGroupingNodePushable pushable = new VCTreeBulkLoaderAndGroupingNodePushable(ctx, partition, nPartitions, inputRecDesc, permitUUID,
                 materializedDataUUID);
+        
+        // Set output record descriptor for the pushable
+        pushable.setOutputRecordDescriptor(outputRecDesc);
+        
+        return pushable;
     }
 
     /**
      * Node pushable implementation for VCTreeBulkLoaderAndGroupingOperatorDescriptor.
      */
-    private class VCTreeBulkLoaderAndGroupingNodePushable extends AbstractUnaryInputSinkOperatorNodePushable {
+    private class VCTreeBulkLoaderAndGroupingNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
         private final IHyracksTaskContext ctx;
         private final int partition;
         private final UUID materializedDataUUID;
@@ -494,12 +639,27 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private MaterializerTaskState materializedData;
         int successfulQueries = 0;
         int totalTuplesProcessed = 0;
+        
+        // Output infrastructure for transformed tuples
+        private FrameTupleAppender outputAppender;
+        private ArrayTupleBuilder outputTupleBuilder;
+        private ArrayTupleReference outputTupleRef;
+        private RecordDescriptor outputRecDesc;
 
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
             this.ctx = ctx;
             this.partition = partition;
             this.materializedDataUUID = materializedDataUUID;
+        }
+
+        /**
+         * Set the output record descriptor for transformed tuples.
+         * 
+         * @param outputRecDesc Record descriptor for output tuples
+         */
+        public void setOutputRecordDescriptor(RecordDescriptor outputRecDesc) {
+            this.outputRecDesc = outputRecDesc;
         }
 
         @Override
@@ -511,10 +671,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         new PartitionedUUID(materializedDataUUID, partition));
                 materializedData.open(ctx);
 
+                // Initialize output infrastructure for transformed tuples
+                initializeOutputInfrastructure();
+
                 // Initialize VCTreePartitioner for recursive partitioning
                 int memoryBudget = 32; // frames - typical value from other operators
                 int frameSize = 32768; // 32KB frame size
                 initializePartitioner(ctx, memoryBudget, frameSize);
+                
+                // Pre-initialize partitioning strategy with known K
+                int knownK = 20; // This should come from configuration or previous operator
+                if (partitioner != null) {
+                    partitioner.preInitializePartitioning(knownK, memoryBudget, frameSize);
+                }
 
                 // Initialize navigation components for static structure access
                 // Get the correct file ID by opening the .static_structure_vctree file
@@ -524,6 +693,30 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 System.err.println("VCTreeBulkLoaderAndGroupingNodePushable opened successfully");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to open VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Initialize output infrastructure for transformed tuples.
+         * 
+         * @throws HyracksDataException if initialization fails
+         */
+        private void initializeOutputInfrastructure() throws HyracksDataException {
+            try {
+                System.err.println("=== INITIALIZING OUTPUT INFRASTRUCTURE ===");
+                
+                // Initialize tuple building components
+                outputTupleBuilder = new ArrayTupleBuilder(outputRecDesc.getFieldCount());
+                outputTupleRef = new ArrayTupleReference();
+                
+                // Initialize frame appender for output
+                outputAppender = new FrameTupleAppender();
+                
+                System.err.println("Output infrastructure initialized successfully");
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to initialize output infrastructure: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
@@ -613,7 +806,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable nextFrame ===");
-            System.err.println("Processing input frame for centroid extraction and partitioning");
+            System.err.println("Processing input frame for centroid extraction and tuple transformation");
 
             try {
                 // Create frame tuple accessor
@@ -621,27 +814,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 fta.reset(buffer);
 
                 int tupleCount = fta.getTupleCount();
-                totalTuplesProcessed +=  tupleCount;
+                totalTuplesProcessed += tupleCount;
                 System.err.println("Processing " + tupleCount + " tuples from input frame");
 
                 if (tupleCount == 0) {
                     System.err.println("No tuples found in input frame");
                     return;
                 }
-
-                // Process data with VCTreePartitioner for recursive partitioning
-                try {
-                    System.err.println("=== APPLYING VCTreePartitioner ===");
-                    int K = 10; // Number of centroids - could be calculated from data
-                    long estimatedDataSize = tupleCount * 1024L; // Rough estimate
-                    
-//                    Map<Integer, FileReference> centroidFiles = processDataWithPartitioner(K, estimatedDataSize);
-                    System.err.println(" VCTreePartitioner processing complete");
-                } catch (Exception e) {
-                    System.err.println("ERROR: VCTreePartitioner processing failed: " + e.getMessage());
-                    e.printStackTrace();
-                }
-
 
                 // Process each tuple in the frame
                 for (int i = 0; i < tupleCount; i++) {
@@ -653,13 +832,22 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         double[] embedding = extractEmbeddingFromTuple(tuple, ctx);
 
                         if (embedding != null && embedding.length > 0) {
-
                             // Find closest centroid using the extracted embedding
                             ClusterSearchResult result = findClosestCentroid(embedding);
                             if (result != null) {
                                 successfulQueries++;
 
-                                        // Need to partitoin here.
+                                // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                ITupleReference transformedTuple = createTransformedTuple(tuple, result);
+                                
+                                // Send transformed tuple to VCTreePartitioner
+                                if (partitioner != null) {
+                                    partitioner.writeStreamingTuple(transformedTuple);
+                                }
+                                
+                                // Output the transformed tuple to downstream operators
+                                outputTransformedTuple(transformedTuple);
+                                
                             } else {
                                 System.err.println("Failed to find closest centroid for query " + (i + 1));
                             }
@@ -680,6 +868,41 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             }
         }
 
+        /**
+         * Output transformed tuple to downstream operators.
+         * 
+         * @param transformedTuple Tuple with [centroidId, distance, ...original fields...]
+         * @throws HyracksDataException if output fails
+         */
+        private void outputTransformedTuple(ITupleReference transformedTuple) throws HyracksDataException {
+            try {
+                if (writer != null && outputAppender != null) {
+                    // Append tuple to output frame
+                    outputAppender.append(transformedTuple);
+                } else {
+                    // If no output writer is set, just log the tuple
+                    System.err.println("DEBUG: Transformed tuple created (no output writer set)");
+                }
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to output transformed tuple: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        @Override
+        public void flush() throws HyracksDataException {
+            try {
+                if (writer != null && outputAppender != null) {
+                    outputAppender.flush(writer);
+                }
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to flush output: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
         @Override
         public void close() throws HyracksDataException {
             System.err.println("Total tuples processed: " + totalTuplesProcessed);
@@ -687,6 +910,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
             System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable CLOSING ===");
             try {
+                // Finalize partitioning after all data is processed
+                if (partitioner != null) {
+                    Map<Integer, FileReference> centroidFiles = partitioner.finalizePartitioning();
+                    System.err.println("Finalized partitioning with " + centroidFiles.size() + " centroid files");
+                }
+                
                 // Close VCTreePartitioner
                 closePartitioner();
                 

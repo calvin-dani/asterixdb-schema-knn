@@ -83,15 +83,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Force output to both System.out and System.err to ensure visibility
         System.out.println(
                 "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
-        System.err.println("==========================================");
-        System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
-        System.err.println("==========================================");
-        System.err.println("Dataset: " + dataset.getDatasetName());
-        System.err.println("Index: " + index.getIndexName());
-        System.err.println("Index type: " + index.getIndexType());
-        System.err.println("Index details: " + index.getIndexDetails());
-        System.err.println("Creating Static Structure Job for K-means + Structure Creation");
-        System.err.println("==========================================");
+
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -174,19 +166,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         RecordDescriptor hierarchicalRecDesc = new RecordDescriptor(hierarchicalSerde, hierarchicalTraits);
 
         System.err.println("=== RECORD DESCRIPTOR COMPARISON ===");
-        System.err.println("Input record descriptor (from dataset): " + recordDesc);
-        System.err.println("Secondary record descriptor (from assign op): " + secondaryRecDesc);
-        System.err.println("Hierarchical record descriptor (to k-means): " + hierarchicalRecDesc);
-        System.err.println("Number of fields in input: " + recordDesc.getFieldCount());
-        System.err.println("Number of fields in secondary: " + secondaryRecDesc.getFieldCount());
-        System.err.println("Number of fields in hierarchical: " + hierarchicalRecDesc.getFieldCount());
 
         // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
-        System.out.println("*** VECTOR INDEX DEBUG: CREATING STATIC STRUCTURE PIPELINE ***");
-        System.err.println("==========================================");
-        System.err.println("*** CREATING STATIC STRUCTURE PIPELINE ***");
-        System.err.println("==========================================");
-        System.err.println("Pipeline: CastAssign → K-means → StaticStructureCreator → Sink");
 
         // 1. K-means operator
         System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
@@ -316,33 +297,68 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID permitUUID = UUID.randomUUID();
         UUID materializedDataUUID = UUID.randomUUID();
 
+        // Create output record descriptor for VCTreeBulkLoaderAndGroupingOperatorDescriptor
+        // Format: [centroidId, distance, ...original fields from secondaryRecDesc...]
+        IDataFormat format = metadataProvider.getDataFormat();
+        ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
+        ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
+        
+        ISerializerDeserializer[] outputRecFields = new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount()];
+        ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount()];
+        
+        // Add centroidId field (int)
+        outputRecFields[0] = serdeProvider.getSerializerDeserializer(AINT32);
+        outputTypeTraits[0] = typeTraitProvider.getTypeTrait(AINT32);
+        
+        // Add distance field (double)
+        outputRecFields[1] = serdeProvider.getSerializerDeserializer(ADOUBLE);
+        outputTypeTraits[1] = typeTraitProvider.getTypeTrait(ADOUBLE);
+        
+        // Copy all original fields from secondaryRecDesc
+        for (int i = 0; i < secondaryRecDesc.getFieldCount(); i++) {
+            outputRecFields[2 + i] = secondaryRecDesc.getFields()[i];
+            outputTypeTraits[2 + i] = secondaryRecDesc.getTypeTraits()[i];
+        }
+        
+        RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
+
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
-                        secondaryRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor);
+                        secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);
 
-        // Connect CastAssign → BulkLoaderAndGrouping (which is a sink operator)
+        // Connect CastAssign → BulkLoaderAndGrouping (which now outputs transformed tuples)
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, bulkLoaderAndGroupingOp, 0);
         System.err.println("Connected: CastAssign → BulkLoaderAndGrouping");
         System.err.println("BulkLoaderAndGrouping operator: " + bulkLoaderAndGroupingOp);
+
+        // Add sink operator to consume the output from BulkLoaderAndGrouping
+        SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
+        sinkRuntimeFactory.setSourceLocation(sourceLoc);
+        AlgebricksMetaOperatorDescriptor sinkOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
+                new IPushRuntimeFactory[] { sinkRuntimeFactory }, new RecordDescriptor[] { outputRecDesc });
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sinkOp, primaryPartitionConstraint);
+        spec.connect(new OneToOneConnectorDescriptor(spec), bulkLoaderAndGroupingOp, 0, sinkOp, 0);
+        System.err.println("Connected: BulkLoaderAndGrouping → Sink");
+        System.err.println("Sink operator: " + sinkOp);
         System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
 
-        // Add single branch as root (BulkLoaderAndGrouping is the sink)
-        spec.addRoot(bulkLoaderAndGroupingOp);
+        // Add sink as root (since BulkLoaderAndGrouping now has outputs)
+        spec.addRoot(sinkOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
         System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
         System.err
-                .println("  Root: " + bulkLoaderAndGroupingOp + " (Data Loading - CastAssign → BulkLoaderAndGrouping)");
+                .println("  Root: " + sinkOp + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sink)");
         System.err.println("=== DATA LOADING JOB CREATED ===");
-        System.err.println("=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping ===");
-        System.err.println("=== DATA LOADING: Initializes bulk loader and groups data into run files ===");
+        System.err.println("=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sink ===");
+        System.err.println("=== DATA LOADING: Initializes bulk loader, groups data, and outputs transformed tuples ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");
@@ -413,28 +429,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             ARecordType enforcedType = enforcedItemType;
             int sourceColumn = recordColumn;
 
-            System.err.println("=== VECTOR FIELD PROCESSING ===");
-            System.err.println("Key field names: " + keyFieldNames);
-            System.err.println("Include field names: " + includeFieldNames);
-            System.err.println("Include field types: " + includeFieldTypes);
-            System.err.println("Source type: " + sourceType);
-            System.err.println("Record column: " + sourceColumn);
-            System.err.println("Number of secondary keys: " + numSecondaryKeys);
-
             List<String> vectorFieldName = keyFieldNames.get(0);
             IAType vectorFieldType = new AOrderedListType(ADOUBLE, "embedding"); // Default vector type
-
-            System.err.println("Vector field name: " + vectorFieldName);
-            System.err.println("Vector field type: " + vectorFieldType);
 
             Pair<IAType, Boolean> keyTypePair =
                     Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldName, sourceType);
             IAType keyType = keyTypePair.first;
-            System.err.println("Resolved key type: " + keyType);
 
             IScalarEvaluatorFactory vectorFieldAccessor =
                     createFieldAccessor(sourceType, sourceColumn, vectorFieldName);
-            System.err.println("Created vector field accessor: " + vectorFieldAccessor);
 
             secondaryFieldAccessEvalFactories[0] =
                     createFieldCast(vectorFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
@@ -444,11 +447,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             secondaryTypeTraits[0] = typeTraitProvider.getTypeTrait(keyType);
             secondaryBloomFilterKeyFields[0] = 0;
 
-            System.err.println("Vector field configured as secondary key 0");
-            System.err.println("=== END VECTOR FIELD PROCESSING ===");
-        } else {
-            System.err.println("=== NO VECTOR FIELD FOUND ===");
-            System.err.println("Key field names: " + keyFieldNames);
+
         }
 
         // Process include fields (if any)
