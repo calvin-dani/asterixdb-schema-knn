@@ -1325,6 +1325,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             isStaticStructureInitialized = true;
         }
 
+        public void setRootPageId() {
+            rootPage = 0;
+        }
 
     /**
          * Unified cluster search result that includes metadata page access.

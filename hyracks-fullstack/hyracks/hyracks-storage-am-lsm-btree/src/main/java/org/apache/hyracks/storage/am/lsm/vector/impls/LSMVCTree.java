@@ -90,10 +90,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     protected final int vectorDimensions;
     protected final boolean needKeyDupCheck;
 
-    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
-        this.staticStructure = staticStructure;
-    }
-
     protected LSMVCTreeDiskComponent staticStructure;
 
     public LSMVCTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
@@ -151,6 +147,11 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         // Create the VCTreeStaticStructureBuilder with a NoOp page write callback for now
         return new LSMVCTreeStaticStructureBuilder(storageConfig,this, opCtx, numLevels, clustersPerLevel,
                 centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
+    }
+
+    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
+        this.staticStructure = staticStructure;
+        staticStructure.setInitialized();
     }
 
     protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory, FileReference insertFileReference,

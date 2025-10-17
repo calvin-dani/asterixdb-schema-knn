@@ -56,6 +56,6 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
     public VectorClusteringTree createIndexInstance(FileReference file) {
         return new VectorClusteringTree(bufferCache, freePageManagerFactory.createPageManager(bufferCache),
                 interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory, cmpFactories,
-                vectorDimensions, 0, file);
+                vectorDimensions, vectorDimensions, file);
     }
 }

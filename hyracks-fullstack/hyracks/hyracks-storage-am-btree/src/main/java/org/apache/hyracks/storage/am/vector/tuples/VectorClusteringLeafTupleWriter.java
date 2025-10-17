@@ -41,19 +41,19 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
     }
 
 
-    @Override
-    public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
-        int totalBytes = 0;
-
-        for (int i = startField; i < startField + numFields; i++) {
-            totalBytes += tuple.getFieldLength(i);
-        }
-
-        // Add field offset array overhead
-        totalBytes += (numFields + 1) * 4;
-
-        return totalBytes;
-    }
+//    @Override
+//    public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
+//        int totalBytes = 0;
+//
+//        for (int i = startField; i < startField + numFields; i++) {
+//            totalBytes += tuple.getFieldLength(i);
+//        }
+//
+//        // Add field offset array overhead
+//        totalBytes += (numFields + 1) * 4;
+//
+//        return totalBytes;
+//    }
 
     /**
      * Get the cluster ID from the tuple

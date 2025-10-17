@@ -265,12 +265,15 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             // Leaf level
             currentFrame = leafFrame;
             leafFrame.setPage(currentPage);
-            leafFrame.initBuffer((byte) currentLevel);
+            /* TODO : verify leaf level should be more elegant */
+            leafFrame.initBuffer((byte) 0);
+            leafFrame.setLevel((byte) 0);
         } else {
             // Interior/root level
             currentFrame = interiorFrame;
             interiorFrame.setPage(currentPage);
-            interiorFrame.initBuffer((byte) currentLevel);
+            interiorFrame.initBuffer((byte) 0);
+            interiorFrame.setLevel((byte) 1);
         }
 
         entriesInCurrentPage = 0;
