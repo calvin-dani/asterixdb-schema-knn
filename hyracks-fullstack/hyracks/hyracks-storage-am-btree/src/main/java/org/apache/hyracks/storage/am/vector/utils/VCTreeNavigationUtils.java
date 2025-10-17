@@ -188,7 +188,7 @@ public class VCTreeNavigationUtils {
         if (bestClusterIndex >= 0) {
             return ClusterSearchResult.create(pageId, bestClusterIndex, bestCentroid, bestDistance, bestCentroidId);
         }
-
+        // TODO : SOME RETURN EMPTY
         return null;
     }
 

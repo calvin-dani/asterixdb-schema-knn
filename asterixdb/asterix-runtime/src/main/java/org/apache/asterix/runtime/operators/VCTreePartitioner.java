@@ -47,7 +47,9 @@ public class VCTreePartitioner {
 
     // SHAPIRO formula constants
     private static final double FUDGE_FACTOR = 1.1;
-    private static final double NLJ_SWITCH_THRESHOLD = 0.8;
+    
+    // Partitioning strategy
+    private final boolean useRangePartitioning = true; // Default to range partitioning
 
     public VCTreePartitioner(IHyracksTaskContext ctx, int memoryBudget, int frameSize) {
         this.ctx = ctx;
@@ -62,12 +64,13 @@ public class VCTreePartitioner {
      */
     public void partitionData(int K, long estimatedDataSize) throws HyracksDataException {
         System.err.println("=== VCTreePartitioner: Starting partitioning for K=" + K + " centroids ===");
+        System.err.println("Using range partitioning strategy: " + useRangePartitioning);
 
         // Step 1: Calculate initial partitions using SHAPIRO
         int numPartitions = calculatePartitionsUsingShapiro(K, estimatedDataSize, frameSize, memoryBudget);
         System.err.println("Initial partitions calculated: " + numPartitions);
 
-        // Step 2: Distribute centroids to partitions
+        // Step 2: Distribute centroids to partitions using range partitioning
         distributeCentroidsToPartitions(K, numPartitions);
 
         // Step 3: Create initial partition files
@@ -114,12 +117,8 @@ public class VCTreePartitioner {
                     memoryBudget);
             System.err.println("Creating " + subPartitions + " sub-partitions for " + centroids.size() + " centroids");
 
-            // Distribute centroids to sub-partitions
-            Map<Integer, List<Integer>> subPartitionToCentroids = new HashMap<>();
-            for (int centroidId : centroids) {
-                int subPartition = centroidId % subPartitions;
-                subPartitionToCentroids.computeIfAbsent(subPartition, k -> new ArrayList<>()).add(centroidId);
-            }
+            // Distribute centroids to sub-partitions using range partitioning
+            Map<Integer, List<Integer>> subPartitionToCentroids = createRangePartitioning(centroids, subPartitions);
 
             // Create sub-partition files
             for (Map.Entry<Integer, List<Integer>> entry : subPartitionToCentroids.entrySet()) {
@@ -263,16 +262,23 @@ public class VCTreePartitioner {
     */
 
     /**
-     * Distribute centroids to partitions.
+     * Distribute centroids to partitions using range partitioning.
      */
     private void distributeCentroidsToPartitions(int K, int numPartitions) {
+        System.err.println("=== DISTRIBUTING CENTROIDS USING RANGE PARTITIONING ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Number of partitions: " + numPartitions);
+        
+        int centroidsPerPartition = calculateCentroidsPerPartition(K, numPartitions);
+        System.err.println("Centroids per partition: " + centroidsPerPartition);
+
         for (int centroidId = 0; centroidId < K; centroidId++) {
-            int partition = centroidId % numPartitions;
+            int partition = centroidId / centroidsPerPartition;
             partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(centroidId);
             centroidToPartition.put(centroidId, partition);
         }
 
-        System.err.println("Centroid distribution:");
+        System.err.println("Range partitioning distribution:");
         for (Map.Entry<Integer, List<Integer>> entry : partitionToCentroids.entrySet()) {
             System.err.println("  Partition " + entry.getKey() + ": " + entry.getValue());
         }
@@ -394,6 +400,79 @@ public class VCTreePartitioner {
         return embedding;
     }
     */
+
+    /**
+     * Calculate centroids per partition for range partitioning.
+     */
+    private int calculateCentroidsPerPartition(int K, int numPartitions) {
+        return (int) Math.ceil((double) K / numPartitions);
+    }
+
+    /**
+     * Create range partitioning for a list of centroids.
+     * 
+     * @param centroids List of centroid IDs to partition
+     * @param numPartitions Number of partitions to create
+     * @return Map of partition ID to list of centroid IDs
+     */
+    private Map<Integer, List<Integer>> createRangePartitioning(List<Integer> centroids, int numPartitions) {
+        System.err.println("=== CREATING RANGE PARTITIONING ===");
+        System.err.println("Centroids to partition: " + centroids.size());
+        System.err.println("Number of partitions: " + numPartitions);
+
+        int centroidsPerPartition = calculateCentroidsPerPartition(centroids.size(), numPartitions);
+        Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
+
+        for (int i = 0; i < centroids.size(); i++) {
+            int partition = i / centroidsPerPartition;
+            int originalCentroidId = centroids.get(i); // Keep original ID
+            partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(originalCentroidId);
+        }
+
+        System.err.println("Range partitioning complete:");
+        for (Map.Entry<Integer, List<Integer>> entry : partitionToCentroids.entrySet()) {
+            System.err.println("  Partition " + entry.getKey() + ": " + entry.getValue().size() + " centroids");
+        }
+
+        return partitionToCentroids;
+    }
+
+    /**
+     * Create grouping strategy using range partitioning.
+     * 
+     * @param K Number of centroids
+     * @param numPartitions Number of partitions
+     * @param memoryBudget Available memory budget in frames
+     * @return Map of partition ID to list of centroid IDs
+     */
+    public Map<Integer, List<Integer>> createGroupingStrategy(int K, int numPartitions, int memoryBudget) {
+        System.err.println("=== CREATING GROUPING STRATEGY (RANGE PARTITIONING) ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Number of partitions: " + numPartitions);
+        System.err.println("Memory budget: " + memoryBudget + " frames");
+
+        int centroidsPerPartition = calculateCentroidsPerPartition(K, numPartitions);
+        int numRunFiles = Math.min(numPartitions, memoryBudget);
+
+        System.err.println("Centroids per partition: " + centroidsPerPartition);
+        System.err.println("Number of run files: " + numRunFiles);
+
+        // Create range partition assignment for centroids
+        Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
+        for (int i = 0; i < K; i++) {
+            int partition = i / centroidsPerPartition;
+            partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(i);
+        }
+
+        // Determine strategy based on centroids per partition
+        if (centroidsPerPartition > 1) {
+            System.err.println("Strategy: Group multiple centroids in one run file (range partitioning)");
+        } else {
+            System.err.println("Strategy: Allocate 1 frame per centroid (range partitioning)");
+        }
+
+        return partitionToCentroids;
+    }
 
     /**
      * Calculate partitions using SHAPIRO formula.

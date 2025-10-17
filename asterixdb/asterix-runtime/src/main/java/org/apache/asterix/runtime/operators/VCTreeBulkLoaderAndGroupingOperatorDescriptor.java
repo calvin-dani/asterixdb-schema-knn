@@ -19,6 +19,7 @@
 package org.apache.asterix.runtime.operators;
 
 import java.nio.ByteBuffer;
+import java.util.Map;
 import java.util.UUID;
 
 import org.apache.asterix.om.types.EnumDeserializer;
@@ -55,6 +56,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkL
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
@@ -74,7 +76,7 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
-    private static final int VECTOR_DIMENSION = 256;
+    private static final int VECTOR_DIMENSION = 784;
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final float fillFactor; // TODO: Use fillFactor in future bulk loading operations
     private final UUID permitUUID;
@@ -87,6 +89,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private int staticStructureFileId;
     private ITreeIndexFrameFactory interiorFrameFactory;
     private ITreeIndexFrameFactory leafFrameFactory;
+    
+    // Partitioning components
+    private VCTreePartitioner partitioner;
 
     public VCTreeBulkLoaderAndGroupingOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
@@ -234,8 +239,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 // Continue processing but log the mismatch
             }
 
-            System.err.println("Query vector dimension: " + queryVector.length);
-            System.err.println("Static structure file ID: " + staticStructureFileId);
 
             // Validate navigation components are initialized
             if (bufferCache == null) {
@@ -245,22 +248,17 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             if (interiorFrameFactory == null || leafFrameFactory == null) {
                 throw new IllegalStateException("Frame factories not initialized");
             }
+            VCTreeStaticStructureNavigator navigator = new VCTreeStaticStructureNavigator(bufferCache,
+                    staticStructureFileId, interiorFrameFactory, leafFrameFactory);
 
             // Use VCTreeNavigationUtils to find closest centroid
             ClusterSearchResult result =
-                    VCTreeNavigationUtils.findClosestCentroid(bufferCache, staticStructureFileId, 0, // rootPageId = 0 for static structures
-                            interiorFrameFactory, leafFrameFactory, queryVector);
+                    navigator.findClosestCentroid(queryVector);
 
             if (result == null) {
                 System.err.println("WARNING: No closest centroid found for query vector");
                 return null;
             }
-
-            System.err.println("✅ Closest centroid found successfully");
-            System.err.println("  Leaf page ID: " + result.leafPageId);
-            System.err.println("  Cluster index: " + result.clusterIndex);
-            System.err.println("  Distance: " + result.distance);
-            System.err.println("  Centroid ID: " + result.centroidId);
 
             return result;
 
@@ -362,6 +360,62 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     }
 
     /**
+     * Initialize VCTreePartitioner for recursive partitioning.
+     * 
+     * @param ctx Hyracks task context for file operations
+     * @param memoryBudget Available memory budget in frames
+     * @param frameSize Frame size in bytes
+     */
+    public void initializePartitioner(IHyracksTaskContext ctx, int memoryBudget, int frameSize) {
+        System.err.println("=== INITIALIZING VCTreePartitioner ===");
+        System.err.println("Memory budget: " + memoryBudget + " frames");
+        System.err.println("Frame size: " + frameSize + " bytes");
+        
+        this.partitioner = new VCTreePartitioner(ctx, memoryBudget, frameSize);
+        System.err.println(" VCTreePartitioner initialized successfully");
+    }
+
+    /**
+     * Process data using VCTreePartitioner for recursive partitioning.
+     * 
+     * @param K Number of centroids
+     * @param estimatedDataSize Estimated data size in bytes
+     * @return Map of centroid ID to file reference
+     * @throws HyracksDataException if partitioning fails
+     */
+    public Map<Integer, FileReference> processDataWithPartitioner(int K, long estimatedDataSize) throws HyracksDataException {
+        System.err.println("=== PROCESSING DATA WITH VCTreePartitioner ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Estimated data size: " + estimatedDataSize + " bytes");
+        
+        if (partitioner == null) {
+            throw new IllegalStateException("VCTreePartitioner not initialized. Call initializePartitioner() first.");
+        }
+        
+        // Use VCTreePartitioner for recursive partitioning
+        partitioner.partitionData(K, estimatedDataSize);
+        Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
+        
+        System.err.println("VCTreePartitioner processing complete");
+        System.err.println("Created " + centroidFiles.size() + " centroid files");
+        
+        return centroidFiles;
+    }
+
+    /**
+     * Close VCTreePartitioner and cleanup resources.
+     * 
+     * @throws HyracksDataException if cleanup fails
+     */
+    public void closePartitioner() throws HyracksDataException {
+        if (partitioner != null) {
+            System.err.println("=== CLOSING VCTreePartitioner ===");
+            partitioner.closeAllFiles();
+            System.err.println("✅ VCTreePartitioner closed successfully");
+        }
+    }
+
+    /**
      * Calculate number of partitions using SHAPIRO formula for VCTree centroid distribution.
      * 
      * @param K Total number of centroids
@@ -438,6 +492,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private IIndexDataflowHelper indexHelper;
         private ILSMIndex lsmIndex; // TODO: Use lsmIndex in future bulk loading operations
         private MaterializerTaskState materializedData;
+        int successfulQueries = 0;
+        int totalTuplesProcessed = 0;
 
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
@@ -455,12 +511,17 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         new PartitionedUUID(materializedDataUUID, partition));
                 materializedData.open(ctx);
 
+                // Initialize VCTreePartitioner for recursive partitioning
+                int memoryBudget = 32; // frames - typical value from other operators
+                int frameSize = 32768; // 32KB frame size
+                initializePartitioner(ctx, memoryBudget, frameSize);
+
                 // Initialize navigation components for static structure access
                 // Get the correct file ID by opening the .static_structure_vctree file
                 int staticStructureFileId = openStaticStructureFile(ctx);
                 initializeNavigationComponents(ctx, staticStructureFileId);
 
-                System.err.println("✅ VCTreeBulkLoaderAndGroupingNodePushable opened successfully");
+                System.err.println("VCTreeBulkLoaderAndGroupingNodePushable opened successfully");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to open VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
                 e.printStackTrace();
@@ -552,7 +613,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable nextFrame ===");
-            System.err.println("Processing input frame for centroid extraction and query processing");
+            System.err.println("Processing input frame for centroid extraction and partitioning");
 
             try {
                 // Create frame tuple accessor
@@ -560,6 +621,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 fta.reset(buffer);
 
                 int tupleCount = fta.getTupleCount();
+                totalTuplesProcessed +=  tupleCount;
                 System.err.println("Processing " + tupleCount + " tuples from input frame");
 
                 if (tupleCount == 0) {
@@ -567,9 +629,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     return;
                 }
 
-                int successfulExtractions = 0;
-                int successfulQueries = 0;
-                final int MAX_DETAILED_LOGS = 5; // Log detailed info for first 5 records
+                // Process data with VCTreePartitioner for recursive partitioning
+                try {
+                    System.err.println("=== APPLYING VCTreePartitioner ===");
+                    int K = 10; // Number of centroids - could be calculated from data
+                    long estimatedDataSize = tupleCount * 1024L; // Rough estimate
+                    
+//                    Map<Integer, FileReference> centroidFiles = processDataWithPartitioner(K, estimatedDataSize);
+                    System.err.println(" VCTreePartitioner processing complete");
+                } catch (Exception e) {
+                    System.err.println("ERROR: VCTreePartitioner processing failed: " + e.getMessage());
+                    e.printStackTrace();
+                }
+
 
                 // Process each tuple in the frame
                 for (int i = 0; i < tupleCount; i++) {
@@ -581,56 +653,18 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         double[] embedding = extractEmbeddingFromTuple(tuple, ctx);
 
                         if (embedding != null && embedding.length > 0) {
-                            successfulExtractions++;
 
                             // Find closest centroid using the extracted embedding
-                            //                            ClusterSearchResult result = findClosestCentroid(embedding);
-                            ClusterSearchResult result = null;
+                            ClusterSearchResult result = findClosestCentroid(embedding);
                             if (result != null) {
                                 successfulQueries++;
 
-                                // Detailed logging for first few records
-                                if (successfulQueries <= MAX_DETAILED_LOGS) {
-                                    System.err.println("=== DETAILED QUERY RESULT " + successfulQueries + " ===");
-                                    System.err.println("📊 Query Vector Details:");
-                                    System.err.println("  - Vector dimension: " + embedding.length);
-                                    System.err.println("  - First 5 values: [" + String.format("%.4f", embedding[0])
-                                            + ", " + String.format("%.4f", embedding[1]) + ", "
-                                            + String.format("%.4f", embedding[2]) + ", "
-                                            + String.format("%.4f", embedding[3]) + ", "
-                                            + String.format("%.4f", embedding[4]) + "...]");
-
-                                    System.err.println("🎯 Closest Centroid Details:");
-                                    System.err.println("  - Centroid ID: " + result.centroidId);
-                                    System.err.println("  - Distance: " + String.format("%.6f", result.distance));
-                                    System.err.println("  - Leaf page ID: " + result.leafPageId);
-                                    System.err.println("  - Cluster index: " + result.clusterIndex);
-
-                                    if (result.centroid != null) {
-                                        System.err.println("  - Centroid first 5 values: ["
-                                                + String.format("%.4f", result.centroid[0]) + ", "
-                                                + String.format("%.4f", result.centroid[1]) + ", "
-                                                + String.format("%.4f", result.centroid[2]) + ", "
-                                                + String.format("%.4f", result.centroid[3]) + ", "
-                                                + String.format("%.4f", result.centroid[4]) + "...]");
-                                    }
-                                    System.err.println("=== END DETAILED RESULT " + successfulQueries + " ===");
-                                } else if (successfulQueries == MAX_DETAILED_LOGS + 1) {
-                                    System.err.println("📝 Detailed logging completed for first " + MAX_DETAILED_LOGS
-                                            + " records. Continuing with summary logging...");
-                                }
-
-                                // Summary logging for all records
-                                if (successfulQueries % 10 == 0 || successfulQueries <= MAX_DETAILED_LOGS) {
-                                    System.err.println("✅ Query " + successfulQueries + " completed - Centroid ID: "
-                                            + result.centroidId + ", Distance: "
-                                            + String.format("%.6f", result.distance));
-                                }
+                                        // Need to partitoin here.
                             } else {
-                                System.err.println("❌ Failed to find closest centroid for query " + (i + 1));
+                                System.err.println("Failed to find closest centroid for query " + (i + 1));
                             }
                         } else {
-                            System.err.println("⚠️ Skipping tuple " + (i + 1) + " - no valid embedding extracted");
+                            System.err.println("Skipping tuple " + (i + 1) + " - no valid embedding extracted");
                         }
 
                     } catch (Exception e) {
@@ -638,13 +672,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         e.printStackTrace();
                     }
                 }
-
-                System.err.println("=== FRAME PROCESSING COMPLETE ===");
-                System.err.println("Total tuples processed: " + tupleCount);
-                System.err.println("Successful extractions: " + successfulExtractions);
-                System.err.println("Successful queries: " + successfulQueries);
-                System.err.println(
-                        "Success rate: " + String.format("%.1f", (double) successfulQueries / tupleCount * 100) + "%");
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to process input frame: " + e.getMessage());
@@ -655,8 +682,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         @Override
         public void close() throws HyracksDataException {
+            System.err.println("Total tuples processed: " + totalTuplesProcessed);
+            System.err.println("Successful extractions: " + successfulQueries);
+
             System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable CLOSING ===");
             try {
+                // Close VCTreePartitioner
+                closePartitioner();
+                
                 if (lsmBulkLoader != null) {
                     lsmBulkLoader.end();
                 }
@@ -678,6 +711,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         public void fail() throws HyracksDataException {
             System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable FAILING ===");
             try {
+                // Close VCTreePartitioner
+                closePartitioner();
+                
                 if (lsmBulkLoader != null) {
                     lsmBulkLoader.abort();
                 }

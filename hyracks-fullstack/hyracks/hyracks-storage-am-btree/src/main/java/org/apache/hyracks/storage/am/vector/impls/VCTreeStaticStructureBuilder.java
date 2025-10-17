@@ -359,6 +359,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
+        finishCurrentPage();
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),

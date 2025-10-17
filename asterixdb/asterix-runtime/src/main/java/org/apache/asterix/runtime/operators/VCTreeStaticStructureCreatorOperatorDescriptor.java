@@ -251,42 +251,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         return partitionToCentroids;
     }
 
-    /**
-     * Main processing flow: dummy data -> partitioning.
-     * 
-     * @param ctx Hyracks task context for file operations
-     * @return Map of centroid ID to file reference
-     */
-    public Map<Integer, FileReference> processVCTreePartitioning(IHyracksTaskContext ctx) throws HyracksDataException {
-        System.err.println("=== VCTreePartitioning: Starting main processing flow ===");
-
-        try {
-            // Step 1: Generate dummy data
-            System.err.println("Step 1: Generating dummy data (K=10)");
-            getDummyValues();
-
-            // Step 2: Recursive partitioning
-            System.err.println("Step 2: Starting recursive partitioning");
-            VCTreePartitioner partitioner = new VCTreePartitioner(ctx, 32, 32768);
-            // partitioner.partitionData(dummyData, 10); // K=10 - FIXED: partitionData expects (int K, long estimatedDataSize)
-            partitioner.partitionData(10, 1000); // K=10, estimatedDataSize=1000
-            Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
-
-            System.err.println("Partitioning complete. Created " + centroidFiles.size() + " centroid files");
-
-            // Step 3: Cleanup
-            partitioner.closeAllFiles();
-
-            System.err.println("=== VCTreePartitioning: Processing complete ===");
-
-            return centroidFiles;
-
-        } catch (Exception e) {
-            System.err.println("ERROR: VCTreePartitioning failed: " + e.getMessage());
-            e.printStackTrace();
-            throw HyracksDataException.create(e);
-        }
-    }
 
     /**
      * Apply recursive partitioning logic with hardcoded memory budget and create run files.
@@ -788,26 +752,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 public void open() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity OPENING ===");
                     try {
-                        // Register permit state for coordination
-                        //                        IterationPermitState permitState =
-                        //                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-                        //
-                        //                        if (permitState == null) {
-                        //                            java.util.concurrent.Semaphore permit = new java.util.concurrent.Semaphore(0);
-                        //                            permitState = new IterationPermitState(ctx.getJobletContext().getJobId(),
-                        //                                    new PartitionedUUID(permitUUID, partition), permit);
-                        //                            ctx.setStateObject(permitState);
-                        //                            System.err.println("✅ PERMIT STATE CREATED AND REGISTERED for UUID: " + permitUUID
-                        //                                    + ", partition: " + partition);
-                        //                        }
-
-                        // Initialize materialized data state
-                        //                        materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
-                        //                                new PartitionedUUID(materializedDataUUID, partition));
-                        //                        materializedData.open(ctx);
-
-                        // Initialize evaluators for extracting tuple fields from 4-field hierarchical format
-                        // Format: [treeLevel, centroidId, parentClusterId, embedding]
                         EvaluatorContext evalCtx = new EvaluatorContext(ctx);
                         levelEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx); // treeLevel
                         centroidIdEval = new ColumnAccessEvalFactory(1).createScalarEvaluator(evalCtx); // centroidId
@@ -959,16 +903,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("Total tuples collected: " + tupleCount);
                     System.err.println("Frames accumulated: " + frameAccumulator.size());
 
-                    // Test partitioning with dummy data
-                    try {
-                        System.err.println("=== TESTING PARTITIONING ===");
-                        Map<Integer, FileReference> centroidFiles = processVCTreePartitioning(ctx);
-                        System.err.println("=== PARTITIONING COMPLETE ===");
-                        System.err.println("Created " + centroidFiles.size() + " centroid files");
-                    } catch (Exception e) {
-                        System.err.println("ERROR: Partitioning failed: " + e.getMessage());
-                        e.printStackTrace();
-                    }
+                    // Note: Partitioning is now handled by VCTreeBulkLoaderAndGroupingOperatorDescriptor
+                    System.err.println("=== PARTITIONING HANDLED BY BULK LOADER OPERATOR ===");
 
                     // Process all accumulated tuples and create static structure
                     System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
@@ -1210,8 +1146,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                 structureCreator.add(convertedTuple);
                                 totalTuplesProcessed++;
 
-                                // Only show first few tuples to avoid spam
-
                             }
 
                             // Only process first frame to avoid spam
@@ -1223,7 +1157,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("Finalizing static structure...");
                         // Finalize the structure
                         structureCreator.end();
-                        System.err.println("✅ STATIC STRUCTURE FINALIZED SUCCESSFULLY");
+                        System.err.println("STATIC STRUCTURE FINALIZED SUCCESSFULLY");
 
                         // Create navigator for static structure access
                         System.err.println("Creating VCTreeStaticStructureNavigator...");
@@ -1239,7 +1173,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                         try {
                             ClusterSearchResult result = navigator.findClosestCentroid(testVector);
-                            System.err.println("✅ NAVIGATOR TEST SUCCESSFUL");
+                            System.err.println("NAVIGATOR TEST SUCCESSFUL");
                             System.err.println("   Closest cluster: pageId=" + result.leafPageId + ", clusterIndex="
                                     + result.clusterIndex + ", distance=" + result.distance);
                         } catch (Exception e) {
@@ -1250,7 +1184,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("Forcing static structure data to disk...");
                         try {
                             bufferCache.force(fileId, true);
-                            System.err.println("✅ STATIC STRUCTURE DATA FORCED TO DISK SUCCESSFULLY");
+                            System.err.println(" STATIC STRUCTURE DATA FORCED TO DISK SUCCESSFULLY");
                         } catch (Exception e) {
                             System.err.println("WARNING: Failed to force data to disk: " + e.getMessage());
                         }
@@ -1259,13 +1193,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("Closing static structure file...");
                         try {
                             bufferCache.closeFile(fileId);
-                            System.err.println("✅ STATIC STRUCTURE FILE CLOSED SUCCESSFULLY");
+                            System.err.println(" STATIC STRUCTURE FILE CLOSED SUCCESSFULLY");
                         } catch (Exception e) {
                             System.err.println("WARNING: Failed to close static structure file: " + e.getMessage());
                         }
 
                         System.err.println(
-                                "✅ STATIC STRUCTURE CREATED SUCCESSFULLY at: " + staticStructureFile.getAbsolutePath());
+                                " STATIC STRUCTURE CREATED SUCCESSFULLY at: " + staticStructureFile.getAbsolutePath());
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to create static structure: " + e.getMessage());
