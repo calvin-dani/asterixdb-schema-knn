@@ -29,13 +29,17 @@ import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Random;
 import java.util.UUID;
 
 import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AOrderedListSerializerDeserializer;
 import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -45,17 +49,23 @@ import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
+import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.ActivityId;
 import org.apache.hyracks.api.dataflow.IActivityGraphBuilder;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
+import org.apache.hyracks.data.std.primitive.FloatPointable;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
@@ -64,6 +74,7 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
+import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
 import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
@@ -221,50 +232,223 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     }
 
     /**
-     * Data structure to hold hierarchical clustering results for VCTreeStaticStructureCreator.
+     * Result class for K-means++ clustering operations.
+     */
+    private static class ClusteringResult {
+        public final List<double[]> centroids;
+        public final int[] assignments;
+        
+        public ClusteringResult(List<double[]> centroids, int[] assignments) {
+            this.centroids = centroids;
+            this.assignments = assignments;
+        }
+    }
+
+    /**
+     * Data structure to hold hierarchical clustering results with parent-child relationships.
      */
     private static class HierarchicalClusterStructure {
-        private final List<List<List<double[]>>> levelClusters; // level -> cluster -> centroids
-        private final List<List<Integer>> clustersPerLevel;
-        private final List<List<List<Integer>>> centroidsPerCluster;
+        // Store centroids for each level (separate parent and child levels)
+        private final Map<Integer, List<CentroidInfo>> levelCentroids;
+        
+        // Track parent-child relationships
+        private final Map<Integer, Map<Integer, List<Integer>>> parentChildRelations;
 
         public HierarchicalClusterStructure() {
-            this.levelClusters = new ArrayList<>();
-            this.clustersPerLevel = new ArrayList<>();
-            this.centroidsPerCluster = new ArrayList<>();
+            this.levelCentroids = new HashMap<>();
+            this.parentChildRelations = new HashMap<>();
         }
-
-        public void addLevel(List<List<double[]>> levelClusters) {
-            this.levelClusters.add(levelClusters);
-
-            List<Integer> levelClusterCounts = new ArrayList<>();
-            List<List<Integer>> levelCentroidCounts = new ArrayList<>();
-
-            for (List<double[]> cluster : levelClusters) {
-                levelClusterCounts.add(1); // Each cluster has 1 centroid
-                List<Integer> centroidCounts = new ArrayList<>();
-                centroidCounts.add(cluster.size()); // Number of centroids in this cluster
-                levelCentroidCounts.add(centroidCounts);
+        
+        public static class CentroidInfo {
+            public final int centroidId;
+            public final int parentClusterId;
+            public final double[] embedding;
+            public final int level;
+            public final List<Integer> childrenIds;
+            
+            public CentroidInfo(int centroidId, int parentClusterId, double[] embedding, int level) {
+                this.centroidId = centroidId;
+                this.parentClusterId = parentClusterId;
+                this.embedding = embedding;
+                this.level = level;
+                this.childrenIds = new ArrayList<>();
             }
-
-            this.clustersPerLevel.add(levelClusterCounts);
-            this.centroidsPerCluster.add(levelCentroidCounts);
         }
-
-        public List<List<List<double[]>>> getLevelClusters() {
-            return levelClusters;
+        
+        /**
+         * Initialize a level with empty centroids (for parents)
+         */
+        public void initializeParentLevel(int level, int parentCount) {
+            List<CentroidInfo> parentLevel = new ArrayList<>();
+            Map<Integer, List<Integer>> parentChildMap = new HashMap<>();
+            
+            // Initialize empty parent centroids
+            for (int i = 0; i < parentCount; i++) {
+                parentLevel.add(new CentroidInfo(i, -1, null, level)); // -1 means no parent (root level)
+                parentChildMap.put(i, new ArrayList<>());
+            }
+            
+            this.levelCentroids.put(level, parentLevel);
+            this.parentChildRelations.put(level, parentChildMap);
+            
+            System.err.println("Initialized parent level " + level + " with " + parentCount + " empty centroids");
         }
-
-        public List<List<Integer>> getClustersPerLevel() {
-            return clustersPerLevel;
+        
+        /**
+         * Build parent-child relationships using assignments
+         */
+        public void buildLevelFromAssignments(List<double[]> childCentroids, 
+                                            List<double[]> parentCentroids, 
+                                            int[] assignments, 
+                                            int parentLevel, 
+                                            int childLevel) {
+            
+            // 1. Populate parent centroids
+            List<CentroidInfo> parentLevelInfo = this.levelCentroids.get(parentLevel);
+            for (int i = 0; i < parentCentroids.size() && i < parentLevelInfo.size(); i++) {
+                CentroidInfo parentInfo = parentLevelInfo.get(i);
+                // Update parent centroid with actual embedding
+                parentLevelInfo.set(i, new CentroidInfo(parentInfo.centroidId, -1, parentCentroids.get(i), parentLevel));
+            }
+            
+            // 2. Create child level with proper parent assignments
+            List<CentroidInfo> childLevelInfo = new ArrayList<>();
+            Map<Integer, List<Integer>> parentChildMap = this.parentChildRelations.get(parentLevel);
+            
+            for (int i = 0; i < assignments.length; i++) {
+                int parentClusterId = assignments[i]; // Which parent cluster this child belongs to
+                int childId = i; // Child centroid index
+                
+                // Create child centroid info
+                CentroidInfo childInfo = new CentroidInfo(childId, parentClusterId, childCentroids.get(i), childLevel);
+                childLevelInfo.add(childInfo);
+                
+                // Add child to parent's children list
+                if (parentChildMap.containsKey(parentClusterId)) {
+                    parentChildMap.get(parentClusterId).add(childId);
+                }
+            }
+            
+            // Store child level information
+            this.levelCentroids.put(childLevel, childLevelInfo);
+            
+            System.err.println("Built level " + childLevel + " with " + childLevelInfo.size() + " child centroids");
+            System.err.println("Parent level " + parentLevel + " now has " + parentCentroids.size() + " centroids with children");
         }
-
-        public List<List<List<Integer>>> getCentroidsPerCluster() {
-            return centroidsPerCluster;
+        
+        /**
+         * Output format: <treeLevel, centroidId, parentClusterId, embedding>
+         * Uses BFS traversal starting from root level
+         */
+        public void outputHierarchicalStructure(FrameTupleAppender appender, IFrameWriter writer, IHyracksTaskContext ctx) throws HyracksDataException {
+            System.err.println("=== OUTPUTTING HIERARCHICAL STRUCTURE (BFS) ===");
+            
+            // Find the root level (highest level number)
+            int maxLevel = -1;
+            for (Integer level : levelCentroids.keySet()) {
+                maxLevel = Math.max(maxLevel, level);
+            }
+            
+            if (maxLevel == -1) {
+                System.err.println("No levels found to output");
+                return;
+            }
+            
+            // BFS traversal starting from root level
+            Queue<Integer> levelQueue = new LinkedList<>();
+            levelQueue.offer(maxLevel); // Start from root
+            int treeLevel = 0;
+            int globalCentroidId = 0;
+            while (!levelQueue.isEmpty()) {
+                int currentLevel = levelQueue.poll();
+                List<CentroidInfo> levelInfo = levelCentroids.get(currentLevel);
+                
+                if (levelInfo == null) continue;
+                
+                System.err.println("Processing level " + currentLevel + " with " + levelInfo.size() + " centroids");
+                
+                // Output all centroids in current level
+                for (CentroidInfo centroid : levelInfo) {
+                    createHierarchicalTuple(treeLevel, globalCentroidId, centroid.parentClusterId,
+                                          centroid.embedding, appender, writer, ctx);
+                    globalCentroidId++;
+                }
+                
+                // Add child level to queue if it exists
+                int childLevel = currentLevel - 1;
+                treeLevel++;
+                if (levelCentroids.containsKey(childLevel)) {
+                    levelQueue.offer(childLevel);
+                }
+            }
         }
-
+        
+        private void createHierarchicalTuple(int treeLevel, int centroidId, int parentClusterId, 
+                                           double[] embedding, FrameTupleAppender appender, IFrameWriter writer, IHyracksTaskContext ctx) 
+                                           throws HyracksDataException {
+            try {
+                // Create tuple: <treeLevel, centroidId, parentClusterId, embedding>
+                ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+                tupleBuilder.reset();
+                
+                // Field 0: Tree Level
+                tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, treeLevel);
+                
+                // Field 1: Centroid ID
+                tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, centroidId);
+                
+                // Field 2: Parent Cluster ID
+                tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, parentClusterId);
+                
+                // Field 3: Embedding - create AsterixDB AOrderedList format
+                OrderedListBuilder listBuilder = new OrderedListBuilder();
+                listBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
+                
+                ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+                AMutableDouble aDouble = new AMutableDouble(0.0);
+                
+                for (int i = 0; i < embedding.length; i++) {
+                    aDouble.setValue(embedding[i]);
+                    storage.reset();
+                    storage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
+                    ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, storage.getDataOutput());
+                    listBuilder.addItem(storage);
+                }
+                
+                storage.reset();
+                listBuilder.write(storage.getDataOutput(), true);
+                tupleBuilder.addField(storage.getByteArray(), 0, storage.getLength());
+                
+                // Append tuple to frame, handle buffer overflow manually
+                if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize())) {
+                    // Frame is full, flush and reset
+                    FrameUtils.flushFrame(appender.getBuffer(), writer);
+                    appender.reset(new VSizeFrame(ctx), true);
+                    appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0, tupleBuilder.getSize());
+                }
+                
+                System.err.println("Output: <" + treeLevel + ", " + centroidId + ", " + parentClusterId + 
+                                 ", embedding[" + embedding.length + "]>");
+                        
+            } catch (Exception e) {
+                System.err.println("ERROR: Hierarchical tuple creation failed: " + e.getMessage());
+                throw HyracksDataException.create(e);
+            }
+        }
+        
         public int getNumLevels() {
-            return levelClusters.size();
+            return levelCentroids.size();
+        }
+        
+        /**
+         * Get the maximum level number (root level)
+         */
+        public int getMaxLevel() {
+            int maxLevel = -1;
+            for (Integer level : levelCentroids.keySet()) {
+                maxLevel = Math.max(maxLevel, level);
+            }
+            return maxLevel;
         }
     }
 
@@ -324,13 +508,127 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         }
     }
 
+    /**
+     * Creates a RecordDescriptor for the hierarchical clustering output format.
+     * Format: <treeLevel, centroidId, parentClusterId, embedding>
+     * 
+     * @return RecordDescriptor with 4 fields: 3 integers + 1 AOrderedList of doubles
+     */
+    public static RecordDescriptor createHierarchicalOutputRecordDescriptor() {
+        @SuppressWarnings("rawtypes")
+        ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[4];
+        
+        // Field 0: Tree Level (int)
+        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
+        
+        // Field 1: Centroid ID (int)
+        fieldSerdes[1] = IntegerSerializerDeserializer.INSTANCE;
+        
+        // Field 2: Parent Cluster ID (int)
+        fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE;
+        
+        // Field 3: Embedding (AOrderedList of doubles)
+        fieldSerdes[3] = new AOrderedListSerializerDeserializer(
+            new AOrderedListType(ADOUBLE, "embedding"));
+        
+        return new RecordDescriptor(fieldSerdes);
+    }
+
+    /**
+     * Parses a hierarchical tuple from the output format.
+     * Format: <treeLevel, centroidId, parentClusterId, embedding>
+     * 
+     * @param tuple The input tuple to parse
+     * @return HierarchicalTupleInfo containing the parsed data
+     */
+    public static HierarchicalTupleInfo parseHierarchicalTuple(ITupleReference tuple) throws HyracksDataException {
+        try {
+            // Field 0: Tree Level
+            int treeLevel = IntegerPointable.getInteger(tuple.getFieldData(0), tuple.getFieldStart(0));
+            
+            // Field 1: Centroid ID
+            int centroidId = IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1));
+            
+            // Field 2: Parent Cluster ID
+            int parentClusterId = IntegerPointable.getInteger(tuple.getFieldData(2), tuple.getFieldStart(2));
+            
+            // Field 3: Embedding (AOrderedList of doubles)
+            byte[] embeddingData = tuple.getFieldData(3);
+            int embeddingStart = tuple.getFieldStart(3);
+            
+            // Parse the embedding using ListAccessor
+            ListAccessor listAccessor = new ListAccessor();
+            listAccessor.reset(embeddingData, embeddingStart);
+            
+            // Extract double values from the AOrderedList
+            double[] embedding = new double[listAccessor.size()];
+            ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+            VoidPointable tempVal = new VoidPointable();
+            
+            for (int i = 0; i < listAccessor.size(); i++) {
+                listAccessor.getOrWriteItem(i, tempVal, storage);
+                embedding[i] = extractNumericValue(tempVal);
+            }
+            
+            return new HierarchicalTupleInfo(treeLevel, centroidId, parentClusterId, embedding);
+            
+        } catch (Exception e) {
+            throw new HyracksDataException("Failed to parse hierarchical tuple: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Helper class to hold parsed hierarchical tuple information.
+     */
+    public static class HierarchicalTupleInfo {
+        public final int treeLevel;
+        public final int centroidId;
+        public final int parentClusterId;
+        public final double[] embedding;
+        
+        public HierarchicalTupleInfo(int treeLevel, int centroidId, int parentClusterId, double[] embedding) {
+            this.treeLevel = treeLevel;
+            this.centroidId = centroidId;
+            this.parentClusterId = parentClusterId;
+            this.embedding = embedding;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("<%d, %d, %d, [%d values]>", treeLevel, centroidId, parentClusterId, embedding.length);
+        }
+    }
+    
+    /**
+     * Extracts numeric value from a pointable (helper method for parsing).
+     */
+    private static double extractNumericValue(IPointable pointable) throws HyracksDataException {
+        byte[] data = pointable.getByteArray();
+        int start = pointable.getStartOffset();
+        
+        ATypeTag typeTag = ATYPETAGDESERIALIZER.deserialize(data[start]);
+        
+        switch (typeTag) {
+            case DOUBLE:
+                return DoublePointable.getDouble(data, start + 1);
+            case FLOAT:
+                return FloatPointable.getFloat(data, start + 1);
+            case INTEGER:
+                return IntegerPointable.getInteger(data, start + 1);
+            case BIGINT:
+                return LongPointable.getLong(data, start + 1);
+            default:
+                throw new HyracksDataException("Unsupported numeric type: " + typeTag);
+        }
+    }
+
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
         super(spec, 1, 1);
-        // Output record descriptor defines the format of output tuples (level, clusterId, centroidId, embedding)
+        // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
-        outRecDescs[0] = outputRecDesc; // Output format (hierarchical structure)
+        outRecDescs[0] = outputRecDesc; // Output format (hierarchical structure with parent-child relationships)
         this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
         this.sampleUUID = sampleUUID;
         this.tupleCountUUID = tupleCountUUID;
@@ -479,9 +777,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             return;
                         }
 
-                        // Convert to VCTreeStaticStructureCreator format
-                        convertToVCTreeFormat(clusterStructure, appender);
+                        // Output hierarchical structure with parent-child relationships
+                        // Manual buffer management handles flushing when needed
+                        clusterStructure.outputHierarchicalStructure(appender, writer, ctx);
 
+                        // Final flush
                         FrameUtils.flushFrame(appender.getBuffer(), writer);
 
                     } catch (Throwable e) {
@@ -496,13 +796,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Performs initial K-means++ on all data from run file to generate K centroids
                  */
-                private List<double[]> performInitialKMeansPlusPlus(IHyracksTaskContext ctx, GeneratedRunFileReader in,
+                private ClusteringResult performInitialKMeansPlusPlus(IHyracksTaskContext ctx, GeneratedRunFileReader in,
                         FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int k, Random rand,
                         int maxIterations, int totalTupleCount) throws HyracksDataException, IOException {
 
                     if (k <= 0 || totalTupleCount <= 0) {
-                        return new ArrayList<>();
+                        return new ClusteringResult(new ArrayList<>(), new int[0]);
                     }
 
                     List<double[]> centroids = new ArrayList<>();
@@ -520,7 +820,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         centroids.add(firstCentroid);
                         System.err.println("Added first centroid at index " + firstIdx);
                     } else {
-                        return centroids;
+                        return new ClusteringResult(centroids, assignments);
                     }
 
                     // 2. Choose remaining centroids using weighted selection
@@ -694,7 +994,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     System.err.println("performInitialKMeansPlusPlus: generated " + centroids.size()
                             + " centroids (target was " + k + ")");
 
-                    return centroids;
+                    return new ClusteringResult(centroids, assignments);
                 }
 
                 /**
@@ -759,29 +1059,27 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Perform initial K-means++ on all data to generate initial centroids
                     Random rand = new Random();
                     int maxKMeansIterations = 20;
-                    List<double[]> initialCentroids = performInitialKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
+                    ClusteringResult initialResult = performInitialKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
                             listAccessorConstant, kMeansUtils, K, rand, maxKMeansIterations, totalTupleCount);
 
-                    if (initialCentroids.isEmpty()) {
+                    if (initialResult.centroids.isEmpty()) {
                         System.err.println("No initial centroids generated, cannot perform hierarchical clustering");
                         return structure;
                     }
 
-                    System.err.println("Generated " + initialCentroids.size()
+                    System.err.println("Generated " + initialResult.centroids.size()
                             + " initial centroids from all data, starting hierarchical clustering");
 
-                    // Add Level 0 (initial centroids)
-                    List<List<double[]>> level0Clusters = new ArrayList<>();
-                    for (double[] centroid : initialCentroids) {
-                        List<double[]> cluster = new ArrayList<>();
-                        cluster.add(centroid);
-                        level0Clusters.add(cluster);
+                    // Add Level 0 (initial centroids) - these are the leaf nodes
+                    List<HierarchicalClusterStructure.CentroidInfo> level0Info = new ArrayList<>();
+                    for (int i = 0; i < initialResult.centroids.size(); i++) {
+                        level0Info.add(new HierarchicalClusterStructure.CentroidInfo(i, -1, initialResult.centroids.get(i), 0));
                     }
-                    structure.addLevel(level0Clusters);
+                    structure.levelCentroids.put(0, level0Info);
 
                     // Build subsequent levels using scalable K-means++ on centroids
-                    List<double[]> currentCentroids = initialCentroids;
-                    int currentK = Math.min(K, Math.max(1, initialCentroids.size() / 2));
+                    List<double[]> currentCentroids = initialResult.centroids;
+                    int currentK = Math.min(K, Math.max(1, initialResult.centroids.size() / 2));
                     int maxIterations = 20;
                     int maxLevels = 5;
                     int currentLevel = 1;
@@ -791,27 +1089,24 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         System.err.println("Level " + currentLevel + ": Clustering " + currentCentroids.size()
                                 + " centroids into " + currentK + " clusters");
 
+                        // Initialize parent level with empty centroids
+                        structure.initializeParentLevel(currentLevel, currentK);
+
                         // Perform K-means++ clustering on centroids from previous level
-                        List<double[]> levelCentroids = performScalableKMeansPlusPlusOnCentroids(currentCentroids,
+                        ClusteringResult levelResult = performScalableKMeansPlusPlusOnCentroids(currentCentroids,
                                 currentK, rand, maxIterations);
 
-                        if (levelCentroids.isEmpty()) {
+                        if (levelResult.centroids.isEmpty()) {
                             System.err.println("K-means++ produced no centroids, stopping clustering");
                             break;
                         }
 
-                        // Group centroids into clusters for this level
-                        List<List<double[]>> levelClusters = new ArrayList<>();
-                        for (double[] centroid : levelCentroids) {
-                            List<double[]> cluster = new ArrayList<>();
-                            cluster.add(centroid);
-                            levelClusters.add(cluster);
-                        }
-
-                        structure.addLevel(levelClusters);
+                        // Build level using assignments - currentCentroids are children, levelResult.centroids are parents
+                        structure.buildLevelFromAssignments(currentCentroids, levelResult.centroids, 
+                                                          levelResult.assignments, currentLevel, currentLevel - 1);
 
                         // Prepare for next level
-                        currentCentroids = levelCentroids;
+                        currentCentroids = levelResult.centroids;
                         currentK = Math.max(1, currentK / 2);
                         currentLevel++;
                     }
@@ -824,13 +1119,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Perform scalable K-means++ on centroids (not raw data).
                  */
-                private List<double[]> performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids, int k,
+                private ClusteringResult performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids, int k,
                         Random rand, int maxIterations) {
                     if (centroids.isEmpty() || k <= 0) {
-                        return new ArrayList<>();
+                        return new ClusteringResult(new ArrayList<>(), new int[0]);
                     }
 
                     List<double[]> resultCentroids = new ArrayList<>();
+                    int[] assignments = new int[centroids.size()]; // Declare assignments outside the loop
 
                     // K-means++ initialization
                     // 1. Choose first centroid randomly
@@ -872,7 +1168,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // 3. Lloyd's algorithm for refinement
                     for (int iter = 0; iter < maxIterations; iter++) {
                         // Assign points to closest centroids
-                        int[] assignments = new int[centroids.size()];
                         for (int i = 0; i < centroids.size(); i++) {
                             double minDist = Double.POSITIVE_INFINITY;
                             int closestCentroid = 0;
@@ -919,90 +1214,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                     }
 
-                    return resultCentroids;
+                    return new ClusteringResult(resultCentroids, assignments);
                 }
 
-                /**
-                 * Convert hierarchical clustering results to VCTreeStaticStructureCreator format.
-                 * Creates 4-field tuples: [level, clusterId, centroidId, embedding] for VCTreeStaticStructureCreatorOperatorDescriptor.
-                 */
-                private void convertToVCTreeFormat(HierarchicalClusterStructure structure, FrameTupleAppender appender)
-                        throws HyracksDataException {
-                    try {
-                        System.err.println("=== CONVERTING TO VCTREE FORMAT ===");
-                        System.err.println("Total levels: " + structure.getNumLevels());
-
-                        int globalCentroidId = 0;
-                        int totalTuplesCreated = 0;
-
-                        System.err.println("Creating VCTree tuples...");
-
-                        // Process each level
-                        for (int level = 0; level < structure.getNumLevels(); level++) {
-                            List<List<double[]>> levelClusters = structure.getLevelClusters().get(level);
-                            System.err.println(
-                                    "Processing level " + level + " with " + levelClusters.size() + " clusters...");
-
-                            // Process each cluster in the level
-                            for (int clusterId = 0; clusterId < levelClusters.size(); clusterId++) {
-                                List<double[]> clusterCentroids = levelClusters.get(clusterId);
-
-                                // Process each centroid in the cluster
-                                for (int centroidId = 0; centroidId < clusterCentroids.size(); centroidId++) {
-                                    double[] embedding = clusterCentroids.get(centroidId);
-
-                                    // Create tuple using ArrayTupleBuilder for proper field end offsets
-                                    // Format: [level, clusterId, centroidId, embedding]
-                                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
-                                    tupleBuilder.reset();
-
-                                    // Add level (field 0)
-                                    tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, level);
-
-                                    // Add clusterId (field 1)
-                                    tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, clusterId);
-
-                                    // Add centroidId (field 2)
-                                    tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, globalCentroidId);
-
-                                    // Add embedding (field 3) - create AsterixDB AOrderedList format
-                                    OrderedListBuilder listBuilder = new OrderedListBuilder();
-                                    listBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
-
-                                    ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
-                                    AMutableDouble aDouble = new AMutableDouble(0.0);
-
-                                    for (int i = 0; i < embedding.length; i++) {
-                                        aDouble.setValue(embedding[i]);
-                                        storage.reset();
-                                        storage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
-                                        ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble,
-                                                storage.getDataOutput());
-                                        listBuilder.addItem(storage);
-                                    }
-
-                                    storage.reset();
-                                    listBuilder.write(storage.getDataOutput(), true);
-                                    tupleBuilder.addField(storage.getByteArray(), 0, storage.getLength());
-
-                                    // Append tuple to output frame
-                                    appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
-                                            tupleBuilder.getSize());
-
-                                    totalTuplesCreated++;
-                                    globalCentroidId++;
-                                }
-                            }
-                        }
-
-                        System.err.println("VCTree tuple creation complete: " + totalTuplesCreated + " tuples created");
-
-                    } catch (Exception e) {
-                        System.err.println("ERROR: VCTree format conversion failed: " + e.getMessage());
-                        e.printStackTrace();
-                        throw HyracksDataException.create(e);
-                    }
-                }
             };
         }
     }
