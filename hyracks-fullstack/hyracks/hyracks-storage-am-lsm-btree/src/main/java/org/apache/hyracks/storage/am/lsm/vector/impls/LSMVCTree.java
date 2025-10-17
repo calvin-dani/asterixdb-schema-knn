@@ -154,6 +154,11 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         staticStructure.setInitialized();
     }
 
+    public void setInitialized(LSMVCTreeDiskComponent diskComponent){
+        diskComponent.setInitialized();
+    }
+
+
     protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory, FileReference insertFileReference,
             FileReference deleteIndexFileReference, FileReference bloomFilterFileRef, boolean createComponent)
             throws HyracksDataException {
@@ -176,6 +181,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             setStaticStructure(vcTreeDiskComponent);
             return;
         }
+        setInitialized(vcTreeDiskComponent);
         diskComponents.add(0, c);
         validateComponentIds();
     }

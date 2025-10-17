@@ -118,8 +118,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         }
 
         // TODO: verify number of levels
-        // Create first page (root page) - computed page ID 0
-        createNewPage(0);
+        // Create first page (root page) - page ID 1
+        createNewPage(1);
 
         LOGGER.debug("VCTreeStaticStructureLoader initialized");
         LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
@@ -189,7 +189,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
                 childPageId);
 
-        return childPageId;
+        return childPageId + 1;
     }
 
     /**
@@ -216,7 +216,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     private int computeCurrentClusterPageId() {
         // Current cluster's page ID = offset for current level + current cluster index
-        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel;
+        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel + 1;
     }
 
     /**

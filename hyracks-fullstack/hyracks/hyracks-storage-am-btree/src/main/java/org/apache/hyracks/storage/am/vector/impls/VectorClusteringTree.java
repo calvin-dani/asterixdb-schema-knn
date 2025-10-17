@@ -1325,8 +1325,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             isStaticStructureInitialized = true;
         }
 
-        public void setRootPageId() {
-            rootPage = 0;
+        public void setRootPageId(int rootPageId) {
+            rootPage = rootPageId;
         }
 
     /**

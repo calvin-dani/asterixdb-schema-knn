@@ -245,6 +245,6 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
     public void setInitialized() {
         vcTree.setStaticStructureInitialized();
-        vcTree.setRootPageId();
+        vcTree.setRootPageId(1);
     }
 }

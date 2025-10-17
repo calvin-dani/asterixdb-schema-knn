@@ -46,22 +46,25 @@ import org.apache.hyracks.storage.am.common.TreeIndexTestUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
+import org.apache.hyracks.storage.am.common.util.HashMultiSet;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeStaticStructureBuilder;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
-import org.apache.hyracks.storage.common.IIndexAccessor;
-import org.apache.hyracks.storage.common.IIndexBulkLoader;
-import org.apache.hyracks.storage.common.IIndexCursor;
-import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.am.rtree.AbstractRTreeTestContext;
+import org.apache.hyracks.storage.am.rtree.RTreeCheckTuple;
+import org.apache.hyracks.storage.am.rtree.impls.SearchPredicate;
+import org.apache.hyracks.storage.am.rtree.util.RTreeUtils;
+import org.apache.hyracks.storage.am.vector.impls.*;
+import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.common.*;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import static org.apache.hyracks.dataflow.common.utils.TupleUtils.printTuple;
+import static org.junit.Assert.*;
 
 @SuppressWarnings({ "rawtypes", "deprecation" })
 public class VectorTreeTestUtils extends TreeIndexTestUtils {
@@ -132,7 +135,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         LSMVCTreeBulkLoader bulkLoader = ((LSMVCTree)ctx.getIndex()).
                 createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes);
 
-        for (int pageId = 0; pageId <= maxPageId; pageId++) {
+        for (int pageId = 1; pageId <= maxPageId; pageId++) {
             ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
             bulkLoader.copyPage(sourcePage);
             vcTreeAccessor.releasePage(sourcePage);
@@ -146,6 +149,110 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         }
 
         bulkLoader.end();
+    }
+
+    /**
+     * Test cursor iteration and validate it returns expected records.
+     * Validates that the cursor can find records with the correct tuple structure: <vector, primary_key>
+     */
+    public void scanClosestLeafCluster(AbstractVectorTreeTestContext ctx) throws Exception {
+        LSMVCTree lsmvcTree = (LSMVCTree)ctx.getIndex();
+        LSMVCTreeDiskComponent diskComponent = (LSMVCTreeDiskComponent) lsmvcTree.getDiskComponents().getFirst();
+        IIndexAccessor accessor = diskComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        double[] queryVector = { 20.0d, 20.0d, 15.0d};
+        VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
+
+        IIndexCursor cursor = accessor.createSearchCursor(false);
+        assertNotNull("Cursor should be created", cursor);
+
+        try {
+            // Open cursor with predicate
+            accessor.search(cursor, predicate);
+
+            // Collect all results from cursor
+            List<ITupleReference> results = new ArrayList<>();
+            while (cursor.hasNext()) {
+                cursor.next();
+                ITupleReference tuple = cursor.getTuple();
+                assertNotNull("Tuple should not be null", tuple);
+                results.add(tuple);
+            }
+
+            // Validate we got at least some results
+            assertFalse("Should find some records in the cluster", results.isEmpty());
+            assertEquals("The cursor should scan all records inserted into the cluster", results.size(), ctx.getDataRecords().get(0).size());
+
+            LOGGER.info("Found {} records in cluster for query vector [{}, {}, {}]", results.size(),
+                        queryVector[0], queryVector[1], queryVector[2]);
+
+            printTupleResults(results);
+
+            // Validate cursor state after iteration
+            assertFalse("Cursor should not have more results after iteration", cursor.hasNext());
+
+        } finally {
+            cursor.close();
+        }
+    }
+
+    private void printTupleResults(List<ITupleReference> results) throws HyracksDataException {
+        ISerializerDeserializer[] dataSerdes = new ISerializerDeserializer[] {
+                DoubleSerializerDeserializer.INSTANCE,  // distance
+                DoubleSerializerDeserializer.INSTANCE,  // cosine similarity, useless for now
+                DoubleArraySerializerDeserializer.INSTANCE,  // vector
+                new UTF8StringSerializerDeserializer()       // primary key
+        };
+
+        for (ITupleReference tuple : results) {
+            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataSerdes);
+            double[] vector = (double[]) fieldValues[2];
+            String primaryKey = (String) fieldValues[3];
+            LOGGER.info(" Record: pk='{}', vector=[{}, {}, {}, {}]", primaryKey, vector[0], vector[1],
+                    vector[2], vector[3]);
+        }
+    }
+
+    public void topKSearch(AbstractVectorTreeTestContext ctx) throws Exception {
+        IIndexCursor cursor = ctx.getIndexAccessor().createSearchCursor(false);
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        double[] queryVector = { 20.0d, 20.0d, 15.0d};
+        VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
+        ISerializerDeserializer[] dataSerdes = new ISerializerDeserializer[] {
+                DoubleSerializerDeserializer.INSTANCE,  // distance
+                DoubleSerializerDeserializer.INSTANCE,  // cosine similarity, useless for now
+                DoubleArraySerializerDeserializer.INSTANCE,  // vector
+                new UTF8StringSerializerDeserializer()       // primary key
+        };
+        try {
+            // Open cursor with predicate
+            accessor.search(cursor, predicate);
+
+            // Collect all results from cursor
+            List<ITupleReference> results = new ArrayList<>();
+            while (cursor.hasNext()) {
+                cursor.next();
+                ITupleReference tuple = cursor.getTuple();
+                results.add(tuple);
+            }
+
+            LOGGER.info("Found {} records in cluster for query vector [{}, {}, {}]", results.size(),
+                        queryVector[0], queryVector[1], queryVector[2]);
+
+            printTupleResults(results);
+
+        } finally {
+            cursor.close();
+        }
+    }
+
+    public void clusterRecords(AbstractVectorTreeTestContext ctx) throws Exception {
+        LSMVCTree lsmvcTree = (LSMVCTree)ctx.getIndex();
+        LSMVCTreeDiskComponent staticStructure = lsmvcTree.getStaticStructure();
+        IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
+
+        ClusterSearchResult searchResult = vcTreeAccessor.findClosestLeafCentroid(new double[]{21.0d, 31.0d, 21.0d});
     }
 
     public List<TestClusterData> insertRecordsIntoMultipleClusters(AbstractVectorTreeTestContext ctx) throws Exception {
