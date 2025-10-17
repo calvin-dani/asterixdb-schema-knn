@@ -30,6 +30,8 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 
+import static org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils.extractVectorFromTuple;
+
 /**
  * Utility class for VCTree navigation operations.
  * Contains common logic for finding closest centroids in tree structures.
@@ -181,7 +183,8 @@ public class VCTreeNavigationUtils {
         for (int i = 0; i < tupleCount; i++) {
             ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
             frameTuple.resetByTupleIndex(interiorFrame, i);
-            double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+            double[] centroid =  extractVectorFromTuple(frameTuple);
+//                    extractCentroidFromInteriorTuple(frameTuple);
 
             // Check vector dimensionality before distance calculation
             if (centroid.length != queryVector.length) {
@@ -189,6 +192,8 @@ public class VCTreeNavigationUtils {
             }
 
             double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+
+//                    VectorDistanceArrCalculation.euclidean_squared(centroid, queryVector);
 
             if (distance < bestDistance) {
                 bestDistance = distance;

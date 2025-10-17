@@ -369,7 +369,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 
                 // Output all centroids in current level
                 for (CentroidInfo centroid : levelInfo) {
-                    createHierarchicalTuple(treeLevel, globalCentroidId, centroid.parentClusterId,
+                     createHierarchicalTuple(treeLevel, globalCentroidId, centroid.parentClusterId,
                                           centroid.embedding, appender, writer, ctx);
                     globalCentroidId++;
                 }
@@ -387,6 +387,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                            double[] embedding, FrameTupleAppender appender, IFrameWriter writer, IHyracksTaskContext ctx) 
                                            throws HyracksDataException {
             try {
+                // Apply clipping to embedding before creating tuple to prevent exorbitant values
+                double[] clippedEmbedding = clipCentroid(embedding);
+                
                 // Create tuple: <treeLevel, centroidId, parentClusterId, embedding>
                 ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
                 tupleBuilder.reset();
@@ -400,15 +403,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 // Field 2: Parent Cluster ID
                 tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, parentClusterId);
                 
-                // Field 3: Embedding - create AsterixDB AOrderedList format
+                // Field 3: Embedding - create AsterixDB AOrderedList format using clipped embedding
                 OrderedListBuilder listBuilder = new OrderedListBuilder();
                 listBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
                 
                 ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
                 AMutableDouble aDouble = new AMutableDouble(0.0);
                 
-                for (int i = 0; i < embedding.length; i++) {
-                    aDouble.setValue(embedding[i]);
+                for (int i = 0; i < clippedEmbedding.length; i++) {
+                    aDouble.setValue(clippedEmbedding[i]);
                     storage.reset();
                     storage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
                     ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, storage.getDataOutput());
@@ -428,7 +431,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
                 
                 System.err.println("Output: <" + treeLevel + ", " + centroidId + ", " + parentClusterId + 
-                                 ", embedding[" + embedding.length + "]>");
+                                 ", embedding[" + clippedEmbedding.length + "]>");
                         
             } catch (Exception e) {
                 System.err.println("ERROR: Hierarchical tuple creation failed: " + e.getMessage());
@@ -474,6 +477,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
                     new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
 
+    // Clipping constants for centroid values
+    private static final double DEFAULT_CLIP_MIN = -1e3;
+    private static final double DEFAULT_CLIP_MAX = 1e3;
+
     private final UUID sampleUUID;
     private final UUID tupleCountUUID;
     private final UUID materializedDataUUID;
@@ -506,6 +513,45 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         } catch (Exception e) {
             throw new RuntimeException("Error calculating distance", e);
         }
+    }
+
+    /**
+     * Clips centroid values to reasonable bounds to prevent exorbitant values.
+     * 
+     * @param centroid The centroid array to clip
+     * @return Clipped centroid array with values bounded between DEFAULT_CLIP_MIN and DEFAULT_CLIP_MAX
+     */
+    private static double[] clipCentroid(double[] centroid) {
+        if (centroid == null) {
+            return centroid;
+        }
+        
+        double[] clipped = new double[centroid.length];
+        boolean wasClipped = false;
+        
+        for (int i = 0; i < centroid.length; i++) {
+            double value = centroid[i];
+            
+            // Check for NaN or Infinity
+            if (Double.isNaN(value) || Double.isInfinite(value)) {
+                clipped[i] = 0.0; // Replace with 0
+                wasClipped = true;
+            } else if (value < DEFAULT_CLIP_MIN) {
+                clipped[i] = DEFAULT_CLIP_MIN;
+                wasClipped = true;
+            } else if (value > DEFAULT_CLIP_MAX) {
+                clipped[i] = DEFAULT_CLIP_MAX;
+                wasClipped = true;
+            } else {
+                clipped[i] = value;
+            }
+        }
+        
+        if (wasClipped) {
+            System.err.println("WARNING: Centroid values were clipped to bounds [" + DEFAULT_CLIP_MIN + ", " + DEFAULT_CLIP_MAX + "]");
+        }
+        
+        return clipped;
     }
 
     /**

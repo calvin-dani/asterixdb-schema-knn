@@ -25,6 +25,7 @@ import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
@@ -108,21 +109,25 @@ public class VectorClusteringTupleUtils {
         // 2. Input tuples: <vector, PK> - vector is in field 0
         // 3. Update tuples with included fields: <vector, included_field1, ..., included_fieldN, PK> - vector is in field 0
 
-        if (tuple.getFieldCount() != 2) {
-            System.err.println("ERROR: unsupported tuple format");
-            return null;
-        }
+//        if (tuple.getFieldCount() != 2) {
+//            System.err.println("ERROR: unsupported tuple format");
+//            return null;
+//        }
 
         try {
-            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
-            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
-            fieldSerdes[1] = new UTF8StringSerializerDeserializer();
+            ISerializerDeserializer[] fieldSerdes =
+                    new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                            DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
+                    };
+//            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
+//            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
+//            fieldSerdes[1] = new UTF8StringSerializerDeserializer();
 
             // Deserialize the tuple using the proper TupleUtils method
             Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
 
             // Extract the vector from the deserialized fields
-            return (double[]) fieldValues[0];
+            return (double[]) fieldValues[1];
         } catch (Exception e) {
             // Log the error and return null instead of crashing
             System.err.println("ERROR: Failed to extract vector from tuple: " + e.getMessage());

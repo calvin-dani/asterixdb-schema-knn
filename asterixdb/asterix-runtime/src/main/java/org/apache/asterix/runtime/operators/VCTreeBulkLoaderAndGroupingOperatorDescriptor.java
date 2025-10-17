@@ -23,17 +23,21 @@ import java.util.UUID;
 
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
-import org.apache.asterix.runtime.operators.KMeansUtils;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
+import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
@@ -44,23 +48,18 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
-import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
-import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
-import org.apache.hyracks.storage.common.buffercache.IBufferCache;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
+import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
-import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
-import org.apache.hyracks.api.io.FileReference;
-import org.apache.hyracks.api.io.IIOManager;
+import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.LocalResource;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
 /**
  * Operator that handles bulk loader initialization and recursive data grouping to run files.
@@ -82,7 +81,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final UUID materializedDataUUID;
     private final IScalarEvaluatorFactory args;
     private final RecordDescriptor inputRecDesc;
-    
+
     // Navigation components
     private IBufferCache bufferCache;
     private int staticStructureFileId;
@@ -114,7 +113,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private void configureFrameFactories(IHyracksTaskContext ctx) throws HyracksDataException {
         try {
             System.err.println("=== CONFIGURING VCTREE FRAME FACTORIES FOR NAVIGATION ===");
-            
+
             // Create tuple writers with proper type traits for VCTree
             // Tuple format: [centroidId (int), embedding (float[]), childPageId (int)]
             ITypeTraits[] typeTraits = new ITypeTraits[3];
@@ -128,15 +127,15 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     new VectorClusteringInteriorTupleWriterFactory(typeTraits, null, null);
 
             // Create VCTree frame factories (these implement the correct interfaces)
-            this.leafFrameFactory = new VectorClusteringLeafFrameFactory(
-                    leafTupleWriterFactory.createTupleWriter(), VECTOR_DIMENSION);
+            this.leafFrameFactory =
+                    new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), VECTOR_DIMENSION);
             this.interiorFrameFactory = new VectorClusteringInteriorFrameFactory(
                     interiorTupleWriterFactory.createTupleWriter(), VECTOR_DIMENSION);
-            
+
             System.err.println("✅ VCTree frame factories configured successfully");
             System.err.println("  Interior frame factory: " + interiorFrameFactory.getClass().getSimpleName());
             System.err.println("  Leaf frame factory: " + leafFrameFactory.getClass().getSimpleName());
-            
+
         } catch (Exception e) {
             System.err.println("ERROR: Failed to configure VCTree frame factories: " + e.getMessage());
             e.printStackTrace();
@@ -155,19 +154,20 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         try {
             System.err.println("=== INITIALIZING NAVIGATION COMPONENTS ===");
             System.err.println("Static structure file ID: " + staticFileId);
-            
+
             // Set up buffer cache access
-            this.bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext().getServiceContext().getApplicationContext()).getBufferCache();
+            this.bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext()
+                    .getServiceContext().getApplicationContext()).getBufferCache();
             this.staticStructureFileId = staticFileId;
-            
+
             // Configure frame factories
             configureFrameFactories(ctx);
-            
+
             // Validate static structure file accessibility
             validateStaticStructureFile();
-            
+
             System.err.println("✅ Navigation components initialized successfully");
-            
+
         } catch (Exception e) {
             System.err.println("ERROR: Failed to initialize navigation components: " + e.getMessage());
             e.printStackTrace();
@@ -184,11 +184,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         try {
             System.err.println("=== VALIDATING STATIC STRUCTURE FILE ===");
             System.err.println("File ID: " + staticStructureFileId);
-            
+
             // Try to pin the root page (page 0) to verify file exists and is accessible
-            long dpid = org.apache.hyracks.storage.common.file.BufferedFileHandle.getDiskPageId(staticStructureFileId, 0);
+            long dpid =
+                    org.apache.hyracks.storage.common.file.BufferedFileHandle.getDiskPageId(staticStructureFileId, 0);
             org.apache.hyracks.storage.common.buffercache.ICachedPage page = bufferCache.pin(dpid);
-            
+
             try {
                 page.acquireReadLatch();
                 // If we can acquire the latch, the file exists and is accessible
@@ -197,7 +198,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 page.releaseReadLatch();
                 bufferCache.unpin(page);
             }
-            
+
         } catch (Exception e) {
             System.err.println("ERROR: Static structure file validation failed: " + e.getMessage());
             e.printStackTrace();
@@ -216,57 +217,53 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     public ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
         try {
             System.err.println("=== FINDING CLOSEST CENTROID ===");
-            
+
             // Validate input vector
             if (queryVector == null) {
                 throw new IllegalArgumentException("Query vector cannot be null");
             }
-            
+
             if (queryVector.length == 0) {
                 throw new IllegalArgumentException("Query vector cannot be empty");
             }
-            
+
             // Validate vector dimensions
             if (queryVector.length != VECTOR_DIMENSION) {
-                System.err.println("WARNING: Query vector dimension (" + queryVector.length + 
-                                 ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
+                System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                        + ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
                 // Continue processing but log the mismatch
             }
-            
+
             System.err.println("Query vector dimension: " + queryVector.length);
             System.err.println("Static structure file ID: " + staticStructureFileId);
-            
+
             // Validate navigation components are initialized
             if (bufferCache == null) {
                 throw new IllegalStateException("Buffer cache not initialized");
             }
-            
+
             if (interiorFrameFactory == null || leafFrameFactory == null) {
                 throw new IllegalStateException("Frame factories not initialized");
             }
-            
+
             // Use VCTreeNavigationUtils to find closest centroid
-            ClusterSearchResult result = VCTreeNavigationUtils.findClosestCentroid(
-                    bufferCache, 
-                    staticStructureFileId, 
-                    0, // rootPageId = 0 for static structures
-                    interiorFrameFactory, 
-                    leafFrameFactory, 
-                    queryVector);
-            
+            ClusterSearchResult result =
+                    VCTreeNavigationUtils.findClosestCentroid(bufferCache, staticStructureFileId, 0, // rootPageId = 0 for static structures
+                            interiorFrameFactory, leafFrameFactory, queryVector);
+
             if (result == null) {
                 System.err.println("WARNING: No closest centroid found for query vector");
                 return null;
             }
-            
+
             System.err.println("✅ Closest centroid found successfully");
             System.err.println("  Leaf page ID: " + result.leafPageId);
             System.err.println("  Cluster index: " + result.clusterIndex);
             System.err.println("  Distance: " + result.distance);
             System.err.println("  Centroid ID: " + result.centroidId);
-            
+
             return result;
-            
+
         } catch (IllegalArgumentException | IllegalStateException e) {
             System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
             throw e;
@@ -286,73 +283,74 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * @return Extracted double array embedding
      * @throws HyracksDataException if extraction fails
      */
-    public double[] extractEmbeddingFromTuple(ITupleReference tuple, IHyracksTaskContext ctx) throws HyracksDataException {
+    public double[] extractEmbeddingFromTuple(ITupleReference tuple, IHyracksTaskContext ctx)
+            throws HyracksDataException {
         try {
             System.err.println("=== EXTRACTING EMBEDDING FROM TUPLE ===");
-            
+
             // Validate input parameters
             if (tuple == null) {
                 throw new IllegalArgumentException("Tuple cannot be null");
             }
-            
+
             if (ctx == null) {
                 throw new IllegalArgumentException("Context cannot be null");
             }
-            
+
             if (args == null) {
                 throw new IllegalStateException("Scalar evaluator factory not initialized");
             }
-            
+
             // Create evaluator for extracting vector data
             IScalarEvaluator eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
             IPointable inputVal = new VoidPointable();
-            
+
             // Create KMeansUtils for proper vector parsing
             KMeansUtils kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
             ListAccessor listAccessorConstant = new ListAccessor();
-            
+
             // Extract vector data from tuple
             // Cast ITupleReference to IFrameTupleReference for evaluator
             eval.evaluate((org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference) tuple, inputVal);
-            
+
             // Validate evaluation result
             if (inputVal.getLength() == 0) {
                 System.err.println("WARNING: Empty evaluation result from tuple");
                 return null;
             }
-            
+
             // Check if it's a list type (required for vector data)
             if (!EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
                     .isListType()) {
                 System.err.println("WARNING: Tuple does not contain list type data, skipping");
                 return null;
             }
-            
+
             // Parse the vector data using proper AsterixDB parsing
             listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
             double[] embedding = kMeansUtils.createPrimitveList(listAccessorConstant);
-            
+
             // Validate extracted embedding
             if (embedding == null) {
                 System.err.println("WARNING: KMeansUtils returned null embedding");
                 return null;
             }
-            
+
             if (embedding.length == 0) {
                 System.err.println("WARNING: Extracted embedding is empty");
                 return null;
             }
-            
+
             // Validate embedding dimensions
             if (embedding.length != VECTOR_DIMENSION) {
-                System.err.println("WARNING: Extracted embedding dimension (" + embedding.length + 
-                                 ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
+                System.err.println("WARNING: Extracted embedding dimension (" + embedding.length
+                        + ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
                 // Continue processing but log the mismatch
             }
-            
+
             System.err.println("✅ Successfully extracted embedding with " + embedding.length + " dimensions");
             return embedding;
-            
+
         } catch (IllegalArgumentException | IllegalStateException e) {
             System.err.println("ERROR: Invalid input or state for embedding extraction: " + e.getMessage());
             throw e;
@@ -421,9 +419,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         return numPartitions;
     }
 
-
-
-
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
@@ -431,7 +426,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         return new VCTreeBulkLoaderAndGroupingNodePushable(ctx, partition, nPartitions, inputRecDesc, permitUUID,
                 materializedDataUUID);
     }
-
 
     /**
      * Node pushable implementation for VCTreeBulkLoaderAndGroupingOperatorDescriptor.
@@ -485,11 +479,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private int openStaticStructureFile(IHyracksTaskContext ctx) throws HyracksDataException {
             try {
                 System.err.println("=== OPENING STATIC STRUCTURE FILE ===");
-                
+
                 // Get buffer cache
-                IBufferCache bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) 
-                    ctx.getJobletContext().getServiceContext().getApplicationContext()).getBufferCache();
-                
+                IBufferCache bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext()
+                        .getServiceContext().getApplicationContext()).getBufferCache();
+
                 // Get index path (same approach as VCTreeStaticStructureCreatorOperatorDescriptor)
                 FileReference indexPathRef = getIndexFilePath();
                 if (indexPathRef == null) {
@@ -520,7 +514,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 return fileId;
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to open static structure file: " + e.getMessage());
                 e.printStackTrace();
@@ -537,9 +531,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private FileReference getIndexFilePath() {
             try {
                 // Get the LSM index file manager to determine the correct component directory
-                IIndexDataflowHelper indexHelper = indexHelperFactory.create(
-                    ctx.getJobletContext().getServiceContext(), partition);
-                
+                IIndexDataflowHelper indexHelper =
+                        indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+
                 // Get the resource path from the index helper
                 LocalResource resource = indexHelper.getResource();
                 String resourcePath = resource.getPath();
@@ -547,7 +541,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 // Resolve the file reference using the IO manager
                 IIOManager ioManager = ctx.getIoManager();
                 return ioManager.resolve(resourcePath);
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
                 e.printStackTrace();
@@ -559,77 +553,78 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable nextFrame ===");
             System.err.println("Processing input frame for centroid extraction and query processing");
-            
+
             try {
                 // Create frame tuple accessor
                 FrameTupleAccessor fta = new FrameTupleAccessor(inputRecDesc);
                 fta.reset(buffer);
-                
+
                 int tupleCount = fta.getTupleCount();
                 System.err.println("Processing " + tupleCount + " tuples from input frame");
-                
+
                 if (tupleCount == 0) {
                     System.err.println("No tuples found in input frame");
                     return;
                 }
-                
+
                 int successfulExtractions = 0;
                 int successfulQueries = 0;
                 final int MAX_DETAILED_LOGS = 5; // Log detailed info for first 5 records
-                
+
                 // Process each tuple in the frame
                 for (int i = 0; i < tupleCount; i++) {
                     FrameTupleReference tuple = new FrameTupleReference();
                     tuple.reset(fta, i);
-                    
+
                     try {
                         // Extract embedding from tuple
                         double[] embedding = extractEmbeddingFromTuple(tuple, ctx);
-                        
+
                         if (embedding != null && embedding.length > 0) {
                             successfulExtractions++;
-                            
+
                             // Find closest centroid using the extracted embedding
-                            ClusterSearchResult result = findClosestCentroid(embedding);
-                            
+//                            ClusterSearchResult result = findClosestCentroid(embedding);
+                            ClusterSearchResult result = null;
                             if (result != null) {
                                 successfulQueries++;
-                                
+
                                 // Detailed logging for first few records
                                 if (successfulQueries <= MAX_DETAILED_LOGS) {
                                     System.err.println("=== DETAILED QUERY RESULT " + successfulQueries + " ===");
                                     System.err.println("📊 Query Vector Details:");
                                     System.err.println("  - Vector dimension: " + embedding.length);
-                                    System.err.println("  - First 5 values: [" + 
-                                        String.format("%.4f", embedding[0]) + ", " +
-                                        String.format("%.4f", embedding[1]) + ", " +
-                                        String.format("%.4f", embedding[2]) + ", " +
-                                        String.format("%.4f", embedding[3]) + ", " +
-                                        String.format("%.4f", embedding[4]) + "...]");
-                                    
+                                    System.err.println("  - First 5 values: [" + String.format("%.4f", embedding[0])
+                                            + ", " + String.format("%.4f", embedding[1]) + ", "
+                                            + String.format("%.4f", embedding[2]) + ", "
+                                            + String.format("%.4f", embedding[3]) + ", "
+                                            + String.format("%.4f", embedding[4]) + "...]");
+
                                     System.err.println("🎯 Closest Centroid Details:");
                                     System.err.println("  - Centroid ID: " + result.centroidId);
                                     System.err.println("  - Distance: " + String.format("%.6f", result.distance));
                                     System.err.println("  - Leaf page ID: " + result.leafPageId);
                                     System.err.println("  - Cluster index: " + result.clusterIndex);
-                                    
+
                                     if (result.centroid != null) {
-                                        System.err.println("  - Centroid first 5 values: [" + 
-                                            String.format("%.4f", result.centroid[0]) + ", " +
-                                            String.format("%.4f", result.centroid[1]) + ", " +
-                                            String.format("%.4f", result.centroid[2]) + ", " +
-                                            String.format("%.4f", result.centroid[3]) + ", " +
-                                            String.format("%.4f", result.centroid[4]) + "...]");
+                                        System.err.println("  - Centroid first 5 values: ["
+                                                + String.format("%.4f", result.centroid[0]) + ", "
+                                                + String.format("%.4f", result.centroid[1]) + ", "
+                                                + String.format("%.4f", result.centroid[2]) + ", "
+                                                + String.format("%.4f", result.centroid[3]) + ", "
+                                                + String.format("%.4f", result.centroid[4]) + "...]");
                                     }
                                     System.err.println("=== END DETAILED RESULT " + successfulQueries + " ===");
                                 } else if (successfulQueries == MAX_DETAILED_LOGS + 1) {
-                                    System.err.println("📝 Detailed logging completed for first " + MAX_DETAILED_LOGS + " records. Continuing with summary logging...");
+                                    System.err.println("📝 Detailed logging completed for first " + MAX_DETAILED_LOGS
+                                            + " records. Continuing with summary logging...");
                                 }
-                                
+
                                 // Summary logging for all records
                                 if (successfulQueries % 10 == 0 || successfulQueries <= MAX_DETAILED_LOGS) {
-                                    System.err.println("✅ Query " + successfulQueries + " completed - Centroid ID: " + 
-                                        result.centroidId + ", Distance: " + String.format("%.6f", result.distance));
+                                    System.err.println("✅ Query " + successfulQueries + " completed - Centroid ID: "
+                                            + result.centroidId + ", Distance: "
+                                            + String.format("%.6f", result.distance));
                                 }
                             } else {
                                 System.err.println("❌ Failed to find closest centroid for query " + (i + 1));
@@ -637,19 +632,20 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         } else {
                             System.err.println("⚠️ Skipping tuple " + (i + 1) + " - no valid embedding extracted");
                         }
-                        
+
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to process tuple " + (i + 1) + ": " + e.getMessage());
                         e.printStackTrace();
                     }
                 }
-                
+
                 System.err.println("=== FRAME PROCESSING COMPLETE ===");
                 System.err.println("Total tuples processed: " + tupleCount);
                 System.err.println("Successful extractions: " + successfulExtractions);
                 System.err.println("Successful queries: " + successfulQueries);
-                System.err.println("Success rate: " + String.format("%.1f", (double) successfulQueries / tupleCount * 100) + "%");
-                
+                System.err.println(
+                        "Success rate: " + String.format("%.1f", (double) successfulQueries / tupleCount * 100) + "%");
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to process input frame: " + e.getMessage());
                 e.printStackTrace();
