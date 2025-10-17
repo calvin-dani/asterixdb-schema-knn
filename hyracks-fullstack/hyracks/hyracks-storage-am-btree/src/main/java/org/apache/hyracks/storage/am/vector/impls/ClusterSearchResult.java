@@ -25,9 +25,9 @@ package org.apache.hyracks.storage.am.vector.impls;
 public class ClusterSearchResult {
     public final int leafPageId;
     public final int clusterIndex;
-    final double[] centroid;
-    final double distance;
-    final int centroidId;
+    public final double[] centroid;
+    public final double distance;
+    public final int centroidId;
 
     ClusterSearchResult(int leafPageId, int clusterIndex, double[] centroid, double distance, int centroidId) {
         this.leafPageId = leafPageId;
@@ -35,5 +35,20 @@ public class ClusterSearchResult {
         this.centroid = centroid;
         this.distance = distance;
         this.centroidId = centroidId;
+    }
+
+    /**
+     * Factory method to create ClusterSearchResult instances.
+     * 
+     * @param leafPageId The leaf page ID
+     * @param clusterIndex The cluster index within the page
+     * @param centroid The centroid vector
+     * @param distance The distance to the centroid
+     * @param centroidId The centroid ID
+     * @return New ClusterSearchResult instance
+     */
+    public static ClusterSearchResult create(int leafPageId, int clusterIndex, double[] centroid, double distance,
+            int centroidId) {
+        return new ClusterSearchResult(leafPageId, clusterIndex, centroid, distance, centroidId);
     }
 }

@@ -18,16 +18,12 @@
  */
 package org.apache.asterix.runtime.operators;
 
+
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -35,46 +31,60 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.ActivityId;
 import org.apache.hyracks.api.dataflow.IActivityGraphBuilder;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
-import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
-import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
-import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
+import org.apache.hyracks.api.dataflow.value.*;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
-import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.RawBinaryComparatorFactory;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
+import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.types.EnumDeserializer;
+import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
+import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
-import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
+// import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.frames.LIFOMetaDataFrameFactory;
 import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManager;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringDataTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
+import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -91,19 +101,20 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     private final int maxEntriesPerPage;
     private final float fillFactor;
     private final UUID permitUUID;
-    private final UUID materializedDataUUID;
+    // private final UUID materializedDataUUID;
 
     public VCTreeStaticStructureCreatorOperatorDescriptor(IOperatorDescriptorRegistry spec,
-            IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
-            RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID) {
+                                                          IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
+                                                          RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID) {
         super(spec, 1, 1);
         this.indexHelperFactory = indexHelperFactory;
         this.maxEntriesPerPage = maxEntriesPerPage;
         this.fillFactor = fillFactor;
         this.permitUUID = permitUUID;
-        this.materializedDataUUID = materializedDataUUID;
+        // this.materializedDataUUID = materializedDataUUID;
         this.outRecDescs[0] = inputRecordDescriptor;
         System.err.println("VCTreeStaticStructureCreatorOperatorDescriptor created with permit UUID: " + permitUUID);
+        System.err.println("Using hierarchical clustering output record descriptor: " + outRecDescs[0]);
     }
 
     /**
@@ -166,6 +177,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
     /**
      * Create grouping strategy for VCTree centroids based on SHAPIRO formula results.
+     * Uses range partitioning instead of round-robin.
      * 
      * @param K Total number of centroids
      * @param numPartitions Number of partitions from SHAPIRO
@@ -173,21 +185,21 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
      * @return GroupingStrategy object with run file allocation plan
      */
     public GroupingStrategy createGroupingStrategy(int K, int numPartitions, int memoryBudget) {
-        System.err.println("=== CREATING GROUPING STRATEGY ===");
+        System.err.println("=== CREATING GROUPING STRATEGY (RANGE PARTITIONING) ===");
         System.err.println("K (centroids): " + K);
         System.err.println("Number of partitions: " + numPartitions);
         System.err.println("Memory budget: " + memoryBudget + " frames");
 
-        int centroidsPerPartition = (int) Math.ceil(1.0 * K / numPartitions);
+        int centroidsPerPartition = (int) Math.ceil((double) K / numPartitions);
         int numRunFiles = Math.min(numPartitions, memoryBudget);
 
         System.err.println("Centroids per partition: " + centroidsPerPartition);
         System.err.println("Number of run files: " + numRunFiles);
 
-        // Create partition assignment for centroids
+        // Create range partition assignment for centroids
         Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
         for (int i = 0; i < K; i++) {
-            int partition = i % numPartitions;
+            int partition = i / centroidsPerPartition;
             partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(i);
         }
 
@@ -195,59 +207,76 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         String strategy;
         if (centroidsPerPartition > 1) {
             strategy = "GROUP_MULTIPLE_CENTROIDS";
-            System.err.println("Strategy: Group multiple centroids in one run file");
+            System.err.println("Strategy: Group multiple centroids in one run file (range partitioning)");
         } else {
             strategy = "ONE_FRAME_PER_CENTROID";
-            System.err.println("Strategy: Allocate 1 frame per centroid");
+            System.err.println("Strategy: Allocate 1 frame per centroid (range partitioning)");
         }
 
         return new GroupingStrategy(numRunFiles, centroidsPerPartition, partitionToCentroids, strategy);
     }
 
     /**
-     * Main processing flow: dummy data -> grouping -> sorting.
+     * Create range partitioning for a list of centroids.
+     * 
+     * @param centroids List of centroid IDs to partition
+     * @param numPartitions Number of partitions to create
+     * @return Map of partition ID to list of centroid IDs
+     */
+    public Map<Integer, List<Integer>> createRangePartitioning(List<Integer> centroids, int numPartitions) {
+        System.err.println("=== CREATING RANGE PARTITIONING ===");
+        System.err.println("Centroids to partition: " + centroids.size());
+        System.err.println("Number of partitions: " + numPartitions);
+
+        int centroidsPerPartition = (int) Math.ceil((double) centroids.size() / numPartitions);
+        Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
+
+        for (int i = 0; i < centroids.size(); i++) {
+            int partition = i / centroidsPerPartition;
+            int originalCentroidId = centroids.get(i); // Keep original ID
+            partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(originalCentroidId);
+        }
+
+        System.err.println("Range partitioning complete:");
+        for (Map.Entry<Integer, List<Integer>> entry : partitionToCentroids.entrySet()) {
+            System.err.println("  Partition " + entry.getKey() + ": " + entry.getValue().size() + " centroids");
+        }
+
+        return partitionToCentroids;
+    }
+
+    /**
+     * Main processing flow: dummy data -> partitioning.
      * 
      * @param ctx Hyracks task context for file operations
+     * @return Map of centroid ID to file reference
      */
-    public void processVCTreePartitioningAndSorting(IHyracksTaskContext ctx) throws HyracksDataException {
-        System.err.println("=== VCTreePartitioningAndSorting: Starting main processing flow ===");
+    public Map<Integer, FileReference> processVCTreePartitioning(IHyracksTaskContext ctx) throws HyracksDataException {
+        System.err.println("=== VCTreePartitioning: Starting main processing flow ===");
 
         try {
-            // Step 1: Generate dummy data
-            System.err.println("Step 1: Generating dummy data (K=10)");
-            DummyData dummyData = getDummyValues();
+                    // Step 1: Generate dummy data
+                    System.err.println("Step 1: Generating dummy data (K=10)");
+                    getDummyValues();
 
-            // Step 2: Recursive grouping
-            System.err.println("Step 2: Starting recursive grouping");
+            // Step 2: Recursive partitioning
+            System.err.println("Step 2: Starting recursive partitioning");
             VCTreePartitioner partitioner = new VCTreePartitioner(ctx, 32, 32768);
-            partitioner.partitionData(dummyData, 10); // K=10
+            // partitioner.partitionData(dummyData, 10); // K=10 - FIXED: partitionData expects (int K, long estimatedDataSize)
+            partitioner.partitionData(10, 1000); // K=10, estimatedDataSize=1000
             Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
 
-            System.err.println("Grouping complete. Created " + centroidFiles.size() + " centroid files");
+            System.err.println("Partitioning complete. Created " + centroidFiles.size() + " centroid files");
 
-            // Step 3: Sort each centroid file
-            System.err.println("Step 3: Starting sorting phase");
-            VCTreeSorter sorter = new VCTreeSorter(ctx);
-            Map<Integer, FileReference> sortedFiles = new HashMap<>();
-
-            for (Map.Entry<Integer, FileReference> entry : centroidFiles.entrySet()) {
-                int centroidId = entry.getKey();
-                FileReference inputFile = entry.getValue();
-                FileReference sortedFile = sorter.sortCentroidFile(centroidId, inputFile);
-                sortedFiles.put(centroidId, sortedFile);
-                System.err.println("Sorted centroid " + centroidId + " to: " + sortedFile);
-            }
-
-            System.err.println("Sorting complete. Created " + sortedFiles.size() + " sorted files");
-
-            // Step 4: Cleanup
+            // Step 3: Cleanup
             partitioner.closeAllFiles();
-            sorter.cleanupIntermediateFiles();
 
-            System.err.println("=== VCTreePartitioningAndSorting: Processing complete ===");
+            System.err.println("=== VCTreePartitioning: Processing complete ===");
+
+            return centroidFiles;
 
         } catch (Exception e) {
-            System.err.println("ERROR: VCTreePartitioningAndSorting failed: " + e.getMessage());
+            System.err.println("ERROR: VCTreePartitioning failed: " + e.getMessage());
             e.printStackTrace();
             throw HyracksDataException.create(e);
         }
@@ -291,7 +320,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
         // Step 4: Apply recursive logic if needed
         int level = 0;
-        int maxLevels = 3; // Prevent infinite recursion
+        // Calculate max recursion depth based on memory budget approach
+        int maxLevels = (int) Math.ceil(Math.log(memoryBudget) / Math.log(2)); // log base 2
+        maxLevels = Math.max(2, Math.min(maxLevels, 10)); // reasonable bounds
 
         while (level < maxLevels && strategy.strategy.equals("GROUP_MULTIPLE_CENTROIDS")) {
             System.err.println("=== RECURSIVE LEVEL " + (level + 1) + " ===");
@@ -305,19 +336,37 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 break;
             }
 
-            // Apply SHAPIRO again on each large partition
+            // Apply SHAPIRO again on each large partition using range partitioning
             for (int partitionId = 0; partitionId < strategy.numRunFiles; partitionId++) {
                 List<Integer> partitionCentroids = strategy.partitionToCentroids.get(partitionId);
-                if (partitionCentroids.size() > memoryBudget) {
-                    System.err.println("Partition " + partitionId + " has " + partitionCentroids.size()
-                            + " centroids, sub-partitioning...");
+
+                // Check if this partition needs sub-partitioning using frame-based calculation
+                int bytesPerCentroid = 4 + (256 * 8); // centroidId + embedding = 2052 bytes
+                long partitionDataSize = partitionCentroids.size() * bytesPerCentroid;
+                long partitionFramesNeeded = (partitionDataSize + frameSize - 1) / frameSize;
+                double threshold = 0.6;
+
+                if (partitionFramesNeeded > (memoryBudget * threshold)) {
+                    System.err.println("Partition " + partitionId + " has " + partitionCentroids.size() + " centroids ("
+                            + partitionFramesNeeded + " frames), sub-partitioning...");
 
                     // Calculate sub-partitions for this partition
-                    int subPartitions = calculatePartitionsUsingShapiro(partitionCentroids.size(),
-                            inputDataBytesSize / strategy.numRunFiles, frameSize, memoryBudget);
+                    int subPartitions = calculatePartitionsUsingShapiro(partitionCentroids.size(), partitionDataSize,
+                            frameSize, memoryBudget);
+
+                    // Apply range partitioning to sub-partition the centroids
+                    Map<Integer, List<Integer>> subPartitionToCentroids =
+                            createRangePartitioning(partitionCentroids, subPartitions);
 
                     // Create sub-run files for this partition
                     runFileManager.createSubRunFiles(partitionId, subPartitions);
+
+                    // Update the strategy with sub-partitioned centroids
+                    strategy.partitionToCentroids.put(partitionId, subPartitionToCentroids.get(0));
+                    for (int subPart = 1; subPart < subPartitions; subPart++) {
+                        strategy.partitionToCentroids.put(strategy.numRunFiles + subPart - 1,
+                                subPartitionToCentroids.get(subPart));
+                    }
                 }
             }
 
@@ -421,11 +470,18 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         }
 
         public boolean checkSizeReduction(int centroidsPerPartition, int memoryBudget) {
-            // 80% size reduction rule (from Hybrid Hash Join)
-            double threshold = 0.8;
-            double currentRatio = (double) centroidsPerPartition / memoryBudget;
+            // Calculate actual memory usage for this partition
+            int bytesPerCentroid = 4 + (256 * 8); // centroidId + embedding = 2052 bytes
+            int frameSize = 32768; // 32KB configurable frame size
+            long partitionDataSize = centroidsPerPartition * bytesPerCentroid;
+            long partitionFramesNeeded = (partitionDataSize + frameSize - 1) / frameSize;
 
-            System.err.println("Size reduction check: ratio=" + currentRatio + ", threshold=" + threshold);
+            // 60% threshold for aggressive memory management
+            double threshold = 0.6;
+            double currentRatio = (double) partitionFramesNeeded / memoryBudget;
+
+            System.err.println("Size reduction check: framesNeeded=" + partitionFramesNeeded + ", memoryBudget="
+                    + memoryBudget + ", ratio=" + currentRatio + ", threshold=" + threshold);
 
             // If ratio is still high, needs more partitioning
             return currentRatio > threshold;
@@ -516,7 +572,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 tuple.level = 0; // All at level 0 for simplicity
                 tuple.clusterId = centroidId % 3; // Distribute across 3 clusters
                 tuple.centroidId = centroidId; // Same centroid ID for all tuples in this group
-                tuple.embedding = generateDummyEmbedding(128); // 128-dimensional vector
+                tuple.embedding = generateDummyEmbedding(256); // 256-dimensional vector for actual data
                 tuple.distance = Math.random() * 100.0; // Random distance between 0-100
                 dummyTuples.add(tuple);
             }
@@ -720,35 +776,37 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private Map<Integer, Integer> levelDistribution = null;
                 private Map<String, Map<Integer, Integer>> clusterDistribution = null;
                 private VCTreeStaticStructureBuilder structureCreator;
-                private MaterializerTaskState materializedData;
+                // private MaterializerTaskState materializedData;
 
                 @Override
                 public void open() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity OPENING ===");
                     try {
                         // Register permit state for coordination
-                        IterationPermitState permitState =
-                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-
-                        if (permitState == null) {
-                            java.util.concurrent.Semaphore permit = new java.util.concurrent.Semaphore(0);
-                            permitState = new IterationPermitState(ctx.getJobletContext().getJobId(),
-                                    new PartitionedUUID(permitUUID, partition), permit);
-                            ctx.setStateObject(permitState);
-                            System.err.println("✅ PERMIT STATE CREATED AND REGISTERED for UUID: " + permitUUID
-                                    + ", partition: " + partition);
-                        }
+                        //                        IterationPermitState permitState =
+                        //                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+                        //
+                        //                        if (permitState == null) {
+                        //                            java.util.concurrent.Semaphore permit = new java.util.concurrent.Semaphore(0);
+                        //                            permitState = new IterationPermitState(ctx.getJobletContext().getJobId(),
+                        //                                    new PartitionedUUID(permitUUID, partition), permit);
+                        //                            ctx.setStateObject(permitState);
+                        //                            System.err.println("✅ PERMIT STATE CREATED AND REGISTERED for UUID: " + permitUUID
+                        //                                    + ", partition: " + partition);
+                        //                        }
 
                         // Initialize materialized data state
-                        materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
-                                new PartitionedUUID(materializedDataUUID, partition));
-                        materializedData.open(ctx);
+                        //                        materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
+                        //                                new PartitionedUUID(materializedDataUUID, partition));
+                        //                        materializedData.open(ctx);
 
-                        // Initialize evaluators for extracting tuple fields
+                        // Initialize evaluators for extracting tuple fields from 4-field hierarchical format
+                        // Format: [treeLevel, centroidId, parentClusterId, embedding]
                         EvaluatorContext evalCtx = new EvaluatorContext(ctx);
-                        levelEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx);
-                        clusterIdEval = new ColumnAccessEvalFactory(1).createScalarEvaluator(evalCtx);
-                        centroidIdEval = new ColumnAccessEvalFactory(2).createScalarEvaluator(evalCtx);
+                        levelEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx);        // treeLevel
+                        centroidIdEval = new ColumnAccessEvalFactory(1).createScalarEvaluator(evalCtx);   // centroidId
+                        clusterIdEval = new ColumnAccessEvalFactory(2).createScalarEvaluator(evalCtx);    // parentClusterId
+                        // Field 3 is embedding - handled separately in convertToVCTreeBuilderFormat
 
                         // Initialize pointables for evaluator results
                         levelVal = new VoidPointable();
@@ -785,23 +843,23 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     }
 
                     // Store frame in materialized data
-                    materializedData.appendFrame(buffer);
+                    // materializedData.appendFrame(buffer);
                 }
 
                 private void processTuple(ITupleReference tuple) throws HyracksDataException {
                     try {
-                        // Extract tuple data for structure analysis
+                        // Extract tuple data for structure analysis from 4-field hierarchical format
+                        // Format: [treeLevel, centroidId, parentClusterId, embedding]
                         FrameTupleReference frameTuple = (FrameTupleReference) tuple;
-                        levelEval.evaluate(frameTuple, levelVal);
-                        clusterIdEval.evaluate(frameTuple, clusterIdVal);
-                        centroidIdEval.evaluate(frameTuple, centroidIdVal);
+                        levelEval.evaluate(frameTuple, levelVal);        // treeLevel
+                        centroidIdEval.evaluate(frameTuple, centroidIdVal);   // centroidId
+                        clusterIdEval.evaluate(frameTuple, clusterIdVal);     // parentClusterId
 
-                        int level = AInt32SerializerDeserializer.getInt(levelVal.getByteArray(),
-                                levelVal.getStartOffset() + 1);
-                        int clusterId = AInt32SerializerDeserializer.getInt(clusterIdVal.getByteArray(),
-                                clusterIdVal.getStartOffset() + 1);
-                        int centroidId = AInt32SerializerDeserializer.getInt(centroidIdVal.getByteArray(),
-                                centroidIdVal.getStartOffset() + 1);
+                        int level = IntegerPointable.getInteger(levelVal.getByteArray(), levelVal.getStartOffset());
+                        int centroidId = IntegerPointable.getInteger(centroidIdVal.getByteArray(),
+                                centroidIdVal.getStartOffset());
+                        int clusterId =
+                                IntegerPointable.getInteger(clusterIdVal.getByteArray(), clusterIdVal.getStartOffset());
 
                         // Debug: Log suspicious level values and filter them out
                         if (level < 0 || level > 100) {
@@ -836,19 +894,78 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     }
                 }
 
+                /**
+                 * Convert 4-field tuple [treeLevel, centroidId, parentClusterId, embedding] to 2-field tuple [centroidId, embedding]
+                 * for VCTreeStaticStructureBuilder, parsing embeddings using the same logic as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.
+                 */
+                private ITupleReference convertToVCTreeBuilderFormat(ITupleReference inputTuple)
+                        throws HyracksDataException {
+                    try {
+                        // Extract centroidId from field 1 (second field)
+                        int centroidId = IntegerPointable.getInteger(inputTuple.getFieldData(1), inputTuple.getFieldStart(1));
+
+                        // Extract embedding from field 3 (fourth field) using same logic as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
+                        byte[] embeddingData = inputTuple.getFieldData(3);
+                        int embeddingStart = inputTuple.getFieldStart(3);
+                        
+                        // Parse the embedding using ListAccessor (same as in HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor)
+                        ListAccessor listAccessor = new ListAccessor();
+                        listAccessor.reset(embeddingData, embeddingStart);
+                        
+                        // Extract double values from the AOrderedList
+                        double[] embedding = new double[listAccessor.size()];
+                        ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+                        VoidPointable tempVal = new VoidPointable();
+                        
+                        for (int i = 0; i < listAccessor.size(); i++) {
+                            listAccessor.getOrWriteItem(i, tempVal, storage);
+                            embedding[i] = extractNumericValue(tempVal);
+                        }
+
+                        if (embedding == null || embedding.length == 0) {
+                            System.err.println("WARNING: Failed to extract embedding from hierarchical tuple, skipping");
+                            throw new HyracksDataException("Failed to extract embedding from hierarchical tuple");
+                        }
+
+                        // Create 2-field tuple: [centroidId, embedding] - same format as test code
+                        org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder tupleBuilder =
+                                new org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder(2);
+                        ArrayTupleReference tupleRef = new ArrayTupleReference();
+
+                        // Create field serializers and values - use double array for full precision
+                        @SuppressWarnings("rawtypes")
+                        ISerializerDeserializer[] fieldSerdes =
+                                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                                        DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
+                        };
+                        Object[] fieldValues = new Object[] { centroidId, embedding };
+
+                        // Build the tuple using TupleUtils - same as test code
+                        TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
+
+                        return tupleRef;
+
+                    } catch (Exception e) {
+                        System.err.println("ERROR: Failed to convert tuple to VCTreeBuilder format: " + e.getMessage());
+                        e.printStackTrace();
+                        throw new HyracksDataException("Failed to convert tuple to VCTreeBuilder format", e);
+                    }
+                }
+
                 @Override
                 public void close() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity CLOSING ===");
                     System.err.println("Total tuples collected: " + tupleCount);
                     System.err.println("Frames accumulated: " + frameAccumulator.size());
 
-                    // Test partitioning and sorting with dummy data
+                    // Test partitioning with dummy data
                     try {
-                        System.err.println("=== TESTING PARTITIONING AND SORTING ===");
-                        processVCTreePartitioningAndSorting(ctx);
-                        System.err.println("=== PARTITIONING AND SORTING COMPLETE ===");
+                        System.err.println("=== TESTING PARTITIONING ===");
+                        Map<Integer, FileReference> centroidFiles = processVCTreePartitioning(ctx);
+                        System.err.println("=== PARTITIONING COMPLETE ===");
+                        System.err.println("Created " + centroidFiles.size() + " centroid files");
                     } catch (Exception e) {
-                        System.err.println("ERROR: Partitioning/sorting failed: " + e.getMessage());
+                        System.err.println("ERROR: Partitioning failed: " + e.getMessage());
                         e.printStackTrace();
                     }
 
@@ -859,10 +976,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
 
                     // Close materialized data
-                    if (materializedData != null) {
-                        materializedData.close();
-                        ctx.setStateObject(materializedData);
-                    }
+                    // if (materializedData != null) {
+                    //     materializedData.close();
+                    //     ctx.setStateObject(materializedData);
+                    // }
 
                     // Signal Branch 2 that structure creation is complete
                     try {
@@ -884,6 +1001,80 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== CreateStructureActivity COMPLETE ===");
                 }
 
+                /**
+                 * Build structure information from collected hierarchical data.
+                 * Creates the arrays needed by VCTreeStaticStructureBuilder.
+                 */
+                private StructureInfo buildStructureInfo() throws HyracksDataException {
+                    System.err.println("=== BUILDING STRUCTURE INFO FROM HIERARCHICAL DATA ===");
+                    
+                    List<Integer> clustersPerLevel = new ArrayList<>();
+                    List<List<Integer>> centroidsPerCluster = new ArrayList<>();
+                    
+                    if (levelDistribution == null || levelDistribution.isEmpty()) {
+                        System.err.println("ERROR: No level distribution found - cannot build structure without data");
+                        throw HyracksDataException.create(new RuntimeException("No hierarchical data available to build structure"));
+                    }
+                    
+                    // Find max level
+                    int maxLevel = levelDistribution.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+                    System.err.println("Found " + (maxLevel + 1) + " levels in hierarchical structure");
+                    System.err.println("Level distribution: " + levelDistribution);
+                    System.err.println("Cluster distribution: " + clusterDistribution);
+                    
+                    // Process each level
+                    for (int level = 0; level <= maxLevel; level++) {
+                        String levelKey = "Level_" + level;
+                        Map<Integer, Integer> levelClusters = clusterDistribution.get(levelKey);
+                        
+                        if (levelClusters != null && !levelClusters.isEmpty()) {
+                            // For hierarchical structure, we need to determine the actual clustering structure
+                            // Level 0: All centroids form 1 cluster (root level)
+                            // Level 1+: Centroids are grouped by their parent cluster IDs
+                            
+                            int clusterCount;
+                            List<Integer> centroidsInClusters = new ArrayList<>();
+                            
+                            if (level == 0) {
+                                // Root level: all centroids form 1 cluster
+                                clusterCount = 1;
+                                int totalCentroids = levelClusters.values().stream().mapToInt(Integer::intValue).sum();
+                                centroidsInClusters.add(totalCentroids);
+                                System.err.println("Level " + level + " (root): 1 cluster with " + totalCentroids + " centroids");
+                            } else {
+                                // Interior levels: group by parent cluster ID
+                                clusterCount = levelClusters.size();
+                                
+                                // Sort cluster IDs to ensure consistent ordering
+                                List<Integer> sortedClusterIds = new ArrayList<>(levelClusters.keySet());
+                                sortedClusterIds.sort(Integer::compareTo);
+                                
+                                for (int clusterId : sortedClusterIds) {
+                                    int centroidCount = levelClusters.get(clusterId);
+                                    centroidsInClusters.add(centroidCount);
+                                    System.err.println("Level " + level + ", Cluster " + clusterId + ": " + centroidCount + " centroids");
+                                }
+                                System.err.println("Level " + level + ": " + clusterCount + " clusters, centroids per cluster: " + centroidsInClusters);
+                            }
+                            
+                            clustersPerLevel.add(clusterCount);
+                            centroidsPerCluster.add(centroidsInClusters);
+                        } else {
+                            // Empty level
+                            clustersPerLevel.add(0);
+                            centroidsPerCluster.add(new ArrayList<>());
+                            System.err.println("Level " + level + ": 0 clusters (no data)");
+                        }
+                    }
+                    
+                    System.err.println("=== STRUCTURE INFO COMPLETE ===");
+                    System.err.println("clustersPerLevel: " + clustersPerLevel);
+                    System.err.println("centroidsPerCluster: " + centroidsPerCluster);
+                    
+                    return new StructureInfo(clustersPerLevel, centroidsPerCluster);
+                }
+                
+
                 private void createStaticStructure() throws HyracksDataException {
                     System.err.println("=== CREATING STATIC STRUCTURE WITH VCTreeStaticStructureCreator ===");
                     System.err.println("Processing " + frameAccumulator.size() + " accumulated frames");
@@ -892,65 +1083,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     try {
                         // Analyze collected data to determine structure
                         System.err.println("Analyzing collected data to determine hierarchical structure...");
-                        List<Integer> clustersPerLevel = new ArrayList<>();
-                        List<List<Integer>> centroidsPerCluster = new ArrayList<>();
+                        StructureInfo structureInfo = buildStructureInfo();
+                        List<Integer> clustersPerLevel = structureInfo.clustersPerLevel;
+                        List<List<Integer>> centroidsPerCluster = structureInfo.centroidsPerCluster;
 
-                        if (levelDistribution != null && !levelDistribution.isEmpty()) {
-                            int maxLevel =
-                                    levelDistribution.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
-                            System.err.println("🔍 DEBUG: Raw maxLevel from levelDistribution: " + maxLevel);
-                            System.err.println("🔍 DEBUG: levelDistribution keys: " + levelDistribution.keySet());
-
-                            // Safety check: limit maxLevel to prevent infinite loops
-                            if (maxLevel > 1000) {
-                                System.err.println("❌ WARNING: maxLevel is too large (" + maxLevel
-                                        + "), limiting to 10 to prevent infinite loop");
-                                maxLevel = 10;
-                            }
-
-                            System.err.println("Found " + maxLevel + " levels in the hierarchical structure");
-
-                            int loopCounter = 0;
-                            for (int level = 0; level <= maxLevel; level++) {
-                                loopCounter++;
-                                System.err.println("🔍 DEBUG: Processing level " + level + " (loop iteration "
-                                        + loopCounter + ")");
-
-                                // Safety check to prevent infinite loops
-                                if (loopCounter > 100) {
-                                    System.err.println(
-                                            "❌ CRITICAL: Loop counter exceeded 100, breaking to prevent infinite loop");
-                                    break;
-                                }
-
-                                String levelKey = "Level_" + level;
-                                Map<Integer, Integer> levelClusters = clusterDistribution.get(levelKey);
-
-                                if (levelClusters != null) {
-                                    int clusterCount = levelClusters.size();
-                                    clustersPerLevel.add(clusterCount);
-                                    System.err.println("Level " + level + ": " + clusterCount + " clusters");
-
-                                    List<Integer> centroidsInClusters = new ArrayList<>();
-                                    for (int clusterId : levelClusters.keySet()) {
-                                        int centroidCount = levelClusters.get(clusterId);
-                                        centroidsInClusters.add(centroidCount);
-                                        System.err.println(
-                                                "  Cluster " + clusterId + ": " + centroidCount + " centroids");
-                                    }
-                                    centroidsPerCluster.add(centroidsInClusters);
-                                } else {
-                                    clustersPerLevel.add(0);
-                                    centroidsPerCluster.add(new ArrayList<>());
-                                    System.err.println("Level " + level + ": 0 clusters (no data)");
-                                }
-                            }
-                        } else {
-                            // Default structure if no data collected
-                            System.err.println("No level distribution found, using default structure");
-                            clustersPerLevel.add(1);
-                            centroidsPerCluster.add(List.of(1));
-                        }
 
                         // Get infrastructure
                         INcApplicationContext appCtx = (INcApplicationContext) ctx.getJobletContext()
@@ -967,66 +1103,87 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("Index path: " + indexPathRef);
 
                         // Create static structure file path
-                        FileReference staticStructureFile = indexPathRef.getChild("static_structure.vctree");
+                        FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
                         System.err.println("Static structure file path: " + staticStructureFile);
 
-                        // Create the file (using unique timestamp, so no conflicts expected)
-                        System.err.println("Creating static structure file...");
+                        // Create or open the static structure file with proper coordination
+                        System.err.println("Creating/opening static structure file...");
                         int fileId;
                         try {
-                            fileId = bufferCache.createFile(staticStructureFile);
-                            System.err.println("Created file with ID: " + fileId);
-
-                            // Open the file to make it available in buffer cache
-                            bufferCache.openFile(fileId);
-                            System.err.println("Opened file with ID: " + fileId);
+                            // Check if file already exists in the file system
+                            IIOManager ioManager = appCtx.getIoManager();
+                            if (ioManager.exists(staticStructureFile)) {
+                                System.err.println("Static structure file already exists, opening it...");
+                                fileId = bufferCache.openFile(staticStructureFile);
+                            } else {
+                                System.err.println("Static structure file doesn't exist, creating it...");
+                                fileId = bufferCache.createFile(staticStructureFile);
+                            }
+                            System.err.println("File ready with ID: " + fileId);
                         } catch (Exception e) {
-                            System.err.println("ERROR: Failed to create static structure file: " + e.getMessage());
+                            System.err.println("ERROR: Failed to create/open static structure file: " + e.getMessage());
                             throw HyracksDataException.create(e);
                         }
 
-                        // Create tuple writers with proper type traits
-                        // Tuple format: [centroidId (int), embedding (float[]), childPageId (int)]
-                        ITypeTraits[] typeTraits = new ITypeTraits[3];
-                        typeTraits[0] = IntegerPointable.TYPE_TRAITS; // centroidId
-                        typeTraits[1] = VarLengthTypeTrait.INSTANCE; // embedding (float array) - variable length
-                        typeTraits[2] = IntegerPointable.TYPE_TRAITS; // childPageId
+                        // Create specific type traits for different frame types following test pattern
+                        // Cluster tuples (Interior/Leaf): <cid, centroid, pointer>
+                        ITypeTraits[] clusterTypeTraits = new ITypeTraits[3];
+                        clusterTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID
+                        clusterTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array)
+                        clusterTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer
 
-                        VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
-                                new VectorClusteringLeafTupleWriterFactory(typeTraits, null, null);
+                        // Metadata tuples: <max_distance, page_pointer>
+                        ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];
+                        metadataTypeTraits[0] = FloatPointable.TYPE_TRAITS; // max distance
+                        metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer
+
+                        // Data tuples: <distance, cosine_similarity, vector, primary_key>
+                        ITypeTraits[] dataTypeTraits = new ITypeTraits[4];
+                        dataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // distance
+                        dataTypeTraits[1] = DoublePointable.TYPE_TRAITS; // cosine similarity
+                        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector
+                        dataTypeTraits[3] = VarLengthTypeTrait.INSTANCE; // primary key
+
+                        // Create tuple writer factories for each frame type
                         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
-                                new VectorClusteringInteriorTupleWriterFactory(typeTraits, null, null);
+                                new VectorClusteringInteriorTupleWriterFactory(clusterTypeTraits, null, null);
+                        VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
+                                new VectorClusteringLeafTupleWriterFactory(clusterTypeTraits, null, null);
+                        VectorClusteringMetadataTupleWriterFactory metadataTupleWriterFactory =
+                                new VectorClusteringMetadataTupleWriterFactory(metadataTypeTraits, null, null);
+                        VectorClusteringDataTupleWriterFactory dataTupleWriterFactory =
+                                new VectorClusteringDataTupleWriterFactory(dataTypeTraits, null, null);
 
-                        // Create frames with proper tuple writers
-                        VectorClusteringLeafFrameFactory leafFrameFactory =
-                                new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), 128);
-                        VectorClusteringInteriorFrameFactory interiorFrameFactory =
-                                new VectorClusteringInteriorFrameFactory(interiorTupleWriterFactory.createTupleWriter(),
-                                        128);
-
-                        // Create data frame factory (needed for VectorClusteringTree)
-                        VectorClusteringDataFrameFactory dataFrameFactory =
-                                new VectorClusteringDataFrameFactory(leafTupleWriterFactory, 128); // 128 dimensions
-
-                        // Create metadata frame factory
-                        VectorClusteringMetadataFrameFactory metadataFrameFactory =
-                                new VectorClusteringMetadataFrameFactory(leafTupleWriterFactory.createTupleWriter(),
-                                        128);
+                        // Create frame factories with proper tuple writers
+                        // Use 256 dimensions for actual data - need larger frame size
+                        int vectorDimensions = 784;
+                        ITreeIndexFrameFactory interiorFrameFactory = new VectorClusteringInteriorFrameFactory(
+                                interiorTupleWriterFactory.createTupleWriter(), vectorDimensions);
+                        ITreeIndexFrameFactory leafFrameFactory = new VectorClusteringLeafFrameFactory(
+                                leafTupleWriterFactory.createTupleWriter(), vectorDimensions);
+                        ITreeIndexFrameFactory metadataFrameFactory = new VectorClusteringMetadataFrameFactory(
+                                metadataTupleWriterFactory.createTupleWriter(), vectorDimensions);
+                        ITreeIndexFrameFactory dataFrameFactory =
+                                new VectorClusteringDataFrameFactory(dataTupleWriterFactory, vectorDimensions);
 
                         // Create page manager
                         AppendOnlyLinkedMetadataPageManager pageManager =
                                 new AppendOnlyLinkedMetadataPageManager(bufferCache, new LIFOMetaDataFrameFactory());
 
-                        // Create comparator factories (needed for VectorClusteringTree)
-                        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[3];
-                        cmpFactories[0] = IntegerBinaryComparatorFactory.INSTANCE; // centroidId
-                        cmpFactories[1] = RawBinaryComparatorFactory.INSTANCE; // embedding
-                        cmpFactories[2] = IntegerBinaryComparatorFactory.INSTANCE; // childPageId
+                        // Create comparator factories for DATA tuples (4 fields)
+                        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[4];
+                        cmpFactories[0] = DoubleBinaryComparatorFactory.INSTANCE; // distance
+                        cmpFactories[1] = DoubleBinaryComparatorFactory.INSTANCE; // cosine similarity
+                        cmpFactories[2] = RawBinaryComparatorFactory.INSTANCE; // vector
+                        cmpFactories[3] = RawBinaryComparatorFactory.INSTANCE; // primary key
 
-                        // Create VectorClusteringTree
+                        // Create VectorClusteringTree with correct parameters
+                        // LSMVCTree
+
+
                         VectorClusteringTree vectorTree = new VectorClusteringTree(bufferCache, pageManager,
                                 interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory,
-                                cmpFactories, 3, 128, staticStructureFile);
+                                cmpFactories, 4, vectorDimensions, staticStructureFile);
 
                         // Activate the tree (this makes the file available for operations)
                         // Note: We skip create() since we already created and opened the file
@@ -1035,11 +1192,15 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         System.err.println("VectorClusteringTree activated successfully");
 
                         // Create static structure builder using the tree's factory method
+                        // Reduce maxEntriesPerPage for 256-dimensional vectors to fit in frame
+                        int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10); // Limit to 10 entries for large vectors
                         System.err.println(
                                 "Creating VCTreeStaticStructureBuilder with " + clustersPerLevel.size() + " levels...");
+                        System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
+                                + adjustedMaxEntriesPerPage + " for 256-dimensional vectors");
                         structureCreator =
                                 vectorTree.createStaticStructureBuilder(clustersPerLevel.size(), clustersPerLevel,
-                                        centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
+                                        centroidsPerCluster, adjustedMaxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
 
                         System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                         // Process all accumulated tuples
@@ -1048,11 +1209,50 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             FrameTupleAccessor frameFta = new FrameTupleAccessor(outRecDescs[0]);
                             frameFta.reset(frameBuffer);
 
+                            System.err.println("Frame has " + frameFta.getTupleCount() + " tuples");
+
                             for (int i = 0; i < frameFta.getTupleCount(); i++) {
                                 tuple.reset(frameFta, i);
-                                structureCreator.add(tuple);
+
+                                // Debug the tuple being processed
+                                System.err.println(
+                                        "=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
+                                System.err.println("Input tuple field count: " + tuple.getFieldCount());
+                                for (int fieldIndex = 0; fieldIndex < tuple.getFieldCount(); fieldIndex++) {
+                                    int fieldLength = tuple.getFieldLength(fieldIndex);
+                                    int fieldStart = tuple.getFieldStart(fieldIndex);
+                                    System.err.println("Field " + fieldIndex + ": length=" + fieldLength + ", start="
+                                            + fieldStart);
+
+                                    // Show first few bytes of each field
+                                    if (fieldLength > 0) {
+                                        byte[] fieldData = tuple.getFieldData(fieldIndex);
+                                        int bytesToShow = Math.min(16, fieldLength);
+                                        System.err.print(
+                                                "Field " + fieldIndex + " data (first " + bytesToShow + " bytes): ");
+                                        for (int j = 0; j < bytesToShow; j++) {
+                                            System.err.printf("%02X ", fieldData[fieldStart + j] & 0xFF);
+                                        }
+                                        System.err.println();
+                                    }
+                                }
+
+                                // Convert 4-field tuple to 3-field tuple for VCTreeStaticStructureBuilder
+                                ITupleReference convertedTuple = convertToVCTreeBuilderFormat(tuple);
+                                System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
+
+                                structureCreator.add(convertedTuple);
                                 totalTuplesProcessed++;
+
+                                // Only show first few tuples to avoid spam
+                                if (totalTuplesProcessed >= 3) {
+                                    System.err.println("... (showing first 3 tuples only)");
+                                    break;
+                                }
                             }
+
+                            // Only process first frame to avoid spam
+                            // Process all tuples for static structure creation
                         }
                         System.err
                                 .println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
@@ -1061,6 +1261,36 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         // Finalize the structure
                         structureCreator.end();
                         System.err.println("✅ STATIC STRUCTURE FINALIZED SUCCESSFULLY");
+
+                        // Create navigator for static structure access
+                        System.err.println("Creating VCTreeStaticStructureNavigator...");
+                        VCTreeStaticStructureNavigator navigator = new VCTreeStaticStructureNavigator(bufferCache,
+                                fileId, interiorFrameFactory, leafFrameFactory);
+
+                        // Test the navigator with a sample vector
+                        System.err.println("Testing navigator with sample vector...");
+                        double[] testVector = new double[vectorDimensions];
+                        for (int i = 0; i < vectorDimensions; i++) {
+                            testVector[i] = 0d;
+                        }
+
+                        try {
+                            ClusterSearchResult result = navigator.findClosestCentroid(testVector);
+                            System.err.println("✅ NAVIGATOR TEST SUCCESSFUL");
+                            System.err.println("   Closest cluster: pageId=" + result.leafPageId + ", clusterIndex="
+                                    + result.clusterIndex + ", distance=" + result.distance);
+                        } catch (Exception e) {
+                            System.err.println("WARNING: Navigator test failed: " + e.getMessage());
+                        }
+
+                        // Force all data to disk before closing
+                        System.err.println("Forcing static structure data to disk...");
+                        try {
+                            bufferCache.force(fileId, true);
+                            System.err.println("✅ STATIC STRUCTURE DATA FORCED TO DISK SUCCESSFULLY");
+                        } catch (Exception e) {
+                            System.err.println("WARNING: Failed to force data to disk: " + e.getMessage());
+                        }
 
                         // Close the file
                         System.err.println("Closing static structure file...");
@@ -1111,13 +1341,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         }
                     }
 
-                    if (materializedData != null) {
-                        try {
-                            materializedData.close();
-                        } catch (Exception e) {
-                            System.err.println("ERROR: Failed to close materialized data: " + e.getMessage());
-                        }
-                    }
+                    // if (materializedData != null) {
+                    //     try {
+                    //         materializedData.close();
+                    //     } catch (Exception e) {
+                    //         System.err.println("ERROR: Failed to close materialized data: " + e.getMessage());
+                    //     }
+                    // }
                     System.err.println("=== CreateStructureActivity FAILED ===");
                 }
             };
@@ -1211,4 +1441,42 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
             };
         }
     }
+
+    /**
+     * Helper class to hold structure information for VCTreeStaticStructureBuilder.
+     */
+    private static class StructureInfo {
+        public final List<Integer> clustersPerLevel;
+        public final List<List<Integer>> centroidsPerCluster;
+        
+        public StructureInfo(List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster) {
+            this.clustersPerLevel = clustersPerLevel;
+            this.centroidsPerCluster = centroidsPerCluster;
+        }
+    }
+
+    /**
+     * Extracts numeric value from a pointable (helper method for parsing embeddings).
+     * Same logic as in HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.
+     */
+    private static double extractNumericValue(IPointable pointable) throws HyracksDataException {
+        byte[] data = pointable.getByteArray();
+        int start = pointable.getStartOffset();
+        
+        ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[start]);
+        
+        switch (typeTag) {
+            case DOUBLE:
+                return DoublePointable.getDouble(data, start + 1);
+            case FLOAT:
+                return FloatPointable.getFloat(data, start + 1);
+            case INTEGER:
+                return IntegerPointable.getInteger(data, start + 1);
+            case BIGINT:
+                return LongPointable.getLong(data, start + 1);
+            default:
+                throw new HyracksDataException("Unsupported numeric type: " + typeTag);
+        }
+    }
+
 }

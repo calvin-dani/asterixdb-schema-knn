@@ -223,6 +223,13 @@ public abstract class SecondaryIndexOperationsHelper implements ISecondaryIndexO
     public abstract JobSpecification buildLoadingJobSpec() throws AlgebricksException;
 
     @Override
+    public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
+        // Default implementation - only VECTOR indexes support static structure creation
+        throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, sourceLoc,
+                "Static structure creation not supported for index type: " + index.getIndexType());
+    }
+
+    @Override
     public abstract JobSpecification buildCompactJobSpec() throws AlgebricksException;
 
     @Override

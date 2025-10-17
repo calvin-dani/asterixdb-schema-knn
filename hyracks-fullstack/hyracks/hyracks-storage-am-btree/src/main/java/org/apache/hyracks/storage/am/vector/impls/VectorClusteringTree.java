@@ -50,6 +50,7 @@ import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -1068,57 +1069,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
 
-        // Start from root page
-        int currentPageId = rootPage;
-        ClusterSearchResult bestResult = null;
-        int loopCounter = 0; // Add loop counter to detect infinite loops
-
-        // Traverse from root to leaf
-        while (true) {
-            loopCounter++;
-            LOGGER.debug("Loop iteration {}, currentPageId={}", loopCounter, currentPageId);
-            if (loopCounter > 10) { // Safety check to prevent infinite loops
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Infinite loop detected in tree traversal");
-            }
-
-            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), currentPageId));
-
-            LOGGER.debug("Pinned page for pageId={}", currentPageId);
-
-            try {
-                page.acquireReadLatch();
-
-                // Check if this is a leaf page
-                ctx.getLeafFrame().setPage(page);
-                boolean isLeaf = ctx.getLeafFrame().isLeaf();
-                LOGGER.debug("Page {} isLeaf={}", currentPageId, isLeaf);
-
-                if (isLeaf) {
-                    // Leaf level - find closest centroid across all overflow pages
-                    bestResult = findClosestCentroidInLeafCluster(currentPageId, queryVector, ctx);
-                    break; // Found leaf level result
-
-                } else {
-                    // Interior level - find closest centroid across all overflow pages and descend
-                    int nextPageId = findClosestCentroidInInteriorCluster(currentPageId, queryVector, ctx);
-                    if (nextPageId == -1) {
-                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
-                                "No valid centroid found in interior cluster");
-                    }
-                    currentPageId = nextPageId;
-                }
-
-            } finally {
-                page.releaseReadLatch();
-                bufferCache.unpin(page);
-            }
-        }
-
-        if (bestResult == null) {
-            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest cluster found");
-        }
-
-        return bestResult;
+        // Use the common navigation logic from VCTreeNavigationUtils
+        return VCTreeNavigationUtils.findClosestCentroid(bufferCache, getFileId(), rootPage, getInteriorFrameFactory(),
+                getLeafFrameFactory(), queryVector);
     }
 
     /**

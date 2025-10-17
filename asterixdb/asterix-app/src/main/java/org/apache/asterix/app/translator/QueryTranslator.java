@@ -2025,6 +2025,69 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             }
             // #. add a new index with PendingAddOp
             MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+
+            // Three-job pattern for vector indexes (Job 2 commented out - not implemented yet)
+            if (index.getIndexType() == IndexType.VECTOR) {
+                // VECTOR INDEX: Three Jobs
+                System.err.println("=== EXECUTING THREE JOBS FOR VECTOR INDEX ===");
+
+                // JOB 1: Create empty index files
+                System.err.println("=== JOB 1: Creating empty index files ===");
+                spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
+                if (spec == null) {
+                    throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                            "Failed to create job spec for creating index '" + ds.getDatasetName() + "."
+                                    + index.getIndexName() + "'");
+                }
+                beforeTxnCommit(metadataProvider, creator, entityDetails);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                progress = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+                runJob(hcc, spec, jobFlags);
+
+                // Flush dataset
+                if (ds.getDatasetType() == DatasetType.INTERNAL) {
+                    FlushDatasetUtil.flushDataset(hcc, metadataProvider, index.getDatabaseName(),
+                            index.getDataverseName(), index.getDatasetName());
+                }
+
+                // JOB 2: Create static structure
+                System.err.println("=== JOB 2: Creating static structure ===");
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                spec = IndexUtil.buildSecondaryIndexStaticStructureJobSpec(ds, index, metadataProvider, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                runJob(hcc, spec, jobFlags);
+
+                // JOB 3: Load data into index (simplified loading job - no K-means or structure creation)
+                System.err.println("=== JOB 3: Loading data into index (simplified) ===");
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+                spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, index, metadataProvider, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                runJob(hcc, spec, jobFlags);
+
+                // Final cleanup
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+                // Add another new index with PendingNoOp after deleting the index with PendingAddOp
+                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(), index.getDatabaseName(),
+                        index.getDataverseName(), index.getDatasetName(), index.getIndexName());
+                index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+                MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+
+                return; // Exit early for vector indexes
+            }
+
             // #. prepare to create the index artifact in NC.
             spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
             if (spec == null) {

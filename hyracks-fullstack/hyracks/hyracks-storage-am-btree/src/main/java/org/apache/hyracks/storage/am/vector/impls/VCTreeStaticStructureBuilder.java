@@ -85,7 +85,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             this.centroidsPerCluster.add(new ArrayList<>(levelCentroids));
         }
 
-        this.currentLevel = 0; // Start from root level (level 0)
+        this.currentLevel = numLevels - 1; // Start from root level (highest level)
         this.currentClusterInLevel = 0;
         this.currentCentroidInCluster = 0;
         this.entriesInCurrentPage = 0;
@@ -151,21 +151,33 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
+        System.err.println("=== VCTreeStaticStructureBuilder.add ===");
+        System.err.println("Input tuple field count: " + tuple.getFieldCount());
+        for (int i = 0; i < tuple.getFieldCount(); i++) {
+            System.err.println("  Field " + i + ": length=" + tuple.getFieldLength(i));
+        }
+        
         // Compute child page ID mathematically
         int childPageId = determineChildPageId();
+        System.err.println("Child page ID: " + childPageId);
 
         // Create entry tuple: <centroid_id, embedding, child_page_id>
+        System.err.println("Calling createEntryTuple...");
         ITupleReference entryTuple = createEntryTuple(tuple, childPageId);
+        System.err.println("createEntryTuple completed successfully");
 
         // Check if current page has space
         if (entriesInCurrentPage >= maxEntriesPerPage) {
             // Create overflow page for same cluster
+            System.err.println("Creating overflow page...");
             createOverflowPage();
         }
 
         // Insert entry into current page
+        System.err.println("Inserting entry into current page...");
         ((IVectorClusteringFrame) currentFrame).insertSorted(entryTuple);
         entriesInCurrentPage++;
+        System.err.println("Entry inserted successfully. Total entries in current page: " + entriesInCurrentPage);
 
         // Advance position in structure
         advancePosition();
@@ -225,7 +237,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     private ITupleReference createEntryTuple(ITupleReference tuple, int childPageId) throws HyracksDataException {
         ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[2];
         fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
-        fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
+        fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Use double array for full precision
 
         // Deserialize the tuple using the proper TupleUtils method
         Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
@@ -243,7 +255,51 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
                             DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
                     centroidId, embedding, childPageId);
         } catch (Exception e) {
+            System.err.println("ERROR creating entry tuple: " + e.getMessage());
+            e.printStackTrace();
             throw new HyracksDataException("Failed to create entry tuple", e);
+        }
+    }
+
+    /**
+     * Extract embedding vector from tuple field using TupleUtils.deserializeTuple with proper field serializers.
+     * Expects 3-field tuple format: [centroidId, embedding, childPageId]
+     */
+    private double[] extractEmbeddingFromTuple(ITupleReference tuple, int fieldIndex) throws HyracksDataException {
+        try {
+            System.err.println("=== EXTRACTING EMBEDDING FROM FIELD " + fieldIndex + " ===");
+            System.err.println("Field data length: " + tuple.getFieldLength(fieldIndex));
+            System.err.println("Field start offset: " + tuple.getFieldStart(fieldIndex));
+            
+            // The input tuple has 3 fields: [centroidId, embedding, childPageId]
+            // We need to deserialize the entire tuple to get the embedding from field 1
+            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
+            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // centroidId
+            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // embedding
+            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // childPageId
+            
+            // Deserialize the tuple using the proper TupleUtils method
+            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+            
+            // Extract the embedding from field 1 (index 1)
+            double[] embedding = (double[]) fieldValues[1];
+            
+            if (embedding == null || embedding.length == 0) {
+                System.err.println("WARNING: Failed to extract embedding from field " + fieldIndex + ", returning empty array");
+                return new double[0];
+            }
+            
+            System.err.println("Successfully extracted embedding with " + embedding.length + " dimensions");
+            if (embedding.length > 0) {
+                System.err.println("First few values: " + Arrays.toString(Arrays.copyOfRange(embedding, 0, Math.min(5, embedding.length))));
+            }
+            
+            return embedding;
+            
+        } catch (Exception e) {
+            System.err.println("ERROR extracting embedding from field " + fieldIndex + ": " + e.getMessage());
+            e.printStackTrace();
+            return new double[0];
         }
     }
 
@@ -261,15 +317,15 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         currentPage = bufferCache.confiscatePage(dpid);
 
         // Determine frame type based on current level
-        if (currentLevel == numLevels - 1) {
-            // Leaf level
+        if (currentLevel == 0) {
+            // Leaf level (level 0)
             currentFrame = leafFrame;
             leafFrame.setPage(currentPage);
             /* TODO : verify leaf level should be more elegant */
             leafFrame.initBuffer((byte) 0);
             leafFrame.setLevel((byte) 0);
         } else {
-            // Interior/root level
+            // Interior/root level (level > 0)
             currentFrame = interiorFrame;
             interiorFrame.setPage(currentPage);
             interiorFrame.initBuffer((byte) 0);
@@ -292,7 +348,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         int overflowPageId = freePageManager.takePage(metaFrame);
 
         // Set next page pointer in current page
-        if (currentLevel == numLevels - 1) {
+        if (currentLevel == 0) {
             // Leaf page - set next leaf pointer
             leafFrame.setNextLeaf(overflowPageId);
             leafFrame.setOverflowFlagBit(true);
@@ -322,11 +378,11 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
             // Check if we finished current level
             if (currentClusterInLevel >= clustersPerLevel.get(currentLevel)) {
-                // Move to next level
-                currentLevel++;
+                // Move to next level (decrement since we start from highest level)
+                currentLevel--;
                 currentClusterInLevel = 0;
 
-                if (currentLevel < numLevels) {
+                if (currentLevel >= 0) {
                     LOGGER.debug("Moving to level {}", currentLevel);
                     // Create first page of new level
                     createNewPage(computeCurrentClusterPageId());
@@ -359,11 +415,42 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
+        // Write existing metadata
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
                 LongPointable.FACTORY.createPointable(totalCentroidsUpToLevel[numLevels - 1]));
+
+        // Write root page ID (always 0 for VCTreeStaticStructureBuilder)
+        metaFrame.put(new MutableArrayValueReference("root_page_id".getBytes()),
+                LongPointable.FACTORY.createPointable(0));
+
+        // Write structure configuration for navigator
+        writeStructureMetadata();
+
         super.end();
+    }
+
+    /**
+     * Write structure metadata for navigator use.
+     */
+    private void writeStructureMetadata() throws HyracksDataException {
+        // Write number of levels
+        metaFrame.put(new MutableArrayValueReference("num_levels".getBytes()),
+                LongPointable.FACTORY.createPointable(numLevels));
+
+        // Write clusters per level as comma-separated string
+        StringBuilder clustersPerLevelStr = new StringBuilder();
+        for (int i = 0; i < clustersPerLevel.size(); i++) {
+            if (i > 0)
+                clustersPerLevelStr.append(",");
+            clustersPerLevelStr.append(clustersPerLevel.get(i));
+        }
+        metaFrame.put(new MutableArrayValueReference("clusters_per_level".getBytes()),
+                LongPointable.FACTORY.createPointable(clustersPerLevelStr.toString().hashCode()));
+
+        LOGGER.debug("Wrote structure metadata: numLevels={}, clustersPerLevel={}", numLevels,
+                clustersPerLevelStr.toString());
     }
 
     @Override

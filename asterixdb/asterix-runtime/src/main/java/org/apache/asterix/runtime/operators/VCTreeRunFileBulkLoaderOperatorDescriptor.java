@@ -54,6 +54,7 @@ import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory
 public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
+    private static final int VECTOR_DIMENSION = 256;
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final int maxEntriesPerPage;
     private final float fillFactor;
@@ -298,7 +299,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
             try {
                 // For now, create placeholder embedding
                 // In real implementation, extract actual embedding from tuple fields
-                double[] embedding = new double[128]; // Standard embedding size
+                double[] embedding = new double[VECTOR_DIMENSION]; // 256-dimensional embedding
                 for (int i = 0; i < embedding.length; i++) {
                     embedding[i] = Math.random() * 2 - 1; // Random values between -1 and 1
                 }
@@ -404,7 +405,7 @@ public class VCTreeRunFileBulkLoaderOperatorDescriptor extends AbstractSingleAct
         private double[] extractCentroidFromPage(VCTreeStaticStructureReader.StaticStructurePage page, int index) {
             // For now, create placeholder embedding
             // In real implementation, deserialize actual embedding from page data
-            double[] embedding = new double[128];
+            double[] embedding = new double[VECTOR_DIMENSION];
             for (int i = 0; i < embedding.length; i++) {
                 embedding[i] = Math.sin(page.pageId * 0.1 + index * 0.01 + i * 0.001) * 0.5;
             }
