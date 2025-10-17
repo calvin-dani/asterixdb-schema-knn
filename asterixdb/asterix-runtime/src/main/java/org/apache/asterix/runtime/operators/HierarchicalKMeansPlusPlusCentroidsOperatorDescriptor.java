@@ -22,6 +22,8 @@ import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 import static org.apache.asterix.runtime.utils.VectorDistanceArrCalculation.euclidean_squared;
 
+import java.io.DataInput;
+import java.io.DataOutput;
 import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
@@ -52,6 +54,7 @@ import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
@@ -65,6 +68,7 @@ import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDese
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
 import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
+import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
@@ -182,6 +186,41 @@ class DotProductDistanceFunction implements DistanceFunction, Serializable {
 public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
 
     /**
+     * Simple state class to pass tuple count between activities.
+     */
+    private static class TupleCountState extends AbstractStateObject {
+        private static final long serialVersionUID = 1L;
+        private int totalTupleCount;
+
+        public TupleCountState(JobId jobId, PartitionedUUID objectId) {
+            super(jobId, objectId);
+            this.totalTupleCount = 0;
+        }
+
+        public int getTotalTupleCount() {
+            return totalTupleCount;
+        }
+
+        public void setTotalTupleCount(int totalTupleCount) {
+            this.totalTupleCount = totalTupleCount;
+        }
+
+        public void addTupleCount(int count) {
+            this.totalTupleCount += count;
+        }
+
+        @Override
+        public void toBytes(DataOutput out) throws IOException {
+            out.writeInt(totalTupleCount);
+        }
+
+        @Override
+        public void fromBytes(DataInput in) throws IOException {
+            totalTupleCount = in.readInt();
+        }
+    }
+
+    /**
      * Data structure to hold hierarchical clustering results for VCTreeStaticStructureCreator.
      */
     private static class HierarchicalClusterStructure {
@@ -252,7 +291,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
 
     private final UUID sampleUUID;
-    private final UUID centroidsUUID;
+    private final UUID tupleCountUUID;
     private final UUID materializedDataUUID;
 
     // Configuration parameters for hierarchical clustering
@@ -286,7 +325,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     }
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
-            RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID centroidsUUID,
+            RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (level, clusterId, centroidId, embedding)
@@ -294,7 +333,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         outRecDescs[0] = outputRecDesc; // Output format (hierarchical structure)
         this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
         this.sampleUUID = sampleUUID;
-        this.centroidsUUID = centroidsUUID;
+        this.tupleCountUUID = tupleCountUUID;
         this.materializedDataUUID = materializedDataUUID;
         this.args = args;
         this.K = K;
@@ -336,12 +375,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         public IOperatorNodePushable createPushRuntime(final IHyracksTaskContext ctx,
                 final IRecordDescriptorProvider recordDescProvider, final int partition, int nPartitions) {
             return new AbstractUnaryInputSinkOperatorNodePushable() {
-                IScalarEvaluator eval;
-                IPointable inputVal;
-                CentroidsState state;
-                boolean first;
                 private MaterializerTaskState materializedSample;
-                KMeansUtils kMeansUtils;
+                private TupleCountState tupleCountState;
 
                 @Override
                 public void open() throws HyracksDataException {
@@ -350,40 +385,19 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             new PartitionedUUID(sampleUUID, partition));
                     materializedSample.open(ctx);
 
-                    // Initialize centroid storage for the first centroid
-                    state = new CentroidsState(ctx.getJobletContext().getJobId(),
-                            new PartitionedUUID(centroidsUUID, partition));
-
-                    // Initialize evaluator for extracting vector data from tuples
-                    eval = args.createScalarEvaluator(new EvaluatorContext(ctx));
-                    inputVal = new VoidPointable();
-                    first = true;
-                    kMeansUtils = new KMeansUtils(new VoidPointable(), new ArrayBackedValueStorage());
+                    // Initialize tuple count state
+                    tupleCountState = new TupleCountState(ctx.getJobletContext().getJobId(),
+                            new PartitionedUUID(tupleCountUUID, partition));
                 }
 
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-                    if (first) {
-                        // CRITICAL: Perform initial K-means++ on raw data to generate K centroids
-                        // This is essential for hierarchical clustering - we need multiple centroids
-                        // to start the hierarchical tree building process
-                        System.err.println("Starting initial K-means++ on raw data with K=" + K);
+                    // Count tuples in this frame
+                    FrameTupleAccessor fta = new FrameTupleAccessor(secondaryRecDesc);
+                    fta.reset(buffer);
+                    int tupleCount = fta.getTupleCount();
+                    tupleCountState.addTupleCount(tupleCount);
 
-                        // Perform K-means++ on the raw data
-                        Random rand = new Random();
-                        int maxKMeansIterations = 20;
-                        List<double[]> initialCentroids = performInitialKMeansPlusPlus(buffer, eval, inputVal,
-                                kMeansUtils, K, rand, maxKMeansIterations);
-
-                        // Store all generated centroids
-                        for (double[] centroid : initialCentroids) {
-                            state.addCentroid(centroid);
-                        }
-
-                        System.err.println("Generated " + initialCentroids.size()
-                                + " initial centroids for hierarchical clustering");
-                        first = false;
-                    }
                     // Materialize all data to disk for subsequent processing passes
                     // This allows us to make multiple passes over the data without loading it all into memory
                     materializedSample.appendFrame(buffer);
@@ -391,12 +405,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 @Override
                 public void close() throws HyracksDataException {
-                    if (state != null) {
-                        ctx.setStateObject(state);
-                    }
                     if (materializedSample != null) {
                         materializedSample.close();
                         ctx.setStateObject(materializedSample);
+                    }
+                    if (tupleCountState != null) {
+                        ctx.setStateObject(tupleCountState);
                     }
                 }
 
@@ -404,142 +418,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 public void fail() throws HyracksDataException {
                 }
 
-                /**
-                 * Performs initial K-means++ on raw data to generate K centroids
-                 */
-                private List<double[]> performInitialKMeansPlusPlus(ByteBuffer buffer, IScalarEvaluator eval,
-                        IPointable inputVal, KMeansUtils kMeansUtils, int k, Random rand, int maxIterations)
-                        throws HyracksDataException {
-
-                    if (k <= 0) {
-                        return new ArrayList<>();
-                    }
-
-                    List<double[]> centroids = new ArrayList<>();
-                    List<double[]> allPoints = new ArrayList<>();
-
-                    // First pass: collect all data points
-                    FrameTupleAccessor fta = new FrameTupleAccessor(secondaryRecDesc);
-                    fta.reset(buffer);
-                    int tupleCount = fta.getTupleCount();
-                    for (int i = 0; i < tupleCount; i++) {
-                        FrameTupleReference tuple = new FrameTupleReference();
-                        tuple.reset(fta, i);
-                        eval.evaluate(tuple, inputVal);
-                        ListAccessor listAccessorConstant = new ListAccessor();
-                        if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
-                                .isListType()) {
-                            continue; // Skip unsupported types
-                        }
-                        listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                        try {
-                            double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-                            allPoints.add(point);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-
-                    if (allPoints.isEmpty()) {
-                        return centroids;
-                    }
-
-                    System.err.println("performInitialKMeansPlusPlus: collected " + allPoints.size()
-                            + " data points, target k = " + k);
-
-                    // K-means++ initialization
-                    // 1. Choose first centroid randomly
-                    int firstIdx = rand.nextInt(allPoints.size());
-                    centroids.add(Arrays.copyOf(allPoints.get(firstIdx), allPoints.get(firstIdx).length));
-                    System.err.println("Added first centroid at index " + firstIdx);
-
-                    // 2. Choose remaining centroids using weighted selection
-                    for (int i = 1; i < k; i++) {
-                        double[] distances = new double[allPoints.size()];
-                        double totalDistance = 0.0;
-
-                        // Calculate minimum distance to existing centroids for each point
-                        for (int j = 0; j < allPoints.size(); j++) {
-                            double minDist = Double.POSITIVE_INFINITY;
-                            for (double[] centroid : centroids) {
-                                double dist = calculateDistance(allPoints.get(j), centroid);
-                                minDist = Math.min(minDist, dist);
-                            }
-                            distances[j] = minDist;
-                            totalDistance += minDist;
-                        }
-
-                        // Weighted random selection
-                        double r = rand.nextDouble() * totalDistance;
-                        double cumulativeDistance = 0.0;
-                        int selectedIdx = 0;
-                        for (int j = 0; j < allPoints.size(); j++) {
-                            cumulativeDistance += distances[j];
-                            if (cumulativeDistance >= r) {
-                                selectedIdx = j;
-                                break;
-                            }
-                        }
-
-                        centroids.add(Arrays.copyOf(allPoints.get(selectedIdx), allPoints.get(selectedIdx).length));
-                        System.err.println("Added centroid " + i + " at index " + selectedIdx);
-                    }
-
-                    // 3. Lloyd's algorithm for refinement
-                    for (int iter = 0; iter < maxIterations; iter++) {
-                        // Assign points to closest centroids
-                        int[] assignments = new int[allPoints.size()];
-                        for (int i = 0; i < allPoints.size(); i++) {
-                            double minDist = Double.POSITIVE_INFINITY;
-                            int closestCentroid = 0;
-                            for (int j = 0; j < centroids.size(); j++) {
-                                double dist = calculateDistance(allPoints.get(i), centroids.get(j));
-                                if (dist < minDist) {
-                                    minDist = dist;
-                                    closestCentroid = j;
-                                }
-                            }
-                            assignments[i] = closestCentroid;
-                        }
-
-                        // Update centroids
-                        double[][] newCentroids = new double[k][allPoints.get(0).length];
-                        int[] counts = new int[k];
-
-                        for (int i = 0; i < allPoints.size(); i++) {
-                            int centroidIdx = assignments[i];
-                            for (int d = 0; d < allPoints.get(i).length; d++) {
-                                newCentroids[centroidIdx][d] += allPoints.get(i)[d];
-                            }
-                            counts[centroidIdx]++;
-                        }
-
-                        // Check for convergence
-                        boolean converged = true;
-                        for (int i = 0; i < k; i++) {
-                            if (counts[i] > 0) {
-                                for (int d = 0; d < newCentroids[i].length; d++) {
-                                    newCentroids[i][d] /= counts[i];
-                                }
-                                // Check if centroid moved significantly
-                                double dist = calculateDistance(centroids.get(i), newCentroids[i]);
-                                if (dist > 1e-4) {
-                                    converged = false;
-                                }
-                                centroids.set(i, newCentroids[i]);
-                            }
-                        }
-
-                        if (converged) {
-                            break;
-                        }
-                    }
-
-                    System.err.println("performInitialKMeansPlusPlus: generated " + centroids.size()
-                            + " centroids (target was " + k + ")");
-
-                    return centroids;
-                }
             };
         }
     }
@@ -562,11 +440,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 @Override
                 public void initialize() throws HyracksDataException {
-                    // Get file reader for written samples
-                    MaterializerTaskState sampleState =
-                            (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(sampleUUID, partition));
-                    GeneratedRunFileReader in = sampleState.creatReader();
-                    try {
+                        // Get file reader for written samples
+                        MaterializerTaskState sampleState =
+                                (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(sampleUUID, partition));
+                        GeneratedRunFileReader in = sampleState.creatReader();
+                        in.open(); // Open the reader before using it
+                        try {
 
                         FrameTupleAccessor fta;
                         FrameTupleReference tuple;
@@ -583,10 +462,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         writer.open();
 
+                        // Get tuple count from first activity
+                        TupleCountState tupleCountState =
+                                (TupleCountState) ctx.getStateObject(new PartitionedUUID(tupleCountUUID, partition));
+                        int totalTupleCount = tupleCountState != null ? tupleCountState.getTotalTupleCount() : 0;
+
+                        System.err.println("Retrieved total tuple count: " + totalTupleCount);
+
                         // Perform memory-efficient hierarchical K-means clustering
                         HierarchicalClusterStructure clusterStructure =
                                 performMemoryEfficientHierarchicalKMeans(ctx, in, fta, tuple, eval, inputVal,
-                                        listAccessorConstant, KMeansUtils, vSizeFrame, partition);
+                                        listAccessorConstant, KMeansUtils, vSizeFrame, partition, totalTupleCount);
 
                         if (clusterStructure.getNumLevels() == 0) {
                             System.err.println("No clustering structure generated");
@@ -608,34 +494,285 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
+                 * Performs initial K-means++ on all data from run file to generate K centroids
+                 */
+                private List<double[]> performInitialKMeansPlusPlus(IHyracksTaskContext ctx, GeneratedRunFileReader in,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int k, Random rand,
+                        int maxIterations, int totalTupleCount) throws HyracksDataException, IOException {
+
+                    if (k <= 0 || totalTupleCount <= 0) {
+                        return new ArrayList<>();
+                    }
+
+                    List<double[]> centroids = new ArrayList<>();
+                    int[] assignments = new int[totalTupleCount];
+
+                    System.err.println("performInitialKMeansPlusPlus: starting streaming K-means++ with "
+                            + totalTupleCount + " total tuples, target k = " + k);
+
+                    // K-means++ initialization using streaming approach
+                    // 1. Choose first centroid randomly from all data
+                    int firstIdx = rand.nextInt(totalTupleCount);
+                    double[] firstCentroid = getPointAtIndex(in, fta, tuple, eval, inputVal, listAccessorConstant,
+                            kMeansUtils, firstIdx, ctx);
+                    if (firstCentroid != null) {
+                        centroids.add(firstCentroid);
+                        System.err.println("Added first centroid at index " + firstIdx);
+                    } else {
+                        return centroids;
+                    }
+
+                    // 2. Choose remaining centroids using weighted selection
+                    for (int i = 1; i < k; i++) {
+                        double totalDistance = 0.0;
+                        int selectedIdx = 0;
+
+                        // Calculate total distance and select next centroid
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        int currentIdx = 0;
+                        while (in.nextFrame(frame)) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+
+                            for (int j = 0; j < tupleCount; j++) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    currentIdx++;
+                                    continue;
+                                }
+
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                try {
+                                    double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                                    // Calculate minimum distance to existing centroids
+                                    double minDist = Double.POSITIVE_INFINITY;
+                                    for (double[] centroid : centroids) {
+                                        double dist = calculateDistance(point, centroid);
+                                        minDist = Math.min(minDist, dist);
+                                    }
+
+                                    totalDistance += minDist;
+
+                                    // Weighted random selection
+                                    if (totalDistance > 0) {
+                                        double r = rand.nextDouble() * totalDistance;
+                                        if (r <= minDist) {
+                                            selectedIdx = currentIdx;
+                                        }
+                                    }
+
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                                currentIdx++;
+                            }
+                        }
+
+                        // Reset reader for next iteration
+                        in = resetRunFileReader(ctx, sampleUUID, partition);
+
+                        // Get the selected centroid
+                        double[] selectedCentroid = getPointAtIndex(in, fta, tuple, eval, inputVal,
+                                listAccessorConstant, kMeansUtils, selectedIdx, ctx);
+                        if (selectedCentroid != null) {
+                            centroids.add(selectedCentroid);
+                            System.err.println("Added centroid " + i + " at index " + selectedIdx);
+                        }
+                    }
+
+                    // 3. Lloyd's algorithm for refinement using streaming approach
+                    for (int iter = 0; iter < maxIterations; iter++) {
+                        // Assignment phase: assign each point to closest centroid
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        int currentIdx = 0;
+                        while (in.nextFrame(frame)) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+
+                            for (int j = 0; j < tupleCount; j++) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    currentIdx++;
+                                    continue;
+                                }
+
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                try {
+                                    double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                                    // Find closest centroid
+                                    double minDist = Double.POSITIVE_INFINITY;
+                                    int closestCentroid = 0;
+                                    for (int c = 0; c < centroids.size(); c++) {
+                                        double dist = calculateDistance(point, centroids.get(c));
+                                        if (dist < minDist) {
+                                            minDist = dist;
+                                            closestCentroid = c;
+                                        }
+                                    }
+                                    assignments[currentIdx] = closestCentroid;
+
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                                currentIdx++;
+                            }
+                        }
+
+                        // Reset reader for update phase
+                        in = resetRunFileReader(ctx, sampleUUID, partition);
+
+                        // Update phase: calculate new centroids
+                        double[][] newCentroids = new double[k][centroids.get(0).length];
+                        int[] counts = new int[k];
+
+                        frame = new VSizeFrame(ctx);
+                        currentIdx = 0;
+                        while (in.nextFrame(frame)) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+
+                            for (int j = 0; j < tupleCount; j++) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    currentIdx++;
+                                    continue;
+                                }
+
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                try {
+                                    double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                                    int centroidIdx = assignments[currentIdx];
+                                    for (int d = 0; d < point.length; d++) {
+                                        newCentroids[centroidIdx][d] += point[d];
+                                    }
+                                    counts[centroidIdx]++;
+
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                                currentIdx++;
+                            }
+                        }
+
+                        // Check for convergence
+                        boolean converged = true;
+                        for (int i = 0; i < k; i++) {
+                            if (counts[i] > 0) {
+                                for (int d = 0; d < newCentroids[i].length; d++) {
+                                    newCentroids[i][d] /= counts[i];
+                                }
+                                // Check if centroid moved significantly
+                                double dist = calculateDistance(centroids.get(i), newCentroids[i]);
+                                if (dist > 1e-4) {
+                                    converged = false;
+                                }
+                                centroids.set(i, newCentroids[i]);
+                            }
+                        }
+
+                        if (converged) {
+                            break;
+                        }
+
+                        // Reset reader for next iteration
+                        in = resetRunFileReader(ctx, sampleUUID, partition);
+                    }
+
+                    System.err.println("performInitialKMeansPlusPlus: generated " + centroids.size()
+                            + " centroids (target was " + k + ")");
+
+                    return centroids;
+                }
+
+                /**
+                 * Get a specific point by index from the run file.
+                 */
+                private double[] getPointAtIndex(GeneratedRunFileReader in, FrameTupleAccessor fta,
+                        FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int targetIndex,
+                        IHyracksTaskContext ctx) throws HyracksDataException, IOException {
+
+                    VSizeFrame frame = new VSizeFrame(ctx);
+                    int currentIndex = 0;
+
+                    while (in.nextFrame(frame)) {
+                        ByteBuffer buffer = frame.getBuffer();
+                        fta.reset(buffer);
+                        int tupleCount = fta.getTupleCount();
+
+                        for (int j = 0; j < tupleCount; j++) {
+                            if (currentIndex == targetIndex) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    return null;
+                                }
+
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                return kMeansUtils.createPrimitveList(listAccessorConstant);
+                            }
+                            currentIndex++;
+                        }
+                    }
+                    return null;
+                }
+
+                /**
+                 * Reset the run file reader to the beginning.
+                 */
+                private GeneratedRunFileReader resetRunFileReader(IHyracksTaskContext ctx, UUID sampleUUID,
+                        int partition) throws HyracksDataException {
+                    MaterializerTaskState sampleState =
+                            (MaterializerTaskState) ctx.getStateObject(new PartitionedUUID(sampleUUID, partition));
+                    GeneratedRunFileReader reader = sampleState.creatReader();
+                    reader.open(); // Open the reader before returning it
+                    return reader;
+                }
+
+                /**
                  * Perform memory-efficient hierarchical K-means clustering using run files.
                  */
                 private HierarchicalClusterStructure performMemoryEfficientHierarchicalKMeans(IHyracksTaskContext ctx,
                         GeneratedRunFileReader in, FrameTupleAccessor fta, FrameTupleReference tuple,
                         IScalarEvaluator eval, IPointable inputVal, ListAccessor listAccessorConstant,
-                        KMeansUtils kMeansUtils, VSizeFrame vSizeFrame, int partition)
+                        KMeansUtils kMeansUtils, VSizeFrame vSizeFrame, int partition, int totalTupleCount)
                         throws HyracksDataException, IOException {
 
                     System.err.println("=== PERFORMING MEMORY-EFFICIENT HIERARCHICAL K-MEANS ===");
 
                     HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
 
-                    // Get the first centroid that was stored in StoreCentroidsActivity
-                    CentroidsState centroidsState =
-                            (CentroidsState) ctx.getStateObject(new PartitionedUUID(centroidsUUID, partition));
-                    List<double[]> existingCentroids = centroidsState.getCentroids();
+                    // Perform initial K-means++ on all data to generate initial centroids
+                    Random rand = new Random();
+                    int maxKMeansIterations = 20;
+                    List<double[]> initialCentroids = performInitialKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
+                            listAccessorConstant, kMeansUtils, K, rand, maxKMeansIterations, totalTupleCount);
 
-                    if (existingCentroids.isEmpty()) {
-                        System.err.println("No existing centroids found, cannot perform hierarchical clustering");
+                    if (initialCentroids.isEmpty()) {
+                        System.err.println("No initial centroids generated, cannot perform hierarchical clustering");
                         return structure;
                     }
 
-                    System.err.println("Found " + existingCentroids.size()
-                            + " existing centroids, starting hierarchical clustering");
+                    System.err.println("Generated " + initialCentroids.size()
+                            + " initial centroids from all data, starting hierarchical clustering");
 
                     // Add Level 0 (initial centroids)
                     List<List<double[]>> level0Clusters = new ArrayList<>();
-                    for (double[] centroid : existingCentroids) {
+                    for (double[] centroid : initialCentroids) {
                         List<double[]> cluster = new ArrayList<>();
                         cluster.add(centroid);
                         level0Clusters.add(cluster);
@@ -643,9 +780,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     structure.addLevel(level0Clusters);
 
                     // Build subsequent levels using scalable K-means++ on centroids
-                    List<double[]> currentCentroids = existingCentroids;
-                    int currentK = Math.min(K, existingCentroids.size());
-                    Random rand = new Random();
+                    List<double[]> currentCentroids = initialCentroids;
+                    int currentK = Math.min(K, Math.max(1, initialCentroids.size() / 2));
                     int maxIterations = 20;
                     int maxLevels = 5;
                     int currentLevel = 1;

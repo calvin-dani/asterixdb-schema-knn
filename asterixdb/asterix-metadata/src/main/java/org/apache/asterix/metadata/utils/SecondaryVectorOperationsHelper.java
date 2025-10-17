@@ -140,7 +140,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = targetOp;
 
         UUID sampleUUID = UUID.randomUUID();
-        UUID centroidsUUID = UUID.randomUUID();
+        UUID tupleCountUUID = UUID.randomUUID();
         UUID permitUUID = UUID.randomUUID();
 
         // Register permit state for structure creation coordination
@@ -193,7 +193,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID materializedDataUUID = UUID.randomUUID();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, centroidsUUID, materializedDataUUID, new ColumnAccessEvalFactory(0), K,
+                        sampleUUID, tupleCountUUID, materializedDataUUID, new ColumnAccessEvalFactory(0), K,
                         maxScalableKmeansIter);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
@@ -318,7 +318,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
-        // This matches the approach used in HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
