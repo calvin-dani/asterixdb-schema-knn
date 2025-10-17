@@ -39,22 +39,6 @@ public class VectorClusteringMetadataTupleWriter extends TypeAwareTupleWriter im
         super(typeTraits, nullTypeTraits, nullIntrospector);
     }
 
-    @Override
-    public int bytesRequired(ITupleReference tuple) {
-        // Calculate required bytes for max_distance + data pointer
-        int totalBytes = 0;
-
-        // Max distance (typically 4 bytes for float)
-        totalBytes += tuple.getFieldLength(MAX_DISTANCE_FIELD);
-
-        // Data pointer (typically 8 bytes for long)
-        totalBytes += tuple.getFieldLength(DATA_POINTER_FIELD);
-
-        // Add field offset array overhead
-        totalBytes += (tuple.getFieldCount() + 1) * 4; // 4 bytes per offset
-
-        return totalBytes;
-    }
 
     @Override
     public int bytesRequired(ITupleReference tuple, int startField, int numFields) {

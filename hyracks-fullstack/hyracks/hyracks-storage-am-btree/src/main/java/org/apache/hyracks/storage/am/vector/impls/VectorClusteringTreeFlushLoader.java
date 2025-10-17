@@ -74,42 +74,6 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
         }
     }
 
-    /**
-     * Copy a single page from source tree to target tree.
-     */
-    private void copyPage(int sourcePageId) throws HyracksDataException {
-        // Pin source page
-        ICachedPage sourcePage =
-                treeIndex.getBufferCache().pin(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), sourcePageId));
-
-        try {
-            sourcePage.acquireReadLatch();
-
-            // Get new page in target tree
-            int targetPageId = freePageManager.takePage(metaFrame);
-            ICachedPage targetPage =
-                    bufferCache.confiscatePage(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), targetPageId));
-
-            try {
-                // Copy entire page content
-                System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
-                        sourcePage.getBuffer().capacity());
-
-                // WRITE PAGE TO DISK
-                write(targetPage);
-
-                System.out.println("DEBUG: Copied page " + sourcePageId + " to " + targetPageId);
-
-            } finally {
-                // targetPage is handled by write() method
-            }
-
-        } finally {
-            sourcePage.releaseReadLatch();
-            treeIndex.getBufferCache().unpin(sourcePage);
-        }
-    }
-
     @Override
     public void end() throws HyracksDataException {
         try {

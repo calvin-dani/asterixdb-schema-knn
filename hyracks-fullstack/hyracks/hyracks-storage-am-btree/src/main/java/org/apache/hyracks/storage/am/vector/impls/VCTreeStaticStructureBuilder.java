@@ -118,8 +118,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         }
 
         // TODO: verify number of levels
-        // Create first page (root page) - computed page ID 0
-        createNewPage(0);
+        // Create first page (root page) - page ID 1
+        createNewPage(1);
 
         LOGGER.debug("VCTreeStaticStructureLoader initialized");
         LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
@@ -201,7 +201,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
                 childPageId);
 
-        return childPageId;
+        return childPageId + 1;
     }
 
     /**
@@ -228,7 +228,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     private int computeCurrentClusterPageId() {
         // Current cluster's page ID = offset for current level + current cluster index
-        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel;
+        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel + 1;
     }
 
     /**
@@ -321,14 +321,15 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             // Leaf level (level 0)
             currentFrame = leafFrame;
             leafFrame.setPage(currentPage);
-            leafFrame.initBuffer((byte) currentLevel);
-            LOGGER.debug("Created leaf page {} at level {}", computedPageId, currentLevel);
+            /* TODO : verify leaf level should be more elegant */
+            leafFrame.initBuffer((byte) 0);
+            leafFrame.setLevel((byte) 0);
         } else {
             // Interior/root level (level > 0)
             currentFrame = interiorFrame;
             interiorFrame.setPage(currentPage);
-            interiorFrame.initBuffer((byte) currentLevel);
-            LOGGER.debug("Created interior page {} at level {}", computedPageId, currentLevel);
+            interiorFrame.initBuffer((byte) 0);
+            interiorFrame.setLevel((byte) 1);
         }
 
         entriesInCurrentPage = 0;

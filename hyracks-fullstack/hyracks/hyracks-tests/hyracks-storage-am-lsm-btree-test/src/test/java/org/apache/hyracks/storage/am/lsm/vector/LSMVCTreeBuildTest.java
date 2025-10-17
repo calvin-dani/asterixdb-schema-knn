@@ -19,9 +19,6 @@
 
 package org.apache.hyracks.storage.am.lsm.vector;
 
-import java.util.List;
-import java.util.Random;
-
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -35,7 +32,10 @@ import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.junit.Before;
 
-public class LSMVCTreeStaticStrucutureBuilderTest extends VectorIndexTestDriver {
+import java.util.List;
+import java.util.Random;
+
+public class LSMVCTreeBuildTest extends VectorIndexTestDriver {
     private static final Logger LOGGER = LogManager.getLogger();
     private final LSMVCTreeTestHarness harness = new LSMVCTreeTestHarness();
     private final VectorTreeTestUtils testUtils = new VectorTreeTestUtils();
@@ -64,21 +64,29 @@ public class LSMVCTreeStaticStrucutureBuilderTest extends VectorIndexTestDriver 
     }
 
     public void runTest(ISerializerDeserializer[] fieldSerdes, List<ITupleReference> centroids,
-            List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster, int vectorDimensions)
+            List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster, int vectorDimensions,
+            List<List<ITupleReference>> dataRecords)
             throws Exception {
         AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, vectorDimensions);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
         ctx.setStaticStructureCentroids(centroids);
+        ctx.setDataRecords(dataRecords);
         ctx.getIndex().create();
         ctx.getIndex().activate();
 
         // Create a specialized test utils for LSM context
         testUtils.buildStaticStructure(ctx);
 
+        // start bulkloading records into leaf centroids
+        testUtils.bulkLoadRecords(ctx);
+
+        testUtils.clusterRecords(ctx);
+
+        testUtils.scanClosestLeafCluster(ctx);
         ctx.getIndex().validate();
         ctx.getIndex().deactivate();
-        // ctx.getIndex().destroy();
+        //ctx.getIndex().destroy();
     }
 
 }

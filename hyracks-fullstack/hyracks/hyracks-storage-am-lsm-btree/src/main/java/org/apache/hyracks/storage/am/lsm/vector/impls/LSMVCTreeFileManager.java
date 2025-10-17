@@ -30,10 +30,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndex;
-import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexFileManager;
-import org.apache.hyracks.storage.am.lsm.common.impls.IndexComponentFileReference;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
-import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
+import org.apache.hyracks.storage.am.lsm.common.impls.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -67,8 +64,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     @Override
     public LSMComponentFileReferences getRelFlushFileReference() throws HyracksDataException {
         String baseName = getNextComponentSequence(vcTreeFilter);
-        return new LSMComponentFileReferences(baseDir.getChild(baseName + DELIMITER + VCTREE_SUFFIX), null,
-                baseDir.getChild(baseName + DELIMITER + STATIC_STRUCTURE_SUFFIX));
+        return new LSMVCTreeComponentFileReferences(baseDir.getChild(baseName + DELIMITER + VCTREE_SUFFIX), null,
+                null, baseDir.getChild(STATIC_STRUCTURE_SUFFIX));
     }
 
     @Override

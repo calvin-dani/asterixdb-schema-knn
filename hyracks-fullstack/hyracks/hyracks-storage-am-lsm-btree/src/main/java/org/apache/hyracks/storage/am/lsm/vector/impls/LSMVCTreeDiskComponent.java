@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
@@ -36,10 +37,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
+import org.apache.hyracks.storage.am.vector.impls.*;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
@@ -54,6 +52,7 @@ import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBuffer
 public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
     private final VectorClusteringTree vcTree;
+    private boolean isStaticStructure = false;
 
     public LSMVCTreeDiskComponent(AbstractLSMIndex lsmIndex, VectorClusteringTree vcTree, ILSMComponentFilter filter) {
         super(lsmIndex, getMetadataPageManager(vcTree), filter);
@@ -228,5 +227,24 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             NoOpPageWriteCallback instance) throws HyracksDataException {
         return getIndex().createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster,
                 maxEntriesPerPage, instance);
+    }
+
+    public VCTreeBulkLoder createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
+            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback) throws HyracksDataException {
+        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
+                dataFrameSerdes);
+    }
+
+    public boolean isStaticStructure() {
+        return  isStaticStructure;
+    }
+
+    public void setStaticStructure(boolean isStaticStructure) {
+        this.isStaticStructure = isStaticStructure;
+    }
+
+    public void setInitialized() {
+        vcTree.setStaticStructureInitialized();
+        vcTree.setRootPageId(1);
     }
 }

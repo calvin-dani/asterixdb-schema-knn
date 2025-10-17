@@ -40,39 +40,20 @@ public class VectorClusteringLeafTupleWriter extends TypeAwareTupleWriter implem
         super(typeTraits, nullTypeTraits, nullIntrospector);
     }
 
-    @Override
-    public int bytesRequired(ITupleReference tuple) {
-        // Calculate required bytes for CID + centroid + metadata pointer
-        int totalBytes = 0;
 
-        // CID (typically 4 bytes for int)
-        totalBytes += tuple.getFieldLength(CID_FIELD);
-
-        // Centroid (vector of doubles)
-        totalBytes += tuple.getFieldLength(CENTROID_FIELD);
-
-        // Metadata pointer (typically 8 bytes for long)
-        totalBytes += tuple.getFieldLength(METADATA_POINTER_FIELD);
-
-        // Add field offset array overhead
-        totalBytes += (tuple.getFieldCount() + 1) * 4; // 4 bytes per offset
-
-        return totalBytes;
-    }
-
-    @Override
-    public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
-        int totalBytes = 0;
-
-        for (int i = startField; i < startField + numFields; i++) {
-            totalBytes += tuple.getFieldLength(i);
-        }
-
-        // Add field offset array overhead
-        totalBytes += (numFields + 1) * 4;
-
-        return totalBytes;
-    }
+//    @Override
+//    public int bytesRequired(ITupleReference tuple, int startField, int numFields) {
+//        int totalBytes = 0;
+//
+//        for (int i = startField; i < startField + numFields; i++) {
+//            totalBytes += tuple.getFieldLength(i);
+//        }
+//
+//        // Add field offset array overhead
+//        totalBytes += (numFields + 1) * 4;
+//
+//        return totalBytes;
+//    }
 
     /**
      * Get the cluster ID from the tuple

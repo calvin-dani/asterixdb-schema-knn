@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
@@ -93,7 +94,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     public double getDistanceToCentroid(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
         // Distance to centroid is the first field in data records - stored as float
-        return FloatPointable.getFloat(frameTuple.getFieldData(0), frameTuple.getFieldStart(0));
+        return DoublePointable.getDouble(frameTuple.getFieldData(0), frameTuple.getFieldStart(0));
     }
 
     @Override
@@ -110,14 +111,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     public void insertSorted(ITupleReference tuple) {
-        // Insert while maintaining sort order by distance
-        try {
-            int insertIndex = findInsertTupleIndex(tuple);
-            insert(tuple, insertIndex);
-        } catch (HyracksDataException e) {
-            // Fallback to inserting at the end
-            insert(tuple, getTupleCount());
-        }
+        insert(tuple, getTupleCount());
     }
 
     @Override
