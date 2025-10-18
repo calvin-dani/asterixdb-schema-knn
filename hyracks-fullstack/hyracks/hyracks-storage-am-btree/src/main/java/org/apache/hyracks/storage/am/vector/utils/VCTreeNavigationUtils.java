@@ -78,8 +78,7 @@ public class VCTreeNavigationUtils {
                 leafFrame.setPage(page);
                 boolean isLeaf = leafFrame.isLeaf();
 
-                System.err
-                        .println("Page " + currentPageId + " - isLeaf: " + isLeaf + ", level: " + leafFrame.getLevel());
+
 
                 if (isLeaf) {
                     // Leaf level - find closest centroid
@@ -151,7 +150,6 @@ public class VCTreeNavigationUtils {
             IVectorClusteringLeafFrame leafFrame) throws HyracksDataException {
 
         int tupleCount = leafFrame.getTupleCount();
-        System.err.println("Leaf page " + pageId + " has " + tupleCount + " tuples");
 
         double bestDistance = Double.MAX_VALUE;
         int bestClusterIndex = -1;

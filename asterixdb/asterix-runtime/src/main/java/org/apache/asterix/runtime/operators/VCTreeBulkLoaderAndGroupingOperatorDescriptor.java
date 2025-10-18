@@ -31,10 +31,10 @@ import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
+import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -42,7 +42,6 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
-import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
@@ -51,7 +50,7 @@ import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
-import org.apache.hyracks.api.comm.IFrameWriter;
+import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
@@ -71,7 +70,6 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
@@ -118,7 +116,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.permitUUID = permitUUID;
         this.materializedDataUUID = materializedDataUUID;
         this.args = args;
+        
+        // Set output record descriptor in the parent class array
+        this.outRecDescs[0] = outputRecordDescriptor;
+        
         System.err.println("VCTreeBulkLoaderAndGroupingOperatorDescriptor created with permit UUID: " + permitUUID);
+        System.err.println("Output record descriptor set: " + outputRecordDescriptor);
     }
 
     /**
@@ -235,7 +238,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      */
     public ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
         try {
-            System.err.println("=== FINDING CLOSEST CENTROID ===");
 
             // Validate input vector
             if (queryVector == null) {
@@ -273,6 +275,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 System.err.println("WARNING: No closest centroid found for query vector");
                 return null;
             }
+
 
             return result;
 
@@ -343,7 +346,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     public double[] extractEmbeddingFromTuple(ITupleReference tuple, IHyracksTaskContext ctx)
             throws HyracksDataException {
         try {
-            System.err.println("=== EXTRACTING EMBEDDING FROM TUPLE ===");
 
             // Validate input parameters
             if (tuple == null) {
@@ -372,14 +374,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
             // Validate evaluation result
             if (inputVal.getLength() == 0) {
-                System.err.println("WARNING: Empty evaluation result from tuple");
                 return null;
             }
 
             // Check if it's a list type (required for vector data)
             if (!EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
                     .isListType()) {
-                System.err.println("WARNING: Tuple does not contain list type data, skipping");
                 return null;
             }
 
@@ -389,30 +389,23 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
             // Validate extracted embedding
             if (embedding == null) {
-                System.err.println("WARNING: KMeansUtils returned null embedding");
                 return null;
             }
 
             if (embedding.length == 0) {
-                System.err.println("WARNING: Extracted embedding is empty");
                 return null;
             }
 
             // Validate embedding dimensions
             if (embedding.length != VECTOR_DIMENSION) {
-                System.err.println("WARNING: Extracted embedding dimension (" + embedding.length
-                        + ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
-                // Continue processing but log the mismatch
+                return null;
             }
 
-            System.err.println("✅ Successfully extracted embedding with " + embedding.length + " dimensions");
             return embedding;
 
         } catch (IllegalArgumentException | IllegalStateException e) {
-            System.err.println("ERROR: Invalid input or state for embedding extraction: " + e.getMessage());
             throw e;
         } catch (Exception e) {
-            System.err.println("ERROR: Failed to extract embedding from tuple: " + e.getMessage());
             e.printStackTrace();
             throw HyracksDataException.create(e);
         }
@@ -503,57 +496,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         }
     }
 
-    /**
-     * Calculate K (number of centroids) from actual data.
-     * 
-     * @param inputTuples List of input tuples
-     * @param centroidIdColumn Column index containing centroid ID
-     * @return Number of unique centroids found
-     */
-    private int calculateKFromData(List<ITupleReference> inputTuples, int centroidIdColumn) {
-        Set<Integer> uniqueCentroids = new HashSet<>();
-        
-        for (ITupleReference tuple : inputTuples) {
-            try {
-                int actualColumnIndex = (centroidIdColumn == -1) ? tuple.getFieldCount() - 1 : centroidIdColumn;
-                int centroidId = extractCentroidIdFromTuple(tuple, actualColumnIndex);
-                uniqueCentroids.add(centroidId);
-            } catch (Exception e) {
-                System.err.println("WARNING: Failed to extract centroid ID from tuple: " + e.getMessage());
-            }
-        }
-        
-        int K = uniqueCentroids.size();
-        System.err.println("Found " + K + " unique centroids in data");
-        return Math.max(K, 1); // Ensure at least 1 centroid
-    }
-
-    /**
-     * Extract centroid ID from tuple at specified column.
-     * 
-     * @param tuple Input tuple
-     * @param columnIndex Column index containing centroid ID
-     * @return Centroid ID as integer
-     */
-    private int extractCentroidIdFromTuple(ITupleReference tuple, int columnIndex) {
-        try {
-            byte[] fieldData = tuple.getFieldData(columnIndex);
-            int fieldStart = tuple.getFieldStart(columnIndex);
-            int fieldLength = tuple.getFieldLength(columnIndex);
-            
-            // Simple integer extraction (assuming 4-byte integer)
-            if (fieldLength >= 4) {
-                ByteBuffer buffer = ByteBuffer.wrap(fieldData, fieldStart, fieldLength);
-                return buffer.getInt();
-            }
-            
-            // Fallback: use column index as centroid ID
-            return columnIndex;
-        } catch (Exception e) {
-            System.err.println("WARNING: Failed to extract centroid ID from column " + columnIndex + ", using column index");
-            return columnIndex;
-        }
-    }
 
     /**
      * Calculate number of partitions using SHAPIRO formula for VCTree centroid distribution.
@@ -664,7 +606,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         @Override
         public void open() throws HyracksDataException {
-            System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable OPENING ===");
             try {
                 // Initialize materialized data state
                 materializedData = new MaterializerTaskState(ctx.getJobletContext().getJobId(),
@@ -673,14 +614,18 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 // Initialize output infrastructure for transformed tuples
                 initializeOutputInfrastructure();
-
+                
+                // Open the output writer
+                if (writer != null) {
+                    writer.open();
+                }
                 // Initialize VCTreePartitioner for recursive partitioning
                 int memoryBudget = 32; // frames - typical value from other operators
                 int frameSize = 32768; // 32KB frame size
                 initializePartitioner(ctx, memoryBudget, frameSize);
                 
                 // Pre-initialize partitioning strategy with known K
-                int knownK = 20; // This should come from configuration or previous operator
+                int knownK = 10; // K = 10 centroids (0-9)
                 if (partitioner != null) {
                     partitioner.preInitializePartitioning(knownK, memoryBudget, frameSize);
                 }
@@ -690,9 +635,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 int staticStructureFileId = openStaticStructureFile(ctx);
                 initializeNavigationComponents(ctx, staticStructureFileId);
 
-                System.err.println("VCTreeBulkLoaderAndGroupingNodePushable opened successfully");
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to open VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
@@ -711,9 +654,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 outputTupleBuilder = new ArrayTupleBuilder(outputRecDesc.getFieldCount());
                 outputTupleRef = new ArrayTupleReference();
                 
-                // Initialize frame appender for output
-                outputAppender = new FrameTupleAppender();
-                
+                // Initialize frame appender for output with a frame
+                org.apache.hyracks.api.comm.VSizeFrame outputFrame = new org.apache.hyracks.api.comm.VSizeFrame(ctx);
+                outputAppender = new FrameTupleAppender(outputFrame);
+
                 System.err.println("Output infrastructure initialized successfully");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to initialize output infrastructure: " + e.getMessage());
@@ -743,34 +687,27 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 if (indexPathRef == null) {
                     throw new HyracksDataException("Could not determine index path");
                 }
-                System.err.println("Index path: " + indexPathRef);
 
                 // Create static structure file path
                 FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
-                System.err.println("Static structure file path: " + staticStructureFile);
 
                 // Open the static structure file
-                System.err.println("Opening static structure file...");
                 int fileId;
                 try {
                     // Check if file exists in the file system
                     IIOManager ioManager = ctx.getIoManager();
                     if (ioManager.exists(staticStructureFile)) {
-                        System.err.println("Static structure file exists, opening it...");
                         fileId = bufferCache.openFile(staticStructureFile);
                     } else {
                         throw new HyracksDataException("Static structure file does not exist: " + staticStructureFile);
                     }
-                    System.err.println("Static structure file opened with ID: " + fileId);
                 } catch (Exception e) {
-                    System.err.println("ERROR: Failed to open static structure file: " + e.getMessage());
                     throw HyracksDataException.create(e);
                 }
 
                 return fileId;
 
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to open static structure file: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
@@ -797,7 +734,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 return ioManager.resolve(resourcePath);
 
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
                 e.printStackTrace();
                 return null;
             }
@@ -805,8 +741,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-            System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable nextFrame ===");
-            System.err.println("Processing input frame for centroid extraction and tuple transformation");
 
             try {
                 // Create frame tuple accessor
@@ -815,10 +749,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 int tupleCount = fta.getTupleCount();
                 totalTuplesProcessed += tupleCount;
-                System.err.println("Processing " + tupleCount + " tuples from input frame");
 
                 if (tupleCount == 0) {
-                    System.err.println("No tuples found in input frame");
                     return;
                 }
 
@@ -841,12 +773,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 ITupleReference transformedTuple = createTransformedTuple(tuple, result);
                                 
                                 // Send transformed tuple to VCTreePartitioner
-                                if (partitioner != null) {
-                                    partitioner.writeStreamingTuple(transformedTuple);
-                                }
+//                                if (partitioner != null) {
+//                                    partitioner.writeStreamingTuple(transformedTuple);
+//                                }
                                 
                                 // Output the transformed tuple to downstream operators
-                                outputTransformedTuple(transformedTuple);
+                                 outputTransformedTuple(transformedTuple);
                                 
                             } else {
                                 System.err.println("Failed to find closest centroid for query " + (i + 1));
@@ -862,7 +794,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to process input frame: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
@@ -876,15 +807,21 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
          */
         private void outputTransformedTuple(ITupleReference transformedTuple) throws HyracksDataException {
             try {
+
+                if (transformedTuple == null) {
+                    return;
+                }
+
                 if (writer != null && outputAppender != null) {
                     // Append tuple to output frame
-                    outputAppender.append(transformedTuple);
-                } else {
-                    // If no output writer is set, just log the tuple
-                    System.err.println("DEBUG: Transformed tuple created (no output writer set)");
+
+                    if(outputAppender.append(transformedTuple)){
+                        FrameUtils.flushFrame(outputAppender.getBuffer(), writer);
+                        outputAppender.reset(new VSizeFrame(ctx), true);
+                        outputAppender.append(transformedTuple);
+                    }
                 }
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to output transformed tuple: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
@@ -897,7 +834,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     outputAppender.flush(writer);
                 }
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to flush output: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
@@ -908,14 +844,16 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             System.err.println("Total tuples processed: " + totalTuplesProcessed);
             System.err.println("Successful extractions: " + successfulQueries);
 
-            System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable CLOSING ===");
             try {
                 // Finalize partitioning after all data is processed
-                if (partitioner != null) {
-                    Map<Integer, FileReference> centroidFiles = partitioner.finalizePartitioning();
-                    System.err.println("Finalized partitioning with " + centroidFiles.size() + " centroid files");
-                }
-                
+//                if (partitioner != null) {
+//                    Map<Integer, FileReference> centroidFiles = partitioner.finalizePartitioning();
+//                    System.err.println("Finalized partitioning with " + centroidFiles.size() + " centroid files");
+//
+//                    // Stream data from run files in centroid ID order
+//                    streamRunFilesInOrder(centroidFiles);
+//                }
+
                 // Close VCTreePartitioner
                 closePartitioner();
                 
@@ -929,16 +867,157 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     materializedData.close();
                     ctx.setStateObject(materializedData);
                 }
-                System.err.println("✅ VCTreeBulkLoaderAndGroupingNodePushable closed successfully");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to close VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
                 e.printStackTrace();
             }
         }
 
+        /**
+         * Stream data from run files in centroid ID order (lowest to highest).
+         * 
+         * @param centroidFiles Map of centroid ID to file reference
+         * @throws HyracksDataException if streaming fails
+         */
+        private void streamRunFilesInOrder(Map<Integer, FileReference> centroidFiles) throws HyracksDataException {
+            try {
+
+                if (centroidFiles.isEmpty()) {
+                    System.err.println("No centroid files to stream");
+                    return;
+                }
+                
+                // Sort centroid IDs to ensure order (lowest to highest)
+                List<Integer> sortedCentroidIds = new ArrayList<>(centroidFiles.keySet());
+                sortedCentroidIds.sort(Integer::compareTo);
+                
+                System.err.println("Streaming centroids in order: " + sortedCentroidIds);
+                
+                long totalTuplesStreamed = 0;
+                
+                // Stream each run file in centroid ID order
+                for (int centroidId : sortedCentroidIds) {
+                    FileReference runFile = centroidFiles.get(centroidId);
+                    if (runFile != null) {
+                        long tuplesInFile = streamSingleRunFile(runFile, centroidId);
+                        totalTuplesStreamed += tuplesInFile;
+                    } else {
+                    }
+                }
+                
+
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+        
+        /**
+         * Stream data from a single run file.
+         * 
+         * @param runFile File reference to the run file
+         * @param centroidId Centroid ID for logging
+         * @return Number of tuples streamed from this file
+         * @throws HyracksDataException if streaming fails
+         */
+        private long streamSingleRunFile(FileReference runFile, int centroidId) throws HyracksDataException {
+            long tuplesStreamed = 0;
+            
+            try {
+                // Create run file reader
+                org.apache.hyracks.dataflow.common.io.RunFileReader reader = 
+                    new org.apache.hyracks.dataflow.common.io.RunFileReader(runFile, ctx.getIoManager(), 0, false);
+                reader.open();
+                
+                try {
+                    // Read frames from the run file
+                    org.apache.hyracks.api.comm.IFrame frame = new org.apache.hyracks.api.comm.VSizeFrame(ctx);
+                    
+                    while (reader.nextFrame(frame)) {
+                        ByteBuffer frameBuffer = frame.getBuffer();
+                        
+                        // Process the frame and stream tuples
+                        tuplesStreamed += processAndStreamFrame(frameBuffer, centroidId);
+                    }
+                    
+                } finally {
+                    reader.close();
+                }
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+            
+            return tuplesStreamed;
+        }
+        
+        /**
+         * Process a frame and stream its tuples to the output.
+         * 
+         * @param frameBuffer Frame buffer containing tuples
+         * @param centroidId Centroid ID for logging
+         * @return Number of tuples processed from this frame
+         * @throws HyracksDataException if processing fails
+         */
+        private long processAndStreamFrame(ByteBuffer frameBuffer, int centroidId) throws HyracksDataException {
+            long tuplesProcessed = 0;
+            
+            try {
+                // Reset frame buffer for reading
+                frameBuffer.rewind();
+                
+                // Create frame tuple accessor with the CORRECT record descriptor
+                // The run files contain tuples written by VCTreePartitioner, so we need to use
+                // the same record descriptor that VCTreePartitioner uses for reading/writing
+                RecordDescriptor partitionerRecDesc = partitioner.getTupleRecordDescriptor();
+                FrameTupleAccessor fta = new FrameTupleAccessor(partitionerRecDesc);
+                fta.reset(frameBuffer);
+                
+                int tupleCount = fta.getTupleCount();
+                tuplesProcessed = tupleCount;
+                
+
+                
+                // Debug: Check if the frame has any data
+                if (tupleCount == 0) {
+
+                    // Try to read a few bytes to see what's in the buffer
+                    if (frameBuffer.remaining() > 0) {
+                        byte[] sample = new byte[Math.min(32, frameBuffer.remaining())];
+                        frameBuffer.get(sample);
+                    }
+                }
+                
+                // Process each tuple in the frame
+                for (int i = 0; i < tupleCount; i++) {
+                    FrameTupleReference tuple = new FrameTupleReference();
+                    tuple.reset(fta, i);
+                    
+                    // Debug: Log tuple field count
+
+                    // Stream the tuple to output
+                    if (writer != null && outputAppender != null) {
+                        outputAppender.append(tuple);
+                    }
+                }
+                
+                // Output the frame if we have a writer
+                if (writer != null && outputAppender != null) {
+                    outputAppender.flush(writer);
+                }
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+            
+            return tuplesProcessed;
+        }
+
         @Override
         public void fail() throws HyracksDataException {
-            System.err.println("=== VCTreeBulkLoaderAndGroupingNodePushable FAILING ===");
             try {
                 // Close VCTreePartitioner
                 closePartitioner();
@@ -953,8 +1032,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     materializedData.close();
                 }
             } catch (Exception e) {
-                System.err
-                        .println("ERROR: Failed to cleanup VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
+
                 e.printStackTrace();
             }
         }

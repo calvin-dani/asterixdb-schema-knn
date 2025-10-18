@@ -27,6 +27,7 @@ import java.util.UUID;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
+import org.apache.asterix.formats.nontagged.BinaryComparatorFactoryProvider;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
@@ -36,6 +37,7 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeSortedDataBulkLoaderOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -45,6 +47,7 @@ import org.apache.hyracks.algebricks.core.jobgen.impl.ConnectorPolicyAssignmentP
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
 import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
 import org.apache.hyracks.algebricks.data.ITypeTraitProvider;
+import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.algebricks.runtime.base.IPushRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
@@ -337,28 +340,70 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Connected: CastAssign → BulkLoaderAndGrouping");
         System.err.println("BulkLoaderAndGrouping operator: " + bulkLoaderAndGroupingOp);
 
-        // Add sink operator to consume the output from BulkLoaderAndGrouping
+        // Update sourceOp to continue the chain
+        sourceOp = bulkLoaderAndGroupingOp;
+
+        // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
+        System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
+        System.err.println("SortNumFrames from config: " + sortNumFrames);
+        int[] sortFields = {0, 1}; // Sort by centroidId (0) first, then distance (1)
+        IBinaryComparatorFactory[] sortComparatorFactories = {
+            BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true),  // centroidId
+            BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true)  // distance
+        };
+        // Ensure minimum frames for sort operator (must be > 1)
+        int sortFrames = Math.max(sortNumFrames, 2);
+        System.err.println("Using sortFrames: " + sortFrames);
+        System.err.println("OutputRecDesc field count: " + outputRecDesc.getFieldCount());
+        ExternalSortOperatorDescriptor sortOp = new ExternalSortOperatorDescriptor(spec, sortFrames, sortFields,
+                sortComparatorFactories, outputRecDesc);
+        sortOp.setSourceLocation(sourceLoc);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortOp, primaryPartitionConstraint);
+        targetOp = sortOp;
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        System.err.println("Connected: BulkLoaderAndGrouping → Sort");
+        System.err.println("Sort operator: " + sortOp);
+
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
+
+        // 5. VCTreeSortedDataBulkLoaderOperatorDescriptor - Process sorted tuples and print first 5 per centroid
+        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
+        VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
+                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f);
+        sortedBulkLoaderOp.setSourceLocation(sourceLoc);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
+                primaryPartitionConstraint);
+        targetOp = sortedBulkLoaderOp;
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        System.err.println("Connected: Sort → SortedDataBulkLoader");
+        System.err.println("SortedDataBulkLoader operator: " + sortedBulkLoaderOp);
+
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
+
+        // 6. Final sink operator
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
         sinkRuntimeFactory.setSourceLocation(sourceLoc);
         AlgebricksMetaOperatorDescriptor sinkOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
                 new IPushRuntimeFactory[] { sinkRuntimeFactory }, new RecordDescriptor[] { outputRecDesc });
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sinkOp, primaryPartitionConstraint);
-        spec.connect(new OneToOneConnectorDescriptor(spec), bulkLoaderAndGroupingOp, 0, sinkOp, 0);
-        System.err.println("Connected: BulkLoaderAndGrouping → Sink");
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, sinkOp, 0);
+        System.err.println("Connected: SortedDataBulkLoader → Sink");
         System.err.println("Sink operator: " + sinkOp);
         System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
 
-        // Add sink as root (since BulkLoaderAndGrouping now has outputs)
+        // Add sink as root
         spec.addRoot(sinkOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
         System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
         System.err
-                .println("  Root: " + sinkOp + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sink)");
+                .println("  Root: " + sinkOp + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink)");
         System.err.println("=== DATA LOADING JOB CREATED ===");
-        System.err.println("=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sink ===");
-        System.err.println("=== DATA LOADING: Initializes bulk loader, groups data, and outputs transformed tuples ===");
+        System.err.println("=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink ===");
+        System.err.println("=== DATA LOADING: Initializes bulk loader, groups data, sorts by centroidId/distance, processes sorted tuples ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");
