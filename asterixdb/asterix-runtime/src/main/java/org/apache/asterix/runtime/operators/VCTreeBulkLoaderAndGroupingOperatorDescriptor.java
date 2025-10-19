@@ -20,12 +20,14 @@ package org.apache.asterix.runtime.operators;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
+import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
+import org.apache.asterix.om.base.ADouble;
+import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
@@ -53,8 +55,10 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
@@ -290,42 +294,60 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     }
 
     /**
-     * Create transformed tuple with centroidId and distance added to the front.
-     * This follows the AssignOperator pattern for adding computed fields to tuples.
+     * Create transformed tuple with centroidId, distance, and all original fields.
+     * Uses TupleUtils.createTuple() with proper serializers from RecordDescriptor.
      * 
-     * @param originalTuple Input tuple with original fields
-     * @param searchResult ClusterSearchResult containing centroidId and distance
+     * @param originalTuple Input tuple with original fields to preserve
+     * @param searchResult ClusterSearchResult containing all needed values
      * @return Transformed tuple with format [centroidId, distance, ...original fields...]
      * @throws HyracksDataException if tuple creation fails
      */
     public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
             throws HyracksDataException {
         try {
-            // Create tuple builder for the new tuple
-            // Format: [centroidId, distance, ...original fields...]
+            // Get serializers for original fields from input record descriptor
+            ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
+            
+            // Create combined serializers: [new fields] + [original fields]
             int totalFields = 2 + originalTuple.getFieldCount(); // 2 new fields + all original fields
-            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(totalFields);
-            ArrayTupleReference tupleRef = new ArrayTupleReference();
+            ISerializerDeserializer<?>[] combinedSerdes = new ISerializerDeserializer<?>[totalFields];
             
-            // Reset the tuple builder (following AssignOperator pattern)
-            tupleBuilder.reset();
+            // Set serializers for new fields
+            ISerializerDeserializer<?>[] outputFieldSerdes = outputRecDesc.getFields();
+            combinedSerdes[0] =  AInt32SerializerDeserializer.INSTANCE;; // centroidId
+            combinedSerdes[1] =  ADoubleSerializerDeserializer.INSTANCE;  // distance
             
-            // Add computed fields using serializers (following AssignOperator pattern)
-            // Add centroidId field
-            tupleBuilder.addField(IntegerSerializerDeserializer.INSTANCE, searchResult.centroidId);
-            
-            // Add distance field
-            tupleBuilder.addField(DoubleSerializerDeserializer.INSTANCE, searchResult.distance);
-            
-            // Add all original fields by copying them from the original tuple
+            // Set serializers for original fields
             for (int i = 0; i < originalTuple.getFieldCount(); i++) {
-                tupleBuilder.addField(originalTuple, i);
+                combinedSerdes[2 + i] = originalFieldSerdes[i];
             }
             
-            // Reset the tuple reference with the final data
-            tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
+            // Deserialize original fields to get their values
+            Object[] originalFieldValues = TupleUtils.deserializeTuple(originalTuple, originalFieldSerdes);
             
-            return tupleRef;
+            // Create combined field values: [new field values] + [original field values]
+            Object[] combinedValues = new Object[totalFields];
+//            combinedValues[0] = searchResult.centroidId; // centroidId
+//            combinedValues[1] = searchResult.distance;   // distance
+            combinedValues[0] = new AInt32(searchResult.centroidId);  // Wrap in AInt32
+            combinedValues[1] = new ADouble(searchResult.distance);
+
+            // Add original field values
+            for (int i = 0; i < originalFieldValues.length; i++) {
+                combinedValues[2 + i] = originalFieldValues[i];
+            }
+            
+            // Use TupleUtils.createTuple() with combined serializers and values
+            ITupleReference result = TupleUtils.createTuple(outputFieldSerdes, combinedValues);
+            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
+            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
+            System.err.println("CombinedValues length: " + combinedValues.length);
+            System.err.println("Result field count: " + result.getFieldCount());
+            System.err.println("CentroidId: " + searchResult.centroidId + " (type: " + combinedValues[0].getClass().getSimpleName() + ")");
+            System.err.println("Distance: " + searchResult.distance + " (type: " + combinedValues[1].getClass().getSimpleName() + ")");
+
+            
+            return result;
             
         } catch (Exception e) {
             System.err.println("ERROR: Failed to create transformed tuple: " + e.getMessage());
@@ -845,6 +867,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             System.err.println("Successful extractions: " + successfulQueries);
 
             try {
+                // CRITICAL: Write any remaining output data before closing
+                // This ensures the downstream sort operator receives all data
+                if (writer != null && outputAppender != null) {
+                    System.err.println("Writing final output data to downstream sort operator...");
+                    outputAppender.write(writer, false);  // false = don't clear frame, just write remaining data
+                    System.err.println("Final output data written successfully");
+                }
+
                 // Finalize partitioning after all data is processed
 //                if (partitioner != null) {
 //                    Map<Integer, FileReference> centroidFiles = partitioner.finalizePartitioning();
@@ -867,9 +897,17 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     materializedData.close();
                     ctx.setStateObject(materializedData);
                 }
+                
+                // Close the writer AFTER flushing all data
+                if (writer != null) {
+                    writer.close();
+                    System.err.println("Writer closed after flushing all data");
+                }
+                
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to close VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
                 e.printStackTrace();
+                throw HyracksDataException.create(e);
             }
         }
 

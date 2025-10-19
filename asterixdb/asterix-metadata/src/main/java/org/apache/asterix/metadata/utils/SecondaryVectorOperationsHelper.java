@@ -18,6 +18,7 @@
  */
 package org.apache.asterix.metadata.utils;
 
+import static org.apache.asterix.om.types.ATypeTag.ARRAY;
 import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
 import static org.apache.asterix.om.types.BuiltinType.AINT32;
 
@@ -35,6 +36,7 @@ import org.apache.asterix.metadata.entities.InternalDatasetDetails;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
+import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeSortedDataBulkLoaderOperatorDescriptor;
@@ -475,7 +477,20 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             int sourceColumn = recordColumn;
 
             List<String> vectorFieldName = keyFieldNames.get(0);
-            IAType vectorFieldType = new AOrderedListType(ADOUBLE, "embedding"); // Default vector type
+            
+            // Try to get the actual field type from the schema first (for closed fields)
+            IAType vectorFieldType = null;
+            try {
+                vectorFieldType = sourceType.getSubFieldType(vectorFieldName);
+            } catch (AlgebricksException e) {
+                // Field not found in schema, will use default for open fields
+                vectorFieldType = null;
+            }
+            
+            // If field type is not found in schema (open field), provide default type
+            if (vectorFieldType == null) {
+                vectorFieldType = DefaultOpenFieldType.getDefaultOpenFieldType(ARRAY);
+            }
 
             Pair<IAType, Boolean> keyTypePair =
                     Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldName, sourceType);
