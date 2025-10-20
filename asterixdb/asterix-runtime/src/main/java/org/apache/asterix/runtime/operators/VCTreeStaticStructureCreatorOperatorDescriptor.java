@@ -251,7 +251,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         return partitionToCentroids;
     }
 
-
     /**
      * Apply recursive partitioning logic with hardcoded memory budget and create run files.
      * 
@@ -811,8 +810,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         int clusterId =
                                 IntegerPointable.getInteger(clusterIdVal.getByteArray(), clusterIdVal.getStartOffset());
 
-
-
                         // Track structure for analysis
                         if (levelDistribution == null) {
                             levelDistribution = new HashMap<>();
@@ -829,7 +826,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         tupleCount++;
 
                         // Log progress every 5000 tuples to reduce noise
-
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to process tuple: " + e.getMessage());
@@ -912,10 +908,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     createStaticStructure();
                     System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
 
-
-
                     // Signal Branch 2 that structure creation is complete
-
 
                     System.err.println("=== CreateStructureActivity COMPLETE ===");
                 }
@@ -1271,16 +1264,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== PassThroughActivity INITIALIZING ===");
                     try {
                         // Wait for permit from CreateStructureActivity
-                        IterationPermitState permitState =
-                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-                        if (permitState != null) {
-                            System.err.println("Waiting for permit from CreateStructureActivity...");
-                            permitState.getPermit().acquire();
-                            System.err.println("✅ PERMIT ACQUIRED - CreateStructureActivity completed");
-                        }
-
-                        // Initialize LSM Bulk Loader
-                        initializeLSMBulkLoader();
+//                        IterationPermitState permitState =
+//                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+//                        if (permitState != null) {
+//                            System.err.println("Waiting for permit from CreateStructureActivity...");
+//                            permitState.getPermit().acquire();
+//                            System.err.println("✅ PERMIT ACQUIRED - CreateStructureActivity completed");
+//                        }
+//
+//                        // Initialize LSM Bulk Loader
+//                        initializeLSMBulkLoader();
 
                         System.err.println("✅ PassThroughActivity initialized successfully");
 

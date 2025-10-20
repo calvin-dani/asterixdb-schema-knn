@@ -33,10 +33,10 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
+import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
-import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeSortedDataBulkLoaderOperatorDescriptor;
@@ -49,7 +49,6 @@ import org.apache.hyracks.algebricks.core.jobgen.impl.ConnectorPolicyAssignmentP
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
 import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
 import org.apache.hyracks.algebricks.data.ITypeTraitProvider;
-import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.algebricks.runtime.base.IPushRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
@@ -63,6 +62,7 @@ import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
+import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
@@ -88,7 +88,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Force output to both System.out and System.err to ensure visibility
         System.out.println(
                 "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
-
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -307,24 +306,24 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         IDataFormat format = metadataProvider.getDataFormat();
         ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
-        
+
         ISerializerDeserializer[] outputRecFields = new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount()];
         ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount()];
-        
+
         // Add centroidId field (int)
         outputRecFields[0] = serdeProvider.getSerializerDeserializer(AINT32);
         outputTypeTraits[0] = typeTraitProvider.getTypeTrait(AINT32);
-        
+
         // Add distance field (double)
         outputRecFields[1] = serdeProvider.getSerializerDeserializer(ADOUBLE);
         outputTypeTraits[1] = typeTraitProvider.getTypeTrait(ADOUBLE);
-        
+
         // Copy all original fields from secondaryRecDesc
         for (int i = 0; i < secondaryRecDesc.getFieldCount(); i++) {
             outputRecFields[2 + i] = secondaryRecDesc.getFields()[i];
             outputTypeTraits[2 + i] = secondaryRecDesc.getTypeTraits()[i];
         }
-        
+
         RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
 
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
@@ -348,11 +347,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
         System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         System.err.println("SortNumFrames from config: " + sortNumFrames);
-        int[] sortFields = {0, 1}; // Sort by centroidId (0) first, then distance (1)
-        IBinaryComparatorFactory[] sortComparatorFactories = {
-            BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true),  // centroidId
-            BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true)  // distance
-        };
+        int[] sortFields = { 0, 1 }; // Sort by centroidId (0) first, then distance (1)
+        IBinaryComparatorFactory[] sortComparatorFactories =
+                { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
+                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true) // distance
+                };
         // Ensure minimum frames for sort operator (must be > 1)
         int sortFrames = Math.max(sortNumFrames, 2);
         System.err.println("Using sortFrames: " + sortFrames);
@@ -370,19 +369,19 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = targetOp;
 
         // 5. VCTreeSortedDataBulkLoaderOperatorDescriptor - Process sorted tuples and print first 5 per centroid
-        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
-        VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
-                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f);
-        sortedBulkLoaderOp.setSourceLocation(sourceLoc);
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
-                primaryPartitionConstraint);
-        targetOp = sortedBulkLoaderOp;
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        System.err.println("Connected: Sort → SortedDataBulkLoader");
-        System.err.println("SortedDataBulkLoader operator: " + sortedBulkLoaderOp);
-
-        // Update sourceOp to continue the chain
-        sourceOp = targetOp;
+//        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
+//        VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
+//                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f);
+//        sortedBulkLoaderOp.setSourceLocation(sourceLoc);
+//        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
+//                primaryPartitionConstraint);
+//        targetOp = sortedBulkLoaderOp;
+//        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+//        System.err.println("Connected: Sort → SortedDataBulkLoader");
+//        System.err.println("SortedDataBulkLoader operator: " + sortedBulkLoaderOp);
+//
+//        // Update sourceOp to continue the chain
+//        sourceOp = targetOp;
 
         // 6. Final sink operator
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
@@ -401,11 +400,13 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
-        System.err
-                .println("  Root: " + sinkOp + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink)");
+        System.err.println("  Root: " + sinkOp
+                + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink)");
         System.err.println("=== DATA LOADING JOB CREATED ===");
-        System.err.println("=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink ===");
-        System.err.println("=== DATA LOADING: Initializes bulk loader, groups data, sorts by centroidId/distance, processes sorted tuples ===");
+        System.err.println(
+                "=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink ===");
+        System.err.println(
+                "=== DATA LOADING: Initializes bulk loader, groups data, sorts by centroidId/distance, processes sorted tuples ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");
@@ -477,7 +478,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             int sourceColumn = recordColumn;
 
             List<String> vectorFieldName = keyFieldNames.get(0);
-            
+
             // Try to get the actual field type from the schema first (for closed fields)
             IAType vectorFieldType = null;
             try {
@@ -486,7 +487,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 // Field not found in schema, will use default for open fields
                 vectorFieldType = null;
             }
-            
+
             // If field type is not found in schema (open field), provide default type
             if (vectorFieldType == null) {
                 vectorFieldType = DefaultOpenFieldType.getDefaultOpenFieldType(ARRAY);
@@ -506,7 +507,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             secondaryComparatorFactories[0] = comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
             secondaryTypeTraits[0] = typeTraitProvider.getTypeTrait(keyType);
             secondaryBloomFilterKeyFields[0] = 0;
-
 
         }
 

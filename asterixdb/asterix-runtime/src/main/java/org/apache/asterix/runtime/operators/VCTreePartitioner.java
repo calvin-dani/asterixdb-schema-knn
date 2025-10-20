@@ -30,24 +30,24 @@ import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
 import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.dataflow.value.ITypeTraits;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
+import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.io.RunFileReader;
-import org.apache.hyracks.dataflow.common.io.RunFileWriter;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
-import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
-import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.dataflow.common.io.RunFileReader;
+import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 
 /**
  * VCTreePartitioner handles recursive centroid partitioning using SHAPIRO formula.
@@ -65,7 +65,7 @@ public class VCTreePartitioner {
     private final int memoryBudget;
     private final int frameSize;
     private final int maxRecursionLevels;
-    
+
     // Streaming mode variables
     private int K;
     private int numPartitions;
@@ -75,22 +75,22 @@ public class VCTreePartitioner {
     private Map<Integer, List<Integer>> partitionToCentroids = new HashMap<>();
     private Map<Integer, Integer> centroidToPartition = new HashMap<>();
     private final Map<Integer, FileReference> centroidFiles = new HashMap<>();
-    
+
     // Frame buffering infrastructure
     private final Map<Integer, VSizeFrame> partitionFrames = new HashMap<>();
     private final Map<Integer, FrameTupleAppender> partitionAppenders = new HashMap<>();
     private int usedFrames = 0;
-    
+
     // Column accessors for field extraction (following VCTreeStaticStructureCreatorOperatorDescriptor pattern)
     private org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator centroidIdEval;
     private IPointable centroidIdVal;
 
     // SHAPIRO formula constants
     private static final double FUDGE_FACTOR = 1.1;
-    
+
     // Partitioning strategy
     private boolean useModuloPartitioning = true; // Flag to enable modulo-based partitioning
-    
+
     // Data storage for processing
     private List<DataTuple> inputData = new ArrayList<>();
 
@@ -100,7 +100,7 @@ public class VCTreePartitioner {
         this.frameSize = frameSize;
         this.maxRecursionLevels = 5;
         this.usedFrames = 0;
-        
+
         // Validate constructor parameters
         if (ctx == null) {
             throw new IllegalArgumentException("Context cannot be null");
@@ -112,7 +112,7 @@ public class VCTreePartitioner {
             throw new IllegalArgumentException("Frame size must be positive: " + frameSize);
         }
     }
-    
+
     /**
      * Set the partitioning strategy.
      * 
@@ -133,7 +133,8 @@ public class VCTreePartitioner {
      * @param centroidIdColumn Column index containing centroid ID (0 for first, -1 for last)
      * @throws HyracksDataException if partitioning fails
      */
-    public void partitionData(List<ITupleReference> inputTuples, int K, int centroidIdColumn) throws HyracksDataException {
+    public void partitionData(List<ITupleReference> inputTuples, int K, int centroidIdColumn)
+            throws HyracksDataException {
         // Convert input tuples to DataTuple objects
         this.inputData = convertTuplesToDataTuples(inputTuples, centroidIdColumn);
 
@@ -243,11 +244,11 @@ public class VCTreePartitioner {
             throws HyracksDataException {
         System.err.println("=== separateAndWriteToFiles (streaming) for partition " + partitionId + " ===");
         System.err.println("Target centroids: " + centroids);
-        
+
         // Create writers for each centroid
         Map<Integer, RunFileWriter> centroidWriters = new HashMap<>();
         Map<Integer, FrameTupleAppender> centroidAppenders = new HashMap<>();
-        
+
         try {
             // Initialize writers and appenders for each centroid
             for (int centroidId : centroids) {
@@ -256,39 +257,39 @@ public class VCTreePartitioner {
                 RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
                 writer.open();
                 centroidWriters.put(centroidId, writer);
-                
+
                 VSizeFrame frame = new VSizeFrame(ctx);
                 FrameTupleAppender appender = new FrameTupleAppender(frame);
                 centroidAppenders.put(centroidId, appender);
-                
+
                 System.err.println("Created writer for centroid " + centroidId);
             }
-            
+
             System.err.println("DEBUG: Target centroids for writers: " + centroidWriters.keySet());
-            
+
             // Stream data from partition file and route to appropriate centroid files
             RunFileWriter partitionWriter = partitionFiles.get(partitionId);
             if (partitionWriter != null) {
                 RunFileReader reader = partitionWriter.createReader();
                 reader.open();
-                
+
                 try {
                     VSizeFrame frame = new VSizeFrame(ctx);
                     int totalTuples = 0;
-                    
+
                     while (reader.nextFrame(frame)) {
                         // Parse tuples from this frame
                         List<DataTuple> frameData = parseFrameToDataTuples(frame.getBuffer(), partitionId);
                         totalTuples += frameData.size();
-                        
+
                         // Route each tuple to its appropriate centroid file
                         for (DataTuple dataTuple : frameData) {
                             int centroidId = dataTuple.centroidId;
                             RunFileWriter centroidWriter = centroidWriters.get(centroidId);
                             FrameTupleAppender centroidAppender = centroidAppenders.get(centroidId);
-                            
+
                             System.err.println("DEBUG: Routing tuple with centroidId " + centroidId + " to writer");
-                            
+
                             if (centroidWriter != null && centroidAppender != null && dataTuple.tupleData != null) {
                                 // Append tuple to centroid file
                                 if (!centroidAppender.append(dataTuple.tupleData)) {
@@ -297,7 +298,8 @@ public class VCTreePartitioner {
                                     FrameUtils.flushFrame(centroidAppender.getBuffer(), centroidWriter);
                                     centroidAppender.reset(new VSizeFrame(ctx), true);
                                     if (!centroidAppender.append(dataTuple.tupleData)) {
-                                        throw new HyracksDataException("Tuple too large for frame in centroid " + centroidId);
+                                        throw new HyracksDataException(
+                                                "Tuple too large for frame in centroid " + centroidId);
                                     }
                                 } else {
                                     System.err.println("DEBUG: Successfully appended tuple to centroid " + centroidId);
@@ -307,36 +309,36 @@ public class VCTreePartitioner {
                             }
                         }
                     }
-                    
+
                     System.err.println("Processed " + totalTuples + " tuples from partition " + partitionId);
-                    
+
                 } finally {
                     reader.close();
                 }
             }
-            
+
             // Flush all remaining data and close files
             for (Map.Entry<Integer, RunFileWriter> entry : centroidWriters.entrySet()) {
                 int centroidId = entry.getKey();
                 RunFileWriter writer = entry.getValue();
                 FrameTupleAppender appender = centroidAppenders.get(centroidId);
-                
+
                 try {
                     // Flush any remaining data
                     if (appender.getTupleCount() > 0) {
                         FrameUtils.flushFrame(appender.getBuffer(), writer);
                     }
-                    
+
                     writer.close();
                     centroidFiles.put(centroidId, writer.getFileReference());
                     System.err.println("Successfully created file for centroid " + centroidId);
-                    
+
                 } catch (Exception e) {
                     System.err.println("ERROR: Failed to finalize centroid " + centroidId + ": " + e.getMessage());
                     writer.fail();
                 }
             }
-            
+
         } catch (Exception e) {
             // Clean up on error
             for (RunFileWriter writer : centroidWriters.values()) {
@@ -349,7 +351,6 @@ public class VCTreePartitioner {
             throw HyracksDataException.create(e);
         }
     }
-
 
     /**
      * Distribute centroids to partitions using range partitioning.
@@ -376,8 +377,6 @@ public class VCTreePartitioner {
             partitionFiles.put(i, writer);
         }
     }
-
-
 
     /**
      * Calculate centroids per partition for range partitioning.
@@ -460,10 +459,10 @@ public class VCTreePartitioner {
         try {
             // Initialize evaluator context
             EvaluatorContext evalCtx = new EvaluatorContext(ctx);
-            
+
             // Initialize column accessor for centroidId (field 0 in [centroidId, distance, embedding, centroidId] format)
             centroidIdEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx);
-            
+
             // Initialize pointable for evaluator results
             centroidIdVal = new VoidPointable();
         } catch (Exception e) {
@@ -484,20 +483,20 @@ public class VCTreePartitioner {
     public void preInitializePartitioning(int K, int memoryBudget, int frameSize) throws HyracksDataException {
         System.err.println("=== preInitializePartitioning called ===");
         System.err.println("K: " + K + ", memoryBudget: " + memoryBudget + ", frameSize: " + frameSize);
-        
+
         this.K = K;
-        
+
         // Initialize column accessors first
         initializeColumnAccessors();
-        
+
         // Calculate number of partitions using SHAPIRO formula
         long estimatedDataSize = K * 1024L; // Rough estimate for pre-calculation
         this.numPartitions = calculatePartitionsUsingShapiro(K, estimatedDataSize, frameSize, memoryBudget);
         System.err.println("Calculated numPartitions: " + numPartitions);
-        
+
         // Pre-calculate partition mapping using range partitioning
         calculatePartitionMapping();
-        
+
         // Initialize partition buffers and files
         initializePartitionBuffers(numPartitions);
         System.err.println("=== preInitializePartitioning completed ===");
@@ -516,18 +515,19 @@ public class VCTreePartitioner {
             // Extract centroid ID using column accessor (field 0 in [centroidId, distance, embedding, centroidId] format)
             int centroidId = extractCentroidId(tuple);
             System.err.println("DEBUG: Extracted centroid ID: " + centroidId);
-            
+
             // Check if centroid ID is in valid range
-//            if (centroidId < 0 || centroidId >= K) {
-//                return;
-//            }
-//
+            //            if (centroidId < 0 || centroidId >= K) {
+            //                return;
+            //            }
+            //
             // Determine target partition
             int partition;
             if (useModuloPartitioning) {
                 // Use modulo-based partitioning: centroidId % numPartitions
                 partition = Math.abs(centroidId) % numPartitions;
-                System.err.println("DEBUG: Centroid ID " + centroidId + " -> Partition " + partition + " (modulo " + numPartitions + ")");
+                System.err.println("DEBUG: Centroid ID " + centroidId + " -> Partition " + partition + " (modulo "
+                        + numPartitions + ")");
             } else {
                 // Use pre-calculated mapping (range partitioning)
                 Integer mappedPartition = centroidToPartition.get(centroidId);
@@ -537,14 +537,14 @@ public class VCTreePartitioner {
                 }
                 partition = mappedPartition;
             }
-            
+
             // Get appender for this partition
             FrameTupleAppender appender = partitionAppenders.get(partition);
-            
+
             if (appender == null) {
                 return;
             }
-            
+
             // Debug: Check what we're about to write
             System.err.println("DEBUG: About to write tuple to partition " + partition);
             System.err.println("DEBUG: Tuple field count: " + tuple.getFieldCount());
@@ -555,24 +555,24 @@ public class VCTreePartitioner {
                     System.err.println("DEBUG: Field 0 centroid ID before writing: " + fieldCentroidId);
                 }
             }
-            
+
             // Try to append tuple to current frame
             if (appender.append(tuple)) {
                 System.err.println("DEBUG: Successfully appended tuple to partition " + partition);
                 return;
             }
-            
+
             // Frame is full, need to flush
             System.err.println("DEBUG: Frame full, flushing partition " + partition);
             flushPartitionFrame(partition);
-            
+
             // Reset appender and try again
             appender.reset(new VSizeFrame(ctx), true);
             if (!appender.append(tuple)) {
                 throw new HyracksDataException("Tuple too large for frame in partition " + partition);
             }
             System.err.println("DEBUG: Successfully appended tuple to partition " + partition + " after flush");
-            
+
         } catch (Exception e) {
             System.err.println("ERROR: Failed to write streaming tuple: " + e.getMessage());
             throw HyracksDataException.create(e);
@@ -591,13 +591,13 @@ public class VCTreePartitioner {
         System.err.println("numPartitions: " + numPartitions);
         System.err.println("partitionToCentroids: " + partitionToCentroids);
         System.err.println("useModuloPartitioning: " + useModuloPartitioning);
-        
+
         // Flush all remaining buffers to files
         flushAllPartitions();
-        
+
         // Close all partition files
         closePartitionFiles();
-        
+
         if (useModuloPartitioning) {
             // For modulo partitioning, we need to read the partition files and extract centroids
             System.err.println("Using modulo partitioning - reading partition files to extract centroids");
@@ -619,7 +619,7 @@ public class VCTreePartitioner {
                 }
             }
         }
-        
+
         System.err.println("Final centroidFiles: " + centroidFiles);
         return centroidFiles;
     }
@@ -633,26 +633,26 @@ public class VCTreePartitioner {
      */
     private List<Integer> extractCentroidsFromPartition(int partitionId) throws HyracksDataException {
         System.err.println("=== extractCentroidsFromPartition (streaming) for partition " + partitionId + " ===");
-        
+
         List<Integer> centroids = new ArrayList<>();
         Set<Integer> uniqueCentroids = new HashSet<>();
-        
+
         try {
             // Stream data from partition file
             RunFileWriter partitionWriter = partitionFiles.get(partitionId);
             if (partitionWriter != null) {
                 RunFileReader reader = partitionWriter.createReader();
                 reader.open();
-                
+
                 try {
                     VSizeFrame frame = new VSizeFrame(ctx);
                     int totalTuples = 0;
-                    
+
                     while (reader.nextFrame(frame)) {
                         // Parse tuples from this frame
                         List<DataTuple> frameData = parseFrameToDataTuples(frame.getBuffer(), partitionId);
                         totalTuples += frameData.size();
-                        
+
                         // Extract unique centroid IDs
                         for (DataTuple dataTuple : frameData) {
                             if (dataTuple.tupleData != null) {
@@ -664,19 +664,20 @@ public class VCTreePartitioner {
                             }
                         }
                     }
-                    
+
                     System.err.println("Processed " + totalTuples + " tuples from partition " + partitionId);
-                    
+
                 } finally {
                     reader.close();
                 }
             }
-            
+
             System.err.println("Extracted " + centroids.size() + " unique centroids from partition " + partitionId);
             return centroids;
-            
+
         } catch (Exception e) {
-            System.err.println("ERROR: Failed to extract centroids from partition " + partitionId + ": " + e.getMessage());
+            System.err.println(
+                    "ERROR: Failed to extract centroids from partition " + partitionId + ": " + e.getMessage());
             e.printStackTrace();
             return new ArrayList<>();
         }
@@ -702,13 +703,13 @@ public class VCTreePartitioner {
         typeTraits[1] = DoublePointable.TYPE_TRAITS; // distance
         typeTraits[2] = DoublePointable.TYPE_TRAITS; // embedding (treated as binary data)
         typeTraits[3] = IntegerPointable.TYPE_TRAITS; // centroidId (duplicate)
-        
+
         ISerializerDeserializer[] serdes = new ISerializerDeserializer[4];
         serdes[0] = IntegerSerializerDeserializer.INSTANCE; // centroidId
         serdes[1] = DoubleSerializerDeserializer.INSTANCE; // distance
         serdes[2] = DoubleSerializerDeserializer.INSTANCE; // embedding (treated as binary data)
         serdes[3] = IntegerSerializerDeserializer.INSTANCE; // centroidId (duplicate)
-        
+
         return new RecordDescriptor(serdes, typeTraits);
     }
 
@@ -718,7 +719,7 @@ public class VCTreePartitioner {
     private void calculatePartitionMapping() {
         partitionToCentroids = new HashMap<>();
         centroidToPartition = new HashMap<>();
-        
+
         if (useModuloPartitioning) {
             // Modulo-based partitioning: centroidId % numPartitions
             System.err.println("Using modulo-based partitioning: centroidId % " + numPartitions);
@@ -728,7 +729,7 @@ public class VCTreePartitioner {
             // Range-based partitioning (original approach)
             System.err.println("Using range-based partitioning");
             int centroidsPerPartition = calculateCentroidsPerPartition(K, numPartitions);
-            
+
             for (int centroidId = 0; centroidId < K; centroidId++) {
                 int partition = centroidId / centroidsPerPartition; // Range partitioning
                 partitionToCentroids.computeIfAbsent(partition, k -> new ArrayList<>()).add(centroidId);
@@ -746,47 +747,47 @@ public class VCTreePartitioner {
      * @throws HyracksDataException if initialization fails
      */
     private void initializePartitionBuffers(int numPartitions) throws HyracksDataException {
-        
+
         // Validate parameters
         if (numPartitions <= 0) {
             throw new HyracksDataException("Invalid number of partitions: " + numPartitions);
         }
         if (numPartitions > memoryBudget) {
-            throw new HyracksDataException("Number of partitions (" + numPartitions + 
-                                         ") exceeds memory budget (" + memoryBudget + ")");
+            throw new HyracksDataException(
+                    "Number of partitions (" + numPartitions + ") exceeds memory budget (" + memoryBudget + ")");
         }
         if (frameSize <= 0) {
             throw new HyracksDataException("Invalid frame size: " + frameSize);
         }
-        
+
         try {
             for (int partitionId = 0; partitionId < numPartitions; partitionId++) {
                 // Check memory budget
                 if (!canAllocateFrame(partitionId)) {
-                    throw new HyracksDataException("Cannot allocate frame for partition " + partitionId + 
-                                                 " - memory budget exceeded");
+                    throw new HyracksDataException(
+                            "Cannot allocate frame for partition " + partitionId + " - memory budget exceeded");
                 }
-                
+
                 // Create frame for this partition
                 VSizeFrame frame = new VSizeFrame(ctx);
-                
+
                 // Create appender for this partition
                 FrameTupleAppender appender = new FrameTupleAppender(frame);
-                
+
                 // Store references
                 partitionFrames.put(partitionId, frame);
                 partitionAppenders.put(partitionId, appender);
-                
+
                 // Create file writer
                 String fileName = "VCTreePartition_" + partitionId + "_" + System.currentTimeMillis();
                 FileReference file = ctx.getJobletContext().createManagedWorkspaceFile(fileName);
                 RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
                 writer.open();
                 partitionFiles.put(partitionId, writer);
-                
+
                 usedFrames++;
             }
-            
+
         } catch (Exception e) {
             // Clean up on failure
             System.err.println("ERROR: Failed to initialize partition buffers, cleaning up...");
@@ -806,13 +807,13 @@ public class VCTreePartitioner {
                     writer.close();
                 }
             }
-            
+
             // Clear all maps
             partitionFiles.clear();
             partitionFrames.clear();
             partitionAppenders.clear();
             usedFrames = 0;
-            
+
         } catch (Exception e) {
             System.err.println("ERROR: Failed to cleanup partition buffers: " + e.getMessage());
         }
@@ -828,24 +829,25 @@ public class VCTreePartitioner {
         if (partitionId < 0 || partitionId >= partitionFiles.size()) {
             throw new HyracksDataException("Invalid partition ID: " + partitionId);
         }
-        
+
         FrameTupleAppender appender = partitionAppenders.get(partitionId);
         RunFileWriter writer = partitionFiles.get(partitionId);
-        
+
         if (appender == null) {
             throw new HyracksDataException("No appender found for partition " + partitionId);
         }
         if (writer == null) {
             throw new HyracksDataException("No writer found for partition " + partitionId);
         }
-        
+
         if (appender.getTupleCount() > 0) {
             try {
-                System.err.println("DEBUG: Flushing partition " + partitionId + " with " + appender.getTupleCount() + " tuples");
-                
+                System.err.println(
+                        "DEBUG: Flushing partition " + partitionId + " with " + appender.getTupleCount() + " tuples");
+
                 // Write current frame to file (no rewind needed - FrameUtils.flushFrame handles the buffer correctly)
                 FrameUtils.flushFrame(appender.getBuffer(), writer);
-                
+
                 // Reset for next batch
                 appender.reset(new VSizeFrame(ctx), true);
             } catch (Exception e) {
@@ -886,7 +888,7 @@ public class VCTreePartitioner {
                 System.err.println("ERROR: Failed to close partition file " + entry.getKey() + ": " + e.getMessage());
             }
         }
-        
+
         // Don't clear partitionFiles here - we need them for reading
         // partitionFiles.clear();
     }
@@ -897,14 +899,14 @@ public class VCTreePartitioner {
     public void closeAllFiles() throws HyracksDataException {
         // Flush all remaining buffers first
         flushAllPartitions();
-        
+
         // Close all partition files
         for (RunFileWriter writer : partitionFiles.values()) {
             if (writer != null) {
                 writer.close();
             }
         }
-        
+
         // Clear buffer references
         partitionFrames.clear();
         partitionAppenders.clear();
@@ -920,20 +922,20 @@ public class VCTreePartitioner {
      */
     private List<DataTuple> convertTuplesToDataTuples(List<ITupleReference> inputTuples, int centroidIdColumn) {
         List<DataTuple> dataTuples = new ArrayList<>();
-        
+
         for (ITupleReference tuple : inputTuples) {
             DataTuple dataTuple = new DataTuple();
-            
+
             // Extract centroid ID from specified column
             int actualColumnIndex = (centroidIdColumn == -1) ? tuple.getFieldCount() - 1 : centroidIdColumn;
             dataTuple.centroidId = extractCentroidId(tuple, actualColumnIndex);
-            
+
             // Store the entire tuple data
             dataTuple.tupleData = tuple;
-            
+
             dataTuples.add(dataTuple);
         }
-        
+
         return dataTuples;
     }
 
@@ -950,13 +952,14 @@ public class VCTreePartitioner {
             // Try column accessor approach first (for FrameTupleReference)
             if (tuple instanceof FrameTupleReference) {
                 FrameTupleReference frameTuple = (FrameTupleReference) tuple;
-                
+
                 // Use column accessor to extract centroidId from field 0 (first field in transformed format)
                 centroidIdEval.evaluate(frameTuple, centroidIdVal);
-                
+
                 // Parse the integer value from the pointable
-                int centroidId = IntegerPointable.getInteger(centroidIdVal.getByteArray(), centroidIdVal.getStartOffset());
-                
+                int centroidId =
+                        IntegerPointable.getInteger(centroidIdVal.getByteArray(), centroidIdVal.getStartOffset());
+
                 return centroidId;
             } else {
                 // Fallback to direct field access for ArrayTupleReference and other types
@@ -980,13 +983,15 @@ public class VCTreePartitioner {
             System.err.println("DEBUG: extractCentroidId called with columnIndex: " + columnIndex);
             System.err.println("DEBUG: Tuple field count: " + tuple.getFieldCount());
             System.err.println("DEBUG: Field " + columnIndex + " length: " + tuple.getFieldLength(columnIndex));
-            
+
             // Use AsterixDB IntegerPointable like in VCTreeStaticStructureCreatorOperatorDescriptor
-            int centroidId = IntegerPointable.getInteger(tuple.getFieldData(columnIndex), tuple.getFieldStart(columnIndex));
+            int centroidId =
+                    IntegerPointable.getInteger(tuple.getFieldData(columnIndex), tuple.getFieldStart(columnIndex));
             System.err.println("DEBUG: Extracted centroid ID: " + centroidId);
             return centroidId;
         } catch (Exception e) {
-            System.err.println("ERROR: Failed to extract centroid ID from column " + columnIndex + ": " + e.getMessage());
+            System.err
+                    .println("ERROR: Failed to extract centroid ID from column " + columnIndex + ": " + e.getMessage());
             e.printStackTrace();
             return columnIndex;
         }
@@ -1014,10 +1019,10 @@ public class VCTreePartitioner {
         for (DataTuple dataTuple : inputData) {
             int centroidId = dataTuple.centroidId;
             Integer partition = centroidToPartition.get(centroidId);
-            
+
             if (partition != null) {
                 FrameTupleAppender appender = partitionAppenders.get(partition);
-                
+
                 if (appender != null) {
                     // Try to append tuple to current frame
                     if (!appender.append(dataTuple.tupleData)) {
@@ -1029,11 +1034,10 @@ public class VCTreePartitioner {
                 }
             }
         }
-        
+
         // Flush all remaining buffers
         flushAllPartitions();
     }
-
 
     /**
      * Parse a frame buffer to extract DataTuple objects.
@@ -1045,20 +1049,20 @@ public class VCTreePartitioner {
      */
     private List<DataTuple> parseFrameToDataTuples(ByteBuffer frameBuffer, int partitionId) {
         List<DataTuple> data = new ArrayList<>();
-        
+
         try {
             // Reset buffer for reading
             frameBuffer.rewind();
-            
+
             // Create FrameTupleAccessor to parse the frame properly
             // We need to create a record descriptor that matches the transformed tuple format
             // Format: [centroidId, distance, ...original fields...]
             // The original tuple has variable fields, so we need to handle this dynamically
-            
+
             // For now, let's use a simple approach: just read the first field (centroidId)
             // and create a minimal DataTuple. The actual tuple parsing will be done by the
             // FrameTupleAccessor which can handle variable field counts.
-            
+
             // Create a record descriptor that matches the transformed tuple format
             // Format: [centroidId, distance, embedding, centroidId] - 4 fields total
             // We need to match exactly what was written during the streaming phase
@@ -1067,26 +1071,26 @@ public class VCTreePartitioner {
             typeTraits[1] = DoublePointable.TYPE_TRAITS; // distance
             typeTraits[2] = DoublePointable.TYPE_TRAITS; // embedding (treated as binary data)
             typeTraits[3] = IntegerPointable.TYPE_TRAITS; // centroidId (duplicate)
-            
+
             ISerializerDeserializer[] serdes = new ISerializerDeserializer[4];
             serdes[0] = IntegerSerializerDeserializer.INSTANCE; // centroidId
             serdes[1] = DoubleSerializerDeserializer.INSTANCE; // distance
             serdes[2] = DoubleSerializerDeserializer.INSTANCE; // embedding (treated as binary data)
             serdes[3] = IntegerSerializerDeserializer.INSTANCE; // centroidId (duplicate)
-            
+
             RecordDescriptor recordDesc = new RecordDescriptor(serdes, typeTraits);
             FrameTupleAccessor fta = new FrameTupleAccessor(recordDesc);
             fta.reset(frameBuffer);
-            
+
             int tupleCount = fta.getTupleCount();
             System.err.println("Parsing frame for partition " + partitionId + " with " + tupleCount + " tuples");
-            
+
             // Parse each tuple in the frame
             for (int i = 0; i < tupleCount; i++) {
                 try {
                     FrameTupleReference tuple = new FrameTupleReference();
                     tuple.reset(fta, i);
-                    
+
                     // Debug: Log tuple field count
                     if (i < 3) { // Only log first 3 tuples to avoid spam
                         System.err.println("DEBUG: Tuple " + i + " field count: " + tuple.getFieldCount());
@@ -1094,35 +1098,37 @@ public class VCTreePartitioner {
                             System.err.println("DEBUG: Field " + j + " length: " + tuple.getFieldLength(j));
                         }
                     }
-                    
+
                     // Extract centroid ID from the first field
                     int centroidId = extractCentroidId(tuple, 0);
-                    
+
                     // Debug: Log centroid ID extraction
                     if (i < 5) { // Only log first 5 tuples to avoid spam
                         System.err.println("DEBUG: Tuple " + i + " has centroidId: " + centroidId);
                     }
-                    
+
                     // Create DataTuple with the actual tuple data
                     DataTuple dataTuple = new DataTuple();
                     dataTuple.centroidId = centroidId;
                     dataTuple.tupleData = tuple; // Store the actual tuple reference
-                    
+
                     data.add(dataTuple);
-                    
+
                 } catch (Exception e) {
-                    System.err.println("ERROR: Failed to parse tuple " + i + " in partition " + partitionId + ": " + e.getMessage());
+                    System.err.println("ERROR: Failed to parse tuple " + i + " in partition " + partitionId + ": "
+                            + e.getMessage());
                     // Continue with next tuple
                 }
             }
-            
+
             System.err.println("Successfully parsed " + data.size() + " tuples from partition " + partitionId);
-            
+
         } catch (Exception e) {
-            System.err.println("ERROR: Failed to parse frame data for partition " + partitionId + ": " + e.getMessage());
+            System.err
+                    .println("ERROR: Failed to parse frame data for partition " + partitionId + ": " + e.getMessage());
             e.printStackTrace();
         }
-        
+
         return data;
     }
 
@@ -1134,7 +1140,7 @@ public class VCTreePartitioner {
      */
     private Map<Integer, List<DataTuple>> groupByCentroidId(List<DataTuple> allData) {
         Map<Integer, List<DataTuple>> groups = new HashMap<>();
-        
+
         // Debug: Log first few centroid IDs
         int debugCount = 0;
         for (DataTuple dataTuple : allData) {
@@ -1144,10 +1150,10 @@ public class VCTreePartitioner {
             }
             groups.computeIfAbsent(dataTuple.centroidId, k -> new ArrayList<>()).add(dataTuple);
         }
-        
+
         // Debug: Log unique centroid IDs found
         System.err.println("DEBUG: Found " + groups.size() + " unique centroid IDs: " + groups.keySet());
-        
+
         return groups;
     }
 
@@ -1161,11 +1167,11 @@ public class VCTreePartitioner {
     public static class DataTuple {
         public int centroidId;
         public ITupleReference tupleData;
-        
+
         @Override
         public String toString() {
-            return String.format("DataTuple{centroidId=%d, fieldCount=%d}", 
-                centroidId, tupleData != null ? tupleData.getFieldCount() : 0);
+            return String.format("DataTuple{centroidId=%d, fieldCount=%d}", centroidId,
+                    tupleData != null ? tupleData.getFieldCount() : 0);
         }
     }
 }

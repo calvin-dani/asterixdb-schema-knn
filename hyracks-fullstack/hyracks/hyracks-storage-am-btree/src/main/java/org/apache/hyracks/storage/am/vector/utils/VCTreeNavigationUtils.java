@@ -78,8 +78,6 @@ public class VCTreeNavigationUtils {
                 leafFrame.setPage(page);
                 boolean isLeaf = leafFrame.isLeaf();
 
-
-
                 if (isLeaf) {
                     // Leaf level - find closest centroid
                     bestResult = findClosestInLeafPage(queryVector, currentPageId, leafFrame);

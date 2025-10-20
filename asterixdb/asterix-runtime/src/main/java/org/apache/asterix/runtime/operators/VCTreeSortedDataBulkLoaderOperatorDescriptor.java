@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
@@ -37,11 +38,9 @@ import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDese
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
-import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 
 /**
@@ -71,14 +70,17 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
         this.outRecDescs[0] = inputRecordDescriptor; // Pass through same record descriptor
-        System.err.println("VCTreeSortedDataBulkLoaderOperatorDescriptor created with indexHelperFactory and fillFactor: " + fillFactor);
+        System.err
+                .println("VCTreeSortedDataBulkLoaderOperatorDescriptor created with indexHelperFactory and fillFactor: "
+                        + fillFactor);
     }
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         RecordDescriptor inputRecDesc = recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0);
-        return new VCTreeSortedDataBulkLoaderNodePushable(ctx, partition, nPartitions, inputRecDesc, indexHelperFactory, fillFactor);
+        return new VCTreeSortedDataBulkLoaderNodePushable(ctx, partition, nPartitions, inputRecDesc, indexHelperFactory,
+                fillFactor);
     }
 
     private class VCTreeSortedDataBulkLoaderNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
@@ -110,13 +112,13 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
 
         // Serializers for tuple field extraction
         @SuppressWarnings("rawtypes")
-        private final ISerializerDeserializer[] fieldSerdes = {
-            IntegerSerializerDeserializer.INSTANCE,  // Field 0: centroidId
-            DoubleSerializerDeserializer.INSTANCE    // Field 1: distance
+        private final ISerializerDeserializer[] fieldSerdes = { IntegerSerializerDeserializer.INSTANCE, // Field 0: centroidId
+                DoubleSerializerDeserializer.INSTANCE // Field 1: distance
         };
 
         public VCTreeSortedDataBulkLoaderNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
-                RecordDescriptor inputRecDesc, IIndexDataflowHelperFactory indexHelperFactory, float fillFactor) throws HyracksDataException {
+                RecordDescriptor inputRecDesc, IIndexDataflowHelperFactory indexHelperFactory, float fillFactor)
+                throws HyracksDataException {
             this.ctx = ctx;
             this.partition = partition;
             this.nPartitions = nPartitions;
@@ -131,12 +133,13 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         public void open() throws HyracksDataException {
             System.err.println("=== VCTreeSortedDataBulkLoader OPENING ===");
             System.err.println("Partition: " + partition + "/" + nPartitions);
-            
+
             try {
                 // Initialize VectorClusteringTree bulk loader
                 initializeVectorClusteringTreeBulkLoader();
-                
-                System.err.println("VCTreeSortedDataBulkLoader opened successfully with VectorClusteringTree bulk loader");
+
+                System.err.println(
+                        "VCTreeSortedDataBulkLoader opened successfully with VectorClusteringTree bulk loader");
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to open VCTreeSortedDataBulkLoader: " + e.getMessage());
                 e.printStackTrace();
@@ -152,21 +155,21 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         private void initializeVectorClusteringTreeBulkLoader() throws HyracksDataException {
             try {
                 System.err.println("=== INITIALIZING VECTORCLUSTERINGTREE BULK LOADER ===");
-                
+
                 // Create index helper
                 indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                 indexHelper.open();
-                
+
                 // Get VectorClusteringTree instance
                 vectorTree = (VectorClusteringTree) indexHelper.getIndexInstance();
                 System.err.println("VectorClusteringTree instance obtained: " + vectorTree);
-                
+
                 // Create bulk loader
                 bulkLoader = vectorTree.createBulkLoader(fillFactor, false, 0, false, null);
                 System.err.println("VCTreeBulkLoder created with fillFactor: " + fillFactor);
-                
+
                 System.err.println("✅ VectorClusteringTree bulk loader initialized successfully");
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to initialize VectorClusteringTree bulk loader: " + e.getMessage());
                 e.printStackTrace();
@@ -211,7 +214,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     // Reset for new centroid
                     currentCentroidId = centroidId;
                     tupleCountForCurrentCentroid = 0;
-                    
+
                     System.err.println("=== Processing Centroid ID: " + centroidId + " ===");
                 }
 
@@ -230,12 +233,12 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     try {
                         bulkLoader.add(tuple);
                     } catch (Exception e) {
-                        System.err.println("ERROR: Failed to add tuple to VectorClusteringTree bulk loader: " + e.getMessage());
+                        System.err.println(
+                                "ERROR: Failed to add tuple to VectorClusteringTree bulk loader: " + e.getMessage());
                         e.printStackTrace();
                         // Continue processing other tuples
                     }
                 }
-
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to process sorted tuple: " + e.getMessage());
@@ -276,10 +279,9 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
          * Print the first 5 values for each centroid ID.
          */
         private void printCentroidData(int centroidId, double distance, ITupleReference tuple, int tupleIndex) {
-            System.err.println("Centroid " + centroidId + ", Tuple " + tupleIndex + 
-                             ": distance=" + String.format("%.6f", distance) + 
-                             ", totalFields=" + tuple.getFieldCount());
-            
+            System.err.println("Centroid " + centroidId + ", Tuple " + tupleIndex + ": distance="
+                    + String.format("%.6f", distance) + ", totalFields=" + tuple.getFieldCount());
+
             // Print additional tuple information for debugging
             if (tupleIndex <= 3) { // Only for first 3 tuples to avoid spam
                 System.err.println("  Tuple details: " + tuple.toString());
@@ -319,18 +321,18 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     bulkLoader.end();
                     System.err.println("✅ VectorClusteringTree bulk loader finalized successfully");
                 }
-                
+
                 // Close index helper
                 if (indexHelper != null) {
                     indexHelper.close();
                     System.err.println("✅ Index helper closed successfully");
                 }
-                
+
                 // Log final summary for current centroid if any
                 if (currentCentroidId != -1) {
                     logCentroidSummary(currentCentroidId, tupleCountForCurrentCentroid);
                 }
-                
+
                 // Log overall processing summary
                 System.err.println("=== VCTreeSortedDataBulkLoader FINAL SUMMARY ===");
                 System.err.println("Total tuples processed: " + totalTuplesProcessed);
@@ -340,11 +342,11 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     System.err.println("  Centroid " + entry.getKey() + ": " + entry.getValue() + " tuples");
                 }
                 System.err.println("===============================================");
-                
+
                 if (writer != null) {
                     writer.close();
                 }
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to close VCTreeSortedDataBulkLoader: " + e.getMessage());
                 e.printStackTrace();
