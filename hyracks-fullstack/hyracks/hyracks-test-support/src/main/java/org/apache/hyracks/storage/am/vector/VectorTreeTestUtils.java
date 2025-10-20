@@ -19,6 +19,8 @@
 
 package org.apache.hyracks.storage.am.vector;
 
+import static org.junit.Assert.*;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -59,8 +61,6 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import static org.junit.Assert.*;
 
 @SuppressWarnings({ "rawtypes", "deprecation" })
 public class VectorTreeTestUtils extends TreeIndexTestUtils {

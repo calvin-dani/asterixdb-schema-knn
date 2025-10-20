@@ -28,10 +28,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
-import org.apache.hyracks.data.std.primitive.DoublePointable;
-import org.apache.hyracks.data.std.primitive.FloatPointable;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
-import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
+import org.apache.hyracks.data.std.primitive.*;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
 import org.apache.hyracks.storage.am.common.api.INullIntrospector;
 import org.apache.hyracks.storage.am.common.api.IPrimitiveValueProviderFactory;
@@ -101,14 +98,15 @@ public class LSMVCTreeUtils {
      * @throws HyracksDataException if creation fails
      */
     public static LSMVCTree createLSMTree(NCConfig storageConfig, IIOManager ioManager,
-                                          List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
-                                          ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories, double bloomFilterFalsePositiveRate,
-                                          ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
-                                          ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-                                          boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields,
-                                          ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
-                                          IComponentFilterHelper filterHelper, boolean durable,
-                                          IMetadataPageManagerFactory metadataPageManagerFactory, boolean atomic, RecordDescriptor inputRecDesc) throws HyracksDataException {
+            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
+            ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories, double bloomFilterFalsePositiveRate,
+            ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
+            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields,
+            ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
+            IComponentFilterHelper filterHelper, boolean durable,
+            IMetadataPageManagerFactory metadataPageManagerFactory, boolean atomic, RecordDescriptor inputRecDesc)
+            throws HyracksDataException {
 
         // We need null-related types for tuple writers - use simple defaults for testing
         ITypeTraits nullTypeTraits = null; // Can be null for basic testing
@@ -128,11 +126,10 @@ public class LSMVCTreeUtils {
 
         // Data frames need 4-field data tuples: <distance, cosine_similarity, vector, primary_key>
         ITypeTraits[] dataTypeTraits = new ITypeTraits[4];
-        ITypeTraits[] inputTypeTraits = inputRecDesc.getTypeTraits();
-        dataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // distance (double) - Fixed 8 bytes
-        dataTypeTraits[1] = DoublePointable.TYPE_TRAITS; // cosine similarity (double) - Fixed 8 bytes
+        dataTypeTraits[0] = new FixedLengthTypeTrait(9); // distance (double) - Fixed 8 bytes
+        dataTypeTraits[1] = new FixedLengthTypeTrait(5); // cosine similarity (double) - Fixed 8 bytes
         dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
-        dataTypeTraits[3] = VarLengthTypeTrait.INSTANCE; // primary key (string/variable) - Variable
+        dataTypeTraits[3] = new FixedLengthTypeTrait(9); // primary key (string/variable) - Variable
 
         // Create individual tuple writer factories with correct type traits for each frame type
         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
@@ -142,7 +139,7 @@ public class LSMVCTreeUtils {
         VectorClusteringMetadataTupleWriterFactory metadataTupleWriterFactory =
                 new VectorClusteringMetadataTupleWriterFactory(metadataTypeTraits, nullTypeTraits, nullIntrospector);
         VectorClusteringDataTupleWriterFactory dataTupleWriterFactory =
-                new VectorClusteringDataTupleWriterFactory(inputTypeTraits, nullTypeTraits, nullIntrospector);
+                new VectorClusteringDataTupleWriterFactory(dataTypeTraits, nullTypeTraits, nullIntrospector);
 
         // Create tuple writers from factories
         ITreeIndexTupleWriter interiorTupleWriter = interiorTupleWriterFactory.createTupleWriter();
@@ -207,7 +204,8 @@ public class LSMVCTreeUtils {
             ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
-            IMetadataPageManagerFactory metadataPageManagerFactory, RecordDescriptor inputRecDesc) throws HyracksDataException {
+            IMetadataPageManagerFactory metadataPageManagerFactory, RecordDescriptor inputRecDesc)
+            throws HyracksDataException {
 
         // Use default configurations for simplified creation
         ILSMComponentFilterFrameFactory filterFrameFactory = null; // No filtering by default
@@ -218,6 +216,7 @@ public class LSMVCTreeUtils {
         return createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits,
                 cmpFactories, bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields,
-                filterFrameFactory, filterManager, filterHelper, durable, metadataPageManagerFactory, atomic,inputRecDesc);
+                filterFrameFactory, filterManager, filterHelper, durable, metadataPageManagerFactory, atomic,
+                inputRecDesc);
     }
 }

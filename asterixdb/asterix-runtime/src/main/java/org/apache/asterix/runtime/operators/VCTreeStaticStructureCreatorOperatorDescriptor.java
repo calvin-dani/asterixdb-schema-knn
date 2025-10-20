@@ -69,8 +69,6 @@ import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
-// import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
-import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
@@ -1264,16 +1262,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== PassThroughActivity INITIALIZING ===");
                     try {
                         // Wait for permit from CreateStructureActivity
-//                        IterationPermitState permitState =
-//                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-//                        if (permitState != null) {
-//                            System.err.println("Waiting for permit from CreateStructureActivity...");
-//                            permitState.getPermit().acquire();
-//                            System.err.println("✅ PERMIT ACQUIRED - CreateStructureActivity completed");
-//                        }
-//
-//                        // Initialize LSM Bulk Loader
-//                        initializeLSMBulkLoader();
+                        //                        IterationPermitState permitState =
+                        //                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
+                        //                        if (permitState != null) {
+                        //                            System.err.println("Waiting for permit from CreateStructureActivity...");
+                        //                            permitState.getPermit().acquire();
+                        //                            System.err.println("✅ PERMIT ACQUIRED - CreateStructureActivity completed");
+                        //                        }
+                        //
+                        //                        // Initialize LSM Bulk Loader
+                        //                        initializeLSMBulkLoader();
 
                         System.err.println("✅ PassThroughActivity initialized successfully");
 

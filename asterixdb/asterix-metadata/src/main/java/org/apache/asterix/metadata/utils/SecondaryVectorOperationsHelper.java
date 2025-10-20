@@ -310,13 +310,13 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ISerializerDeserializer[] outputRecFields = new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount()];
         ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount()];
 
-        // Add centroidId field (int)
-        outputRecFields[0] = serdeProvider.getSerializerDeserializer(AINT32);
-        outputTypeTraits[0] = typeTraitProvider.getTypeTrait(AINT32);
+        outputRecFields[0] = serdeProvider.getSerializerDeserializer(ADOUBLE);
+        outputTypeTraits[0] = typeTraitProvider.getTypeTrait(ADOUBLE);
 
-        // Add distance field (double)
-        outputRecFields[1] = serdeProvider.getSerializerDeserializer(ADOUBLE);
-        outputTypeTraits[1] = typeTraitProvider.getTypeTrait(ADOUBLE);
+        // Add centroidId field (int)
+        outputRecFields[1] = serdeProvider.getSerializerDeserializer(AINT32);
+        outputTypeTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
+
 
         // Copy all original fields from secondaryRecDesc
         for (int i = 0; i < secondaryRecDesc.getFieldCount(); i++) {
@@ -347,7 +347,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
         System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         System.err.println("SortNumFrames from config: " + sortNumFrames);
-        int[] sortFields = { 0, 1 }; // Sort by centroidId (0) first, then distance (1)
+        int[] sortFields = { 1, 0 }; // Sort by centroidId (0) first, then distance (1)
         IBinaryComparatorFactory[] sortComparatorFactories =
                 { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
                         BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true) // distance
@@ -369,16 +369,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = targetOp;
 
         // 5. VCTreeSortedDataBulkLoaderOperatorDescriptor - Process sorted tuples and print first 5 per centroid
-//        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
-        
+        //        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
+
         // Extract vector parameters from index details
         int vectorDimensions = 784; // Default vector dimensions
-        int[] vectorFields = {2}; // Vector field is at index 2 (after centroidId and distance)
+        int[] vectorFields = { 2 }; // Vector field is at index 2 (after centroidId and distance)
         int[] filterFields = null; // No filter fields for now
         boolean durable = true; // Default to durable
-        
+
         VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
-                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f, 
+                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f,
                         vectorDimensions, vectorFields, filterFields, durable);
         sortedBulkLoaderOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,

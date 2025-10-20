@@ -309,8 +309,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
             // Set serializers for new fields
             ISerializerDeserializer<?>[] outputFieldSerdes = outputRecDesc.getFields();
-            combinedSerdes[0] = AInt32SerializerDeserializer.INSTANCE;; // centroidId
-            combinedSerdes[1] = ADoubleSerializerDeserializer.INSTANCE; // distance
+            combinedSerdes[1] = AInt32SerializerDeserializer.INSTANCE;; // centroidId
+            combinedSerdes[0] = ADoubleSerializerDeserializer.INSTANCE; // distance
 
             // Set serializers for original fields
             for (int i = 0; i < originalTuple.getFieldCount(); i++) {
@@ -324,8 +324,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             Object[] combinedValues = new Object[totalFields];
             //            combinedValues[0] = searchResult.centroidId; // centroidId
             //            combinedValues[1] = searchResult.distance;   // distance
-            combinedValues[0] = new AInt32(searchResult.centroidId); // Wrap in AInt32
-            combinedValues[1] = new ADouble(searchResult.distance);
+            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
+            combinedValues[0] = new ADouble(searchResult.distance);
 
             // Add original field values
             for (int i = 0; i < originalFieldValues.length; i++) {
@@ -334,14 +334,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
             // Use TupleUtils.createTuple() with combined serializers and values
             ITupleReference result = TupleUtils.createTuple(outputFieldSerdes, combinedValues);
-//            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
-//            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
-//            System.err.println("CombinedValues length: " + combinedValues.length);
-//            System.err.println("Result field count: " + result.getFieldCount());
-//            System.err.println("CentroidId: " + searchResult.centroidId + " (type: "
-//                    + combinedValues[0].getClass().getSimpleName() + ")");
-//            System.err.println("Distance: " + searchResult.distance + " (type: "
-//                    + combinedValues[1].getClass().getSimpleName() + ")");
+            //            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
+            //            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
+            //            System.err.println("CombinedValues length: " + combinedValues.length);
+            //            System.err.println("Result field count: " + result.getFieldCount());
+            //            System.err.println("CentroidId: " + searchResult.centroidId + " (type: "
+            //                    + combinedValues[0].getClass().getSimpleName() + ")");
+            //            System.err.println("Distance: " + searchResult.distance + " (type: "
+            //                    + combinedValues[1].getClass().getSimpleName() + ")");
 
             return result;
 

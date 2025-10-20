@@ -93,10 +93,21 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
         }
 
         // Create the LSM Vector Clustering Tree
-        LSMVCTree lsmVCTree =
-                LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache,
-                        typeTraits, cmpFactories, null, -1, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
-                        pageWriteCallbackFactory, false, numVectorFields, null, null, true, metadataPageManagerFactory);
+        LSMVCTree lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,
+                diskBufferCache, typeTraits, cmpFactories, null, // valueProviderFactories (can be null)
+                0.0, // bloomFilterFalsePositiveRate (0.0 = no bloom filter)
+                mergePolicy, // mergePolicy
+                opTracker, // opTracker
+                ioScheduler, // ioScheduler
+                ioOpCallbackFactory, // ioOpCallbackFactory
+                pageWriteCallbackFactory, // pageWriteCallbackFactory
+                false, // needKeyDupCheck
+                numVectorFields, // vectorDimensions
+                new int[] { 0 }, // vectorFields (vector field at index 0)
+                null, // filterFields (no filter fields)
+                true, // durable
+                metadataPageManagerFactory, // metadataPageManagerFactory
+                null); // inputRecDesc (can be null for testing)
 
         LSMVCTreeTestContext testCtx = new LSMVCTreeTestContext(fieldSerdes, lsmVCTree, numVectorFields);
         return testCtx;

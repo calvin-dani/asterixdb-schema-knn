@@ -94,7 +94,10 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     public double getDistanceToCentroid(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
         // Distance to centroid is the first field in data records - stored as float
-        return DoublePointable.getDouble(frameTuple.getFieldData(0), frameTuple.getFieldStart(0));
+        int distanceOff = frameTuple.getFieldStart(0) + 1;
+// Distance to centroid is the first field in data records - stored as float
+        double distance = buf.getDouble(distanceOff);
+        return distance;
     }
 
     @Override

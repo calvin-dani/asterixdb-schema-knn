@@ -32,13 +32,18 @@ import org.apache.asterix.om.base.AInt32;
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
+import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.control.common.controllers.NCConfig;
+import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.UTF8StringBinaryComparatorFactory;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -46,36 +51,30 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializer
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.utils.SerdeUtils;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManagerFactory;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.impls.NoMergePolicy;
+import org.apache.hyracks.storage.am.lsm.common.impls.NoOpIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.NoOpPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.SynchronousSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.impls.ThreadCountingTracker;
 import org.apache.hyracks.storage.am.lsm.common.impls.VirtualBufferCache;
-import org.apache.hyracks.storage.am.lsm.common.impls.NoOpIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
-import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-import org.apache.hyracks.storage.common.buffercache.ICachedPage;
-import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
-import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
-import org.apache.hyracks.data.std.accessors.UTF8StringBinaryComparatorFactory;
-import org.apache.hyracks.dataflow.common.utils.SerdeUtils;
-import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
-import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
-import org.apache.hyracks.control.common.controllers.NCConfig;
+import org.apache.hyracks.storage.common.buffercache.ICachedPage;
+import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 
 /**
  * Bulk loader operator that processes sorted tuples from ExternalSortOperatorDescriptor.
@@ -102,8 +101,8 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
     private final boolean durable;
 
     public VCTreeSortedDataBulkLoaderOperatorDescriptor(IOperatorDescriptorRegistry spec,
-            RecordDescriptor inputRecordDescriptor, IIndexDataflowHelperFactory indexHelperFactory, 
-            float fillFactor, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable) {
+            RecordDescriptor inputRecordDescriptor, IIndexDataflowHelperFactory indexHelperFactory, float fillFactor,
+            int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable) {
         super(spec, 1, 1); // Input arity 1, Output arity 1
         this.inputRecordDescriptor = inputRecordDescriptor;
         this.indexHelperFactory = indexHelperFactory;
@@ -152,7 +151,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         private final boolean durable;
         private LSMVCTree lsmvcTree;
         private LSMVCTreeBulkLoader bulkLoader;
-        
+
         // Static structure navigation components
         private IBufferCache bufferCache;
         private int staticStructureFileId;
@@ -166,14 +165,15 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         private int totalTuplesProcessed = 0;
         private boolean first;
         // Serializers for tuple field extraction
-//        @SuppressWarnings("rawtypes")
-//        private final ISerializerDeserializer[] fieldSerdes = { IntegerSerializerDeserializer.INSTANCE, // Field 0: centroidId
-//                DoubleSerializerDeserializer.INSTANCE // Field 1: distance
-//        };
+        //        @SuppressWarnings("rawtypes")
+        //        private final ISerializerDeserializer[] fieldSerdes = { IntegerSerializerDeserializer.INSTANCE, // Field 0: centroidId
+        //                DoubleSerializerDeserializer.INSTANCE // Field 1: distance
+        //        };
 
         public VCTreeSortedDataBulkLoaderNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
-                RecordDescriptor inputRecDesc, IIndexDataflowHelperFactory indexHelperFactory, float fillFactor, 
-                int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable) throws HyracksDataException {
+                RecordDescriptor inputRecDesc, IIndexDataflowHelperFactory indexHelperFactory, float fillFactor,
+                int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable)
+                throws HyracksDataException {
             this.ctx = ctx;
             this.partition = partition;
             this.nPartitions = nPartitions;
@@ -230,8 +230,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
 
                 // Create virtual buffer caches
                 List<IVirtualBufferCache> virtualBufferCaches = new ArrayList<>();
-                IVirtualBufferCache virtualBufferCache = new VirtualBufferCache(
-                        new HeapBufferAllocator(), 512, 1000);
+                IVirtualBufferCache virtualBufferCache = new VirtualBufferCache(new HeapBufferAllocator(), 512, 1000);
                 virtualBufferCaches.add(virtualBufferCache);
 
                 // Create file reference using proper IO device path
@@ -243,17 +242,17 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                 }
 
                 // Get disk buffer cache
-                IBufferCache diskBufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext()
-                        .getServiceContext().getApplicationContext()).getBufferCache();
+                IBufferCache diskBufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx
+                        .getJobletContext().getServiceContext().getApplicationContext()).getBufferCache();
 
                 // Create field serializers for vector fields
                 @SuppressWarnings("rawtypes")
-                ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[] {
-                        IntegerSerializerDeserializer.INSTANCE, // centroidId
-                        DoubleSerializerDeserializer.INSTANCE,  // distance
-                        DoubleArraySerializerDeserializer.INSTANCE, // vector
-                        DoubleArraySerializerDeserializer.INSTANCE // primary key
-                };
+                ISerializerDeserializer[] fieldSerdes =
+                        new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroidId
+                                DoubleSerializerDeserializer.INSTANCE, // distance
+                                DoubleArraySerializerDeserializer.INSTANCE, // vector
+                                DoubleArraySerializerDeserializer.INSTANCE // primary key
+                        };
 
                 // Create type traits for vector fields
                 ITypeTraits[] typeTraits = SerdeUtils.serdesToTypeTraits(fieldSerdes);
@@ -268,11 +267,11 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                 }
 
                 // Create LSMVCTree using LSMVCTreeUtils (full version like in tests)
-                lsmvcTree = LSMVCTreeUtils.createLSMTree(ncConfig, ioManager, virtualBufferCaches, file, diskBufferCache,
-                        typeTraits, cmpFactories, -1, new NoMergePolicy(), new ThreadCountingTracker(),
+                lsmvcTree = LSMVCTreeUtils.createLSMTree(ncConfig, ioManager, virtualBufferCaches, file,
+                        diskBufferCache, typeTraits, cmpFactories, -1, new NoMergePolicy(), new ThreadCountingTracker(),
                         SynchronousSchedulerProvider.INSTANCE.getIoScheduler(null),
-                        NoOpIOOperationCallbackFactory.INSTANCE, NoOpPageWriteCallbackFactory.INSTANCE,
-                        false, vectorDimensions, vectorFields, filterFields, null, null, null, durable,
+                        NoOpIOOperationCallbackFactory.INSTANCE, NoOpPageWriteCallbackFactory.INSTANCE, false,
+                        vectorDimensions, vectorFields, filterFields, null, null, null, durable,
                         AppendOnlyLinkedMetadataPageManagerFactory.INSTANCE, false, inputRecDesc);
 
                 System.err.println("✅ LSMVCTree initialized successfully");
@@ -341,52 +340,51 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
 
                 int pagesProcessed = 0;
 
-
                 for (int pageId = 1; pageId <= 8; pageId++) {
-                    ICachedPage sourcePage = bufferCache.pin(BufferedFileHandle.getDiskPageId(staticStructureFileId, pageId));
+                    ICachedPage sourcePage =
+                            bufferCache.pin(BufferedFileHandle.getDiskPageId(staticStructureFileId, pageId));
                     bulkLoader.copyPage(sourcePage);
                     bufferCache.unpin(sourcePage);
                 }
 
-
-//                while (!pageQueue.isEmpty()) {
-//                    int currentPageId = pageQueue.poll();
-//
-//                    // Pin and copy the current page
-//                    ICachedPage sourcePage =
-//                    try {
-//                        sourcePage.acquireReadLatch();
-//
-//                        // Copy the page using bulk loader
-//                        if (bulkLoader != null) {
-//                            bulkLoader.copyPage(sourcePage);
-//                        }
-//                        pagesProcessed++;
-//
-//                        System.err.println("Copied page " + currentPageId + " (total processed: " + pagesProcessed + ")");
-//
-//                        // Check if this is an interior page (has children)
-//                        org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame interiorFrame =
-//                                (org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
-//                        interiorFrame.setPage(sourcePage);
-//
-//                        if (!interiorFrame.isLeaf()) {
-//                            // Add all child pages to queue
-//                            int tupleCount = interiorFrame.getTupleCount();
-//                            for (int i = 0; i < tupleCount; i++) {
-//                                int childPageId = interiorFrame.getChildPageId(i);
-//                                if (childPageId > 0) {
-//                                    pageQueue.offer(childPageId);
-//                                    System.err.println("Added child page " + childPageId + " to queue");
-//                                }
-//                            }
-//                        }
-//
-//                    } finally {
-//                        sourcePage.releaseReadLatch();
-//                        bufferCache.unpin(sourcePage);
-//                    }
-//                }
+                //                while (!pageQueue.isEmpty()) {
+                //                    int currentPageId = pageQueue.poll();
+                //
+                //                    // Pin and copy the current page
+                //                    ICachedPage sourcePage =
+                //                    try {
+                //                        sourcePage.acquireReadLatch();
+                //
+                //                        // Copy the page using bulk loader
+                //                        if (bulkLoader != null) {
+                //                            bulkLoader.copyPage(sourcePage);
+                //                        }
+                //                        pagesProcessed++;
+                //
+                //                        System.err.println("Copied page " + currentPageId + " (total processed: " + pagesProcessed + ")");
+                //
+                //                        // Check if this is an interior page (has children)
+                //                        org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame interiorFrame =
+                //                                (org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                //                        interiorFrame.setPage(sourcePage);
+                //
+                //                        if (!interiorFrame.isLeaf()) {
+                //                            // Add all child pages to queue
+                //                            int tupleCount = interiorFrame.getTupleCount();
+                //                            for (int i = 0; i < tupleCount; i++) {
+                //                                int childPageId = interiorFrame.getChildPageId(i);
+                //                                if (childPageId > 0) {
+                //                                    pageQueue.offer(childPageId);
+                //                                    System.err.println("Added child page " + childPageId + " to queue");
+                //                                }
+                //                            }
+                //                        }
+                //
+                //                    } finally {
+                //                        sourcePage.releaseReadLatch();
+                //                        bufferCache.unpin(sourcePage);
+                //                    }
+                //                }
 
                 System.err.println("✅ Level-order page copying completed. Total pages processed: " + pagesProcessed);
 
@@ -467,12 +465,12 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
 
                 // Create field serializers for data loading
                 @SuppressWarnings("rawtypes")
-                ISerializerDeserializer[] dataFrameSerdes = new ISerializerDeserializer[] {
-                        DoubleSerializerDeserializer.INSTANCE, // distance
-                        DoubleSerializerDeserializer.INSTANCE, // cosine similarity
-                        DoubleArraySerializerDeserializer.INSTANCE, // vector
-                        DoubleArraySerializerDeserializer.INSTANCE // primary key
-                };
+                ISerializerDeserializer[] dataFrameSerdes =
+                        new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE, // distance
+                                DoubleSerializerDeserializer.INSTANCE, // cosine similarity
+                                DoubleArraySerializerDeserializer.INSTANCE, // vector
+                                DoubleArraySerializerDeserializer.INSTANCE // primary key
+                        };
 
                 // Create LSMVCTreeBulkLoader
                 bulkLoader = lsmvcTree.createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes);
@@ -497,15 +495,15 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                 // Use the same approach as VCTreeStaticStructureCreatorOperatorDescriptor
                 IIndexDataflowHelper indexHelper =
                         indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-//                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-//                indexHelper.open();
-//                lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
+                //                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                //                indexHelper.open();
+                //                lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
                 LocalResource resource = indexHelper.getResource();
                 String resourcePath = resource.getPath();
 
                 IIOManager ioManager = ctx.getJobletContext().getServiceContext().getIoManager();
                 return ioManager.resolve(resourcePath);
-                
+
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
                 e.printStackTrace();
@@ -546,7 +544,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                         logCentroidSummary(currentCentroidId, tupleCountForCurrentCentroid);
                     }
                     // TODO CALVIN DANI: to call bulkload.nextcentroid()
-                    if(!first) {
+                    if (!first) {
                         bulkLoader.next();
                     }
                     first = false;
@@ -572,8 +570,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     try {
                         bulkLoader.add(tuple);
                     } catch (Exception e) {
-                        System.err.println(
-                                "ERROR: Failed to add tuple to LSM Index bulk loader: " + e.getMessage());
+                        System.err.println("ERROR: Failed to add tuple to LSM Index bulk loader: " + e.getMessage());
                         e.printStackTrace();
                         // Continue processing other tuples
                     }
@@ -593,7 +590,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
             try {
                 // Use TupleUtils to deserialize the integer field
                 Object[] fieldValues = TupleUtils.deserializeTuple(tuple, inputRecDesc.getFields());
-                return ((AInt32) fieldValues[0]).getIntegerValue();
+                return ((AInt32) fieldValues[1]).getIntegerValue();
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to extract centroidId from tuple: " + e.getMessage());
                 throw HyracksDataException.create(e);
@@ -607,7 +604,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
             try {
                 // Use TupleUtils to deserialize the double field
                 Object[] fieldValues = TupleUtils.deserializeTuple(tuple, inputRecDesc.getFields());
-                return ((ADouble) fieldValues[1]).getDoubleValue();
+                return ((ADouble) fieldValues[0]).getDoubleValue();
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to extract distance from tuple: " + e.getMessage());
                 throw HyracksDataException.create(e);
