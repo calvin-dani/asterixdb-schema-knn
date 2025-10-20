@@ -370,8 +370,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // 5. VCTreeSortedDataBulkLoaderOperatorDescriptor - Process sorted tuples and print first 5 per centroid
 //        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
+        
+        // Extract vector parameters from index details
+        int vectorDimensions = 784; // Default vector dimensions
+        int[] vectorFields = {2}; // Vector field is at index 2 (after centroidId and distance)
+        int[] filterFields = null; // No filter fields for now
+        boolean durable = true; // Default to durable
+        
         VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
-                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f);
+                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f, 
+                        vectorDimensions, vectorFields, filterFields, durable);
         sortedBulkLoaderOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
                 primaryPartitionConstraint);

@@ -101,7 +101,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
                 vectorDimensions, vectorFields, filterFields, null, // filterFrameFactory
                 null, // filterManager
                 null, // filterHelper
-                durable, metadataPageManagerFactory, atomic);
+                durable, metadataPageManagerFactory, atomic,null);
     }
 
     @Override

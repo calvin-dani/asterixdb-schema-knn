@@ -334,14 +334,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
             // Use TupleUtils.createTuple() with combined serializers and values
             ITupleReference result = TupleUtils.createTuple(outputFieldSerdes, combinedValues);
-            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
-            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
-            System.err.println("CombinedValues length: " + combinedValues.length);
-            System.err.println("Result field count: " + result.getFieldCount());
-            System.err.println("CentroidId: " + searchResult.centroidId + " (type: "
-                    + combinedValues[0].getClass().getSimpleName() + ")");
-            System.err.println("Distance: " + searchResult.distance + " (type: "
-                    + combinedValues[1].getClass().getSimpleName() + ")");
+//            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
+//            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
+//            System.err.println("CombinedValues length: " + combinedValues.length);
+//            System.err.println("Result field count: " + result.getFieldCount());
+//            System.err.println("CentroidId: " + searchResult.centroidId + " (type: "
+//                    + combinedValues[0].getClass().getSimpleName() + ")");
+//            System.err.println("Distance: " + searchResult.distance + " (type: "
+//                    + combinedValues[1].getClass().getSimpleName() + ")");
 
             return result;
 
