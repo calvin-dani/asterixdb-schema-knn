@@ -370,18 +370,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // 5. VCTreeSortedDataBulkLoaderOperatorDescriptor - Process sorted tuples and print first 5 per centroid
 //        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
-//        VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
-//                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f);
-//        sortedBulkLoaderOp.setSourceLocation(sourceLoc);
-//        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
-//                primaryPartitionConstraint);
-//        targetOp = sortedBulkLoaderOp;
-//        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-//        System.err.println("Connected: Sort → SortedDataBulkLoader");
-//        System.err.println("SortedDataBulkLoader operator: " + sortedBulkLoaderOp);
-//
-//        // Update sourceOp to continue the chain
-//        sourceOp = targetOp;
+        VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
+                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f);
+        sortedBulkLoaderOp.setSourceLocation(sourceLoc);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
+                primaryPartitionConstraint);
+        targetOp = sortedBulkLoaderOp;
+        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        System.err.println("Connected: Sort → SortedDataBulkLoader");
+        System.err.println("SortedDataBulkLoader operator: " + sortedBulkLoaderOp);
+
+        // Update sourceOp to continue the chain
+        sourceOp = targetOp;
 
         // 6. Final sink operator
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
