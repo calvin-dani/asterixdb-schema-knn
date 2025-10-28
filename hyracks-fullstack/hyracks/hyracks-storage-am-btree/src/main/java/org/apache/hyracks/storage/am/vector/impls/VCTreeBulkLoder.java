@@ -128,6 +128,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
             // Initialize data page state
             entriesInCurrentDataPage = 0;
             currentDirectoryPage = directoryPages.getFirst();
+            currentDirectoryFrame.setPage(currentDirectoryPage);
             LOGGER.debug("Initialized bulk loading with {} directory pages", directoryPages.size());
         }
     }
@@ -163,7 +164,7 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     /**
      * ========= leaf cluster bulk loading methods =========
      */
-
+    @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
