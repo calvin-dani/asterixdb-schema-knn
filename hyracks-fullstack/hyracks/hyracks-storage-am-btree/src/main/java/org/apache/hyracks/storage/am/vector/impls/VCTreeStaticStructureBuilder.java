@@ -70,6 +70,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     // Frames for different page types
     private IVectorClusteringInteriorFrame interiorFrame;
     private IVectorClusteringLeafFrame leafFrame;
+    private final List<ICachedPage> leafPages = new ArrayList<>();
 
     public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, int numLevels, List<Integer> clustersPerLevel,
@@ -151,21 +152,33 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
+        System.err.println("=== VCTreeStaticStructureBuilder.add ===");
+        System.err.println("Input tuple field count: " + tuple.getFieldCount());
+        for (int i = 0; i < tuple.getFieldCount(); i++) {
+            System.err.println("  Field " + i + ": length=" + tuple.getFieldLength(i));
+        }
+
         // Compute child page ID mathematically
         int childPageId = determineChildPageId();
+        System.err.println("Child page ID: " + childPageId);
 
         // Create entry tuple: <centroid_id, embedding, child_page_id>
+        System.err.println("Calling createEntryTuple...");
         ITupleReference entryTuple = createEntryTuple(tuple, childPageId);
+        System.err.println("createEntryTuple completed successfully");
 
         // Check if current page has space
         if (entriesInCurrentPage >= maxEntriesPerPage) {
             // Create overflow page for same cluster
+            System.err.println("Creating overflow page...");
             createOverflowPage();
         }
 
         // Insert entry into current page
+        System.err.println("Inserting entry into current page...");
         ((IVectorClusteringFrame) currentFrame).insertSorted(entryTuple);
         entriesInCurrentPage++;
+        System.err.println("Entry inserted successfully. Total entries in current page: " + entriesInCurrentPage);
 
         // Advance position in structure
         advancePosition();
@@ -193,8 +206,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     }
 
     /**
-     * Compute which cluster in the next level this centroid points to.
-     * This is based on the BFS ordering and predetermined structure.
+     * Compute which cluster in the next level this centroid points to. This is based on the BFS ordering and
+     * predetermined structure.
      */
     private int computeChildClusterIndex() {
         // In BFS order, centroids map sequentially to child clusters
@@ -238,11 +251,12 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
                 currentClusterInLevel, currentCentroidInCluster);
 
         try {
-            return TupleUtils.createTuple(
-                    new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
-                            DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
-                    centroidId, embedding, childPageId);
+            return TupleUtils.createTuple(new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
+                            DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE }, centroidId,
+                    embedding, childPageId);
         } catch (Exception e) {
+            System.err.println("ERROR creating entry tuple: " + e.getMessage());
+            e.printStackTrace();
             throw new HyracksDataException("Failed to create entry tuple", e);
         }
     }
@@ -268,6 +282,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             /* TODO : verify leaf level should be more elegant */
             leafFrame.initBuffer((byte) 0);
             leafFrame.setLevel((byte) 0);
+            leafPages.add(currentPage);
         } else {
             // Interior/root level
             currentFrame = interiorFrame;
@@ -292,7 +307,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         int overflowPageId = freePageManager.takePage(metaFrame);
 
         // Set next page pointer in current page
-        if (currentLevel == numLevels - 1) {
+        if (currentLevel == 0) {
             // Leaf page - set next leaf pointer
             leafFrame.setNextLeaf(overflowPageId);
             leafFrame.setOverflowFlagBit(true);
@@ -347,6 +362,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         if (currentPage == null) {
             return;
         }
+        /* TODO: not write back for leaf pages at this point */
         write(currentPage);
     }
 
@@ -354,12 +370,60 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         return totalCentroidsUpToLevel[numLevels] - totalCentroidsUpToLevel[numLevels - 1];
     }
 
+    private int getFirstLeafPageId() {
+        return totalPagesUpToLevel[numLevels - 1] + 1;
+    }
+
+    /**
+     * Update all leaf pages to have correct directory page pointers instead of -1.
+     */
+    private void updateLeafPagesWithDirectoryPointers() throws HyracksDataException {
+        if (leafPages.isEmpty()) {
+            LOGGER.warn("No leaf pages to update");
+            return;
+        }
+
+        int nextDirectoryPageId = metaFrame.getMaxPage() + 1;
+
+        LOGGER.debug("Starting directory page ID: {}, processing {} leaf pages",
+                nextDirectoryPageId, leafPages.size());
+
+        // Process each leaf page
+        for (int pageIndex = 0; pageIndex < leafPages.size(); pageIndex++) {
+            ICachedPage leafPage = leafPages.get(pageIndex);
+
+            // Set up frame to read the leaf page
+            leafFrame.setPage(leafPage);
+
+            int tupleCount = leafFrame.getTupleCount();
+            LOGGER.debug("Processing leaf page {} with {} tuples", pageIndex, tupleCount);
+
+            // Update each tuple in the leaf page
+            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
+                leafFrame.setMetadataPagePointer(tupleIndex, nextDirectoryPageId);
+                // Move to next directory page for next tuple
+                nextDirectoryPageId++;
+            }
+            LOGGER.debug("Completed updating leaf page {} with {} tuples", pageIndex, tupleCount);
+        }
+
+        LOGGER.debug("Updated all {} leaf pages with directory page pointers from {} to {}",
+                leafPages.size(), metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
+    }
+
     /**
      * Only gets called when everything is done.
      */
     @Override
     public void end() throws HyracksDataException {
-        finishCurrentPage();
+        // Update leaf pages with correct directory page pointers
+        updateLeafPagesWithDirectoryPointers();
+
+        // Write all leaf pages
+        for (ICachedPage leafPage : leafPages) {
+            write(leafPage);
+        }
+
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
