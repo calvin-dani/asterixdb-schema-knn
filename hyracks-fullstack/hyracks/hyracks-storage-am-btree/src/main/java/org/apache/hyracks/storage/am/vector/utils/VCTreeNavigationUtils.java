@@ -19,7 +19,9 @@
 package org.apache.hyracks.storage.am.vector.utils;
 
 import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
@@ -38,9 +40,6 @@ import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Utility class for VCTree navigation operations.
@@ -105,7 +104,7 @@ public class VCTreeNavigationUtils {
                     leafEnterFields.put("pageId", currentPageId);
                     leafEnterFields.put("fileId", fileId);
                     logTraversalEvent("leaf_page_enter", leafEnterFields);
-                    
+
                     bestResult = findClosestInLeafPage(queryVector, currentPageId, leafFrame);
                     break; // Found leaf level result
 
@@ -115,7 +114,7 @@ public class VCTreeNavigationUtils {
                     interiorEnterFields.put("pageId", currentPageId);
                     interiorEnterFields.put("fileId", fileId);
                     logTraversalEvent("interior_page_enter", interiorEnterFields);
-                    
+
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
@@ -124,13 +123,13 @@ public class VCTreeNavigationUtils {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                                 "No valid centroid found in interior cluster");
                     }
-                    
+
                     Map<String, Object> interiorDescendFields = new HashMap<>();
                     interiorDescendFields.put("pageId", currentPageId);
                     interiorDescendFields.put("selectedChildPageId", nextPageId);
                     interiorDescendFields.put("fileId", fileId);
                     logTraversalEvent("interior_descend", interiorDescendFields);
-                    
+
                     currentPageId = nextPageId;
                 }
 
@@ -214,12 +213,12 @@ public class VCTreeNavigationUtils {
         sb.append("{\"event\":\"");
         sb.append(eventType);
         sb.append("\"");
-        
+
         for (Map.Entry<String, Object> entry : fields.entrySet()) {
             sb.append(",\"");
             sb.append(entry.getKey());
             sb.append("\":");
-            
+
             Object value = entry.getValue();
             if (value instanceof String) {
                 sb.append("\"");
@@ -233,7 +232,7 @@ public class VCTreeNavigationUtils {
                 sb.append(value);
             }
         }
-        
+
         sb.append("}");
         System.err.println(sb.toString());
     }
@@ -309,7 +308,7 @@ public class VCTreeNavigationUtils {
             searchSelectFields.put("bestDistance", bestDistance);
             searchSelectFields.put("candidatesProcessed", candidatesProcessed);
             logTraversalEvent("leaf_search_select", searchSelectFields);
-            
+
             return ClusterSearchResult.create(pageId, bestClusterIndex, bestCentroid, bestDistance, bestCentroidId);
         }
         // TODO : SOME RETURN EMPTY
@@ -381,8 +380,8 @@ public class VCTreeNavigationUtils {
         return bestChildPageId;
     }
 
-    private static int findClosestInInteriorPage(double[] queryVector,
-                                                 IVectorClusteringInteriorFrame interiorFrame) throws HyracksDataException {
+    private static int findClosestInInteriorPage(double[] queryVector, IVectorClusteringInteriorFrame interiorFrame)
+            throws HyracksDataException {
 
         int tupleCount = interiorFrame.getTupleCount();
         double bestDistance = Double.MAX_VALUE;
@@ -419,7 +418,6 @@ public class VCTreeNavigationUtils {
      * @param tuple Leaf frame tuple
      * @return Centroid vector
      */
-
 
     /**
      * Perform a breadth-first traversal of the static structure starting at root and print
@@ -479,13 +477,13 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            System.err.println("tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId
-                                    + " | centroid=" + centroidStr + " | dist=" + distStr + " | metadata="
-                                    + metadataPtr);
+                            System.err.println(
+                                    "tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
+                                            + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
                             processedTuples++;
                         } catch (Exception e) {
-                            System.err.println("ERROR processing leaf tuple " + i + " on page " + currentPageId
-                                    + ": " + e.getMessage());
+                            System.err.println("ERROR processing leaf tuple " + i + " on page " + currentPageId + ": "
+                                    + e.getMessage());
                         }
                     }
 

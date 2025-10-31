@@ -1144,7 +1144,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             // Process all tuples for static structure creation
                         }
 
-
                         System.err.println("Finalizing static structure...");
                         // Finalize the structure
                         structureCreator.end();
@@ -1158,12 +1157,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                         double[] embedding = new double[vectorDimensions];
                         System.err.println("=== PRINTING STATIC STRUCTURE ===");
-                        VCTreeNavigationUtils.bfsPrintStaticStructure(bufferCache, fileId, 1,
-                                interiorFrameFactory, leafFrameFactory, embedding, /* embeddingPrintLimit */ vectorDimensions);
+                        VCTreeNavigationUtils.bfsPrintStaticStructure(bufferCache, fileId, 1, interiorFrameFactory,
+                                leafFrameFactory, embedding, /* embeddingPrintLimit */ vectorDimensions);
                         System.err.println("=== END STATIC STRUCTURE PRINT ===");
                         System.err
                                 .println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
-
 
                         // Create navigator for static structure access
                         System.err.println("Creating VCTreeStaticStructureNavigator...");

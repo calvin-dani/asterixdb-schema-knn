@@ -317,7 +317,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         outputRecFields[1] = serdeProvider.getSerializerDeserializer(AINT32);
         outputTypeTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
 
-
         // Copy all original fields from secondaryRecDesc
         for (int i = 0; i < secondaryRecDesc.getFieldCount(); i++) {
             outputRecFields[2 + i] = secondaryRecDesc.getFields()[i];

@@ -29,7 +29,6 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
@@ -95,7 +94,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         frameTuple.resetByTupleIndex(this, tupleIndex);
         // Distance to centroid is the first field in data records - stored as float
         int distanceOff = frameTuple.getFieldStart(0) + 1;
-// Distance to centroid is the first field in data records - stored as float
+        // Distance to centroid is the first field in data records - stored as float
         double distance = buf.getDouble(distanceOff);
         return distance;
     }
