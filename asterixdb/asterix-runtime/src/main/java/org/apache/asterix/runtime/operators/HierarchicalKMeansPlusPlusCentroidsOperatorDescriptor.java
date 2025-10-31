@@ -932,7 +932,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Performs Spark's k-means|| (k-means parallel) on all data from run file to generate K centroids.
+                 * Performs   k-means|| (k-means parallel) on all data from run file to generate K centroids.
                  * Uses multiple rounds of probabilistic sampling to build candidate set, then reduces to k centroids.
                  */
                 private ClusteringResult performInitialKMeansPlusPlus(IHyracksTaskContext ctx,
@@ -941,7 +941,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         KMeansUtils kMeansUtils, int k, Random rand, int maxIterations, int totalTupleCount,
                         int partition)
                         throws HyracksDataException, IOException {
-                    // Spark's k-means|| configuration
+                    //   k-means|| configuration
                     int numRounds = 5; // Number of sampling rounds (default 5-10)
                     double oversamplingFactor = 2.0 * k; // Oversampling factor l ≈ 2k
                     
@@ -950,7 +950,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
                 
                 /**
-                 * Implements Spark's k-means|| algorithm with configurable parameters.
+                 * Implements   k-means|| algorithm with configurable parameters.
                  */
                 private ClusteringResult performKMeansParallel(IHyracksTaskContext ctx,
                         GeneratedRunFileReader in, FrameTupleAccessor fta, FrameTupleReference tuple,
@@ -963,7 +963,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return new ClusteringResult(new ArrayList<>(), new int[0]);
                     }
 
-                    System.err.println("performKMeansParallel: starting Spark's k-means|| with "
+                    System.err.println("performKMeansParallel: starting   k-means|| with "
                             + totalTupleCount + " total tuples, target k = " + k + ", rounds = " + numRounds
                             + ", oversampling factor = " + oversamplingFactor);
 
@@ -1065,7 +1065,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         minDist = Math.min(minDist, dist);
                                     }
 
-                                    // Spark's probabilistic sampling: p(x) = l * D(x) / S
+                                    //   probabilistic sampling: p(x) = l * D(x) / S
                                     double probability = oversamplingFactor * minDist / totalDistance;
 
                                     // Independent Bernoulli trial for each point
@@ -1151,7 +1151,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Reduce duplicates: combine identical/very close candidates and sum their weights
                     for (int i = 0; i < candidates.size(); i++) {
                         if (candidateWeights[i] == 0) {
-                            continue; // Skip zero-weight candidates (Spark's filter)
+                            continue; // Skip zero-weight candidates (  filter)
                         }
                         
                         // Check if this candidate is a duplicate of an existing weighted candidate
@@ -1159,7 +1159,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         for (int j = 0; j < weightedCandidates.size(); j++) {
                             double dist = calculateDistance(candidates.get(i), weightedCandidates.get(j));
                             if (dist < 1e-10) { // Consider identical if very close
-                                // Accumulate weight (Spark's reduceByKey(_ + _))
+                                // Accumulate weight (  reduceByKey(_ + _))
                                 weightedCandidateWeights.set(j, weightedCandidateWeights.get(j) + candidateWeights[i]);
                                 foundDuplicate = true;
                                 break;
