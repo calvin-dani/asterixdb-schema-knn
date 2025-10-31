@@ -430,7 +430,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             levelQueue.offer(maxLevel); // Start from root
             int treeLevel = 0;
             int globalCentroidId = 0;
-            
+
             while (!levelQueue.isEmpty()) {
                 int currentLevel = levelQueue.poll();
                 List<CentroidInfo> levelInfo = levelCentroids.get(currentLevel);
@@ -939,33 +939,31 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         GeneratedRunFileReader in, FrameTupleAccessor fta, FrameTupleReference tuple,
                         IScalarEvaluator eval, IPointable inputVal, ListAccessor listAccessorConstant,
                         KMeansUtils kMeansUtils, int k, Random rand, int maxIterations, int totalTupleCount,
-                        int partition)
-                        throws HyracksDataException, IOException {
+                        int partition) throws HyracksDataException, IOException {
                     //   k-means|| configuration
                     int numRounds = 5; // Number of sampling rounds (default 5-10)
                     double oversamplingFactor = 2.0 * k; // Oversampling factor l ≈ 2k
-                    
-                    return performKMeansParallel(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
-                            kMeansUtils, k, rand, maxIterations, totalTupleCount, partition, numRounds, oversamplingFactor);
+
+                    return performKMeansParallel(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant, kMeansUtils,
+                            k, rand, maxIterations, totalTupleCount, partition, numRounds, oversamplingFactor);
                 }
-                
+
                 /**
                  * Implements   k-means|| algorithm with configurable parameters.
                  */
-                private ClusteringResult performKMeansParallel(IHyracksTaskContext ctx,
-                        GeneratedRunFileReader in, FrameTupleAccessor fta, FrameTupleReference tuple,
-                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAccessorConstant,
-                        KMeansUtils kMeansUtils, int k, Random rand, int maxIterations, int totalTupleCount,
-                        int partition, int numRounds, double oversamplingFactor)
+                private ClusteringResult performKMeansParallel(IHyracksTaskContext ctx, GeneratedRunFileReader in,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int k, Random rand,
+                        int maxIterations, int totalTupleCount, int partition, int numRounds, double oversamplingFactor)
                         throws HyracksDataException, IOException {
 
                     if (k <= 0 || totalTupleCount <= 0) {
                         return new ClusteringResult(new ArrayList<>(), new int[0]);
                     }
 
-                    System.err.println("performKMeansParallel: starting   k-means|| with "
-                            + totalTupleCount + " total tuples, target k = " + k + ", rounds = " + numRounds
-                            + ", oversampling factor = " + oversamplingFactor);
+                    System.err.println("performKMeansParallel: starting   k-means|| with " + totalTupleCount
+                            + " total tuples, target k = " + k + ", rounds = " + numRounds + ", oversampling factor = "
+                            + oversamplingFactor);
 
                     int[] assignments = new int[totalTupleCount];
 
@@ -1003,8 +1001,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             for (int j = 0; j < tupleCount; j++) {
                                 tuple.reset(fta, j);
                                 eval.evaluate(tuple, inputVal);
-                                if (!ATYPETAGDESERIALIZER.deserialize(
-                                        inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
                                     tempIdx++;
                                     continue;
                                 }
@@ -1048,8 +1046,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             for (int j = 0; j < tupleCount; j++) {
                                 tuple.reset(fta, j);
                                 eval.evaluate(tuple, inputVal);
-                                if (!ATYPETAGDESERIALIZER.deserialize(
-                                        inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
                                     currentIdx++;
                                     continue;
                                 }
@@ -1093,8 +1091,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                     }
 
-                    System.err.println("Sampling complete: " + candidates.size() + " total candidates (target k = " + k
-                            + ")");
+                    System.err.println(
+                            "Sampling complete: " + candidates.size() + " total candidates (target k = " + k + ")");
 
                     // Step 3: Weight candidates - count how many original points are nearest to each candidate
                     int[] candidateWeights = new int[candidates.size()];
@@ -1112,8 +1110,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         for (int j = 0; j < tupleCount; j++) {
                             tuple.reset(fta, j);
                             eval.evaluate(tuple, inputVal);
-                            if (!ATYPETAGDESERIALIZER.deserialize(
-                                    inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                            if (!ATYPETAGDESERIALIZER.deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
+                                    .isListType()) {
                                 weightIdx++;
                                 continue;
                             }
@@ -1144,16 +1142,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     System.err.println("Weighting complete");
 
-                    
                     List<double[]> weightedCandidates = new ArrayList<>();
                     List<Integer> weightedCandidateWeights = new ArrayList<>();
-                    
+
                     // Reduce duplicates: combine identical/very close candidates and sum their weights
                     for (int i = 0; i < candidates.size(); i++) {
                         if (candidateWeights[i] == 0) {
                             continue; // Skip zero-weight candidates (  filter)
                         }
-                        
+
                         // Check if this candidate is a duplicate of an existing weighted candidate
                         boolean foundDuplicate = false;
                         for (int j = 0; j < weightedCandidates.size(); j++) {
@@ -1165,13 +1162,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 break;
                             }
                         }
-                        
+
                         if (!foundDuplicate) {
                             weightedCandidates.add(Arrays.copyOf(candidates.get(i), candidates.get(i).length));
                             weightedCandidateWeights.add(candidateWeights[i]);
                         }
                     }
-                    
+
                     System.err.println("Reduced " + candidates.size() + " candidates to " + weightedCandidates.size()
                             + " distinct weighted candidates (after filtering zeros)");
 
@@ -1191,14 +1188,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         System.err.println("No weighted candidates (all filtered), using first centroid only");
                     } else if (weightedCandidates.size() <= k) {
                         // Spark behavior: use weighted candidates and pad to k by sampling from data
-                        System.err.println("Have " + weightedCandidates.size() + " distinct weighted candidates (<= k), padding to k=" + k);
-                        
+                        System.err.println("Have " + weightedCandidates.size()
+                                + " distinct weighted candidates (<= k), padding to k=" + k);
+
                         // Start with weighted candidates (Spark: centersBuf = weightedCandidates.map(_._1).toBuffer)
                         centroids = new ArrayList<>();
                         for (double[] candidate : weightedCandidates) {
                             centroids.add(Arrays.copyOf(candidate, candidate.length));
                         }
-                        
+
                         // Spark: pad with random points from data (data.takeSample)
                         int needed = k - centroids.size();
                         if (needed > 0) {
@@ -1213,7 +1211,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 }
                                 additionalIndices.add(index);
                             }
-                            
+
                             // Get the additional points
                             in = resetRunFileReader(ctx, sampleUUID, partition);
                             for (int idx : additionalIndices) {
@@ -1234,7 +1232,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     }
                                 }
                             }
-                            
+
                             // If we still don't have k (edge case: duplicates), pad with perturbed copies
                             while (centroids.size() < k && centroids.size() > 0) {
                                 double[] base = centroids.get(centroids.size() - 1);
@@ -1246,15 +1244,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 centroids.add(perturbed);
                             }
                         }
-                        
+
                         System.err.println("Padded to " + centroids.size() + " initial centers (target was " + k + ")");
                     } else {
                         // Spark: Normal path - we have more than k weighted candidates
                         // Run weighted k-means++ on weightedCandidates to select exactly k
                         centroids = performWeightedKMeansPlusPlusOnCandidates(weightedCandidates, finalWeights, k, rand,
                                 maxIterations);
-                        System.err.println("Reduced " + weightedCandidates.size() + " weighted candidates to " + centroids.size()
-                                + " final centroids using weighted k-means++");
+                        System.err.println("Reduced " + weightedCandidates.size() + " weighted candidates to "
+                                + centroids.size() + " final centroids using weighted k-means++");
                     }
 
                     // 3. Lloyd's algorithm for refinement using streaming approach
@@ -1392,7 +1390,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             }
                             // Sort by weight (descending)
                             candidateIndices.sort((a, b) -> Integer.compare(weights[b], weights[a]));
-                            
+
                             int remaining = k - result.size();
                             for (int i = 0; i < remaining && i < candidateIndices.size(); i++) {
                                 int idx = candidateIndices.get(i);
@@ -1449,7 +1447,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             }
                         }
 
-                        resultCentroids.add(Arrays.copyOf(candidates.get(selectedIdx), candidates.get(selectedIdx).length));
+                        resultCentroids
+                                .add(Arrays.copyOf(candidates.get(selectedIdx), candidates.get(selectedIdx).length));
                     }
 
                     // 3. Weighted Lloyd's algorithm for refinement
@@ -1512,13 +1511,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     if (resultCentroids.size() < k) {
                         System.err.println("Weighted k-means++ initialization produced only " + resultCentroids.size()
                                 + " centroids, filling gap to reach k=" + k);
-                        
+
                         // Fill gap by selecting additional candidates that are farthest from existing centroids
                         int remaining = k - resultCentroids.size();
                         for (int gap = 0; gap < remaining; gap++) {
                             double maxMinDist = -1.0;
                             int bestCandidateIdx = -1;
-                            
+
                             // Find candidate with maximum minimum distance to existing centroids
                             for (int i = 0; i < candidates.size(); i++) {
                                 // Check if this candidate is already a centroid
@@ -1533,14 +1532,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 if (isAlreadyCentroid) {
                                     continue;
                                 }
-                                
+
                                 // Find minimum distance to existing centroids
                                 double minDist = Double.POSITIVE_INFINITY;
                                 for (double[] centroid : resultCentroids) {
                                     double dist = calculateDistance(candidates.get(i), centroid);
                                     minDist = Math.min(minDist, dist);
                                 }
-                                
+
                                 // Weight by candidate weight and distance
                                 double weightedScore = weights[i] * minDist;
                                 if (weightedScore > maxMinDist) {
@@ -1548,10 +1547,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     bestCandidateIdx = i;
                                 }
                             }
-                            
+
                             if (bestCandidateIdx >= 0) {
-                                resultCentroids.add(
-                                        Arrays.copyOf(candidates.get(bestCandidateIdx), candidates.get(bestCandidateIdx).length));
+                                resultCentroids.add(Arrays.copyOf(candidates.get(bestCandidateIdx),
+                                        candidates.get(bestCandidateIdx).length));
                             } else {
                                 // Fallback: if all candidates are duplicates, add a slightly perturbed copy of last centroid
                                 if (resultCentroids.size() > 0) {
@@ -1564,7 +1563,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 }
                             }
                         }
-                        
+
                         System.err.println("Filled gap in weighted selection: now have " + resultCentroids.size()
                                 + " centroids (target was " + k + ")");
                     }
@@ -1659,8 +1658,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Perform initial K-means++ on all data to generate initial centroids
                     Random rand = new Random();
                     int maxKMeansIterations = 20;
-                    ClusteringResult initialResult = performInitialKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal,
-                            listAccessorConstant, kMeansUtils, K, rand, maxKMeansIterations, totalTupleCount, partition);
+                    ClusteringResult initialResult =
+                            performInitialKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,
+                                    kMeansUtils, K, rand, maxKMeansIterations, totalTupleCount, partition);
 
                     if (initialResult.centroids.isEmpty()) {
                         System.err.println("No initial centroids generated, cannot perform hierarchical clustering");

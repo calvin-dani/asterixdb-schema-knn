@@ -251,9 +251,10 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
                 currentClusterInLevel, currentCentroidInCluster);
 
         try {
-            return TupleUtils.createTuple(new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
-                            DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE }, centroidId,
-                    embedding, childPageId);
+            return TupleUtils.createTuple(
+                    new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
+                            DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
+                    centroidId, embedding, childPageId);
         } catch (Exception e) {
             System.err.println("ERROR creating entry tuple: " + e.getMessage());
             e.printStackTrace();
@@ -385,8 +386,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
         int nextDirectoryPageId = metaFrame.getMaxPage() + 1;
 
-        LOGGER.debug("Starting directory page ID: {}, processing {} leaf pages",
-                nextDirectoryPageId, leafPages.size());
+        LOGGER.debug("Starting directory page ID: {}, processing {} leaf pages", nextDirectoryPageId, leafPages.size());
 
         // Process each leaf page
         for (int pageIndex = 0; pageIndex < leafPages.size(); pageIndex++) {
@@ -407,8 +407,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             LOGGER.debug("Completed updating leaf page {} with {} tuples", pageIndex, tupleCount);
         }
 
-        LOGGER.debug("Updated all {} leaf pages with directory page pointers from {} to {}",
-                leafPages.size(), metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
+        LOGGER.debug("Updated all {} leaf pages with directory page pointers from {} to {}", leafPages.size(),
+                metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
     }
 
     /**
