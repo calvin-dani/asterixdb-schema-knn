@@ -89,6 +89,7 @@ import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringDataTupleWrit
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -1142,13 +1143,27 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             // Only process first frame to avoid spam
                             // Process all tuples for static structure creation
                         }
-                        System.err
-                                .println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
+
 
                         System.err.println("Finalizing static structure...");
                         // Finalize the structure
                         structureCreator.end();
                         System.err.println("STATIC STRUCTURE FINALIZED SUCCESSFULLY");
+
+                        // Print structure parameters before printing static structure
+                        System.err.println("=== STATIC STRUCTURE PARAMETERS ===");
+                        System.err.println("clustersPerLevel: " + clustersPerLevel);
+                        System.err.println("centroidsPerCluster: " + centroidsPerCluster);
+                        System.err.println("=== END STATIC STRUCTURE PARAMETERS ===");
+
+                        double[] embedding = new double[vectorDimensions];
+                        System.err.println("=== PRINTING STATIC STRUCTURE ===");
+                        VCTreeNavigationUtils.bfsPrintStaticStructure(bufferCache, fileId, 1,
+                                interiorFrameFactory, leafFrameFactory, embedding, /* embeddingPrintLimit */ vectorDimensions);
+                        System.err.println("=== END STATIC STRUCTURE PRINT ===");
+                        System.err
+                                .println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
+
 
                         // Create navigator for static structure access
                         System.err.println("Creating VCTreeStaticStructureNavigator...");

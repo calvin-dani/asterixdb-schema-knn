@@ -245,6 +245,28 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     }
 
     /**
+     * Format a double array as a JSON array string.
+     * 
+     * @param vector Double array to format
+     * @return JSON array string like "[1.23,4.56,7.89]"
+     */
+    private static String formatVectorAsJsonArray(double[] vector) {
+        if (vector == null) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        for (int i = 0; i < vector.length; i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            sb.append(vector[i]);
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
      * Data structure to hold hierarchical clustering results with parent-child relationships.
      */
     private static class HierarchicalClusterStructure {
@@ -372,6 +394,71 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 for (CentroidInfo centroid : levelInfo) {
                     createHierarchicalTuple(treeLevel, globalCentroidId, centroid.parentClusterId, centroid.embedding,
                             appender, writer, ctx);
+                    globalCentroidId++;
+                }
+
+                // Add child level to queue if it exists
+                int childLevel = currentLevel - 1;
+                treeLevel++;
+                if (levelCentroids.containsKey(childLevel)) {
+                    levelQueue.offer(childLevel);
+                }
+            }
+        }
+
+        /**
+         * Log all centroids from all levels as JSON objects to System.err.
+         * Each centroid is logged as a single-line JSON object with complete information.
+         * Uses BFS traversal to assign global IDs matching outputHierarchicalStructure().
+         */
+        public void logAllCentroids() {
+            System.err.println("=== LOGGING ALL HIERARCHICAL CENTROIDS ===");
+
+            // Find the root level (highest level number)
+            int maxLevel = -1;
+            for (Integer level : levelCentroids.keySet()) {
+                maxLevel = Math.max(maxLevel, level);
+            }
+
+            if (maxLevel == -1) {
+                System.err.println("No levels found to log");
+                return;
+            }
+
+            // BFS traversal starting from root level (same as outputHierarchicalStructure)
+            Queue<Integer> levelQueue = new LinkedList<>();
+            levelQueue.offer(maxLevel); // Start from root
+            int treeLevel = 0;
+            int globalCentroidId = 0;
+            
+            while (!levelQueue.isEmpty()) {
+                int currentLevel = levelQueue.poll();
+                List<CentroidInfo> levelInfo = levelCentroids.get(currentLevel);
+
+                if (levelInfo == null) {
+                    continue;
+                }
+
+                // Log all centroids in current level with global IDs
+                for (CentroidInfo centroid : levelInfo) {
+                    StringBuilder json = new StringBuilder();
+                    json.append("{\"event\":\"hierarchical_centroid\"");
+                    json.append(",\"level\":").append(currentLevel);
+                    json.append(",\"centroidId\":").append(globalCentroidId);
+                    json.append(",\"levelLocalId\":").append(centroid.centroidId);
+                    json.append(",\"parentClusterId\":").append(centroid.parentClusterId);
+                    json.append(",\"childrenCount\":").append(centroid.childrenIds.size());
+
+                    if (centroid.embedding != null) {
+                        json.append(",\"vectorDim\":").append(centroid.embedding.length);
+                        json.append(",\"vector\":").append(formatVectorAsJsonArray(centroid.embedding));
+                    } else {
+                        json.append(",\"vectorDim\":0");
+                        json.append(",\"vector\":[]");
+                    }
+
+                    json.append("}");
+                    System.err.println(json.toString());
                     globalCentroidId++;
                 }
 
@@ -824,6 +911,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             System.err.println("No clustering structure generated");
                             return;
                         }
+
+                        // Log all centroids from all levels as JSON
+                        clusterStructure.logAllCentroids();
 
                         // Output hierarchical structure with parent-child relationships
                         // Manual buffer management handles flushing when needed
