@@ -1179,7 +1179,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     // Step 4: Reduce candidates to k using weighted k-means++
-                    // Spark ensures k initial centers by filling gaps if fewer than k candidates are produced
+                    //   ensures k initial centers by filling gaps if fewer than k candidates are produced
                     List<double[]> centroids;
                     if (weightedCandidates.isEmpty()) {
                         // Fallback: use first centroid only
@@ -1187,17 +1187,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         centroids.add(firstCentroid);
                         System.err.println("No weighted candidates (all filtered), using first centroid only");
                     } else if (weightedCandidates.size() <= k) {
-                        // Spark behavior: use weighted candidates and pad to k by sampling from data
+                        //   behavior: use weighted candidates and pad to k by sampling from data
                         System.err.println("Have " + weightedCandidates.size()
                                 + " distinct weighted candidates (<= k), padding to k=" + k);
 
-                        // Start with weighted candidates (Spark: centersBuf = weightedCandidates.map(_._1).toBuffer)
+                        // Start with weighted candidates ( : centersBuf = weightedCandidates.map(_._1).toBuffer)
                         centroids = new ArrayList<>();
                         for (double[] candidate : weightedCandidates) {
                             centroids.add(Arrays.copyOf(candidate, candidate.length));
                         }
 
-                        // Spark: pad with random points from data (data.takeSample)
+                        // pad with random points from data (data.takeSample)
                         int needed = k - centroids.size();
                         if (needed > 0) {
                             System.err.println("Padding with " + needed + " additional points from dataset");
@@ -1247,7 +1247,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         System.err.println("Padded to " + centroids.size() + " initial centers (target was " + k + ")");
                     } else {
-                        // Spark: Normal path - we have more than k weighted candidates
+                        // Normal path - we have more than k weighted candidates
                         // Run weighted k-means++ on weightedCandidates to select exactly k
                         centroids = performWeightedKMeansPlusPlusOnCandidates(weightedCandidates, finalWeights, k, rand,
                                 maxIterations);
@@ -1378,7 +1378,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     // If we have <= k candidates, use them but ensure we have exactly k by duplicating if needed
-                    // (Spark behavior: always return k initial centers)
+                    // (always return k initial centers)
                     if (candidates.size() <= k) {
                         List<double[]> result = new ArrayList<>(candidates);
                         // If we have fewer than k, duplicate the most weighted candidates to fill the gap
@@ -1507,7 +1507,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                     }
 
-                    // Spark behavior: Ensure exactly k centroids by filling gaps if initialization terminated early
+                    // Ensure exactly k centroids by filling gaps if initialization terminated early
                     if (resultCentroids.size() < k) {
                         System.err.println("Weighted k-means++ initialization produced only " + resultCentroids.size()
                                 + " centroids, filling gap to reach k=" + k);
@@ -1766,6 +1766,61 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 .add(Arrays.copyOf(centroids.get(selectedIdx), centroids.get(selectedIdx).length));
                     }
 
+                    // Gap-filling: If we have fewer than k centroids, fill gaps
+                    if (resultCentroids.size() < k && !centroids.isEmpty()) {
+                        int remaining = k - resultCentroids.size();
+                        System.err.println("Filling gap: have " + resultCentroids.size() + " centroids, need " + k
+                                + " (input had " + centroids.size() + ")");
+
+                        for (int gap = 0; gap < remaining; gap++) {
+                            double maxMinDist = -1.0;
+                            int bestIdx = -1;
+
+                            // Find centroid farthest from all existing centroids
+                            for (int j = 0; j < centroids.size(); j++) {
+                                // Check if this centroid is already selected
+                                boolean alreadySelected = false;
+                                for (double[] existing : resultCentroids) {
+                                    double dist = calculateDistance(centroids.get(j), existing);
+                                    if (dist < 1e-10) {
+                                        alreadySelected = true;
+                                        break;
+                                    }
+                                }
+                                if (alreadySelected) {
+                                    continue;
+                                }
+
+                                // Find minimum distance to existing centroids
+                                double minDist = Double.POSITIVE_INFINITY;
+                                for (double[] existing : resultCentroids) {
+                                    double dist = calculateDistance(centroids.get(j), existing);
+                                    minDist = Math.min(minDist, dist);
+                                }
+
+                                if (minDist > maxMinDist) {
+                                    maxMinDist = minDist;
+                                    bestIdx = j;
+                                }
+                            }
+
+                            // Add best candidate or fallback to random
+                            if (bestIdx >= 0) {
+                                resultCentroids
+                                        .add(Arrays.copyOf(centroids.get(bestIdx), centroids.get(bestIdx).length));
+                            } else {
+                                // Fallback: all candidates are duplicates, select random
+                                int randomIdx = rand.nextInt(centroids.size());
+                                resultCentroids.add(
+                                        Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
+                                System.err.println(
+                                        "Warning: All candidates were duplicates, selected random centroid for gap-filling");
+                            }
+                        }
+
+                        System.err.println("Gap-filling complete: now have " + resultCentroids.size() + " centroids");
+                    }
+
                     // 3. Lloyd's algorithm for refinement
                     for (int iter = 0; iter < maxIterations; iter++) {
                         // Assign points to closest centroids
@@ -1807,6 +1862,21 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     converged = false;
                                 }
                                 resultCentroids.set(i, newCentroids[i]);
+                            } else {
+                                // Reinitialize empty cluster
+                                // Select random centroid from input centroids list
+                                if (!centroids.isEmpty()) {
+                                    int randomIdx = rand.nextInt(centroids.size());
+                                    resultCentroids.set(i,
+                                            Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
+                                    System.err.println(
+                                            "Reinitialized empty cluster " + i + " with random centroid from input");
+                                    converged = false; // Force continuation since we changed a centroid
+                                } else {
+                                    // Edge case: no input centroids (shouldn't happen, but defensive)
+                                    System.err.println("Warning: Cannot reinitialize empty cluster " + i
+                                            + " - no input centroids available");
+                                }
                             }
                         }
 
