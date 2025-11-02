@@ -37,7 +37,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoader;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -233,10 +233,25 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
                 maxEntriesPerPage, instance);
     }
 
-    public VCTreeBulkLoder createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
+    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
             ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback) throws HyracksDataException {
+        // Extract static structure filename from operation parameters if available
+        String staticStructureFileName = null;
+        // Note: This method doesn't have access to operation, so staticStructureFileName will be passed
+        // through from the caller via VectorClusteringTree.createBulkLoader()
         return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
-                dataFrameSerdes);
+                dataFrameSerdes, staticStructureFileName);
+    }
+
+    /**
+     * Create bulk loader with static structure filename support.
+     * This overloaded method allows passing the static structure filename directly.
+     */
+    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
+            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback, String staticStructureFileName)
+            throws HyracksDataException {
+        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
+                dataFrameSerdes, staticStructureFileName);
     }
 
     public boolean isStaticStructure() {

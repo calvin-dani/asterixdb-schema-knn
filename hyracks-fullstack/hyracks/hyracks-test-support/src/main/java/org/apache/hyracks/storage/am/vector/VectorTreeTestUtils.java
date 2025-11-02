@@ -128,8 +128,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                         new UTF8StringSerializerDeserializer() // primary key
                 };
 
-        LSMVCTreeBulkLoader bulkLoader =
-                ((LSMVCTree) ctx.getIndex()).createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes);
+        LSMVCTreeBulkLoader bulkLoader = ((LSMVCTree) ctx.getIndex()).createBulkLoader(numLeafCentroids,
+                firstLeafCentroidId, dataFrameSerdes, ".static_structure_vctree");
 
         for (int pageId = 1; pageId <= maxPageId; pageId++) {
             ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
