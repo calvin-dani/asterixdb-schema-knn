@@ -784,6 +784,50 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         return new Pair<>(rtreeSearchOp, partitioningProperties.getConstraints());
     }
 
+    public Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> getVectorSearchRuntime(JobSpecification jobSpec,
+            List<LogicalVariable> outputVars, IOperatorSchema opSchema, IVariableTypeEnvironment typeEnv,
+            JobGenContext context, boolean retainInput, Dataset dataset, String indexName, int[] queryFields)
+            throws AlgebricksException {
+        // Get vector index metadata
+        Index vectorIndex = MetadataManager.INSTANCE.getIndex(mdTxnCtx, dataset.getDatabaseName(),
+                dataset.getDataverseName(), dataset.getDatasetName(), indexName);
+        if (vectorIndex == null) {
+            throw new AlgebricksException(
+                    "Code generation error: no index " + indexName + " for dataset " + dataset.getDatasetName());
+        }
+
+        // Create output record descriptor
+        RecordDescriptor outputRecDesc = JobGenHelper.mkRecordDescriptor(typeEnv, opSchema, context);
+
+        // Get partitioning properties (how data is distributed across nodes)
+        PartitioningProperties partitioningProperties =
+                getPartitioningProperties(dataset, vectorIndex.getIndexName());
+
+        // Get primary key fields for callback
+        int numPrimaryKeys = dataset.getPrimaryKeys().size();
+        int[] primaryKeyFields = new int[numPrimaryKeys];
+        for (int i = 0; i < numPrimaryKeys; i++) {
+            primaryKeyFields[i] = i;
+        }
+
+        // Create search callback factory (for transaction management)
+        ISearchOperationCallbackFactory searchCallbackFactory = dataset.getSearchCallbackFactory(
+                storageComponentProvider, vectorIndex, IndexOperation.SEARCH, primaryKeyFields, null, false);
+
+        // Create index dataflow helper factory (manages index access)
+        IIndexDataflowHelperFactory indexDataflowHelperFactory = new IndexDataflowHelperFactory(
+                storageComponentProvider.getStorageManager(), partitioningProperties.getSplitsProvider());
+
+        // Create VectorSearchOperatorDescriptor
+        int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
+        org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor vectorSearchOp =
+                new org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor(jobSpec,
+                        outputRecDesc, queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory,
+                        partitionsMap);
+
+        return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
+    }
+
     @Override
     public Pair<IPushRuntimeFactory, AlgebricksPartitionConstraint> getWriteFileRuntime(int sourceColumn,
             int[] partitionColumns, IBinaryComparatorFactory[] partitionComparatorFactories,
