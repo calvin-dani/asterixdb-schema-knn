@@ -81,6 +81,8 @@ import org.apache.hyracks.api.exceptions.Warning;
 
 import com.google.common.base.Strings;
 
+import static org.apache.asterix.om.types.AOrderedListType.FULL_OPEN_ORDEREDLIST_TYPE;
+
 /**
  * Class that embodies the commonalities between rewrite rules for access
  * methods.
@@ -833,6 +835,15 @@ public abstract class AbstractIntroduceAccessMethodRule implements IAlgebraicRew
                     keySources = textIndexDetails.getKeyFieldSourceIndicators();
                     isOverridingKeyFieldTypes = textIndexDetails.isOverridingKeyFieldTypes();
                     break;
+                case VECTOR:
+                    Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+                    keyFieldNames = vectorIndexDetails.getKeyFieldNames();
+                    keyFieldTypes = new ArrayList<>();
+                    keyFieldTypes.add(FULL_OPEN_ORDEREDLIST_TYPE);
+                    keySources = null;
+                    isOverridingKeyFieldTypes = vectorIndexDetails.isOverridingKeyFieldTypes();
+                    break;
+
                 default:
                     throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,
                             String.valueOf(index.getIndexType()));
