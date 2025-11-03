@@ -25,13 +25,14 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoder;
+import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 
-public class LSMVCTreeBulkLoader {
+public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
     private final LSMVCTree lsmvcTree;
-    private final VCTreeBulkLoder bulkLoader;
+    private final VCTreeBulkLoader bulkLoader;
     private final ILSMIndexOperationContext opCtx;
     private boolean failed = false;
 
@@ -40,26 +41,30 @@ public class LSMVCTreeBulkLoader {
             NoOpPageWriteCallback instance) throws HyracksDataException {
         this.lsmvcTree = lsmvcTree;
         this.opCtx = opCtx;
-        this.bulkLoader = ((LSMVCTreeDiskComponent) opCtx.getIoOperation().getNewComponent())
-                .createBulkLoader(numLeafCentroid, firstLeafCentroidId, dataFrameSerdes, instance);
+        // Extract static structure filename from operation parameters
+        String staticStructureFileName = (String) opCtx.getIoOperation().getParameters().get("staticStructureFileName");
+        this.bulkLoader = ((LSMVCTreeDiskComponent) opCtx.getIoOperation().getNewComponent()).createBulkLoader(
+                numLeafCentroid, firstLeafCentroidId, dataFrameSerdes, instance, staticStructureFileName);
     }
 
     public ILSMDiskComponent getComponent() {
         return opCtx.getIoOperation().getNewComponent();
     }
 
-    public void add(ITupleReference tuple) throws HyracksDataException {
-        try {
-            bulkLoader.add(tuple);
-        } catch (Throwable th) {
-            fail(th);
-            throw th;
-        }
+    public ITupleReference add(ITupleReference tuple) throws HyracksDataException {
+        bulkLoader.add(tuple);
+        return tuple;
+    }
+
+    @Override
+    public ITupleReference delete(ITupleReference tuple) throws HyracksDataException {
+        // TODO : implement delete for LSMVCTreeBulkLoader Hongyu?
+        return null;
     }
 
     public void next() throws HyracksDataException {
         try {
-            ((VCTreeBulkLoder) bulkLoader).loadToNextLeafCluster();
+            ((VCTreeBulkLoader) bulkLoader).loadToNextLeafCluster();
         } catch (Throwable th) {
             fail(th);
             throw th;
@@ -68,7 +73,7 @@ public class LSMVCTreeBulkLoader {
 
     public void copyPage(ICachedPage page) throws HyracksDataException {
         try {
-            ((VCTreeBulkLoder) bulkLoader).copyPage(page);
+            ((VCTreeBulkLoader) bulkLoader).copyPage(page);
         } catch (Throwable th) {
             fail(th);
             throw th;
@@ -98,6 +103,16 @@ public class LSMVCTreeBulkLoader {
         } finally {
             lsmvcTree.getIOOperationCallback().completed(opCtx.getIoOperation());
         }
+    }
+
+    @Override
+    public void cleanupArtifacts() throws HyracksDataException {
+
+    }
+
+    @Override
+    public void writeFailed(ICachedPage page, Throwable failure) {
+        throw new UnsupportedOperationException();
     }
 
     public boolean hasFailed() {

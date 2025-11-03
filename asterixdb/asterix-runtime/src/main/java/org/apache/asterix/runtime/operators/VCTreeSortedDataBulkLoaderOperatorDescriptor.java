@@ -22,10 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 
 import org.apache.asterix.om.base.ADouble;
 import org.apache.asterix.om.base.AInt32;
@@ -68,13 +66,9 @@ import org.apache.hyracks.storage.am.lsm.common.impls.VirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
-import org.apache.hyracks.storage.common.buffercache.ICachedPage;
-import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 
 /**
  * Bulk loader operator that processes sorted tuples from ExternalSortOperatorDescriptor.
@@ -152,12 +146,6 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         private LSMVCTree lsmvcTree;
         private LSMVCTreeBulkLoader bulkLoader;
 
-        // Static structure navigation components
-        private IBufferCache bufferCache;
-        private int staticStructureFileId;
-        private VectorClusteringInteriorFrameFactory interiorFrameFactory;
-        private VectorClusteringLeafFrameFactory leafFrameFactory;
-
         // Centroid tracking state
         private int currentCentroidId = -1;
         private int tupleCountForCurrentCentroid = 0;
@@ -198,11 +186,8 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                 // Initialize LSMVCTree
                 initializeLSMVCTree();
 
-                // Initialize bulk loader first (needed for page copying)
+                // Initialize bulk loader (static structure copying happens in constructor)
                 initializeBulkLoader();
-
-                // Navigate existing static structure and copy pages
-                navigateExistingStaticStructure();
 
                 System.err.println("VCTreeSortedDataBulkLoader opened successfully");
             } catch (Exception e) {
@@ -284,173 +269,6 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         }
 
         /**
-         * Navigate existing static structure file using level order traversal and copy pages.
-         * The static structure was already created by VCTreeStaticStructureCreatorOperatorDescriptor.
-         * 
-         * @throws HyracksDataException if navigation fails
-         */
-        private void navigateExistingStaticStructure() throws HyracksDataException {
-            try {
-                System.err.println("=== NAVIGATING EXISTING STATIC STRUCTURE WITH LEVEL ORDER TRAVERSAL ===");
-
-                // Get the static structure file path
-                FileReference indexPathRef = getIndexFilePath();
-                if (indexPathRef == null) {
-                    throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
-                            "Could not determine index path for static structure navigation");
-                }
-
-                // Create static structure file path
-                FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
-                System.err.println("Static structure file path: " + staticStructureFile);
-
-                // Check if static structure file exists
-                IIOManager ioManager = ctx.getJobletContext().getServiceContext().getIoManager();
-                if (!ioManager.exists(staticStructureFile)) {
-                    throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.FILE_DOES_NOT_EXIST,
-                            "Static structure file does not exist: " + staticStructureFile);
-                }
-
-                // Initialize navigation components
-                initializeNavigationComponents(staticStructureFile);
-
-                // Perform level order traversal and page copying
-                copyPagesInLevelOrder();
-
-                System.err.println("✅ Static structure navigation and page copying completed successfully");
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to navigate existing static structure: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Copy all pages in level-order using BFS traversal.
-         * This follows the same pattern as VCTreeStaticStructureNavigator.copyPagesInLevelOrder().
-         * 
-         * @throws HyracksDataException if any error occurs during traversal
-         */
-        private void copyPagesInLevelOrder() throws HyracksDataException {
-            try {
-                System.err.println("=== STARTING LEVEL ORDER PAGE COPYING ===");
-                Queue<Integer> pageQueue = new LinkedList<>();
-                pageQueue.offer(1); // Start with root page (page ID 0)
-
-                int pagesProcessed = 0;
-
-                for (int pageId = 1; pageId <= 8; pageId++) {
-                    ICachedPage sourcePage =
-                            bufferCache.pin(BufferedFileHandle.getDiskPageId(staticStructureFileId, pageId));
-                    bulkLoader.copyPage(sourcePage);
-                    bufferCache.unpin(sourcePage);
-                }
-
-                //                while (!pageQueue.isEmpty()) {
-                //                    int currentPageId = pageQueue.poll();
-                //
-                //                    // Pin and copy the current page
-                //                    ICachedPage sourcePage =
-                //                    try {
-                //                        sourcePage.acquireReadLatch();
-                //
-                //                        // Copy the page using bulk loader
-                //                        if (bulkLoader != null) {
-                //                            bulkLoader.copyPage(sourcePage);
-                //                        }
-                //                        pagesProcessed++;
-                //
-                //                        System.err.println("Copied page " + currentPageId + " (total processed: " + pagesProcessed + ")");
-                //
-                //                        // Check if this is an interior page (has children)
-                //                        org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame interiorFrame =
-                //                                (org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
-                //                        interiorFrame.setPage(sourcePage);
-                //
-                //                        if (!interiorFrame.isLeaf()) {
-                //                            // Add all child pages to queue
-                //                            int tupleCount = interiorFrame.getTupleCount();
-                //                            for (int i = 0; i < tupleCount; i++) {
-                //                                int childPageId = interiorFrame.getChildPageId(i);
-                //                                if (childPageId > 0) {
-                //                                    pageQueue.offer(childPageId);
-                //                                    System.err.println("Added child page " + childPageId + " to queue");
-                //                                }
-                //                            }
-                //                        }
-                //
-                //                    } finally {
-                //                        sourcePage.releaseReadLatch();
-                //                        bufferCache.unpin(sourcePage);
-                //                    }
-                //                }
-
-                System.err.println("✅ Level-order page copying completed. Total pages processed: " + pagesProcessed);
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to copy pages in level order: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Initialize navigation components for static structure traversal.
-         * 
-         * @param staticStructureFile File reference to the static structure file
-         * @throws HyracksDataException if initialization fails
-         */
-        private void initializeNavigationComponents(FileReference staticStructureFile) throws HyracksDataException {
-            try {
-                System.err.println("=== INITIALIZING NAVIGATION COMPONENTS ===");
-
-                // Get buffer cache
-                bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext()
-                        .getServiceContext().getApplicationContext()).getBufferCache();
-
-                // Open static structure file
-                staticStructureFileId = bufferCache.openFile(staticStructureFile);
-
-                // Configure VCTree frame factories
-                configureVCTreeFrameFactories();
-
-                System.err.println("✅ Navigation components initialized successfully");
-                System.err.println("  - Static structure file ID: " + staticStructureFileId);
-                System.err.println("  - Buffer cache: " + (bufferCache != null ? "OK" : "NULL"));
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to initialize navigation components: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Configure VCTree frame factories for static structure navigation.
-         * 
-         * @throws HyracksDataException if configuration fails
-         */
-        private void configureVCTreeFrameFactories() throws HyracksDataException {
-            try {
-                System.err.println("=== CONFIGURING VCTREE FRAME FACTORIES ===");
-
-                // Initialize frame factories
-                interiorFrameFactory = new VectorClusteringInteriorFrameFactory(vectorDimensions);
-                leafFrameFactory = new VectorClusteringLeafFrameFactory(null, vectorDimensions);
-
-                System.err.println("✅ VCTree frame factories configured successfully");
-                System.err.println("  - Interior frame factory: " + (interiorFrameFactory != null ? "OK" : "NULL"));
-                System.err.println("  - Leaf frame factory: " + (leafFrameFactory != null ? "OK" : "NULL"));
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to configure VCTree frame factories: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
          * Initialize bulk loader for data loading.
          * 
          * @throws HyracksDataException if bulk loader initialization fails
@@ -472,8 +290,9 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                                 DoubleArraySerializerDeserializer.INSTANCE // primary key
                         };
 
-                // Create LSMVCTreeBulkLoader
-                bulkLoader = lsmvcTree.createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes);
+                // Create LSMVCTreeBulkLoader with static structure filename
+                bulkLoader = lsmvcTree.createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes,
+                        ".static_structure_vctree");
 
                 System.err.println("✅ Bulk loader initialized successfully");
 

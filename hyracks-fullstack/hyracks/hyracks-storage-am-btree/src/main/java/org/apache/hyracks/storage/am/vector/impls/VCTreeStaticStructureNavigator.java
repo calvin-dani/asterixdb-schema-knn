@@ -150,7 +150,7 @@ public class VCTreeStaticStructureNavigator {
      * @param bulkLoader VCTreeBulkLoder to copy pages to
      * @throws HyracksDataException if any error occurs during traversal
      */
-    public void copyPagesInLevelOrder(VCTreeBulkLoder bulkLoader) throws HyracksDataException {
+    public void copyPagesInLevelOrder(VCTreeBulkLoader bulkLoader) throws HyracksDataException {
         LOGGER.debug("Starting level-order page copying from root page {}", rootPageId);
 
         Queue<Integer> pageQueue = new LinkedList<>();

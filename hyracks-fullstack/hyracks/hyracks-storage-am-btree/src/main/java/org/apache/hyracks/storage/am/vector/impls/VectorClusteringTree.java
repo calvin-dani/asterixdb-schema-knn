@@ -134,10 +134,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return 0;
     }
 
-    public VCTreeBulkLoder createBulkLoader(NoOpPageWriteCallback instance, int numLeafCentroid,
-            int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
-        return new VCTreeBulkLoder(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
-                DefaultBufferCacheWriteContext.INSTANCE, numLeafCentroid, firstLeafCentroidId, dataFrameSerdes);
+    public VCTreeBulkLoader createBulkLoader(NoOpPageWriteCallback instance, int numLeafCentroid,
+            int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerdes, String staticStructureFileName)
+            throws HyracksDataException {
+        return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
+                DefaultBufferCacheWriteContext.INSTANCE, numLeafCentroid, firstLeafCentroidId, dataFrameSerdes,
+                staticStructureFileName);
     }
 
     @Override
@@ -156,10 +158,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
         dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
 
-        return new VCTreeBulkLoder(fillFactor, callback, this, leafFrameFactory.createFrame(),
+        return new VCTreeBulkLoader(fillFactor, callback, this, leafFrameFactory.createFrame(),
                 dataFrameFactory.createFrame(), DefaultBufferCacheWriteContext.INSTANCE, 4, // numLeafCentroid
                 0, // firstLeafCentroidId
-                dataFrameSerds);
+                dataFrameSerds, null); // staticStructureFileName - null for default createBulkLoader
     }
 
     public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,

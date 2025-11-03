@@ -199,11 +199,15 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     }
 
     public LSMVCTreeBulkLoader createBulkLoader(int numLeafCentroids, int firstLeafCentroidId,
-            ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
+            ISerializerDeserializer[] dataFrameSerdes, String staticStructureFileName) throws HyracksDataException {
         AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
         LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
         LoadOperation loadOp =
                 new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
+        // Add static structure filename to operation parameters
+        if (staticStructureFileName != null) {
+            loadOp.getParameters().put("staticStructureFileName", staticStructureFileName);
+        }
         ILSMDiskComponent diskComponent = createDiskComponent(bulkLoadComponentFactory,
                 componentFileRefs.getInsertIndexFileReference(), null, null, true);
         loadOp.setNewComponent(diskComponent);

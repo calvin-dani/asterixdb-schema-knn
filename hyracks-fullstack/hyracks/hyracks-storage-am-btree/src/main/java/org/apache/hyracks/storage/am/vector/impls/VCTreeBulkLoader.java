@@ -18,11 +18,13 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
@@ -43,7 +45,7 @@ import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
+public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private static final Logger LOGGER = LogManager.getLogger();
     private int firstLeafCentroidId; // ID of the first leaf centroid
     private int numLeafCentroid; // Total number of leaf centroids
@@ -64,10 +66,10 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
     private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
 
-    public VCTreeBulkLoder(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
+    public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
-            int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds)
-            throws HyracksDataException {
+            int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds,
+            String staticStructureFileName) throws HyracksDataException {
         super(0, callback, vectorTree, leafFrame, writeContext);
         this.numLeafCentroid = numLeafCentroid;
         this.firstLeafCentroidId = firstLeafCentroidId;
@@ -84,6 +86,60 @@ public class VCTreeBulkLoder extends AbstractTreeIndexBulkLoader {
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
+
+        // Copy static structure if filename provided
+        if (staticStructureFileName != null) {
+            copyStaticStructure(staticStructureFileName);
+        }
+    }
+
+    /**
+     * Copy static structure from existing file into this bulk loader.
+     * 
+     * @param staticStructureFileName Name of the static structure file (relative to index file directory)
+     * @throws HyracksDataException if file doesn't exist or copying fails
+     */
+    private void copyStaticStructure(String staticStructureFileName) throws HyracksDataException {
+        try {
+            // Derive static structure file path from index file
+            FileReference indexFileRef = treeIndex.getFileReference();
+            FileReference staticStructureFileRef = indexFileRef.getParent().getChild(staticStructureFileName);
+
+            // Check if file exists
+            File staticStructureFile = new File(staticStructureFileRef.getAbsolutePath());
+            if (!staticStructureFile.exists()) {
+                throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.FILE_DOES_NOT_EXIST,
+                        "Static structure file does not exist: " + staticStructureFileRef.getAbsolutePath());
+            }
+
+            LOGGER.debug("Copying static structure from: {}", staticStructureFileRef.getAbsolutePath());
+
+            // Open static structure file
+            int staticStructureFileId = bufferCache.openFile(staticStructureFileRef);
+
+            try {
+                // Copy pages 1-8 in level order
+                for (int pageId = 1; pageId <= 8; pageId++) {
+                    ICachedPage sourcePage =
+                            bufferCache.pin(BufferedFileHandle.getDiskPageId(staticStructureFileId, pageId));
+                    try {
+                        copyPage(sourcePage);
+                    } finally {
+                        bufferCache.unpin(sourcePage);
+                    }
+                }
+
+                LOGGER.debug("Successfully copied static structure pages 1-8");
+            } finally {
+                // Close static structure file
+                bufferCache.closeFile(staticStructureFileId);
+            }
+
+        } catch (HyracksDataException e) {
+            throw e;
+        } catch (Exception e) {
+            throw HyracksDataException.create(e);
+        }
     }
 
     public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
