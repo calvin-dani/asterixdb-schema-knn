@@ -173,7 +173,6 @@ import org.apache.hyracks.storage.am.lsm.btree.dataflow.LSMBTreeBatchPointSearch
 import org.apache.hyracks.storage.am.lsm.invertedindex.dataflow.BinaryTokenizerOperatorDescriptor;
 import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.IFullTextConfigEvaluatorFactory;
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.IBinaryTokenizerFactory;
-import org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor;
 import org.apache.hyracks.storage.am.rtree.dataflow.RTreeSearchOperatorDescriptor;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
@@ -801,8 +800,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         RecordDescriptor outputRecDesc = JobGenHelper.mkRecordDescriptor(typeEnv, opSchema, context);
 
         // Get partitioning properties (how data is distributed across nodes)
-        PartitioningProperties partitioningProperties =
-                getPartitioningProperties(dataset, vectorIndex.getIndexName());
+        PartitioningProperties partitioningProperties = getPartitioningProperties(dataset, vectorIndex.getIndexName());
 
         // Get primary key fields for callback
         int numPrimaryKeys = dataset.getPrimaryKeys().size();

@@ -30,7 +30,6 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.commons.lang3.mutable.Mutable;
-import org.apache.commons.lang3.mutable.MutableObject;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalExpression;
@@ -45,7 +44,6 @@ import org.apache.hyracks.algebricks.core.algebra.expressions.VariableReferenceE
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractLogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AssignOperator;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.DelegateOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.LimitOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator.IOrder;
@@ -376,8 +374,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         }
 
         // Iterate over candidate vector indexes
-        Iterator<Map.Entry<Index, List<Pair<Integer, Integer>>>> indexIt = analysisCtx
-                .getIteratorForIndexExprsAndVars();
+        Iterator<Map.Entry<Index, List<Pair<Integer, Integer>>>> indexIt =
+                analysisCtx.getIteratorForIndexExprsAndVars();
 
         while (indexIt.hasNext()) {
             Map.Entry<Index, List<Pair<Integer, Integer>>> indexEntry = indexIt.next();
@@ -418,8 +416,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
 
         // Call VectorIndexAccessMethod to create the index search plan
         // This creates UNNEST-MAP operator that returns candidate tuples from vector index
-        ILogicalOperator indexSearchOp = VectorIndexAccessMethod.INSTANCE.createIndexSearchPlan(
-                limitRef, orderRef, annDistanceExpr, subTree, vectorIndex, analysisCtx, context);
+        ILogicalOperator indexSearchOp = VectorIndexAccessMethod.INSTANCE.createIndexSearchPlan(limitRef, orderRef,
+                annDistanceExpr, subTree, vectorIndex, analysisCtx, context);
 
         if (indexSearchOp == null) {
             System.err.println("Plan transformation not yet implemented");

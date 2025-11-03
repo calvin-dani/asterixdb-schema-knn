@@ -206,14 +206,15 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                     componentFileRefs.getStaticStructureFileReference(), null, null, true);
         } else {
             // Use standard data file reference
-            component = createDiskComponent(bulkLoadComponentFactory,
-                    componentFileRefs.getInsertIndexFileReference(), null, null, true);
+            component = createDiskComponent(bulkLoadComponentFactory, componentFileRefs.getInsertIndexFileReference(),
+                    null, null, true);
         }
 
         loadOp.setNewComponent(component);
         ioOpCallback.scheduled(loadOp);
         opCtx.setIoOperation(loadOp);
-        return new LSMIndexDiskComponentBulkLoader(storageConfig, this, opCtx, fillFactor, verifyInput, numElementsHint);
+        return new LSMIndexDiskComponentBulkLoader(storageConfig, this, opCtx, fillFactor, verifyInput,
+                numElementsHint);
     }
 
     public LSMVCTreeBulkLoader createBulkLoader(int numLeafCentroids, int firstLeafCentroidId,

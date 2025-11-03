@@ -219,13 +219,13 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
     }
 
     public void setCallbacks(IModificationOperationCallback modificationCallback,
-                             ISearchOperationCallback searchCallback) {
+            ISearchOperationCallback searchCallback) {
         this.modificationCallback = modificationCallback;
         this.searchCallback = searchCallback;
-//        TODO - HY
-//        if (cursorInitialState != null) {
-//            cursorInitialState.setSearchOperationCallback(searchCallback);
-//        }
+        //        TODO - HY
+        //        if (cursorInitialState != null) {
+        //            cursorInitialState.setSearchOperationCallback(searchCallback);
+        //        }
     }
 
     public long getMetadataPageId() {
