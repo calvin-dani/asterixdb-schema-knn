@@ -173,6 +173,7 @@ import org.apache.hyracks.storage.am.lsm.btree.dataflow.LSMBTreeBatchPointSearch
 import org.apache.hyracks.storage.am.lsm.invertedindex.dataflow.BinaryTokenizerOperatorDescriptor;
 import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.IFullTextConfigEvaluatorFactory;
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.IBinaryTokenizerFactory;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor;
 import org.apache.hyracks.storage.am.rtree.dataflow.RTreeSearchOperatorDescriptor;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
@@ -818,14 +819,25 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         IIndexDataflowHelperFactory indexDataflowHelperFactory = new IndexDataflowHelperFactory(
                 storageComponentProvider.getStorageManager(), partitioningProperties.getSplitsProvider());
 
-        // Create VectorSearchOperatorDescriptor
-        int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
-        org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor vectorSearchOp =
-                new org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor(jobSpec,
-                        outputRecDesc, queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory,
-                        partitionsMap);
+        // Get secondary key count for vector index
+        // For vector index: secondary keys = distance (double) + cosine (double) + embedding (double[])
+        // numSecondaryKeys = 3 fields (distance, cosine, embedding)
+        // But we only output PK fields, so we skip these 3 fields in the tuple projector
+        // TODO: Verify KeyFieldTypeUtil.getNumSecondaryKeys() works correctly for vector indexes,
+        //       or keep hardcoded value if tuple format is always <distance, cosine, embedding, pk...>
 
-        return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
+        //       int numSecondaryKeys = 3;  // Hardcoded: distance, cosine, embedding
+        //       Create VectorSearchOperatorDescriptor
+        //       int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
+        //       VectorSearchOperatorDescriptor vectorSearchOp =
+        //       new VectorSearchOperatorDescriptor(jobSpec,
+        //       outputRecDesc, queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory,
+        //       partitionsMap, numPrimaryKeys, numSecondaryKeys);
+        //
+        //       return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
+
+        // TODO: Implement vector search operator creation
+        throw new UnsupportedOperationException("Vector search operator not yet implemented");
     }
 
     @Override
