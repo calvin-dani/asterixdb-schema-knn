@@ -1103,16 +1103,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         vectorTree.activate();
                         System.err.println("VectorClusteringTree activated successfully");
 
-                        // Create static structure builder using the tree's factory method
+                        // Create static structure bulk loader using the tree's factory method
                         // Reduce maxEntriesPerPage for 256-dimensional vectors to fit in frame
                         int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10); // Limit to 10 entries for large vectors
                         System.err.println(
-                                "Creating VCTreeStaticStructureBuilder with " + clustersPerLevel.size() + " levels...");
+                                "Creating VCTreeStaticStructureBulkLoader with " + clustersPerLevel.size() + " levels...");
                         System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
                                 + adjustedMaxEntriesPerPage + " for 256-dimensional vectors");
                         structureCreator =
-                                vectorTree.createStaticStructureBuilder(clustersPerLevel.size(), clustersPerLevel,
-                                        centroidsPerCluster, adjustedMaxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
+                                (VCTreeStaticStructureBuilder) (vectorTree.createStaticStructureBulkLoader(clustersPerLevel.size(),
+                                        clustersPerLevel, centroidsPerCluster, adjustedMaxEntriesPerPage, NoOpPageWriteCallback.INSTANCE));
 
                         System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                         // Process all accumulated tuples

@@ -104,6 +104,7 @@ import org.apache.asterix.optimizer.rules.am.IntroduceJoinAccessMethodRule;
 import org.apache.asterix.optimizer.rules.am.IntroduceLSMComponentFilterRule;
 import org.apache.asterix.optimizer.rules.am.IntroducePrimaryIndexForAggregationRule;
 import org.apache.asterix.optimizer.rules.am.IntroduceSelectAccessMethodRule;
+import org.apache.asterix.optimizer.rules.am.IntroduceTopKAccessMethodRule;
 import org.apache.asterix.optimizer.rules.cbo.EnumerateJoinsRule;
 import org.apache.asterix.optimizer.rules.cbo.JoinEnum;
 import org.apache.asterix.optimizer.rules.subplan.AsterixMoveFreeVariableOperatorOutOfSubplanRule;
@@ -329,6 +330,7 @@ public final class RuleCollections {
     public static List<IAlgebraicRewriteRule> buildAccessMethodRuleCollection() {
         List<IAlgebraicRewriteRule> accessMethod = new LinkedList<>();
         accessMethod.add(new IntroduceSelectAccessMethodRule());
+        accessMethod.add(new IntroduceTopKAccessMethodRule());
         accessMethod.add(new IntroduceJoinAccessMethodRule());
         accessMethod.add(new IntroduceLSMComponentFilterRule());
         accessMethod.add(new IntroducePrimaryIndexForAggregationRule());

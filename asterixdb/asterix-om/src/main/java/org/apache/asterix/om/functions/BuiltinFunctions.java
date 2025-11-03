@@ -1161,6 +1161,8 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY = FunctionConstants.newAsterix("vector-distance", 3);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
             FunctionConstants.newAsterix("vector-distance-constant", 3);
+    // Vector search functions
+    public static final FunctionIdentifier ANN_DISTANCE = FunctionConstants.newAsterix("ann-distance", 3);
 
     // KMEAN function
     public static final FunctionIdentifier KMEAN_FAISS = FunctionConstants.newAsterix("kmean-faiss", 3);
@@ -1887,6 +1889,7 @@ public class BuiltinFunctions {
         // Vector functions
         addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
         addFunction(VECTOR_DISTANCE_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(ANN_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
 
         addFunction(KMEAN_FAISS, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
