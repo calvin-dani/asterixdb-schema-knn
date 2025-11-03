@@ -83,8 +83,6 @@ import org.apache.hyracks.api.exceptions.Warning;
 
 import com.google.common.base.Strings;
 
-import static org.apache.asterix.om.types.AOrderedListType.FULL_OPEN_ORDEREDLIST_TYPE;
-
 /**
  * Class that embodies the commonalities between rewrite rules for access
  * methods.
