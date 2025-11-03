@@ -34,6 +34,7 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializer
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.btree.impls.BTree;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
@@ -164,10 +165,21 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 dataFrameSerds, null); // staticStructureFileName - null for default createBulkLoader
     }
 
-    public VCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
-            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage, NoOpPageWriteCallback instance)
+    /**
+     * Creates a bulk loader for building the static hierarchical clustering structure.
+     * This is called during index creation to build the multi-level centroid tree.
+     *
+     * @param numLevels Number of levels in the hierarchy
+     * @param clustersPerLevel List of cluster counts per level
+     * @param centroidsPerCluster List of centroids per cluster per level
+     * @param maxEntriesPerPage Maximum entries per page
+     * @param callback Page write callback
+     * @return IIndexBulkLoader for building static structure
+     */
+    public IIndexBulkLoader createStaticStructureBulkLoader(int numLevels, List<Integer> clustersPerLevel,
+            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage, IPageWriteCallback callback)
             throws HyracksDataException {
-        return new VCTreeStaticStructureBuilder(instance, this, leafFrameFactory.createFrame(),
+        return new VCTreeStaticStructureBuilder(callback, this, leafFrameFactory.createFrame(),
                 dataFrameFactory.createFrame(), numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
     }
 
@@ -1378,8 +1390,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     public class VectorClusteringTreeAccessor implements ITreeIndexAccessor {
 
-        private final VectorClusteringTree tree;
-        private final VectorClusteringOpContext ctx;
+        private VectorClusteringTree tree;
+        private VectorClusteringOpContext ctx;
         private boolean destroyed = false;
 
         public VectorClusteringTreeAccessor(VectorClusteringTree tree, IIndexAccessParameters iap) {
@@ -1387,6 +1399,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             this.ctx = new VectorClusteringOpContext(this, tree.interiorFrameFactory, tree.leafFrameFactory,
                     tree.metadataFrameFactory, tree.dataFrameFactory, tree.freePageManager, tree.cmpFactories,
                     tree.vectorDimensions, iap.getModificationCallback(), iap.getSearchOperationCallback());
+        }
+
+        public void reset(VectorClusteringTree vctree, IIndexAccessParameters iap) {
+            this.tree = vctree;
+            ctx.setCallbacks(iap.getModificationCallback(), iap.getSearchOperationCallback());
+            ctx.reset();
         }
 
         @Override

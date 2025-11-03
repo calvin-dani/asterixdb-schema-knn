@@ -218,6 +218,16 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
         freePageManager.releaseBlock(metaFrame, blockPageId, size);
     }
 
+    public void setCallbacks(IModificationOperationCallback modificationCallback,
+                             ISearchOperationCallback searchCallback) {
+        this.modificationCallback = modificationCallback;
+        this.searchCallback = searchCallback;
+//        TODO - HY
+//        if (cursorInitialState != null) {
+//            cursorInitialState.setSearchOperationCallback(searchCallback);
+//        }
+    }
+
     public long getMetadataPageId() {
         return metadataPageId;
     }
