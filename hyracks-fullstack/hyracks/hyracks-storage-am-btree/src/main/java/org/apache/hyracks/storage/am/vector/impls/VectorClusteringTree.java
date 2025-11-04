@@ -91,10 +91,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
             IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] VectorClusteringTree constructor: Started, super() call completed");
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
         staticInitializer = null;
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] VectorClusteringTree constructor: Constructor completed");
     }
 
     /**
