@@ -38,15 +38,11 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
-import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
-import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
@@ -62,18 +58,15 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperato
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
-import org.apache.hyracks.storage.common.LocalResource;
-import org.apache.hyracks.storage.common.buffercache.IBufferCache;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.common.IIndexAccessor;
 
 /**
  * Operator that handles bulk loader initialization and recursive data grouping to run files.
@@ -97,12 +90,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final RecordDescriptor inputRecDesc;
     private final RecordDescriptor outputRecDesc;
 
-    // Navigation components
-    private IBufferCache bufferCache;
-    private int staticStructureFileId;
-    private ITreeIndexFrameFactory interiorFrameFactory;
-    private ITreeIndexFrameFactory leafFrameFactory;
-
     // Partitioning components
     private VCTreePartitioner partitioner;
 
@@ -124,168 +111,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         System.err.println("VCTreeBulkLoaderAndGroupingOperatorDescriptor created with permit UUID: " + permitUUID);
         System.err.println("Output record descriptor set: " + outputRecordDescriptor);
-    }
-
-    /**
-     * Configure frame factories for VCTree navigation.
-     * Creates the correct VCTree frame factories that implement IVectorClusteringLeafFrame
-     * and IVectorClusteringInteriorFrame interfaces required by VCTreeNavigationUtils.
-     * 
-     * @param ctx Hyracks task context for getting frame factories
-     * @throws HyracksDataException if frame factory configuration fails
-     */
-    private void configureFrameFactories(IHyracksTaskContext ctx) throws HyracksDataException {
-        try {
-            System.err.println("=== CONFIGURING VCTREE FRAME FACTORIES FOR NAVIGATION ===");
-
-            // Create tuple writers with proper type traits for VCTree
-            // Tuple format: [centroidId (int), embedding (float[]), childPageId (int)]
-            ITypeTraits[] typeTraits = new ITypeTraits[3];
-            typeTraits[0] = IntegerPointable.TYPE_TRAITS; // centroidId
-            typeTraits[1] = VarLengthTypeTrait.INSTANCE; // embedding (float array) - variable length
-            typeTraits[2] = IntegerPointable.TYPE_TRAITS; // childPageId
-
-            VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
-                    new VectorClusteringLeafTupleWriterFactory(typeTraits, null, null);
-            VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
-                    new VectorClusteringInteriorTupleWriterFactory(typeTraits, null, null);
-
-            // Create VCTree frame factories (these implement the correct interfaces)
-            this.leafFrameFactory =
-                    new VectorClusteringLeafFrameFactory(leafTupleWriterFactory.createTupleWriter(), VECTOR_DIMENSION);
-            this.interiorFrameFactory = new VectorClusteringInteriorFrameFactory(
-                    interiorTupleWriterFactory.createTupleWriter(), VECTOR_DIMENSION);
-
-            System.err.println("✅ VCTree frame factories configured successfully");
-            System.err.println("  Interior frame factory: " + interiorFrameFactory.getClass().getSimpleName());
-            System.err.println("  Leaf frame factory: " + leafFrameFactory.getClass().getSimpleName());
-
-        } catch (Exception e) {
-            System.err.println("ERROR: Failed to configure VCTree frame factories: " + e.getMessage());
-            e.printStackTrace();
-            throw HyracksDataException.create(e);
-        }
-    }
-
-    /**
-     * Initialize navigation components for static structure access.
-     * 
-     * @param ctx Hyracks task context for getting buffer cache and file access
-     * @param staticFileId File ID of the static structure file to navigate
-     * @throws HyracksDataException if navigation initialization fails
-     */
-    private void initializeNavigationComponents(IHyracksTaskContext ctx, int staticFileId) throws HyracksDataException {
-        try {
-            System.err.println("=== INITIALIZING NAVIGATION COMPONENTS ===");
-            System.err.println("Static structure file ID: " + staticFileId);
-
-            // Set up buffer cache access
-            this.bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext()
-                    .getServiceContext().getApplicationContext()).getBufferCache();
-            this.staticStructureFileId = staticFileId;
-
-            // Configure frame factories
-            configureFrameFactories(ctx);
-
-            // Validate static structure file accessibility
-            validateStaticStructureFile();
-
-            System.err.println("✅ Navigation components initialized successfully");
-
-        } catch (Exception e) {
-            System.err.println("ERROR: Failed to initialize navigation components: " + e.getMessage());
-            e.printStackTrace();
-            throw HyracksDataException.create(e);
-        }
-    }
-
-    /**
-     * Validate that the static structure file exists and is accessible.
-     * 
-     * @throws HyracksDataException if file is not accessible
-     */
-    private void validateStaticStructureFile() throws HyracksDataException {
-        try {
-            System.err.println("=== VALIDATING STATIC STRUCTURE FILE ===");
-            System.err.println("File ID: " + staticStructureFileId);
-
-            // Try to pin the root page (page 0) to verify file exists and is accessible
-            long dpid =
-                    org.apache.hyracks.storage.common.file.BufferedFileHandle.getDiskPageId(staticStructureFileId, 0);
-            org.apache.hyracks.storage.common.buffercache.ICachedPage page = bufferCache.pin(dpid);
-
-            try {
-                page.acquireReadLatch();
-                // If we can acquire the latch, the file exists and is accessible
-                System.err.println("✅ Static structure file validation successful - root page is accessible");
-            } finally {
-                page.releaseReadLatch();
-                bufferCache.unpin(page);
-            }
-
-        } catch (Exception e) {
-            System.err.println("ERROR: Static structure file validation failed: " + e.getMessage());
-            e.printStackTrace();
-            throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
-                    "Static structure file not accessible: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Find the closest centroid using VCTreeNavigationUtils.
-     * 
-     * @param queryVector Query vector to find closest centroid for
-     * @return ClusterSearchResult containing closest centroid information
-     * @throws HyracksDataException if navigation fails
-     */
-    public ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
-        try {
-
-            // Validate input vector
-            if (queryVector == null) {
-                throw new IllegalArgumentException("Query vector cannot be null");
-            }
-
-            if (queryVector.length == 0) {
-                throw new IllegalArgumentException("Query vector cannot be empty");
-            }
-
-            // Validate vector dimensions
-            if (queryVector.length != VECTOR_DIMENSION) {
-                System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                        + ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
-                // Continue processing but log the mismatch
-            }
-
-            // Validate navigation components are initialized
-            if (bufferCache == null) {
-                throw new IllegalStateException("Buffer cache not initialized");
-            }
-
-            if (interiorFrameFactory == null || leafFrameFactory == null) {
-                throw new IllegalStateException("Frame factories not initialized");
-            }
-            VCTreeStaticStructureNavigator navigator = new VCTreeStaticStructureNavigator(bufferCache,
-                    staticStructureFileId, interiorFrameFactory, leafFrameFactory);
-
-            // Use VCTreeNavigationUtils to find closest centroid
-            ClusterSearchResult result = navigator.findClosestCentroid(queryVector);
-
-            if (result == null) {
-                System.err.println("WARNING: No closest centroid found for query vector");
-                return null;
-            }
-
-            return result;
-
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-            e.printStackTrace();
-            throw HyracksDataException.create(e);
-        }
     }
 
     /**
@@ -597,6 +422,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private LSMIndexDiskComponentBulkLoader lsmBulkLoader;
         private IIndexDataflowHelper indexHelper;
         private ILSMIndex lsmIndex; // TODO: Use lsmIndex in future bulk loading operations
+        private LSMVCTree lsmVCTree;
+        private VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor;
         private MaterializerTaskState materializedData;
         int successfulQueries = 0;
         int totalTuplesProcessed = 0;
@@ -649,10 +476,34 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     partitioner.preInitializePartitioning(knownK, memoryBudget, frameSize);
                 }
 
-                // Initialize navigation components for static structure access
-                // Get the correct file ID by opening the .static_structure_vctree file
-                int staticStructureFileId = openStaticStructureFile(ctx);
-                initializeNavigationComponents(ctx, staticStructureFileId);
+                // Initialize index helper to access static structure via LSM index system
+                System.err.println("=== INITIALIZING INDEX-BASED STATIC STRUCTURE ACCESS ===");
+                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                indexHelper.open();
+
+                // Get LSMVCTree instance
+                org.apache.hyracks.storage.common.IIndex indexInstance = indexHelper.getIndexInstance();
+                System.err.println("Index instance type: "
+                        + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
+
+                if (!(indexInstance instanceof ILSMIndex)) {
+                    throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
+                            + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
+                }
+                ILSMIndex lsmIndex = (ILSMIndex) indexInstance;
+
+                if (!(lsmIndex instanceof LSMVCTree)) {
+                    throw new HyracksDataException(
+                            "Index is not an LSMVCTree instance, got: " + lsmIndex.getClass().getName());
+                }
+                lsmVCTree = (LSMVCTree) lsmIndex;
+                System.err.println("LSMVCTree instance obtained successfully");
+
+                // Get static structure and create accessor
+                LSMVCTreeDiskComponent staticStructure = lsmVCTree.getStaticStructure();
+                IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+                vcTreeAccessor = (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
+                System.err.println("✅ VectorClusteringTreeAccessor created successfully");
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -686,75 +537,52 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         }
 
         /**
-         * Open the .static_structure_vctree file and return its file ID.
-         * This follows the same approach as VCTreeStaticStructureCreatorOperatorDescriptor.
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
          * 
-         * @param ctx Hyracks task context for getting buffer cache and file access
-         * @return File ID of the opened static structure file
-         * @throws HyracksDataException if file cannot be opened
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
          */
-        private int openStaticStructureFile(IHyracksTaskContext ctx) throws HyracksDataException {
+        private ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
             try {
-                System.err.println("=== OPENING STATIC STRUCTURE FILE ===");
-
-                // Get buffer cache
-                IBufferCache bufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx.getJobletContext()
-                        .getServiceContext().getApplicationContext()).getBufferCache();
-
-                // Get index path (same approach as VCTreeStaticStructureCreatorOperatorDescriptor)
-                FileReference indexPathRef = getIndexFilePath();
-                if (indexPathRef == null) {
-                    throw new HyracksDataException("Could not determine index path");
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
                 }
 
-                // Create static structure file path
-                FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
-
-                // Open the static structure file
-                int fileId;
-                try {
-                    // Check if file exists in the file system
-                    IIOManager ioManager = ctx.getIoManager();
-                    if (ioManager.exists(staticStructureFile)) {
-                        fileId = bufferCache.openFile(staticStructureFile);
-                    } else {
-                        throw new HyracksDataException("Static structure file does not exist: " + staticStructureFile);
-                    }
-                } catch (Exception e) {
-                    throw HyracksDataException.create(e);
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
                 }
 
-                return fileId;
+                // Validate vector dimensions
+                if (queryVector.length != VECTOR_DIMENSION) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
+                }
 
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Use accessor to find closest leaf centroid
+                ClusterSearchResult result = vcTreeAccessor.findClosestLeafCentroid(queryVector);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
             } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Get the index file path for accessing the static structure file.
-         * This follows the same approach as VCTreeStaticStructureCreatorOperatorDescriptor.
-         * 
-         * @return FileReference to the index directory
-         */
-        private FileReference getIndexFilePath() {
-            try {
-                // Get the LSM index file manager to determine the correct component directory
-                IIndexDataflowHelper indexHelper =
-                        indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-
-                // Get the resource path from the index helper
-                LocalResource resource = indexHelper.getResource();
-                String resourcePath = resource.getPath();
-
-                // Resolve the file reference using the IO manager
-                IIOManager ioManager = ctx.getIoManager();
-                return ioManager.resolve(resourcePath);
-
-            } catch (Exception e) {
-                e.printStackTrace();
-                return null;
             }
         }
 
@@ -886,6 +714,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 if (lsmBulkLoader != null) {
                     lsmBulkLoader.end();
+                }
+                if (vcTreeAccessor != null) {
+                    // Accessor doesn't need explicit close, but we can set to null for cleanup
+                    vcTreeAccessor = null;
                 }
                 if (indexHelper != null) {
                     indexHelper.close();

@@ -69,6 +69,7 @@ import org.apache.asterix.metadata.utils.IndexUtil;
 import org.apache.asterix.metadata.utils.InvertedIndexResourceFactoryProvider;
 import org.apache.asterix.metadata.utils.RTreeResourceFactoryProvider;
 import org.apache.asterix.metadata.utils.TypeUtil;
+import org.apache.asterix.metadata.utils.VCTreeResourceFactoryProvider;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
@@ -489,8 +490,8 @@ public class Dataset implements IMetadataEntity<Dataset>, IDataset {
                         recordType, metaType, mergePolicyFactory, mergePolicyProperties, null, null);
                 break;
             case VECTOR:
-                // VECTOR indexes use LSM_BTREE as base structure, similar to BTREE indexes
-                resourceFactory = BTreeResourceFactoryProvider.INSTANCE.getResourceFactory(mdProvider, this, index,
+                // VECTOR indexes use LSMVCTree structure for vector clustering
+                resourceFactory = VCTreeResourceFactoryProvider.INSTANCE.getResourceFactory(mdProvider, this, index,
                         recordType, metaType, mergePolicyFactory, mergePolicyProperties, filterTypeTraits,
                         filterCmpFactories);
                 break;

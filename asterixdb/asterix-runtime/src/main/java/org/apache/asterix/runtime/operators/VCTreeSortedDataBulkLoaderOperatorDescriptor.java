@@ -252,6 +252,8 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                 }
 
                 // Create LSMVCTree using LSMVCTreeUtils (full version like in tests)
+                System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                        + "] VCTreeSortedDataBulkLoader: About to call LSMVCTreeUtils.createLSMTree()");
                 lsmvcTree = LSMVCTreeUtils.createLSMTree(ncConfig, ioManager, virtualBufferCaches, file,
                         diskBufferCache, typeTraits, cmpFactories, -1, new NoMergePolicy(), new ThreadCountingTracker(),
                         SynchronousSchedulerProvider.INSTANCE.getIoScheduler(null),
