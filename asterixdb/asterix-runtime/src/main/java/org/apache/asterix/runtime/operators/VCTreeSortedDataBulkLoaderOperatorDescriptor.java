@@ -19,10 +19,8 @@
 package org.apache.asterix.runtime.operators;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.apache.asterix.om.base.ADouble;
@@ -30,45 +28,24 @@ import org.apache.asterix.om.base.AInt32;
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
-import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.api.io.FileReference;
-import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
-import org.apache.hyracks.control.common.controllers.NCConfig;
-import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
-import org.apache.hyracks.data.std.accessors.UTF8StringBinaryComparatorFactory;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.utils.SerdeUtils;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManagerFactory;
-import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
-import org.apache.hyracks.storage.am.lsm.common.impls.NoMergePolicy;
-import org.apache.hyracks.storage.am.lsm.common.impls.NoOpIOOperationCallbackFactory;
-import org.apache.hyracks.storage.am.lsm.common.impls.NoOpPageWriteCallbackFactory;
-import org.apache.hyracks.storage.am.lsm.common.impls.SynchronousSchedulerProvider;
-import org.apache.hyracks.storage.am.lsm.common.impls.ThreadCountingTracker;
-import org.apache.hyracks.storage.am.lsm.common.impls.VirtualBufferCache;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
-import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
-import org.apache.hyracks.storage.common.LocalResource;
-import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
-import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
 /**
  * Bulk loader operator that processes sorted tuples from ExternalSortOperatorDescriptor.
@@ -143,6 +120,7 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         private final int[] vectorFields;
         private final int[] filterFields;
         private final boolean durable;
+        private IIndexDataflowHelper indexHelper;
         private LSMVCTree lsmvcTree;
         private LSMVCTreeBulkLoader bulkLoader;
 
@@ -198,70 +176,35 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         }
 
         /**
-         * Initialize LSMVCTree with proper configuration.
+         * Initialize LSMVCTree by opening the existing index instance.
          * 
          * @throws HyracksDataException if initialization fails
          */
         private void initializeLSMVCTree() throws HyracksDataException {
             try {
-                System.err.println("=== INITIALIZING LSMVCTree ===");
+                System.err.println("=== INITIALIZING LSMVCTree (OPENING EXISTING INDEX) ===");
 
-                // Create NCConfig
-                //TODO : CALVIN DANI CHANGE
-                NCConfig ncConfig = new NCConfig(null);
+                // Create index helper to access existing index via LSM index system
+                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                indexHelper.open();
 
-                // Get IOManager
-                IIOManager ioManager = ctx.getJobletContext().getServiceContext().getIoManager();
+                // Get LSMVCTree instance
+                org.apache.hyracks.storage.common.IIndex indexInstance = indexHelper.getIndexInstance();
+                System.err.println("Index instance type: "
+                        + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
 
-                // Create virtual buffer caches
-                List<IVirtualBufferCache> virtualBufferCaches = new ArrayList<>();
-                IVirtualBufferCache virtualBufferCache = new VirtualBufferCache(new HeapBufferAllocator(), 512, 1000);
-                virtualBufferCaches.add(virtualBufferCache);
-
-                // Create file reference using proper IO device path
-                // Use the same approach as other operators - get the index path from the dataflow helper
-                FileReference file = getIndexFilePath();
-                if (file == null) {
-                    throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
-                            "Could not determine index file path for LSMVCTree");
+                if (!(indexInstance instanceof ILSMIndex)) {
+                    throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
+                            + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
                 }
+                ILSMIndex lsmIndex = (ILSMIndex) indexInstance;
 
-                // Get disk buffer cache
-                IBufferCache diskBufferCache = ((org.apache.asterix.common.api.INcApplicationContext) ctx
-                        .getJobletContext().getServiceContext().getApplicationContext()).getBufferCache();
-
-                // Create field serializers for vector fields
-                @SuppressWarnings("rawtypes")
-                ISerializerDeserializer[] fieldSerdes =
-                        new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroidId
-                                DoubleSerializerDeserializer.INSTANCE, // distance
-                                DoubleArraySerializerDeserializer.INSTANCE, // vector
-                                DoubleArraySerializerDeserializer.INSTANCE // primary key
-                        };
-
-                // Create type traits for vector fields
-                ITypeTraits[] typeTraits = SerdeUtils.serdesToTypeTraits(fieldSerdes);
-                IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[fieldSerdes.length];
-                for (int i = 0; i < fieldSerdes.length; i++) {
-                    if (fieldSerdes[i] instanceof UTF8StringSerializerDeserializer) {
-                        cmpFactories[i] = UTF8StringBinaryComparatorFactory.INSTANCE;
-                    } else {
-                        // For vector field and other numeric fields, use integer comparator for now
-                        cmpFactories[i] = IntegerBinaryComparatorFactory.INSTANCE;
-                    }
+                if (!(lsmIndex instanceof LSMVCTree)) {
+                    throw new HyracksDataException(
+                            "Index is not an LSMVCTree instance, got: " + lsmIndex.getClass().getName());
                 }
-
-                // Create LSMVCTree using LSMVCTreeUtils (full version like in tests)
-                System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-                        + "] VCTreeSortedDataBulkLoader: About to call LSMVCTreeUtils.createLSMTree()");
-                lsmvcTree = LSMVCTreeUtils.createLSMTree(ncConfig, ioManager, virtualBufferCaches, file,
-                        diskBufferCache, typeTraits, cmpFactories, -1, new NoMergePolicy(), new ThreadCountingTracker(),
-                        SynchronousSchedulerProvider.INSTANCE.getIoScheduler(null),
-                        NoOpIOOperationCallbackFactory.INSTANCE, NoOpPageWriteCallbackFactory.INSTANCE, false,
-                        vectorDimensions, vectorFields, filterFields, null, null, null, durable,
-                        AppendOnlyLinkedMetadataPageManagerFactory.INSTANCE, false, inputRecDesc);
-
-                System.err.println("✅ LSMVCTree initialized successfully");
+                lsmvcTree = (LSMVCTree) lsmIndex;
+                System.err.println("✅ LSMVCTree instance obtained successfully");
 
             } catch (Exception e) {
                 System.err.println("ERROR: Failed to initialize LSMVCTree: " + e.getMessage());
@@ -302,33 +245,6 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                 System.err.println("ERROR: Failed to initialize bulk loader: " + e.getMessage());
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Get the index file path for LSMVCTree creation.
-         * This follows the same approach as other operators in the system.
-         * 
-         * @return FileReference to the index directory
-         */
-        private FileReference getIndexFilePath() {
-            try {
-                // Use the same approach as VCTreeStaticStructureCreatorOperatorDescriptor
-                IIndexDataflowHelper indexHelper =
-                        indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-                //                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-                //                indexHelper.open();
-                //                lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
-                LocalResource resource = indexHelper.getResource();
-                String resourcePath = resource.getPath();
-
-                IIOManager ioManager = ctx.getJobletContext().getServiceContext().getIoManager();
-                return ioManager.resolve(resourcePath);
-
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
-                e.printStackTrace();
-                return null;
             }
         }
 
@@ -460,6 +376,13 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
             if (writer != null) {
                 writer.fail();
             }
+            if (indexHelper != null) {
+                try {
+                    indexHelper.close();
+                } catch (Exception e) {
+                    System.err.println("ERROR: Failed to close indexHelper in fail(): " + e.getMessage());
+                }
+            }
         }
 
         @Override
@@ -477,6 +400,11 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     System.err.println("=== FINALIZING LSMVCTreeBulkLoader ===");
                     bulkLoader.end();
                     System.err.println("✅ LSMVCTreeBulkLoader finalized successfully");
+                }
+
+                // Close index helper
+                if (indexHelper != null) {
+                    indexHelper.close();
                 }
 
                 // Log final summary for current centroid if any

@@ -44,6 +44,8 @@ import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResource;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IStorageManager;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -51,6 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public class LSMVCTreeLocalResource extends LsmResource {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOGGER = LogManager.getLogger(LSMVCTreeLocalResource.class);
 
     protected final int vectorDimensions;
     protected final int[] vectorFields;
@@ -123,10 +126,63 @@ public class LSMVCTreeLocalResource extends LsmResource {
 
     public static IJsonSerializable fromJson(IPersistedResourceRegistry registry, JsonNode json)
             throws HyracksDataException {
-        int vectorDimensions = json.get("vectorDimensions").asInt();
-        int[] vectorFields = OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class);
-        int[] filterFields = OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class);
-        boolean atomic = json.get("atomic").asBoolean();
+        LOGGER.info("Deserializing LSMVCTreeLocalResource from JSON");
+        int vectorDimensions = getOrDefaultInt(json, "vectorDimensions", 784);
+        int[] vectorFields = getOrDefaultIntArray(json, "vectorFields", new int[0]);
+        JsonNode filterFieldsNode = json.get("filterFields");
+        int[] filterFields;
+        if (filterFieldsNode != null && !filterFieldsNode.isNull()) {
+            filterFields = OBJECT_MAPPER.convertValue(filterFieldsNode, int[].class);
+            LOGGER.info("Field 'filterFields': exists=true, value={}", java.util.Arrays.toString(filterFields));
+        } else {
+            LOGGER.warn(
+                    "Field 'filterFields': exists=false or is null, using parent's value (deserialized in super constructor)");
+            // Note: filterFields is also deserialized in parent class LsmResource constructor,
+            // but we need a value here. Try to get from parent or use empty array as fallback
+            filterFields = new int[0];
+        }
+        boolean atomic = getOrDefaultBoolean(json, "atomic", false);
+        LOGGER.info(
+                "Successfully deserialized LSMVCTreeLocalResource with vectorDimensions={}, vectorFields={}, filterFields={}, atomic={}",
+                vectorDimensions, java.util.Arrays.toString(vectorFields),
+                filterFields != null ? java.util.Arrays.toString(filterFields) : "null", atomic);
         return new LSMVCTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic);
+    }
+
+    protected static boolean getOrDefaultBoolean(JsonNode jsonNode, String fieldName, boolean defaultValue) {
+        boolean exists = jsonNode.has(fieldName);
+        boolean value = exists ? jsonNode.get(fieldName).asBoolean() : defaultValue;
+        if (exists) {
+            LOGGER.info("Field '{}': exists=true, value={}", fieldName, value);
+        } else {
+            LOGGER.info("Field '{}': exists=false, using default value={}", fieldName, defaultValue);
+        }
+        return value;
+    }
+
+    protected static int getOrDefaultInt(JsonNode jsonNode, String fieldName, int defaultValue) {
+        boolean exists = jsonNode.has(fieldName);
+        int value = exists ? jsonNode.get(fieldName).asInt() : defaultValue;
+        if (exists) {
+            LOGGER.info("Field '{}': exists=true, value={}", fieldName, value);
+        } else {
+            LOGGER.info("Field '{}': exists=false, using default value={}", fieldName, defaultValue);
+        }
+        return value;
+    }
+
+    protected static int[] getOrDefaultIntArray(JsonNode jsonNode, String fieldName, int[] defaultValue) {
+        boolean exists = jsonNode.has(fieldName);
+        if (exists) {
+            JsonNode fieldNode = jsonNode.get(fieldName);
+            if (fieldNode != null && !fieldNode.isNull()) {
+                int[] value = OBJECT_MAPPER.convertValue(fieldNode, int[].class);
+                LOGGER.info("Field '{}': exists=true, value={}", fieldName, java.util.Arrays.toString(value));
+                return value;
+            }
+        }
+        LOGGER.info("Field '{}': exists={}, using default value={}", fieldName, exists,
+                defaultValue != null ? java.util.Arrays.toString(defaultValue) : "null");
+        return defaultValue;
     }
 }

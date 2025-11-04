@@ -46,6 +46,8 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCacheProvider;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResource;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.compression.NoOpCompressorDecompressorFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -53,6 +55,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public class LSMBTreeLocalResource extends LsmResource {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOGGER = LogManager.getLogger(LSMBTreeLocalResource.class);
     private static final String HAS_BLOOM_FILTER_FIELD = "hasBloomFilter";
 
     protected final boolean hasBloomFilter;
@@ -137,6 +140,7 @@ public class LSMBTreeLocalResource extends LsmResource {
 
     public static IJsonSerializable fromJson(IPersistedResourceRegistry registry, JsonNode json)
             throws HyracksDataException {
+        LOGGER.info("Deserializing LSMBTreeLocalResource from JSON");
         final int[] bloomFilterKeyFields = OBJECT_MAPPER.convertValue(json.get("bloomFilterKeyFields"), int[].class);
         final double bloomFilterFalsePositiveRate = json.get("bloomFilterFalsePositiveRate").asDouble();
         final boolean isPrimary = json.get("isPrimary").asBoolean();
@@ -148,6 +152,9 @@ public class LSMBTreeLocalResource extends LsmResource {
         boolean isSecondaryNoIncrementalMaintenance =
                 getOrDefaultBoolean(json, "isSecondaryNoIncrementalMaintenance", false);
         boolean atomic = getOrDefaultBoolean(json, "atomic", false);
+        LOGGER.info(
+                "Successfully deserialized LSMBTreeLocalResource with hasBloomFilter={}, isSecondaryNoIncrementalMaintenance={}, atomic={}",
+                hasBloomFilter, isSecondaryNoIncrementalMaintenance, atomic);
         return new LSMBTreeLocalResource(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate, isPrimary,
                 btreeFields, compDecompFactory, hasBloomFilter, isSecondaryNoIncrementalMaintenance, atomic);
     }
@@ -168,11 +175,19 @@ public class LSMBTreeLocalResource extends LsmResource {
 
     protected static boolean getOrDefaultHasBloomFilter(JsonNode json, boolean isPrimary) {
         // for backward compatibility, only primary indexes have bloom filters
+        // Note: getOrDefaultBoolean already logs, so we just return the result
         return getOrDefaultBoolean(json, HAS_BLOOM_FILTER_FIELD, isPrimary);
     }
 
     protected static boolean getOrDefaultBoolean(JsonNode jsonNode, String fieldName, boolean defaultValue) {
-        return jsonNode.has(fieldName) ? jsonNode.get(fieldName).asBoolean() : defaultValue;
+        boolean exists = jsonNode.has(fieldName);
+        boolean value = exists ? jsonNode.get(fieldName).asBoolean() : defaultValue;
+        if (exists) {
+            LOGGER.info("Field '{}': exists=true, value={}", fieldName, value);
+        } else {
+            LOGGER.info("Field '{}': exists=false, using default value={}", fieldName, defaultValue);
+        }
+        return value;
     }
 
 }

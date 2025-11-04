@@ -263,6 +263,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
         LoadOperation loadOp =
                 new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
+        // Add component ID to operation parameters (required for LSMIOOperationCallback.afterOperation)
+        loadOp.getParameters().put("FlushedComponentId", LSMComponentId.DEFAULT_COMPONENT_ID);
         // Add static structure filename to operation parameters
         if (staticStructureFileName != null) {
             loadOp.getParameters().put("staticStructureFileName", staticStructureFileName);
