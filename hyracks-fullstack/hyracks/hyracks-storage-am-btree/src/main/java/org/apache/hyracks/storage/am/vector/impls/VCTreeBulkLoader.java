@@ -82,7 +82,6 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.currentDataFrame = vectorTree.getDataFrameFactory().createFrame();
         this.dataFrameSerds = dataFrameSerds;
         this.vcTreeIndex = vectorTree;
-
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
@@ -119,6 +118,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
 
             try {
                 // Copy pages 1-8 in level order
+                // TODO : CALVIN DANI
                 for (int pageId = 1; pageId <= 8; pageId++) {
                     ICachedPage sourcePage =
                             bufferCache.pin(BufferedFileHandle.getDiskPageId(staticStructureFileId, pageId));
@@ -217,11 +217,19 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         return (double[]) fieldValues[1];
     }
 
+    private double[] extractCentroidId(ITupleReference tuple) throws HyracksDataException {
+        // Assuming the vector is stored in the second field of the tuple
+        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
+        return (double[]) fieldValues[1];
+    }
+
     /**
      * ========= leaf cluster bulk loading methods =========
      */
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
+
+        //        extractCentroidId(tuple);
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
             createNewDataPage();

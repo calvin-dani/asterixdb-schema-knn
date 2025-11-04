@@ -61,6 +61,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationC
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
@@ -116,6 +117,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
                 bulkLoadComponentFactory, filterFrameFactory, filterManager, filterFields, durable, filterHelper,
                 vectorFields, ITracer.NONE, atomic);
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] LSMVCTree constructor: Started, super() call completed");
 
         this.interiorFrameFactory = interiorFrameFactory;
         this.leafFrameFactory = leafFrameFactory;
@@ -126,17 +129,36 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         this.needKeyDupCheck = needKeyDupCheck;
 
         // Create in-memory components using VectorClusteringTree
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] LSMVCTree constructor: About to create memory components, count=" + virtualBufferCaches.size());
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
-            LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this,
-                    new VectorClusteringTree(virtualBufferCache, new VirtualFreePageManager(virtualBufferCache),
-                            interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory,
-                            cmpFactories, 1, vectorDimensions,
-                            ioManager.resolve(fileManager.getBaseDir() + "_virtual_" + i)),
-                    virtualBufferCache, filterHelper == null ? null : filterHelper.createFilter());
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: Memory component loop iteration " + i);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: About to create VectorClusteringTree");
+            String baseDirPath = fileManager.getBaseDir() + "_virtual_" + i;
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: About to resolve path: " + baseDirPath);
+            FileReference virtualFileRef = ioManager.resolve(baseDirPath);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: Path resolved successfully");
+            VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
+                    new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
+                    metadataFrameFactory, dataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: VectorClusteringTree created");
+            LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
+                    filterHelper == null ? null : filterHelper.createFilter());
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: LSMVCTreeMemoryComponent created");
             memoryComponents.add(mutableComponent);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: Memory component added to list");
             ++i;
         }
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] LSMVCTree constructor: All memory components created, constructor completed");
     }
 
     public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
