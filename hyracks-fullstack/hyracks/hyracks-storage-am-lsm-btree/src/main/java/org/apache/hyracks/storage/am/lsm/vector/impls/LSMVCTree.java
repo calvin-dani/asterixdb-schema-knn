@@ -60,7 +60,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
@@ -116,6 +116,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
                 bulkLoadComponentFactory, filterFrameFactory, filterManager, filterFields, durable, filterHelper,
                 vectorFields, ITracer.NONE, atomic);
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] LSMVCTree constructor: Started, super() call completed");
 
         this.interiorFrameFactory = interiorFrameFactory;
         this.leafFrameFactory = leafFrameFactory;
@@ -126,17 +128,56 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         this.needKeyDupCheck = needKeyDupCheck;
 
         // Create in-memory components using VectorClusteringTree
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] LSMVCTree constructor: About to create memory components, count=" + virtualBufferCaches.size());
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
-            LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this,
-                    new VectorClusteringTree(virtualBufferCache, new VirtualFreePageManager(virtualBufferCache),
-                            interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory,
-                            cmpFactories, 1, vectorDimensions,
-                            ioManager.resolve(fileManager.getBaseDir() + "_virtual_" + i)),
-                    virtualBufferCache, filterHelper == null ? null : filterHelper.createFilter());
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: Memory component loop iteration " + i);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: About to create VectorClusteringTree");
+            String baseDirPath = fileManager.getBaseDir() + "_virtual_" + i;
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: About to resolve path: " + baseDirPath);
+            FileReference virtualFileRef = ioManager.resolve(baseDirPath);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: Path resolved successfully");
+            VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
+                    new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
+                    metadataFrameFactory, dataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: VectorClusteringTree created");
+            LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
+                    filterHelper == null ? null : filterHelper.createFilter());
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: LSMVCTreeMemoryComponent created");
             memoryComponents.add(mutableComponent);
+            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                    + "] LSMVCTree constructor: Memory component added to list");
             ++i;
         }
+        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+                + "] LSMVCTree constructor: All memory components created, constructor completed");
+    }
+
+    public LSMVCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
+            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage) throws HyracksDataException {
+        // Get the current mutable component to build the static structure
+        AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
+        LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("FlushedComponentId", LSMComponentId.DEFAULT_COMPONENT_ID);
+        LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), parameters);
+        ILSMDiskComponent ssComponent = createStaticStructure(bulkLoadComponentFactory,
+                ((LSMVCTreeComponentFileReferences) componentFileRefs).getStaticStructureFileReference(), null, null,
+                true);
+        loadOp.setNewComponent(ssComponent);
+        ioOpCallback.scheduled(loadOp);
+        opCtx.setIoOperation(loadOp);
+
+        // Create the VCTreeStaticStructureBuilder with a NoOp page write callback for now
+        return new LSMVCTreeStaticStructureBuilder(storageConfig, this, opCtx, numLevels, clustersPerLevel,
+                centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
     }
 
     public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {

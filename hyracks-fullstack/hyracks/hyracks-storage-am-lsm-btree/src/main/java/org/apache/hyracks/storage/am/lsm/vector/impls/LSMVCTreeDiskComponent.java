@@ -231,6 +231,16 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
                 dataFrameSerdes, staticStructureFileName);
     }
 
+    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
+            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback) throws HyracksDataException {
+        // Extract static structure filename from operation parameters if available
+        String staticStructureFileName = null;
+        // Note: This method doesn't have access to operation, so staticStructureFileName will be passed
+        // through from the caller via VectorClusteringTree.createBulkLoader()
+        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
+                dataFrameSerdes, staticStructureFileName);
+    }
+
     /**
      * Create bulk loader with static structure filename support.
      * This overloaded method allows passing the static structure filename directly.

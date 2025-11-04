@@ -51,7 +51,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private static final String VCTREE_SUFFIX = "_vct";
-    private static final String STATIC_STRUCTURE_SUFFIX = ".staticstructure";
+    private static final String STATIC_STRUCTURE_SUFFIX = ".static_structure_vctree";
     private static final String MASK_FILE_PREFIX = ".";
 
     private final TreeIndexFactory<? extends ITreeIndex> vcTreeFactory;
@@ -91,18 +91,18 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         // Sort all files
         Collections.sort(allVCTreeFiles);
 
-        // Process each VCTree file and validate its corresponding .staticstructure file
+        // Process each VCTree file and validate its corresponding .static_structure_vctree file
         for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
             String baseName = vcTreeFile.getSequence();
             FileReference staticStructureFile = baseDir.getChild(baseName + DELIMITER + STATIC_STRUCTURE_SUFFIX);
 
-            // Validate .staticstructure file exists and is valid
+            // Validate .static_structure_vctree file exists and is valid
             if (validateStaticStructureFile(staticStructureFile)) {
-                LOGGER.debug("Valid VCTree component found: {} with .staticstructure", baseName);
+                LOGGER.debug("Valid VCTree component found: {} with .static_structure_vctree", baseName);
                 validFiles.add(new LSMComponentFileReferences(vcTreeFile.getFileRef(), null, staticStructureFile));
             } else {
-                LOGGER.warn("Invalid or missing .staticstructure file for VCTree component: {}", baseName);
-                // Clean up orphaned VCTree file if .staticstructure is missing
+                LOGGER.warn("Invalid or missing .static_structure_vctree file for VCTree component: {}", baseName);
+                // Clean up orphaned VCTree file if .static_structure_vctree is missing
                 cleanupOrphanedVCTreeFile(vcTreeFile.getFileRef());
             }
         }
@@ -134,9 +134,9 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
-     * Validates that a .staticstructure file exists and is valid.
+     * Validates that a .static_structure_vctree file exists and is valid.
      * 
-     * @param staticStructureFile The .staticstructure file to validate
+     * @param staticStructureFile The .static_structure_vctree file to validate
      * @return true if the file exists and is valid, false otherwise
      */
     private boolean validateStaticStructureFile(FileReference staticStructureFile) {
@@ -191,9 +191,9 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
-     * Gets the mask file for a .staticstructure file.
+     * Gets the mask file for a .static_structure_vctree file.
      * 
-     * @param staticStructureFile The .staticstructure file
+     * @param staticStructureFile The .static_structure_vctree file
      * @return The corresponding mask file
      */
     private FileReference getMaskFile(FileReference staticStructureFile) {
@@ -202,7 +202,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
-     * Cleans up an orphaned VCTree file when its .staticstructure file is missing or invalid.
+     * Cleans up an orphaned VCTree file when its .static_structure_vctree file is missing or invalid.
      * 
      * @param vcTreeFile The orphaned VCTree file to clean up
      */

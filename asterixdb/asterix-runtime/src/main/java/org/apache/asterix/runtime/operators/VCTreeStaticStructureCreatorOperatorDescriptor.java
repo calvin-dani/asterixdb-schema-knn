@@ -19,13 +19,16 @@
 package org.apache.asterix.runtime.operators;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.UUID;
 
-import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
@@ -37,23 +40,17 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.ActivityId;
 import org.apache.hyracks.api.dataflow.IActivityGraphBuilder;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
-import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
-import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
-import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
-import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
-import org.apache.hyracks.data.std.accessors.RawBinaryComparatorFactory;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
-import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
@@ -71,29 +68,24 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.common.frames.LIFOMetaDataFrameFactory;
-import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManager;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFactory;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
-import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrameFactory;
-import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureNavigator;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeStaticStructureBuilder;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringDataTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
-import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
+import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
-import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
+import org.apache.hyracks.storage.common.buffercache.ICachedPage;
+import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 
 /**
  * Operator that creates VCTree static structure files using VCTreeStaticStructureBuilder.
@@ -743,7 +735,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private IPointable centroidIdVal;
                 private Map<Integer, Integer> levelDistribution = null;
                 private Map<String, Map<Integer, Integer>> clusterDistribution = null;
-                private VCTreeStaticStructureBuilder structureCreator;
+                private LSMVCTreeStaticStructureBuilder lsmStaticStructureBuilder;
+                private IIndexDataflowHelper indexHelper;
                 // private MaterializerTaskState materializedData;
 
                 @Override
@@ -990,7 +983,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 }
 
                 private void createStaticStructure() throws HyracksDataException {
-                    System.err.println("=== CREATING STATIC STRUCTURE WITH VCTreeStaticStructureCreator ===");
+                    System.err.println("=== CREATING STATIC STRUCTURE USING LSM PATTERN ===");
                     System.err.println("Processing " + frameAccumulator.size() + " accumulated frames");
                     System.err.println("Total tuples to process: " + tupleCount);
 
@@ -1001,118 +994,47 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         List<Integer> clustersPerLevel = structureInfo.clustersPerLevel;
                         List<List<Integer>> centroidsPerCluster = structureInfo.centroidsPerCluster;
 
-                        // Get infrastructure
-                        INcApplicationContext appCtx = (INcApplicationContext) ctx.getJobletContext()
-                                .getServiceContext().getApplicationContext();
-                        IBufferCache bufferCache = appCtx.getBufferCache();
+                        // Open index via IndexDataflowHelper to get LSMVCTree instance
+                        System.err.println("Opening index via IndexDataflowHelper...");
+                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
 
-                        // Get index path
-                        System.err.println("Getting index file path...");
-                        FileReference indexPathRef = getIndexFilePath();
-                        if (indexPathRef == null) {
-                            System.err.println("ERROR: Could not determine index path");
-                            return;
+                        // Check LocalResource type before opening
+                        LocalResource resource = indexHelper.getResource();
+                        System.err.println("LocalResource type: "
+                                + (resource != null ? resource.getResource().getClass().getName() : "null"));
+
+                        indexHelper.open();
+
+                        // Get index instance and check type
+                        IIndex indexInstance = indexHelper.getIndexInstance();
+                        System.err.println("Index instance type: "
+                                + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
+
+                        // Get LSMVCTree instance
+                        if (!(indexInstance instanceof ILSMIndex)) {
+                            throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
+                                    + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
                         }
-                        System.err.println("Index path: " + indexPathRef);
+                        ILSMIndex lsmIndex = (ILSMIndex) indexInstance;
 
-                        // Create static structure file path
-                        FileReference staticStructureFile = indexPathRef.getChild(".static_structure_vctree");
-                        System.err.println("Static structure file path: " + staticStructureFile);
-
-                        // Create or open the static structure file with proper coordination
-                        System.err.println("Creating/opening static structure file...");
-                        int fileId;
-                        try {
-                            // Check if file already exists in the file system
-                            IIOManager ioManager = appCtx.getIoManager();
-                            if (ioManager.exists(staticStructureFile)) {
-                                System.err.println("Static structure file already exists, opening it...");
-                                fileId = bufferCache.openFile(staticStructureFile);
-                            } else {
-                                System.err.println("Static structure file doesn't exist, creating it...");
-                                fileId = bufferCache.createFile(staticStructureFile);
-                            }
-                            System.err.println("File ready with ID: " + fileId);
-                        } catch (Exception e) {
-                            System.err.println("ERROR: Failed to create/open static structure file: " + e.getMessage());
-                            throw HyracksDataException.create(e);
+                        if (!(lsmIndex instanceof LSMVCTree)) {
+                            throw new HyracksDataException("Index is not an LSMVCTree instance, got: "
+                                    + lsmIndex.getClass().getName() + ", LocalResource type: "
+                                    + (resource != null ? resource.getResource().getClass().getName() : "null"));
                         }
+                        LSMVCTree lsmVCTree = (LSMVCTree) lsmIndex;
+                        System.err.println("LSMVCTree instance obtained successfully");
 
-                        // Create specific type traits for different frame types following test pattern
-                        // Cluster tuples (Interior/Leaf): <cid, centroid, pointer>
-                        ITypeTraits[] clusterTypeTraits = new ITypeTraits[3];
-                        clusterTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID
-                        clusterTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array)
-                        clusterTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer
-
-                        // Metadata tuples: <max_distance, page_pointer>
-                        ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];
-                        metadataTypeTraits[0] = FloatPointable.TYPE_TRAITS; // max distance
-                        metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer
-
-                        // Data tuples: <distance, cosine_similarity, vector, primary_key>
-                        ITypeTraits[] dataTypeTraits = new ITypeTraits[4];
-                        dataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // distance
-                        dataTypeTraits[1] = DoublePointable.TYPE_TRAITS; // cosine similarity
-                        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector
-                        dataTypeTraits[3] = VarLengthTypeTrait.INSTANCE; // primary key
-
-                        // Create tuple writer factories for each frame type
-                        VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
-                                new VectorClusteringInteriorTupleWriterFactory(clusterTypeTraits, null, null);
-                        VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
-                                new VectorClusteringLeafTupleWriterFactory(clusterTypeTraits, null, null);
-                        VectorClusteringMetadataTupleWriterFactory metadataTupleWriterFactory =
-                                new VectorClusteringMetadataTupleWriterFactory(metadataTypeTraits, null, null);
-                        VectorClusteringDataTupleWriterFactory dataTupleWriterFactory =
-                                new VectorClusteringDataTupleWriterFactory(dataTypeTraits, null, null);
-
-                        // Create frame factories with proper tuple writers
-                        // Use 256 dimensions for actual data - need larger frame size
-                        int vectorDimensions = 784;
-                        ITreeIndexFrameFactory interiorFrameFactory = new VectorClusteringInteriorFrameFactory(
-                                interiorTupleWriterFactory.createTupleWriter(), vectorDimensions);
-                        ITreeIndexFrameFactory leafFrameFactory = new VectorClusteringLeafFrameFactory(
-                                leafTupleWriterFactory.createTupleWriter(), vectorDimensions);
-                        ITreeIndexFrameFactory metadataFrameFactory = new VectorClusteringMetadataFrameFactory(
-                                metadataTupleWriterFactory.createTupleWriter(), vectorDimensions);
-                        ITreeIndexFrameFactory dataFrameFactory =
-                                new VectorClusteringDataFrameFactory(dataTupleWriterFactory, vectorDimensions);
-
-                        // Create page manager
-                        AppendOnlyLinkedMetadataPageManager pageManager =
-                                new AppendOnlyLinkedMetadataPageManager(bufferCache, new LIFOMetaDataFrameFactory());
-
-                        // Create comparator factories for DATA tuples (4 fields)
-                        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[4];
-                        cmpFactories[0] = DoubleBinaryComparatorFactory.INSTANCE; // distance
-                        cmpFactories[1] = DoubleBinaryComparatorFactory.INSTANCE; // cosine similarity
-                        cmpFactories[2] = RawBinaryComparatorFactory.INSTANCE; // vector
-                        cmpFactories[3] = RawBinaryComparatorFactory.INSTANCE; // primary key
-
-                        // Create VectorClusteringTree with correct parameters
-                        // LSMVCTree
-
-                        VectorClusteringTree vectorTree = new VectorClusteringTree(bufferCache, pageManager,
-                                interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory,
-                                cmpFactories, 4, vectorDimensions, staticStructureFile);
-
-                        // Activate the tree (this makes the file available for operations)
-                        // Note: We skip create() since we already created and opened the file
-                        System.err.println("Activating VectorClusteringTree...");
-                        vectorTree.activate();
-                        System.err.println("VectorClusteringTree activated successfully");
-
-                        // Create static structure bulk loader using the tree's factory method
-                        // Reduce maxEntriesPerPage for 256-dimensional vectors to fit in frame
-                        int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10); // Limit to 10 entries for large vectors
-                        System.err.println(
-                                "Creating VCTreeStaticStructureBulkLoader with " + clustersPerLevel.size() + " levels...");
+                        // Reduce maxEntriesPerPage for large-dimensional vectors to fit in frame
+                        int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10);
+                        System.err.println("Creating LSMVCTreeStaticStructureBuilder with " + clustersPerLevel.size()
+                                + " levels...");
                         System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
-                                + adjustedMaxEntriesPerPage + " for 256-dimensional vectors");
-                        structureCreator =
-                                (VCTreeStaticStructureBuilder) (vectorTree.createStaticStructureBulkLoader(clustersPerLevel.size(),
-                                        clustersPerLevel, centroidsPerCluster, adjustedMaxEntriesPerPage, NoOpPageWriteCallback.INSTANCE));
+                                + adjustedMaxEntriesPerPage + " for large-dimensional vectors");
+
+                        // Use LSM pattern to create static structure builder
+                        lsmStaticStructureBuilder = lsmVCTree.createStaticStructureBuilder(clustersPerLevel.size(),
+                                clustersPerLevel, centroidsPerCluster, adjustedMaxEntriesPerPage);
 
                         System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                         // Process all accumulated tuples
@@ -1131,79 +1053,41 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         "=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
                                 System.err.println("Input tuple field count: " + tuple.getFieldCount());
 
-                                // Convert 4-field tuple to 3-field tuple for VCTreeStaticStructureBuilder
+                                // Convert 4-field tuple to 2-field tuple for VCTreeStaticStructureBuilder
                                 ITupleReference convertedTuple = convertToVCTreeBuilderFormat(tuple);
                                 System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
 
-                                structureCreator.add(convertedTuple);
+                                lsmStaticStructureBuilder.add(convertedTuple);
                                 totalTuplesProcessed++;
-
                             }
 
-                            // Only process first frame to avoid spam
                             // Process all tuples for static structure creation
                         }
 
                         System.err.println("Finalizing static structure...");
-                        // Finalize the structure
-                        structureCreator.end();
+                        // Finalize the structure - LSM builder handles component registration
+                        lsmStaticStructureBuilder.end();
                         System.err.println("STATIC STRUCTURE FINALIZED SUCCESSFULLY");
 
-                        // Print structure parameters before printing static structure
+                        // Print structure parameters
                         System.err.println("=== STATIC STRUCTURE PARAMETERS ===");
                         System.err.println("clustersPerLevel: " + clustersPerLevel);
                         System.err.println("centroidsPerCluster: " + centroidsPerCluster);
                         System.err.println("=== END STATIC STRUCTURE PARAMETERS ===");
-
-                        double[] embedding = new double[vectorDimensions];
-                        System.err.println("=== PRINTING STATIC STRUCTURE ===");
-                        VCTreeNavigationUtils.bfsPrintStaticStructure(bufferCache, fileId, 1, interiorFrameFactory,
-                                leafFrameFactory, embedding, /* embeddingPrintLimit */ vectorDimensions);
-                        System.err.println("=== END STATIC STRUCTURE PRINT ===");
                         System.err
                                 .println("Processed " + totalTuplesProcessed + " tuples for static structure creation");
 
-                        // Create navigator for static structure access
-                        System.err.println("Creating VCTreeStaticStructureNavigator...");
-                        VCTreeStaticStructureNavigator navigator = new VCTreeStaticStructureNavigator(bufferCache,
-                                fileId, interiorFrameFactory, leafFrameFactory);
+                        System.err.println("STATIC STRUCTURE CREATED SUCCESSFULLY using LSM component system");
 
-                        // Test the navigator with a sample vector
-                        System.err.println("Testing navigator with sample vector...");
-                        double[] testVector = new double[vectorDimensions];
-                        for (int i = 0; i < vectorDimensions; i++) {
-                            testVector[i] = 0d;
-                        }
-
+                        // Print BFS traversal of static structure
                         try {
-                            ClusterSearchResult result = navigator.findClosestCentroid(testVector);
-                            System.err.println("NAVIGATOR TEST SUCCESSFUL");
-                            System.err.println("   Closest cluster: pageId=" + result.leafPageId + ", clusterIndex="
-                                    + result.clusterIndex + ", distance=" + result.distance);
+                            LSMVCTreeDiskComponent component =
+                                    (LSMVCTreeDiskComponent) lsmStaticStructureBuilder.getComponent();
+                            printStaticStructureBFS(component, null);
                         } catch (Exception e) {
-                            System.err.println("WARNING: Navigator test failed: " + e.getMessage());
+                            System.err.println("WARNING: Failed to print static structure BFS: " + e.getMessage());
+                            // Don't fail structure creation if logging fails
                         }
-
-                        // Force all data to disk before closing
-                        System.err.println("Forcing static structure data to disk...");
-                        try {
-                            bufferCache.force(fileId, true);
-                            System.err.println(" STATIC STRUCTURE DATA FORCED TO DISK SUCCESSFULLY");
-                        } catch (Exception e) {
-                            System.err.println("WARNING: Failed to force data to disk: " + e.getMessage());
-                        }
-
-                        // Close the file
-                        System.err.println("Closing static structure file...");
-                        try {
-                            bufferCache.closeFile(fileId);
-                            System.err.println(" STATIC STRUCTURE FILE CLOSED SUCCESSFULLY");
-                        } catch (Exception e) {
-                            System.err.println("WARNING: Failed to close static structure file: " + e.getMessage());
-                        }
-
-                        System.err.println(
-                                " STATIC STRUCTURE CREATED SUCCESSFULLY at: " + staticStructureFile.getAbsolutePath());
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to create static structure: " + e.getMessage());
@@ -1212,21 +1096,180 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     }
                 }
 
-                private FileReference getIndexFilePath() {
-                    try {
-                        IIndexDataflowHelper indexHelper =
-                                indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-                        LocalResource resource = indexHelper.getResource();
-                        String resourcePath = resource.getPath();
+                /**
+                 * Perform a breadth-first traversal of the static structure and print
+                 * a human-readable dump of all interior/leaf pages and their tuples.
+                 * Distances are computed w.r.t the provided query vector when dimensionality matches;
+                 * otherwise marked as NA.
+                 */
+                private void printStaticStructureBFS(LSMVCTreeDiskComponent component, double[] queryVector)
+                        throws HyracksDataException {
+                    VectorClusteringTree vcTree = component.getIndex();
+                    IBufferCache bufferCache = vcTree.getBufferCache();
+                    int fileId = vcTree.getFileId();
+                    int rootPageId = vcTree.getRootPageId();
+                    ITreeIndexFrameFactory interiorFrameFactory = vcTree.getInteriorFrameFactory();
+                    ITreeIndexFrameFactory leafFrameFactory = vcTree.getLeafFrameFactory();
 
-                        IIOManager ioManager = ctx.getIoManager();
-                        return ioManager.resolve(resourcePath);
-
-                    } catch (Exception e) {
-                        System.err.println("ERROR: Failed to get index file path: " + e.getMessage());
-                        e.printStackTrace();
-                        return null;
+                    if (bufferCache == null || interiorFrameFactory == null || leafFrameFactory == null) {
+                        throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
+                                "Required components are not initialized");
                     }
+
+                    final int printLimit = 8; // Limit for embedding dimension display
+
+                    Queue<int[]> queue = new ArrayDeque<>();
+                    Set<Integer> visited = new HashSet<>();
+                    queue.add(new int[] { rootPageId, 0 });
+                    visited.add(rootPageId);
+
+                    int visitedPages = 0;
+                    long processedTuples = 0L;
+
+                    while (!queue.isEmpty()) {
+                        int[] entry = queue.poll();
+                        int currentPageId = entry[0];
+                        int level = entry[1];
+
+                        ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                        try {
+                            page.acquireReadLatch();
+
+                            IVectorClusteringLeafFrame leafFrame =
+                                    (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                            leafFrame.setPage(page);
+                            boolean isLeaf = leafFrame.isLeaf();
+
+                            if (isLeaf) {
+                                System.err.println(
+                                        "=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: LEAF ===");
+                                int tupleCount = leafFrame.getTupleCount();
+                                for (int i = 0; i < tupleCount; i++) {
+                                    try {
+                                        ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
+                                        frameTuple.resetByTupleIndex(leafFrame, i);
+
+                                        ISerializerDeserializer<?>[] serdes = new ISerializerDeserializer<?>[3];
+                                        serdes[0] = IntegerSerializerDeserializer.INSTANCE;
+                                        serdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
+                                        serdes[2] = IntegerSerializerDeserializer.INSTANCE;
+                                        Object[] fields = TupleUtils.deserializeTuple(frameTuple, serdes);
+
+                                        int cid = (Integer) fields[0];
+                                        double[] centroid = (double[]) fields[1];
+                                        int metadataPtr = (Integer) fields[2];
+                                        int centroidId = leafFrame.getCentroidId(i);
+
+                                        String centroidStr = formatCentroid(centroid, printLimit);
+                                        String distStr = computeDistanceString(queryVector, centroid);
+
+                                        System.err.println("tuple=" + i + " | cid=" + cid + " | centroidId="
+                                                + centroidId + " | centroid=" + centroidStr + " | dist=" + distStr
+                                                + " | metadata=" + metadataPtr);
+                                        processedTuples++;
+                                    } catch (Exception e) {
+                                        System.err.println("ERROR processing leaf tuple " + i + " on page "
+                                                + currentPageId + ": " + e.getMessage());
+                                    }
+                                }
+
+                                int nextLeaf = leafFrame.getNextLeaf();
+                                if (nextLeaf != -1 && visited.add(nextLeaf)) {
+                                    queue.add(new int[] { nextLeaf, level });
+                                }
+
+                            } else {
+                                IVectorClusteringInteriorFrame interiorFrame =
+                                        (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                                interiorFrame.setPage(page);
+                                System.err.println(
+                                        "=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: INTERIOR ===");
+                                int tupleCount = interiorFrame.getTupleCount();
+                                for (int i = 0; i < tupleCount; i++) {
+                                    try {
+                                        ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
+                                        frameTuple.resetByTupleIndex(interiorFrame, i);
+
+                                        ISerializerDeserializer<?>[] serdes = new ISerializerDeserializer<?>[3];
+                                        serdes[0] = IntegerSerializerDeserializer.INSTANCE;
+                                        serdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
+                                        serdes[2] = IntegerSerializerDeserializer.INSTANCE;
+                                        Object[] fields = TupleUtils.deserializeTuple(frameTuple, serdes);
+
+                                        int cid = (Integer) fields[0];
+                                        double[] centroid = (double[]) fields[1];
+                                        int childPageId = interiorFrame.getChildPageId(i);
+
+                                        String centroidStr = formatCentroid(centroid, printLimit);
+                                        String distStr = computeDistanceString(queryVector, centroid);
+
+                                        System.err.println("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr
+                                                + " | dist=" + distStr + " | child=" + childPageId);
+                                        processedTuples++;
+
+                                        if (childPageId != -1 && visited.add(childPageId)) {
+                                            queue.add(new int[] { childPageId, level + 1 });
+                                        }
+                                    } catch (Exception e) {
+                                        System.err.println("ERROR processing interior tuple " + i + " on page "
+                                                + currentPageId + ": " + e.getMessage());
+                                    }
+                                }
+
+                                int nextPage = interiorFrame.getNextPage();
+                                if (nextPage != 0 && visited.add(nextPage)) {
+                                    queue.add(new int[] { nextPage, level });
+                                }
+                            }
+
+                            visitedPages++;
+                        } finally {
+                            page.releaseReadLatch();
+                            bufferCache.unpin(page);
+                        }
+                    }
+
+                    System.err.println(
+                            "=== BFS PRINT COMPLETE | pages=" + visitedPages + " | tuples=" + processedTuples + " ===");
+                }
+
+                /**
+                 * Format a centroid vector with truncation for display.
+                 */
+                private String formatCentroid(double[] centroid, int limit) {
+                    if (centroid == null) {
+                        return "null";
+                    }
+                    int n = centroid.length;
+                    int toPrint = Math.min(limit, n);
+                    StringBuilder sb = new StringBuilder();
+                    sb.append('[');
+                    for (int i = 0; i < toPrint; i++) {
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        sb.append(String.format("%.4f", centroid[i]));
+                    }
+                    sb.append(']');
+                    if (n > toPrint) {
+                        sb.append(" (+").append(n - toPrint).append(" more)");
+                    }
+                    return sb.toString();
+                }
+
+                /**
+                 * Compute distance string between query vector and centroid.
+                 * Returns "NA" if query vector is null or dimensions don't match.
+                 */
+                private String computeDistanceString(double[] queryVector, double[] centroid) {
+                    if (queryVector == null || centroid == null) {
+                        return "NA";
+                    }
+                    if (centroid.length != queryVector.length) {
+                        return "NA (dim mismatch)";
+                    }
+                    double d = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                    return String.format("%.4f", d);
                 }
 
                 @Override
@@ -1234,11 +1277,19 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== CreateStructureActivity FAILING ===");
                     System.err.println("Total tuples processed before failure: " + tupleCount);
 
-                    if (structureCreator != null) {
+                    if (lsmStaticStructureBuilder != null) {
                         try {
-                            structureCreator.abort();
+                            lsmStaticStructureBuilder.abort();
                         } catch (Exception e) {
-                            System.err.println("ERROR: Failed to abort structure creator: " + e.getMessage());
+                            System.err.println("ERROR: Failed to abort static structure builder: " + e.getMessage());
+                        }
+                    }
+
+                    if (indexHelper != null) {
+                        try {
+                            indexHelper.close();
+                        } catch (Exception e) {
+                            System.err.println("ERROR: Failed to close index helper: " + e.getMessage());
                         }
                     }
 
@@ -1274,17 +1325,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 public void initialize() throws HyracksDataException {
                     System.err.println("=== PassThroughActivity INITIALIZING ===");
                     try {
-                        // Wait for permit from CreateStructureActivity
-                        //                        IterationPermitState permitState =
-                        //                                (IterationPermitState) ctx.getStateObject(new PartitionedUUID(permitUUID, partition));
-                        //                        if (permitState != null) {
-                        //                            System.err.println("Waiting for permit from CreateStructureActivity...");
-                        //                            permitState.getPermit().acquire();
-                        //                            System.err.println("✅ PERMIT ACQUIRED - CreateStructureActivity completed");
-                        //                        }
-                        //
-                        //                        // Initialize LSM Bulk Loader
-                        //                        initializeLSMBulkLoader();
 
                         System.err.println("✅ PassThroughActivity initialized successfully");
 
