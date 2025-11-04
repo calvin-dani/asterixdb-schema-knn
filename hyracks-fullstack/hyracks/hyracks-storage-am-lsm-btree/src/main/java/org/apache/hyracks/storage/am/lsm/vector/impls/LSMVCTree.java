@@ -60,6 +60,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
@@ -160,26 +161,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 + "] LSMVCTree constructor: All memory components created, constructor completed");
     }
 
-    public LSMVCTreeStaticStructureBuilder createStaticStructureBuilder(int numLevels, List<Integer> clustersPerLevel,
-            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage) throws HyracksDataException {
-        // Get the current mutable component to build the static structure
-        AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
-        LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
-        Map<String, Object> parameters = new HashMap<>();
-        parameters.put("FlushedComponentId", LSMComponentId.DEFAULT_COMPONENT_ID);
-        LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), parameters);
-        ILSMDiskComponent ssComponent = createStaticStructure(bulkLoadComponentFactory,
-                ((LSMVCTreeComponentFileReferences) componentFileRefs).getStaticStructureFileReference(), null, null,
-                true);
-        loadOp.setNewComponent(ssComponent);
-        ioOpCallback.scheduled(loadOp);
-        opCtx.setIoOperation(loadOp);
-
-        // Create the VCTreeStaticStructureBuilder with a NoOp page write callback for now
-        return new LSMVCTreeStaticStructureBuilder(storageConfig, this, opCtx, numLevels, clustersPerLevel,
-                centroidsPerCluster, maxEntriesPerPage, NoOpPageWriteCallback.INSTANCE);
-    }
-
     public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
         this.staticStructure = staticStructure;
         staticStructure.setInitialized();
@@ -247,14 +228,15 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                     componentFileRefs.getStaticStructureFileReference(), null, null, true);
         } else {
             // Use standard data file reference
-            component = createDiskComponent(bulkLoadComponentFactory,
-                    componentFileRefs.getInsertIndexFileReference(), null, null, true);
+            component = createDiskComponent(bulkLoadComponentFactory, componentFileRefs.getInsertIndexFileReference(),
+                    null, null, true);
         }
 
         loadOp.setNewComponent(component);
         ioOpCallback.scheduled(loadOp);
         opCtx.setIoOperation(loadOp);
-        return new LSMIndexDiskComponentBulkLoader(storageConfig, this, opCtx, fillFactor, verifyInput, numElementsHint);
+        return new LSMIndexDiskComponentBulkLoader(storageConfig, this, opCtx, fillFactor, verifyInput,
+                numElementsHint);
     }
 
     public LSMVCTreeBulkLoader createBulkLoader(int numLeafCentroids, int firstLeafCentroidId,

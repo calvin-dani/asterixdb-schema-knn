@@ -88,14 +88,14 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         List<ITupleReference> centroids = ctx.getStaticStructureCentroids();
 
         // Create the static structure builder
-//        LSMVCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree) ctx.getIndex()).createStaticStructureBulkLoader(numLevels,
-//                clustersPerLevel, centroidsPerCluster, 5);
+        //        LSMVCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree) ctx.getIndex()).createStaticStructureBulkLoader(numLevels,
+        //                clustersPerLevel, centroidsPerCluster, 5);
 
         // Add centroids to the builder level by level
-//        for (ITupleReference tuple : centroids) {
-//            ssBuilder.add(tuple);
-//        }
-//        ssBuilder.end();
+        //        for (ITupleReference tuple : centroids) {
+        //            ssBuilder.add(tuple);
+        //        }
+        //        ssBuilder.end();
     }
 
     public void bulkLoadRecords(AbstractVectorTreeTestContext ctx) throws Exception {

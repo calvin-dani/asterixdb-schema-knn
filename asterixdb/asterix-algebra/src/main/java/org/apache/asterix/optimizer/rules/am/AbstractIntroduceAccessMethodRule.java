@@ -18,6 +18,8 @@
  */
 package org.apache.asterix.optimizer.rules.am;
 
+import static org.apache.asterix.om.types.AOrderedListType.FULL_OPEN_ORDEREDLIST_TYPE;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;

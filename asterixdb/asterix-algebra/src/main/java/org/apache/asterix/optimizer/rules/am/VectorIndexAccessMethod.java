@@ -85,8 +85,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
     // ANN_DISTANCE function - used in ORDER BY clauses for top-k queries
     // The second boolean (true) indicates that approximate search may need verification
-    private static final List<Pair<FunctionIdentifier, Boolean>> FUNC_IDENTIFIERS = Collections
-            .unmodifiableList(Arrays.asList(new Pair<>(BuiltinFunctions.ANN_DISTANCE, true)));
+    private static final List<Pair<FunctionIdentifier, Boolean>> FUNC_IDENTIFIERS =
+            Collections.unmodifiableList(Arrays.asList(new Pair<>(BuiltinFunctions.ANN_DISTANCE, true)));
 
     @Override
     public List<Pair<FunctionIdentifier, Boolean>> getOptimizableFunctions() {
@@ -196,13 +196,9 @@ public class VectorIndexAccessMethod implements IAccessMethod {
      * @param context Optimization context
      * @return The transformed plan with vector index search + primary lookup, or null if transformation fails
      */
-    public ILogicalOperator createIndexSearchPlan(
-            Mutable<ILogicalOperator> limitRef,
-            Mutable<ILogicalOperator> orderRef,
-            AbstractFunctionCallExpression annDistanceExpr,
-            OptimizableOperatorSubTree subTree,
-            Index chosenIndex,
-            AccessMethodAnalysisContext analysisCtx,
+    public ILogicalOperator createIndexSearchPlan(Mutable<ILogicalOperator> limitRef,
+            Mutable<ILogicalOperator> orderRef, AbstractFunctionCallExpression annDistanceExpr,
+            OptimizableOperatorSubTree subTree, Index chosenIndex, AccessMethodAnalysisContext analysisCtx,
             IOptimizationContext context) throws AlgebricksException {
 
         System.err.println("=== VectorIndexAccessMethod.createIndexSearchPlan CALLED ===");
@@ -254,14 +250,9 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         context.computeAndSetTypeEnvironmentForOperator(assignSearchKeys);
 
         // Create VectorJobGenParams to pass parameters to Hyracks runtime
-        VectorJobGenParams jobGenParams = new VectorJobGenParams(
-                chosenIndex.getIndexName(),
-                IndexType.VECTOR,
-                chosenIndex.getDatabaseName(),
-                dataset.getDataverseName(),
-                dataset.getDatasetName(),
-                false, // retainInput - not needed for simple case
-                false  // requiresBroadcast
+        VectorJobGenParams jobGenParams = new VectorJobGenParams(chosenIndex.getIndexName(), IndexType.VECTOR,
+                chosenIndex.getDatabaseName(), dataset.getDataverseName(), dataset.getDatasetName(), false, // retainInput - not needed for simple case
+                false // requiresBroadcast
         );
         jobGenParams.setQueryVarList(queryVarList);
 
@@ -271,34 +262,27 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
         // Create UNNEST-MAP operator for vector index search
         // This returns: <vector_field, pk> from the index
-        ILogicalOperator secondaryIndexUnnestOp = AccessMethodUtils.createSecondaryIndexUnnestMap(
-                dataset, recordType, metaRecordType, chosenIndex, assignSearchKeys,
-                jobGenParams, context, false, false, isIndexOnlyPlan, null);
+        ILogicalOperator secondaryIndexUnnestOp =
+                AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType, metaRecordType, chosenIndex,
+                        assignSearchKeys, jobGenParams, context, false, false, isIndexOnlyPlan, null);
 
         // Add primary index lookup to get full record
         // This uses the PKs returned from vector index to fetch complete records
-        ILogicalOperator primaryIndexUnnestOp = AccessMethodUtils.createRestOfIndexSearchPlan(
-                null,  // afterTopOpRefs - not needed for ORDER BY case
-                null,  // topOpRef - not needed for ORDER BY case
-                null,  // conditionRef - no WHERE condition to push down
-                null,  // assignsBeforeTopOpRef - query params already in assignSearchKeys
-                dataSourceOp,
-                dataset,
-                recordType,
-                metaRecordType,
-                secondaryIndexUnnestOp,  // inputOp: vector index search results
-                context,
-                true,   // sortPrimaryKeys
-                false,  // retainInput
-                false,  // retainMissing
-                false,  // requiresBroadcast
-                chosenIndex,  // secondaryIndex
-                analysisCtx,
-                subTree,  // indexSubTree
-                null,   // probeSubTree - not a join
-                null,   // newMissingPlaceHolderForLOJ
-                null,   // leftOuterMissingValue
-                false   // anyRealTypeConvertedToIntegerType
+        ILogicalOperator primaryIndexUnnestOp = AccessMethodUtils.createRestOfIndexSearchPlan(null, // afterTopOpRefs - not needed for ORDER BY case
+                null, // topOpRef - not needed for ORDER BY case
+                null, // conditionRef - no WHERE condition to push down
+                null, // assignsBeforeTopOpRef - query params already in assignSearchKeys
+                dataSourceOp, dataset, recordType, metaRecordType, secondaryIndexUnnestOp, // inputOp: vector index search results
+                context, true, // sortPrimaryKeys
+                false, // retainInput
+                false, // retainMissing
+                false, // requiresBroadcast
+                chosenIndex, // secondaryIndex
+                analysisCtx, subTree, // indexSubTree
+                null, // probeSubTree - not a join
+                null, // newMissingPlaceHolderForLOJ
+                null, // leftOuterMissingValue
+                false // anyRealTypeConvertedToIntegerType
         );
 
         System.err.println("=== Vector index search plan created successfully ===");

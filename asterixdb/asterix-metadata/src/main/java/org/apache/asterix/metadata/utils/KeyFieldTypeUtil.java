@@ -18,6 +18,8 @@
  */
 package org.apache.asterix.metadata.utils;
 
+import static org.apache.asterix.om.types.AOrderedListType.FULL_OPEN_ORDEREDLIST_TYPE;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -201,8 +203,8 @@ public class KeyFieldTypeUtil {
         //ARecordType targetRecType = chooseSource(keySourceIndicators, 0, recordType, metaRecordType);
         ARecordType targetRecType = recordType;
 
-        Pair<IAType, Boolean> keyPairType = Index.getNonNullableOpenFieldType(index, FULL_OPEN_ORDEREDLIST_TYPE
-                , indexDetails.getKeyFieldNames().get(0), targetRecType);
+        Pair<IAType, Boolean> keyPairType = Index.getNonNullableOpenFieldType(index, FULL_OPEN_ORDEREDLIST_TYPE,
+                indexDetails.getKeyFieldNames().get(0), targetRecType);
 
         // For vector indexes, the key type is the vector itself (ordered list of doubles)
         // The secondary key output is the full vector embedding

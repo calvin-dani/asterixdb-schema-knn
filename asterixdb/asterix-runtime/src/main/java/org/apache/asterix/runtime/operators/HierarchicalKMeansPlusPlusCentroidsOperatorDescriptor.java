@@ -1811,8 +1811,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             } else {
                                 // Fallback: all candidates are duplicates, select random
                                 int randomIdx = rand.nextInt(centroids.size());
-                                resultCentroids.add(
-                                        Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
+                                resultCentroids
+                                        .add(Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
                                 System.err.println(
                                         "Warning: All candidates were duplicates, selected random centroid for gap-filling");
                             }

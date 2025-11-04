@@ -801,8 +801,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         RecordDescriptor outputRecDesc = JobGenHelper.mkRecordDescriptor(typeEnv, opSchema, context);
 
         // Get partitioning properties (how data is distributed across nodes)
-        PartitioningProperties partitioningProperties =
-                getPartitioningProperties(dataset, vectorIndex.getIndexName());
+        PartitioningProperties partitioningProperties = getPartitioningProperties(dataset, vectorIndex.getIndexName());
 
         // Get primary key fields for callback
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
