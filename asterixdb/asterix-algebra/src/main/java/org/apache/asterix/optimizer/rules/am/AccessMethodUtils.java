@@ -445,8 +445,9 @@ public class AccessMethodUtils {
      */
     public static void appendSecondaryIndexTypes(Dataset dataset, ARecordType recordType, ARecordType metaRecordType,
             Index index, List<Object> dest, boolean requireResultOfInstantTryLock) throws AlgebricksException {
-        // In case of an inverted-index search, secondary keys will not be generated.
-        boolean primaryKeysOnly = isInvertedIndex(index);
+        // In case of an inverted-index or vector-index search, secondary keys will not be generated.
+        // For vector indexes, this avoids transferring large embeddings when only PKs are needed.
+        boolean primaryKeysOnly = isInvertedIndex(index) || index.getIndexType() == IndexType.VECTOR;
         if (!primaryKeysOnly) {
             switch (index.getIndexType()) {
                 case ARRAY:
@@ -466,6 +467,9 @@ public class AccessMethodUtils {
                     break;
                 case RTREE:
                     dest.addAll(KeyFieldTypeUtil.getRTreeIndexKeyTypes(index, recordType, metaRecordType));
+                    break;
+                case VECTOR:
+                    dest.addAll(KeyFieldTypeUtil.getVectorIndexKeyTypes(index, recordType, metaRecordType));
                     break;
                 default:
                     break;
@@ -491,7 +495,10 @@ public class AccessMethodUtils {
     /**
      * Creates output variables for the given unnest-map or left-outer-unnestmap operator
      * that does a secondary index lookup.
-     * The order: SK, PK, [Optional: the result of a instantTryLock on PK]
+     * The order:
+     *   - For most indexes: SK, PK, [Optional: the result of a instantTryLock on PK]
+     *   - For inverted/vector indexes: PK, [Optional: the result of a instantTryLock on PK]
+     * Vector and inverted indexes skip SK output to avoid materializing unnecessary data.
      */
     public static void appendSecondaryIndexOutputVars(Dataset dataset, ARecordType recordType,
             ARecordType metaRecordType, Index index, IOptimizationContext context, List<LogicalVariable> dest,
@@ -504,8 +511,11 @@ public class AccessMethodUtils {
             numPrimaryKeys = dataset.getPrimaryKeys().size();
         }
         int numSecondaryKeys = KeyFieldTypeUtil.getNumSecondaryKeys(index, recordType, metaRecordType);
-        // In case of an inverted-index search, secondary keys will not be generated.
-        int numVars = isInvertedIndex(index) ? numPrimaryKeys : numPrimaryKeys + numSecondaryKeys;
+        // In case of an inverted-index or vector-index search in non-index-only plan,
+        // secondary keys will not be generated (they'll be retrieved from primary index).
+        // For vector indexes, this is a significant optimization since embeddings are very large (1024+ floats).
+        boolean skipSecondaryKeys = isInvertedIndex(index) || index.getIndexType() == IndexType.VECTOR;
+        int numVars = skipSecondaryKeys ? numPrimaryKeys : numPrimaryKeys + numSecondaryKeys;
 
         // If it's an index-only plan, add one more variable to put the result of instantTryLock on PK -
         // whether this lock can be granted on a primary key.
@@ -523,7 +533,9 @@ public class AccessMethodUtils {
     /**
      * Gets the primary key variables from the unnest-map or left-outer-unnest-map operator
      * that does a secondary index lookup.
-     * The order: SK, PK, [Optional: the result of a TryLock on PK]
+     * The order:
+     *   - For most indexes: SK, PK, [Optional: the result of a TryLock on PK]
+     *   - For inverted/vector indexes: PK, [Optional: the result of a TryLock on PK]
      */
     public static List<LogicalVariable> getKeyVarsFromSecondaryUnnestMap(Dataset dataset, ARecordType recordType,
             ARecordType metaRecordType, ILogicalOperator unnestMapOp, Index index,
@@ -544,9 +556,9 @@ public class AccessMethodUtils {
         int stop;
 
         // If a secondary-index search didn't generate SKs, set it to zero.
-        // Currently, only an inverted-index search doesn't generate any SKs.
-        boolean isNgramOrKeywordIndex = isInvertedIndex(index);
-        if (isNgramOrKeywordIndex) {
+        // Currently, inverted-index and vector-index searches don't generate any SKs.
+        boolean skipSecondaryKeys = isInvertedIndex(index) || index.getIndexType() == IndexType.VECTOR;
+        if (skipSecondaryKeys) {
             numSecondaryKeys = 0;
         }
 

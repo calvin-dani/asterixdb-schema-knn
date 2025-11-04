@@ -42,6 +42,7 @@ import org.apache.hyracks.storage.am.vector.impls.VCTreeLoader;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
+import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
@@ -179,16 +180,11 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
         try {
             // Create VCTreeStaticStructureLoader with real structure
-            VCTreeLoader staticLoader =
-                    new VCTreeLoader(fillFactor, callback, vcTree, vcTree.getLeafFrameFactory().createFrame(),
-                            vcTree.getDataFrameFactory().createFrame(), DefaultBufferCacheWriteContext.INSTANCE,
-                            numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
-
-            System.err.println("VCTreeStaticStructureLoader created successfully with real structure");
-
+            IIndexBulkLoader ssbuilder =
+                    getIndex().createStaticStructureBulkLoader(numLevels, clustersPerLevel, centroidsPerCluster,
+                            maxEntriesPerPage,  callback);
             // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
-            LSMIndexBulkLoader wrappedLoader = new LSMIndexBulkLoader(staticLoader);
-            return wrappedLoader;
+            return new LSMIndexBulkLoader(ssbuilder);
 
         } catch (Exception e) {
             System.err.println("ERROR: Failed to create VCTreeStaticStructureLoader: " + e.getMessage());
@@ -225,12 +221,14 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         return diskComponentLoader;
     }
 
-    /* TODO - Hongyu: simplified version */
-    public VCTreeStaticStructureBuilder createStaticStructureBuilder(NCConfig storageConfig, int numLevels,
-            List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage,
-            NoOpPageWriteCallback instance) throws HyracksDataException {
-        return getIndex().createStaticStructureBuilder(numLevels, clustersPerLevel, centroidsPerCluster,
-                maxEntriesPerPage, instance);
+    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
+            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback) throws HyracksDataException {
+        // Extract static structure filename from operation parameters if available
+        String staticStructureFileName = null;
+        // Note: This method doesn't have access to operation, so staticStructureFileName will be passed
+        // through from the caller via VectorClusteringTree.createBulkLoader()
+        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
+                dataFrameSerdes, staticStructureFileName);
     }
 
     public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
