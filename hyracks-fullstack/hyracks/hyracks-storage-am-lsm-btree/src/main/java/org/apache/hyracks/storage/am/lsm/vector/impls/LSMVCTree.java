@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
@@ -527,5 +528,41 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      */
     public IIndexCursor createAnnSearchCursor(AbstractLSMIndexOperationContext opCtx) {
         return new LSMVCTreeAnnCursor(opCtx);
+    }
+
+    // TODO - HY: also override deactivate()
+
+    @Override
+    public synchronized void activate() throws HyracksDataException {
+        if (isActive) {
+            throw HyracksDataException.create(ErrorCode.CANNOT_ACTIVATE_ACTIVE_INDEX);
+        }
+        loadDiskComponents();
+        completeActivation();
+        isActive = true;
+    }
+
+    private void loadStaticStructure() throws HyracksDataException {
+        LSMVCTreeFileManager lsmVcTreeFileManager = (LSMVCTreeFileManager) fileManager;
+        LSMVCTreeComponentFileReferences ssFileRefeference = lsmVcTreeFileManager.getStaticStructureFileReference();
+        if (ssFileRefeference == null) {
+            return;
+        }
+        ILSMDiskComponent ssComponent = createStaticStructure(componentFactory, ssFileRefeference.getStaticStructureFileReference(),
+                null, null, false);
+        setStaticStructure((LSMVCTreeDiskComponent) ssComponent);
+    }
+
+    private void loadDiskComponents() throws HyracksDataException {
+        diskComponents.clear();
+        List<LSMComponentFileReferences> validFileReferences = fileManager.cleanupAndGetValidFiles();
+        for (LSMComponentFileReferences lsmComponentFileReferences : validFileReferences) {
+            ILSMDiskComponent component =
+                    createDiskComponent(componentFactory, lsmComponentFileReferences.getInsertIndexFileReference(),
+                            lsmComponentFileReferences.getDeleteIndexFileReference(),
+                            lsmComponentFileReferences.getBloomFilterFileReference(), false);
+            diskComponents.add(component);
+        }
+        loadStaticStructure();
     }
 }
