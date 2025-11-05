@@ -138,34 +138,22 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return 0;
     }
 
-    public VCTreeBulkLoader createBulkLoader(NoOpPageWriteCallback instance, int numLeafCentroid,
-            int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerdes, String staticStructureFileName)
-            throws HyracksDataException {
-        return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
-                DefaultBufferCacheWriteContext.INSTANCE, numLeafCentroid, firstLeafCentroidId, dataFrameSerdes,
-                staticStructureFileName);
-    }
-
-    @Override
-    public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        // Create VCTreeBulkLoder with default parameters
-        // The LSM system will handle the actual parameters at a higher level
-        List<Integer> defaultClustersPerLevel = List.of(5, 10);
-        List<List<Integer>> defaultCentroidsPerCluster = List.of(List.of(10), List.of(10));
-        int defaultMaxEntriesPerPage = 100;
-
-        // Create serializer/deserializer array for data frame fields
+    public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
+            ITreeIndexAccessor static_accessor) throws HyracksDataException {
         ISerializerDeserializer[] dataFrameSerds = new ISerializerDeserializer[4];
         dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
         dataFrameSerds[1] = DoubleSerializerDeserializer.INSTANCE; // cosine similarity
         dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
         dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
+        return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
+                DefaultBufferCacheWriteContext.INSTANCE, dataFrameSerds, static_accessor);
+    }
 
-        return new VCTreeBulkLoader(fillFactor, callback, this, leafFrameFactory.createFrame(),
-                dataFrameFactory.createFrame(), DefaultBufferCacheWriteContext.INSTANCE, 4, // numLeafCentroid
-                0, // firstLeafCentroidId
-                dataFrameSerds, null); // staticStructureFileName - null for default createBulkLoader
+    @Override
+    public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+        //        return new VCTreeBulkLoader(fillFactor, verifyInput, callback, this);
+        throw new UnsupportedOperationException();
     }
 
     /**
@@ -1446,6 +1434,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     tree.dataFrameFactory);
 
             return cursor;
+        }
+
+        public VectorClusteringTree getIndex() {
+            return tree;
         }
 
         @Override

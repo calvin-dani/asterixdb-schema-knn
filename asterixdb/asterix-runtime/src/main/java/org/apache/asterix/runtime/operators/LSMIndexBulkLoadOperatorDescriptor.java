@@ -19,6 +19,8 @@
 
 package org.apache.asterix.runtime.operators;
 
+import java.util.List;
+
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
@@ -45,17 +47,39 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
 
     protected final int datasetId;
 
+    // Static structure parameters for Vector Clustering Tree
+    protected final Integer numLevels;
+    protected final List<Integer> clustersPerLevel;
+    protected final List<List<Integer>> centroidsPerCluster;
+    protected final Integer maxEntriesPerPage;
+
     public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IIndexDataflowHelperFactory indexHelperFactory,
             IIndexDataflowHelperFactory primaryIndexHelperFactory, BulkLoadUsage usage, int datasetId,
             ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory,
             int[][] partitionsMap) {
+        this(spec, outRecDesc, fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
+                indexHelperFactory, primaryIndexHelperFactory, usage, datasetId, tupleFilterFactory, partitionerFactory,
+                partitionsMap, null, null, null, null);
+    }
+
+    public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
+            int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, IIndexDataflowHelperFactory indexHelperFactory,
+            IIndexDataflowHelperFactory primaryIndexHelperFactory, BulkLoadUsage usage, int datasetId,
+            ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap,
+            Integer numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster,
+            Integer maxEntriesPerPage) {
         super(spec, outRecDesc, fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
                 indexHelperFactory, tupleFilterFactory, partitionerFactory, partitionsMap);
         this.primaryIndexHelperFactory = primaryIndexHelperFactory;
         this.usage = usage;
         this.datasetId = datasetId;
+        this.numLevels = numLevels;
+        this.clustersPerLevel = clustersPerLevel;
+        this.centroidsPerCluster = centroidsPerCluster;
+        this.maxEntriesPerPage = maxEntriesPerPage;
     }
 
     @Override
@@ -64,6 +88,7 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
         return new LSMIndexBulkLoadOperatorNodePushable(indexHelperFactory, primaryIndexHelperFactory, ctx, partition,
                 fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
                 recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0), usage, datasetId,
-                tupleFilterFactory, partitionerFactory, partitionsMap);
+                tupleFilterFactory, partitionerFactory, partitionsMap, numLevels, clustersPerLevel, centroidsPerCluster,
+                maxEntriesPerPage);
     }
 }

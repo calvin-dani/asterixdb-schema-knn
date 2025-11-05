@@ -30,7 +30,9 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
@@ -68,11 +70,10 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
 
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
-            int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds,
-            String staticStructureFileName) throws HyracksDataException {
+            ISerializerDeserializer[] dataFrameSerds, ITreeIndexAccessor staticAccessor) throws HyracksDataException {
         super(0, callback, vectorTree, leafFrame, writeContext);
-        this.numLeafCentroid = numLeafCentroid;
-        this.firstLeafCentroidId = firstLeafCentroidId;
+        //        this.numLeafCentroid = numLeafCentroid;
+        //        this.firstLeafCentroidId = firstLeafCentroidId;
 
         this.directoryPages = new ArrayList<>();
         // Initialize frames
@@ -86,9 +87,26 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
 
-        // Copy static structure if filename provided
-        if (staticStructureFileName != null) {
-            copyStaticStructure(staticStructureFileName);
+        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor1 =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
+        VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
+        MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+        LongPointable value1 = LongPointable.FACTORY.createPointable();
+        MutableArrayValueReference key2 = new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
+        LongPointable value2 = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key1, value1);
+        metaFrame.get(key2, value2);
+        this.numLeafCentroid = value1.intValue();
+        this.firstLeafCentroidId = value2.intValue();
+        VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
+        ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
+        // Simple bulk load - just copy all pages
+        int maxPageId = vctree.getPageManager().getMaxPageId(metaFrame);
+        for (int pageId = 1; pageId <= maxPageId; pageId++) {
+            ICachedPage sourcePage = staticAccessor1.getCachedPage(pageId);
+            copyPage(sourcePage);
+            staticAccessor1.releasePage(sourcePage);
         }
     }
 
@@ -101,6 +119,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private void copyStaticStructure(String staticStructureFileName) throws HyracksDataException {
         try {
             // Derive static structure file path from index file
+
             FileReference indexFileRef = treeIndex.getFileReference();
             FileReference staticStructureFileRef = indexFileRef.getParent().getChild(staticStructureFileName);
 
@@ -217,19 +236,11 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         return (double[]) fieldValues[1];
     }
 
-    private double[] extractCentroidId(ITupleReference tuple) throws HyracksDataException {
-        // Assuming the vector is stored in the second field of the tuple
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
-        return (double[]) fieldValues[1];
-    }
-
     /**
      * ========= leaf cluster bulk loading methods =========
      */
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
-
-        //        extractCentroidId(tuple);
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
             createNewDataPage();

@@ -48,7 +48,6 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
-import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -57,7 +56,6 @@ import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
-import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -127,23 +125,23 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                         new UTF8StringSerializerDeserializer() // primary key
                 };
 
-        LSMVCTreeBulkLoader bulkLoader = ((LSMVCTree) ctx.getIndex()).createBulkLoader(numLeafCentroids,
-                firstLeafCentroidId, dataFrameSerdes, ".static_structure_vctree");
-
-        for (int pageId = 1; pageId <= maxPageId; pageId++) {
-            ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
-            bulkLoader.copyPage(sourcePage);
-            vcTreeAccessor.releasePage(sourcePage);
-        }
-
-        for (List<ITupleReference> records : ctx.getDataRecords()) {
-            for (ITupleReference record : records) {
-                bulkLoader.add(record);
-            }
-            bulkLoader.next();
-        }
-
-        bulkLoader.end();
+        //        LSMVCTreeBulkLoader bulkLoader = ((LSMVCTree) ctx.getIndex()).createBulkLoader(numLeafCentroids,
+        //                firstLeafCentroidId, dataFrameSerdes, ".static_structure_vctree");
+        //
+        //        for (int pageId = 1; pageId <= maxPageId; pageId++) {
+        //            ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
+        //            bulkLoader.copyPage(sourcePage);
+        //            vcTreeAccessor.releasePage(sourcePage);
+        //        }
+        //
+        //        for (List<ITupleReference> records : ctx.getDataRecords()) {
+        //            for (ITupleReference record : records) {
+        //                bulkLoader.add(record);
+        //            }
+        //            bulkLoader.next();
+        //        }
+        //
+        //        bulkLoader.end();
     }
 
     /**

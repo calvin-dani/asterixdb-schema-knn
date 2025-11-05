@@ -19,7 +19,6 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -62,7 +61,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationC
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
@@ -75,7 +73,6 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
-import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.util.trace.ITracer;
 
 /**
@@ -213,14 +210,19 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
             Map<String, Object> parameters) throws HyracksDataException {
         AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
+        boolean isStaticStructureLoad = parameters != null && parameters.containsKey("numLevels")
+                && parameters.containsKey("clustersPerLevel") && parameters.containsKey("centroidsPerCluster");
+        if(!isStaticStructureLoad) {
+            // For data loading, ensure static structure is already built
+            parameters.put("static_structure_component", getStaticStructure());
+        }
         opCtx.setParameters(parameters);
         LSMVCTreeComponentFileReferences componentFileRefs =
                 (LSMVCTreeComponentFileReferences) fileManager.getRelFlushFileReference();
         LoadOperation loadOp = new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), parameters);
 
         // Check if this is static structure creation or data loading
-        boolean isStaticStructureLoad = parameters != null && parameters.containsKey("numLevels")
-                && parameters.containsKey("clustersPerLevel") && parameters.containsKey("centroidsPerCluster");
+
 
         ILSMDiskComponent component;
         if (isStaticStructureLoad) {
@@ -238,26 +240,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         opCtx.setIoOperation(loadOp);
         return new LSMIndexDiskComponentBulkLoader(storageConfig, this, opCtx, fillFactor, verifyInput,
                 numElementsHint);
-    }
-
-    public LSMVCTreeBulkLoader createBulkLoader(int numLeafCentroids, int firstLeafCentroidId,
-            ISerializerDeserializer[] dataFrameSerdes, String staticStructureFileName) throws HyracksDataException {
-        AbstractLSMIndexOperationContext opCtx = createOpContext(NoOpIndexAccessParameters.INSTANCE);
-        LSMComponentFileReferences componentFileRefs = fileManager.getRelFlushFileReference();
-        LoadOperation loadOp =
-                new LoadOperation(componentFileRefs, ioOpCallback, getIndexIdentifier(), new HashMap<>());
-        // Add static structure filename to operation parameters
-        if (staticStructureFileName != null) {
-            loadOp.getParameters().put("staticStructureFileName", staticStructureFileName);
-        }
-        ILSMDiskComponent diskComponent = createDiskComponent(bulkLoadComponentFactory,
-                componentFileRefs.getInsertIndexFileReference(), null, null, true);
-        loadOp.setNewComponent(diskComponent);
-        ioOpCallback.scheduled(loadOp);
-        opCtx.setIoOperation(loadOp);
-
-        return new LSMVCTreeBulkLoader(storageConfig, this, opCtx, numLeafCentroids, firstLeafCentroidId,
-                dataFrameSerdes, NoOpPageWriteCallback.INSTANCE);
     }
 
     @Override

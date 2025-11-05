@@ -26,13 +26,12 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 
 public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
     private final LSMVCTree lsmvcTree;
-    private final VCTreeBulkLoader bulkLoader;
+    //    private final VCTreeBulkLoader bulkLoader;
     private final ILSMIndexOperationContext opCtx;
     private boolean failed = false;
 
@@ -42,9 +41,8 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
         this.lsmvcTree = lsmvcTree;
         this.opCtx = opCtx;
         // Extract static structure filename from operation parameters
-        String staticStructureFileName = (String) opCtx.getIoOperation().getParameters().get("staticStructureFileName");
-        this.bulkLoader = ((LSMVCTreeDiskComponent) opCtx.getIoOperation().getNewComponent()).createBulkLoader(
-                numLeafCentroid, firstLeafCentroidId, dataFrameSerdes, instance, staticStructureFileName);
+        //        this.bulkLoader = ((LSMVCTreeDiskComponent) opCtx.getIoOperation().getNewComponent()).createBulkLoader(
+        //                numLeafCentroid, firstLeafCentroidId, dataFrameSerdes, instance);
     }
 
     public ILSMDiskComponent getComponent() {
@@ -52,7 +50,7 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
     }
 
     public ITupleReference add(ITupleReference tuple) throws HyracksDataException {
-        bulkLoader.add(tuple);
+        //        bulkLoader.add(tuple);
         return tuple;
     }
 
@@ -64,7 +62,7 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
 
     public void next() throws HyracksDataException {
         try {
-            ((VCTreeBulkLoader) bulkLoader).loadToNextLeafCluster();
+            //            ((VCTreeBulkLoader) bulkLoader).loadToNextLeafCluster();
         } catch (Throwable th) {
             fail(th);
             throw th;
@@ -73,7 +71,7 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
 
     public void copyPage(ICachedPage page) throws HyracksDataException {
         try {
-            ((VCTreeBulkLoader) bulkLoader).copyPage(page);
+            //            ((VCTreeBulkLoader) bulkLoader).copyPage(page);
         } catch (Throwable th) {
             fail(th);
             throw th;
@@ -96,7 +94,7 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
         fail(null);
         try {
             try {
-                bulkLoader.abort();
+                //                bulkLoader.abort();
             } finally {
                 lsmvcTree.getIOOperationCallback().afterFinalize(opCtx.getIoOperation());
             }
@@ -126,10 +124,10 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
     private void presistComponentToDisk() throws HyracksDataException {
         try {
             lsmvcTree.getIOOperationCallback().afterOperation(opCtx.getIoOperation());
-            bulkLoader.end();
+            //            bulkLoader.end();
         } catch (Throwable th) { // NOSONAR Must not call afterFinalize without setting failure
             fail(th);
-            bulkLoader.abort();
+            //            bulkLoader.abort();
             throw th;
         } finally {
             lsmvcTree.getIOOperationCallback().afterFinalize(opCtx.getIoOperation());
@@ -150,6 +148,6 @@ public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
     }
 
     public void force() throws HyracksDataException {
-        bulkLoader.force();
+        //        bulkLoader.force();
     }
 }

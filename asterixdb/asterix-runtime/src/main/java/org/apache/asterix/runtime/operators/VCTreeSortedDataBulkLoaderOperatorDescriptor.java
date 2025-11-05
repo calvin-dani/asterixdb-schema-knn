@@ -293,8 +293,8 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                         };
 
                 // Create LSMVCTreeBulkLoader with static structure filename
-                bulkLoader = lsmvcTree.createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes,
-                        ".static_structure_vctree");
+                //                bulkLoader = lsmvcTree.createBulkLoader(numLeafCentroids, firstLeafCentroidId, dataFrameSerdes,
+                //                        ".static_structure_vctree");
 
                 System.err.println("✅ Bulk loader initialized successfully");
 

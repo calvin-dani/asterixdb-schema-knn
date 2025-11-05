@@ -25,10 +25,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilter;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
@@ -37,7 +38,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -125,17 +125,19 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         Map<String, Object> parameters = operation.getParameters();
         boolean isStaticStructureLoad = parameters.containsKey("numLevels")
                 && parameters.containsKey("clustersPerLevel") && parameters.containsKey("centroidsPerCluster");
-
+        boolean test = parameters.containsKey("static_structure_component");
         IChainedComponentBulkLoader indexBulkLoader;
         if (isStaticStructureLoad) {
+            // TODO : SEE IF THIS IS COMPATIBLE WITH EXISTING INFRA
             System.err.println("Creating VCTreeStaticStructureLoader with real structure parameters");
             indexBulkLoader = createVCTreeStaticStructureBulkLoader(storageConfig, operation, fillFactor, verifyInput,
                     numElementsHint, checkIfEmptyIndex, callback);
         } else {
-            System.err.println("ERROR: Static structure parameters not found - VCTree requires hierarchical structure");
-            System.err.println("Expected parameters: numLevels, clustersPerLevel, centroidsPerCluster");
-            System.err.println("Available parameters: " + parameters.keySet());
-            throw new HyracksDataException("VCTreeStaticStructureLoader requires hierarchical structure parameters");
+            // TODO : CREATE NORMAL BULK LOADER CALVIN
+            System.err.println("Creating VCTreeStaticStructureLoader with real structure parameters");
+            indexBulkLoader = createVCTreeBulkLoader(storageConfig, operation, fillFactor, verifyInput, numElementsHint,
+                    checkIfEmptyIndex, callback);
+
         }
 
         chainedBulkLoader.addBulkLoader(indexBulkLoader);
@@ -189,6 +191,52 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         }
     }
 
+    /**
+     * Creates a VCTreeStaticStructureLoader with real hierarchical structure parameters.
+     *
+     * This method extracts the structure information from the operation parameters
+     * and creates a VCTreeStaticStructureLoader configured with the actual
+     * hierarchical k-means structure.
+     */
+    private IChainedComponentBulkLoader createVCTreeBulkLoader(NCConfig storageConfig,
+                                                                              ILSMIOOperation operation, float fillFactor, boolean verifyInput, long numElementsHint,
+                                                                              boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+
+        Map<String, Object> parameters = operation.getParameters();
+
+        // Extract structure parameters with defaults
+        int numLevels = (Integer) parameters.getOrDefault("numLevels", 2);
+        @SuppressWarnings("unchecked")
+        List<Integer> clustersPerLevel =
+                (List<Integer>) parameters.getOrDefault("clustersPerLevel", Arrays.asList(5, 10));
+        @SuppressWarnings("unchecked")
+        List<List<Integer>> centroidsPerCluster = (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster",
+                Arrays.asList(Arrays.asList(1, 1, 1, 1, 1), Arrays.asList(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
+        int maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
+
+        System.err.println("VCTreeStaticStructureLoader parameters:");
+        System.err.println("  - numLevels: " + numLevels);
+        System.err.println("  - clustersPerLevel: " + clustersPerLevel);
+        System.err.println("  - centroidsPerCluster: " + centroidsPerCluster);
+        System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
+        System.err.println("  - fillFactor: " + fillFactor);
+        LSMVCTreeDiskComponent staticComponent = parameters.getOrDefault("static_structure_component", null) instanceof LSMVCTreeDiskComponent comp ? comp : null;
+        ITreeIndexAccessor staticAccessor = staticComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+
+        try {
+
+            // Create VCTreeStaticStructureLoader with real structure
+            IIndexBulkLoader builder = getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE,staticAccessor );
+            // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
+            return new LSMIndexBulkLoader(builder);
+
+        } catch (Exception e) {
+            System.err.println("ERROR: Failed to create VCTreeStaticStructureLoader: " + e.getMessage());
+            e.printStackTrace();
+            throw HyracksDataException.create(e);
+        }
+    }
+
     static IMetadataPageManager getMetadataPageManager(VectorClusteringTree vcTree) {
         return (IMetadataPageManager) vcTree.getPageManager();
     }
@@ -215,27 +263,6 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
                 .setFlushLoader((VectorClusteringTreeFlushLoader) (getIndex().createFlushLoader(0, callback)));
         callback.initialize(diskComponentLoader);
         return diskComponentLoader;
-    }
-
-    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
-            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback) throws HyracksDataException {
-        // Extract static structure filename from operation parameters if available
-        String staticStructureFileName = null;
-        // Note: This method doesn't have access to operation, so staticStructureFileName will be passed
-        // through from the caller via VectorClusteringTree.createBulkLoader()
-        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
-                dataFrameSerdes, staticStructureFileName);
-    }
-
-    /**
-     * Create bulk loader with static structure filename support.
-     * This overloaded method allows passing the static structure filename directly.
-     */
-    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
-            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback, String staticStructureFileName)
-            throws HyracksDataException {
-        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
-                dataFrameSerdes, staticStructureFileName);
     }
 
     public boolean isStaticStructure() {
