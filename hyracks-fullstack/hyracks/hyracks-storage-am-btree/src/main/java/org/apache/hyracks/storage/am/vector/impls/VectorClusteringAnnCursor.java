@@ -338,7 +338,7 @@ public class VectorClusteringAnnCursor extends EnforcedIndexCursor {
                 int tupleCount = ctx.getMetadataFrame().getTupleCount();
 
                 for (int i = 0; i < tupleCount; i++) {
-                    float maxDistance = ctx.getMetadataFrame().getMaxDistance(i);
+                    double maxDistance = ctx.getMetadataFrame().getMaxDistance(i);
                     long dataPageId = ctx.getMetadataFrame().getDataPagePointer(i);
 
                     // Apply triangle inequality pruning
@@ -366,7 +366,7 @@ public class VectorClusteringAnnCursor extends EnforcedIndexCursor {
     /**
      * Check if a data page should be pruned using triangle inequality.
      */
-    private boolean shouldPrunePage(float maxDistanceInPage, double[] clusterCentroid,
+    private boolean shouldPrunePage(double maxDistanceInPage, double[] clusterCentroid,
             double distanceToClusterCentroid) {
         if (topK.size() < predicate.getK()) {
             return false; // Need more candidates

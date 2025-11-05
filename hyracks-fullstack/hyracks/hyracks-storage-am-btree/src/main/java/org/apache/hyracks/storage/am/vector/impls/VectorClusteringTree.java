@@ -29,6 +29,7 @@ import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
@@ -44,6 +45,8 @@ import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
+import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
+import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
@@ -1396,10 +1399,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         private VectorClusteringTree tree;
         private VectorClusteringOpContext ctx;
+        private IIndexAccessParameters iap;
         private boolean destroyed = false;
 
         public VectorClusteringTreeAccessor(VectorClusteringTree tree, IIndexAccessParameters iap) {
             this.tree = tree;
+            this.iap = iap;
             this.ctx = new VectorClusteringOpContext(this, tree.interiorFrameFactory, tree.leafFrameFactory,
                     tree.metadataFrameFactory, tree.dataFrameFactory, tree.freePageManager, tree.cmpFactories,
                     tree.vectorDimensions, iap.getModificationCallback(), iap.getSearchOperationCallback());
@@ -1407,6 +1412,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         public void reset(VectorClusteringTree vctree, IIndexAccessParameters iap) {
             this.tree = vctree;
+            this.iap = iap;
             ctx.setCallbacks(iap.getModificationCallback(), iap.getSearchOperationCallback());
             ctx.reset();
         }
@@ -1467,9 +1473,38 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             vectorCursor.setFrameFactories(tree.interiorFrameFactory, tree.leafFrameFactory, tree.metadataFrameFactory,
                     tree.dataFrameFactory);
 
-            // Create a simple initial state (the cursor will find the centroid itself)
+            // Extract query vector from predicate using the accessor factory
+            // The predicate holds the tuple reference (updated per-tuple in resetSearchPredicate)
+            double[] queryVector = null;
+            if (searchPred instanceof VectorPointPredicate) {
+                VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
+                ITupleReference queryTuple = vectorPred.getQueryTuple();
+                int queryFieldIndex = vectorPred.getQueryFieldIndex();
+
+                if (queryTuple != null) {
+                    // Get accessor factory from parameters (stored during index accessor creation)
+                    IVectorBinaryAccessorFactory factory =
+                            (IVectorBinaryAccessorFactory) iap.getParameters().get(HyracksConstants.VECTOR_QUERY);
+
+                    if (factory != null) {
+                        // Create accessor and extract vector from tuple
+                        IVectorBinaryAccessor accessor = factory.createAccessor();
+                        accessor.reset(
+                            queryTuple.getFieldData(queryFieldIndex),
+                            queryTuple.getFieldStart(queryFieldIndex),
+                            queryTuple.getFieldLength(queryFieldIndex)
+                        );
+                        queryVector = accessor.getVector();
+                    }
+                }
+            }
+
+            // Create initial state with query vector
             VectorCursorInitialState initialState = new VectorCursorInitialState(ctx.getAccessor());
             initialState.setRootPageId(tree.rootPage);
+            if (queryVector != null) {
+                initialState.setQueryVector(queryVector);
+            }
 
             // Open the cursor - it will perform centroid finding and position on data pages
             vectorCursor.open(initialState, searchPred);

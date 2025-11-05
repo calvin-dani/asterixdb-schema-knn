@@ -305,6 +305,22 @@ public class APIFramework {
             ICompiler compiler = compilerFactory.createCompiler(plan, metadataProvider, t.getVarCounter());
             if (conf.isOptimize()) {
                 compiler.optimize();
+
+                // ===== DEBUG: Print optimized logical plan =====
+                try {
+                    System.err.println("\n========================================");
+                    System.err.println("OPTIMIZED LOGICAL PLAN:");
+                    System.err.println("========================================");
+                    org.apache.hyracks.algebricks.core.algebra.prettyprint.IPlanPrettyPrinter pPrinter =
+                        org.apache.hyracks.algebricks.core.algebra.prettyprint.PlanPrettyPrinter.createStringPlanPrettyPrinter();
+                    pPrinter.printPlan(plan, false);
+                    System.err.println(pPrinter.toString());
+                    System.err.println("========================================\n");
+                } catch (Exception e) {
+                    System.err.println("Failed to print plan: " + e.getMessage());
+                }
+                // ===== END DEBUG =====
+
                 if (conf.is(SessionConfig.OOB_OPTIMIZED_LOGICAL_PLAN) || isExplainOnly) {
                     if (conf.is(SessionConfig.FORMAT_ONLY_PHYSICAL_OPS)) {
                         // For Optimizer tests. Print physical operators in verbose mode.

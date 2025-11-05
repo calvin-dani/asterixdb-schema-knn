@@ -642,6 +642,7 @@ import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYear2Descr
 import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYearDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationGreaterThanComparatorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationLessThanComparatorDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.ANNDistanceDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceConstantDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.DenseRankRunningAggregateDescriptor;
@@ -1329,6 +1330,7 @@ public final class FunctionCollection implements IFunctionCollection {
         // Vector functions
         fc.add(VectorDistanceArrDescriptor.FACTORY);
         fc.add(VectorDistanceConstantDescriptor.FACTORY);
+        fc.add(ANNDistanceDescriptor.FACTORY);
 
         fc.add(KmeanFaissArrDescriptor.FACTORY);
         // Type functions.

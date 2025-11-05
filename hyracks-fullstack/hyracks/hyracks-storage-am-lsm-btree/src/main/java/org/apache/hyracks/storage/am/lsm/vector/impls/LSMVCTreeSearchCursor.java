@@ -19,405 +19,361 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
-import java.util.Comparator;
-import java.util.List;
-import java.util.PriorityQueue;
-
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent.LSMComponentType;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
-import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VectorRangePredicate;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexCursor;
+import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.MultiComparator;
+import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
+import org.apache.hyracks.storage.common.util.IndexCursorUtils;
 
 /**
- * Search cursor for LSM Vector Clustering Tree.
+ * LSM search cursor for Vector Clustering Tree.
  *
- * This cursor coordinates search operations across multiple LSM components (memory and disk),
- * merging results using a priority queue to return top-k nearest neighbors based on vector similarity.
+ * This cursor coordinates searches across multiple LSM components (memory and disk)
+ * by delegating to VectorClusteringSearchCursor for each component and merging results.
  *
- * Algorithm Overview:
- * 1. Open cursors for all operational components (memory + disk)
- * 2. Each component cursor finds its closest cluster and iterates through cluster data
- * 3. Use a max-heap priority queue to maintain top-k results across all components
- * 4. Return results in ascending order of distance (nearest first)
+ * Following the pattern of LSMBTreeRangeSearchCursor:
+ * - Extends LSMIndexSearchCursor for priority queue and component switching infrastructure
+ * - Creates VectorClusteringTreeAccessor for each component
+ * - Handles component state changes (memory → disk transitions)
+ * - For vector index: simplified sequential iteration (no priority queue merging needed for now)
  */
-public class LSMVCTreeSearchCursor implements IIndexCursor {
+public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
-    private AbstractLSMIndexOperationContext opCtx;
-    private List<ILSMComponent> operationalComponents;
-    private List<IIndexCursor> rangeCursors;
+    // Accessor array for each component's VCTree
+    private VectorClusteringTreeAccessor[] vcTreeAccessors;
+
+    // Track component types to detect memory → disk transitions
+    protected boolean[] isMemoryComponent;
+
+    // Store search predicate for component switching
     private ISearchPredicate searchPredicate;
-    private VectorRangePredicate vectorPredicate;
 
-    // Cursor state
-    private boolean open;
-    private boolean exhausted;
-    private ITupleReference currentTuple;
-
-    // Priority queue for top-k results
-    private PriorityQueue<VectorResult> resultHeap;
-    private int k; // Number of results to return
-    private double[] queryVector;
-
-    // Result iteration
-    private VectorResult[] sortedResults;
-    private int resultIndex;
-
-    /**
-     * Internal class to hold vector search results with distance information.
-     */
-    private static class VectorResult {
-        final ITupleReference tuple;
-        final double distance;
-        final int componentIndex;
-
-        VectorResult(ITupleReference tuple, double distance, int componentIndex) {
-            this.tuple = tuple;
-            this.distance = distance;
-            this.componentIndex = componentIndex;
-        }
-    }
+    // Current component being iterated
+    private int currentComponentIndex;
+    private IIndexCursor currentComponentCursor;
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
-        this.opCtx = (AbstractLSMIndexOperationContext) opCtx;
-        this.open = false;
-        this.exhausted = false;
-        this.resultIndex = 0;
+        this(opCtx, false, NoOpIndexCursorStats.INSTANCE);
+    }
+
+    public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples,
+            IIndexCursorStats stats) {
+        super(opCtx, returnDeletedTuples, stats);
+        this.currentComponentIndex = 0;
+        this.currentComponentCursor = null;
     }
 
     @Override
-    public void open(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
+    public void doOpen(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
+        // Get LSM-specific initial state
         LSMVCTreeCursorInitialState lsmInitialState = (LSMVCTreeCursorInitialState) initialState;
 
+        // Save search predicate for component switching
         this.searchPredicate = searchPred;
-        this.operationalComponents = lsmInitialState.getOperationalComponents();
-        this.rangeCursors = lsmInitialState.getCursors();
 
-        // Extract vector search parameters
-        if (searchPred instanceof VectorRangePredicate) {
-            this.vectorPredicate = (VectorRangePredicate) searchPred;
-            this.queryVector = vectorPredicate.getQueryVector();
-            this.k = 10;
-        } else {
-            throw new HyracksDataException("LSMVCTreeSearchCursor requires VectorRangePredicate");
+        // Set up comparator and operational components
+        cmp = lsmInitialState.getOriginalKeyComparator();
+        operationalComponents = lsmInitialState.getOperationalComponents();
+        lsmHarness = lsmInitialState.getLSMHarness();
+
+        // For vector index, we don't need mutable component special handling initially
+        includeMutableComponent = false;
+
+        int numVCTrees = operationalComponents.size();
+
+        // Initialize or resize accessor/cursor arrays
+        if (rangeCursors == null) {
+            // First open: create arrays
+            rangeCursors = new IIndexCursor[numVCTrees];
+            vcTreeAccessors = new VectorClusteringTreeAccessor[numVCTrees];
+            isMemoryComponent = new boolean[numVCTrees];
+        } else if (rangeCursors.length != numVCTrees) {
+            // Component count changed (due to flush/merge): destroy and recreate
+            Throwable failure = CleanupUtils.destroy(null, vcTreeAccessors);
+            vcTreeAccessors = null;
+            failure = CleanupUtils.destroy(failure, rangeCursors);
+            if (failure != null) {
+                throw HyracksDataException.create(failure);
+            }
+            rangeCursors = new IIndexCursor[numVCTrees];
+            vcTreeAccessors = new VectorClusteringTreeAccessor[numVCTrees];
+            isMemoryComponent = new boolean[numVCTrees];
         }
 
-        // Initialize priority queue for top-k results (max-heap to keep smallest k distances)
-        this.resultHeap = new PriorityQueue<>(k + 1, new Comparator<VectorResult>() {
-            @Override
-            public int compare(VectorResult a, VectorResult b) {
-                // Max-heap: larger distances have higher priority (will be removed first)
-                return Double.compare(b.distance, a.distance);
-            }
-        });
-
-        this.open = true;
-        this.exhausted = false;
-        this.resultIndex = 0;
-        this.sortedResults = null;
-
-        // Open cursors for all operational components
-        openComponentCursors();
-
-        // Collect and merge results from all components
-        collectAndMergeResults();
-    }
-
-    /**
-     * Open cursors for all LSM components (memory and disk).
-     */
-    private void openComponentCursors() throws HyracksDataException {
-        for (int i = 0; i < operationalComponents.size(); i++) {
+        // Create accessors and cursors for each component
+        for (int i = 0; i < numVCTrees; i++) {
             ILSMComponent component = operationalComponents.get(i);
+            LSMComponentType type = component.getType();
 
-            if (component instanceof LSMVCTreeMemoryComponent) {
-                openMemoryComponentCursor(component, i);
-            } else if (component instanceof LSMVCTreeDiskComponent) {
-                openDiskComponentCursor(component, i);
+            // Track if this is a memory component
+            if (component.getType() == LSMComponentType.MEMORY) {
+                includeMutableComponent = true;
+            }
+
+            // Check if we need to destroy incompatible accessor/cursor
+            if (vcTreeAccessors[i] == null || destroyIncompatible(component, i)) {
+                vcTreeAccessors[i] = createAccessor(component, i);
+                rangeCursors[i] = createCursor(type, vcTreeAccessors[i]);
             } else {
-                throw new HyracksDataException("Unknown LSM component type: " + component.getClass());
+                // Re-use existing cursor
+                rangeCursors[i].close();
             }
-        }
-    }
 
-    /**
-     * Open cursor for memory component.
-     */
-    private void openMemoryComponentCursor(ILSMComponent component, int componentIndex) throws HyracksDataException {
-        LSMVCTreeMemoryComponent memComponent = (LSMVCTreeMemoryComponent) component;
-        VectorClusteringTree vcTree = memComponent.getIndex();
-
-        // Create and configure cursor
-        VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) vcTree.createSearchCursor(false);
-        vcCursor.setBufferCache(vcTree.getBufferCache());
-        vcCursor.setFileId(vcTree.getFileId());
-        vcCursor.setRootPageId(vcTree.getRootPageId());
-        vcCursor.setFrameFactories(vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(),
-                vcTree.getMetadataFrameFactory(), vcTree.getDataFrameFactory());
-        vcCursor.setQueryVector(queryVector);
-
-        rangeCursors.set(componentIndex, vcCursor);
-        vcCursor.open(null, searchPredicate);
-
-        System.out.println("DEBUG: Opened memory component cursor " + componentIndex);
-    }
-
-    /**
-     * Open cursor for disk component.
-     */
-    private void openDiskComponentCursor(ILSMComponent component, int componentIndex) throws HyracksDataException {
-        LSMVCTreeDiskComponent diskComponent = (LSMVCTreeDiskComponent) component;
-        VectorClusteringTree vcTree = diskComponent.getIndex();
-
-        // Create and configure cursor (same as memory component)
-        VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) vcTree.createSearchCursor(false);
-        vcCursor.setBufferCache(vcTree.getBufferCache());
-        vcCursor.setFileId(vcTree.getFileId());
-        vcCursor.setRootPageId(vcTree.getRootPageId());
-        vcCursor.setFrameFactories(vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(),
-                vcTree.getMetadataFrameFactory(), vcTree.getDataFrameFactory());
-        vcCursor.setQueryVector(queryVector);
-
-        rangeCursors.set(componentIndex, vcCursor);
-        vcCursor.open(null, searchPredicate);
-
-        System.out.println("DEBUG: Opened disk component cursor " + componentIndex);
-    }
-
-    /**
-     * Collect results from all component cursors and merge using priority queue.
-     */
-    private void collectAndMergeResults() throws HyracksDataException {
-        System.out.println("DEBUG: Collecting results from " + rangeCursors.size() + " components");
-
-        // Process results from each component cursor
-        for (int i = 0; i < rangeCursors.size(); i++) {
-            IIndexCursor cursor = rangeCursors.get(i);
-            if (cursor == null)
-                continue;
-
-            System.out.println("DEBUG: Processing component " + i);
-
-            // Collect all results from this component
-            while (cursor.hasNext()) {
-                cursor.next();
-                ITupleReference tuple = cursor.getTuple();
-
-                // Calculate distance from query vector to this result
-                double distance = calculateDistanceFromTuple(tuple, queryVector);
-
-                // Add to priority queue (implements top-k logic)
-                addToTopKResults(new VectorResult(tuple, distance, i));
-            }
+            isMemoryComponent[i] = type == LSMComponentType.MEMORY;
         }
 
-        // Convert priority queue to sorted array for iteration
-        prepareSortedResults();
+        // Open all cursors with the search predicate
+        IndexCursorUtils.open(vcTreeAccessors, rangeCursors, searchPred);
 
-        System.out.println("DEBUG: Collected " + (sortedResults != null ? sortedResults.length : 0) + " total results");
-    }
+        // Initialize sequential iteration
+        currentComponentIndex = 0;
+        currentComponentCursor = (rangeCursors.length > 0) ? rangeCursors[0] : null;
 
-    /**
-     * Add a result to the top-k priority queue.
-     */
-    private void addToTopKResults(VectorResult result) {
-        if (resultHeap.size() < k) {
-            // Queue not full, just add
-            resultHeap.offer(result);
-        } else {
-            // Queue full, check if this result is better than the worst
-            VectorResult worst = resultHeap.peek();
-            if (result.distance < worst.distance) {
-                // This result is better, replace worst
-                resultHeap.poll();
-                resultHeap.offer(result);
-            }
-        }
-    }
-
-    /**
-     * Convert priority queue to sorted array for iteration.
-     */
-    private void prepareSortedResults() {
-        if (resultHeap.isEmpty()) {
-            sortedResults = new VectorResult[0];
-            return;
-        }
-
-        // Extract all results from heap
-        sortedResults = resultHeap.toArray(new VectorResult[0]);
-
-        // Sort by distance (ascending order - nearest first)
-        java.util.Arrays.sort(sortedResults, new Comparator<VectorResult>() {
-            @Override
-            public int compare(VectorResult a, VectorResult b) {
-                return Double.compare(a.distance, b.distance);
-            }
-        });
-
-        System.out.println("DEBUG: Prepared " + sortedResults.length + " sorted results");
-        if (sortedResults.length > 0) {
-            System.out.println("DEBUG: Best distance: " + sortedResults[0].distance);
-            System.out.println("DEBUG: Worst distance: " + sortedResults[sortedResults.length - 1].distance);
-        }
-    }
-
-    /**
-     * Calculate Euclidean distance between query vector and a result tuple.
-     */
-    private double calculateDistanceFromTuple(ITupleReference tuple, double[] queryVector) {
+        // Note: Priority queue setup is kept for compatibility with base class,
+        // but not used in simplified sequential iteration
         try {
-            // Assuming tuple format: [distance, cosine_similarity, vector_data, primary_key]
-            // Extract vector data from field 2
-            byte[] vectorData = tuple.getFieldData(2);
-            int vectorOffset = tuple.getFieldStart(2);
-            int vectorLength = tuple.getFieldLength(2);
-
-            // Deserialize vector using FloatArraySerializerDeserializer
-            //TODO
-            double[] resultVector = new double[vectorLength / Float.BYTES];
-
-            // Calculate Euclidean distance
-            return VectorUtils.calculateEuclideanDistance(queryVector, resultVector);
-
-        } catch (Exception e) {
-            System.out.println(
-                    "WARNING: Failed to calculate distance for tuple, using distance field: " + e.getMessage());
-
-            // Fallback: try to use pre-calculated distance from field 0
-            try {
-                byte[] distanceData = tuple.getFieldData(0);
-                int distanceOffset = tuple.getFieldStart(0);
-                // TODO
-                return 0;
-            } catch (Exception e2) {
-                System.out.println("ERROR: Could not extract distance from tuple: " + e2.getMessage());
-                return Double.MAX_VALUE;
-            }
+            setPriorityQueueComparator();
+            initPriorityQueue();
+        } catch (Throwable th) { // NOSONAR Must catch all
+            IndexCursorUtils.close(rangeCursors, th);
+            throw HyracksDataException.create(th);
         }
     }
 
-    @Override
-    public boolean hasNext() throws HyracksDataException {
-        if (!open) {
-            return false;
-        }
-
-        if (exhausted) {
-            return false;
-        }
-
-        // Check if we have more results to return
-        if (sortedResults != null && resultIndex < sortedResults.length) {
+    /**
+     * Check if accessor/cursor needs to be destroyed due to component type change.
+     * This happens when a memory component is replaced with a disk component.
+     */
+    private boolean destroyIncompatible(ILSMComponent component, int index) throws HyracksDataException {
+        // XOR: if component type changed (memory → disk or disk → memory)
+        if (component.getType() == LSMComponentType.MEMORY ^ isMemoryComponent[index]) {
+            Throwable failure = CleanupUtils.destroy(null, vcTreeAccessors[index]);
+            vcTreeAccessors[index] = null;
+            failure = CleanupUtils.destroy(failure, rangeCursors[index]);
+            rangeCursors[index] = null;
+            if (failure != null) {
+                throw HyracksDataException.create(failure);
+            }
             return true;
         }
-
-        // No more results
-        exhausted = true;
         return false;
     }
 
+    /**
+     * Create accessor for a VCTree component.
+     */
+    protected VectorClusteringTreeAccessor createAccessor(ILSMComponent component, int index)
+            throws HyracksDataException {
+        VectorClusteringTree vcTree = (VectorClusteringTree) component.getIndex();
+        return (VectorClusteringTreeAccessor) vcTree.createAccessor(iap);
+    }
+
+    /**
+     * Create cursor for a VCTree component.
+     */
+    protected IIndexCursor createCursor(LSMComponentType type, VectorClusteringTreeAccessor accessor)
+            throws HyracksDataException {
+        return accessor.createSearchCursor(false);
+    }
+
     @Override
-    public void next() throws HyracksDataException {
-        if (!hasNext()) {
-            throw new IllegalStateException("No more elements");
+    public void doClose() throws HyracksDataException {
+        super.doClose();
+        // Additional cleanup specific to vector index if needed
+    }
+
+    @Override
+    public boolean doHasNext() throws HyracksDataException {
+        hasNextCallCount++;
+        checkPriorityQueue();
+        // Check sequential iteration state instead of priority queue
+        return currentComponentCursor != null && currentComponentCursor.hasNext();
+    }
+
+    @Override
+    public void doNext() throws HyracksDataException {
+        // Simplified version: just advance current component cursor
+        // No priority queue sorting needed - return all tuples from all components
+        if (currentComponentCursor != null && currentComponentCursor.hasNext()) {
+            currentComponentCursor.next();
+        }
+    }
+
+    @Override
+    protected void checkPriorityQueue() throws HyracksDataException {
+        // Every SWITCH_COMPONENT_CYCLE calls, check if memory components need to be swapped with disk components
+        // This handles the case where a memory component is flushed to disk while the cursor is active
+        if (hasNextCallCount >= SWITCH_COMPONENT_CYCLE) {
+            replaceMemoryComponentWithDiskComponentIfNeeded();
+            hasNextCallCount = 0;
         }
 
-        // Get next result from sorted array
-        VectorResult result = sortedResults[resultIndex];
-        currentTuple = result.tuple;
-        resultIndex++;
+        // Simplified version: sequential iteration through components
+        // No priority queue sorting - just return all tuples from all components in order
+        // TODO: Future optimization - use priority queue to merge results sorted by distance
+        //       for more efficient top-k selection at higher layers
 
-        System.out.println("DEBUG: Returning result " + resultIndex + " with distance " + result.distance
-                + " from component " + result.componentIndex);
+        // Find next component with results
+        while (currentComponentIndex < rangeCursors.length) {
+            if (currentComponentCursor != null && currentComponentCursor.hasNext()) {
+                // Current component still has results
+                return;
+            }
+
+            // Current component exhausted, move to next
+            currentComponentIndex++;
+            if (currentComponentIndex < rangeCursors.length) {
+                currentComponentCursor = rangeCursors[currentComponentIndex];
+            } else {
+                currentComponentCursor = null;
+            }
+        }
     }
 
-    @Override
-    public ITupleReference getTuple() {
-        return currentTuple;
-    }
-
-    @Override
-    public void close() throws HyracksDataException {
-        if (!open) {
+    /**
+     * Replace memory components with disk components if they were flushed.
+     * This is called periodically to handle concurrent flushes during search.
+     */
+    private void replaceMemoryComponentWithDiskComponentIfNeeded() throws HyracksDataException {
+        int replaceFrom = findFirstComponentToReplace();
+        if (replaceFrom < 0) {
+            // No switch needed
             return;
         }
 
-        // Close all component cursors
-        if (rangeCursors != null) {
-            for (IIndexCursor cursor : rangeCursors) {
-                if (cursor != null) {
-                    cursor.close();
+        // Ask LSM harness to replace memory components with their flushed disk versions
+        opCtx.getIndex().getHarness().replaceMemoryComponentsWithDiskComponents(getOpCtx(), replaceFrom);
+
+        // Redo searches on the new disk components
+        for (int i = replaceFrom; i < switchRequest.length && i < operationalComponents.size(); i++) {
+            if (switchRequest[i]) {
+                ILSMComponent component = operationalComponents.get(i);
+                VectorClusteringTree vcTree = (VectorClusteringTree) component.getIndex();
+
+                // Check if first component is now disk (no more mutable component)
+                if (i == 0 && component.getType() != LSMComponentType.MEMORY) {
+                    includeMutableComponent = false;
                 }
+
+                // If we had an active element from this component, restart search from that point
+                if (switchedElements[i] != null) {
+                    // Close cursor and reset accessor to the new disk component
+                    rangeCursors[i].close();
+                    vcTreeAccessors[i].reset(vcTree, iap);
+                    vcTreeAccessors[i].search(rangeCursors[i], searchPredicate);
+
+                    // Try to position cursor at the same element
+                    if (rangeCursors[i].hasNext()) {
+                        rangeCursors[i].next();
+                        switchedElements[i].reset(rangeCursors[i].getTuple());
+                    }
+                }
+            }
+            switchRequest[i] = false;
+            switchedElements[i] = null;
+            // Any failed switch makes further switches pointless
+            switchPossible = switchPossible && operationalComponents.get(i).getType() == LSMComponentType.DISK;
+        }
+    }
+
+    /**
+     * Find the first component that needs to be replaced (has been flushed).
+     * Returns the index of the first component to replace, or -1 if no replacement needed.
+     */
+    private int findFirstComponentToReplace() throws HyracksDataException {
+        int replaceFrom = -1;
+
+        if (!switchPossible) {
+            return replaceFrom;
+        }
+
+        for (int i = 0; i < operationalComponents.size(); i++) {
+            ILSMComponent component = operationalComponents.get(i);
+
+            if (component.getType() == LSMComponentType.DISK) {
+                if (i == 0) {
+                    // First component is already disk, no more switching possible
+                    switchPossible = false;
+                }
+                break;
+            } else if (component.getState() == ILSMComponent.ComponentState.UNREADABLE_UNWRITABLE) {
+                // Component was flushed while cursor is active - mark for replacement
+                if (replaceFrom < 0) {
+                    replaceFrom = i;
+                }
+
+                // Find the element from this cursor (if any)
+                PriorityQueueElement element = findElementInQueue(i);
+
+                // Mark this cursor for switching
+                rangeCursors[i].close();
+                switchRequest[i] = true;
+                switchedElements[i] = element;
             }
         }
 
-        // Clear data structures
-        if (resultHeap != null) {
-            resultHeap.clear();
+        return replaceFrom;
+    }
+
+    /**
+     * Find an element in the priority queue or output element from a specific cursor.
+     */
+    private PriorityQueueElement findElementInQueue(int cursorIndex) {
+        // Check if output element is from this cursor
+        if (outputElement != null && outputElement.getCursorIndex() == cursorIndex) {
+            return outputElement;
         }
 
-        sortedResults = null;
-        open = false;
-        exhausted = false;
-        currentTuple = null;
-        resultIndex = 0;
+        // Search in priority queue
+        for (PriorityQueueElement element : outputPriorityQueue) {
+            if (element.getCursorIndex() == cursorIndex) {
+                return element;
+            }
+        }
+
+        return null;
     }
 
     @Override
-    public void destroy() throws HyracksDataException {
-        close();
-
-        // Destroy all component cursors
-        if (rangeCursors != null) {
-            for (IIndexCursor cursor : rangeCursors) {
-                if (cursor != null) {
-                    cursor.destroy();
-                }
-            }
-            rangeCursors.clear();
+    protected void setPriorityQueueComparator() {
+        // For vector index: sort by distance (field 0 in tuple)
+        // Tuple format: <distance, cosine, embedding, pk>
+        if (pqCmp == null || pqCmp.getMultiComparator() != cmp) {
+            pqCmp = new PriorityQueueComparator(cmp);
         }
     }
 
-    /**
-     * Checks if the cursor is currently open.
-     */
-    public boolean isOpen() {
-        return open;
+    @Override
+    public ITupleReference doGetTuple() {
+        // Return tuple from current component cursor
+        if (currentComponentCursor != null) {
+            return currentComponentCursor.getTuple();
+        }
+        return null;
     }
 
-    /**
-     * Checks if the cursor is exhausted.
-     */
-    public boolean isExhausted() {
-        return exhausted;
+    @Override
+    protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB) throws HyracksDataException {
+        // For vector index: compare by distance (first field)
+        // This ensures results are sorted by distance (nearest first)
+        return cmp.compare(tupleA, tupleB);
     }
 
-    /**
-     * Get the number of results returned by this search.
-     */
-    public int getResultCount() {
-        return sortedResults != null ? sortedResults.length : 0;
-    }
-
-    /**
-     * Get the query vector used for this search.
-     */
-    public double[] getQueryVector() {
-        return queryVector;
-    }
-
-    /**
-     * Get the k value (number of nearest neighbors requested).
-     */
-    public int getK() {
-        return k;
+    @Override
+    protected boolean isDeleted(PriorityQueueElement element) {
+        // Vector index doesn't have delete markers in tuples
+        // (deletions handled at primary index level)
+        return false;
     }
 }

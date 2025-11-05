@@ -24,39 +24,71 @@ import org.apache.hyracks.storage.common.MultiComparator;
 
 /**
  * Search predicate for vector point queries.
- * Used for finding the closest cluster to a query vector.
+ * Holds a reference to the query tuple for per-tuple vector searches.
+ *
+ * Following the Reference Pattern (like RTree): The predicate holds an ITupleReference
+ * that is updated per-tuple by resetSearchPredicate(). The storage layer extracts
+ * the query vector when needed during search.
  */
 public class VectorPointPredicate implements ISearchPredicate {
     private static final long serialVersionUID = 1L;
 
-    private final double[] queryVector;
+    private ITupleReference queryTuple;
+    private int queryFieldIndex;
 
-    public VectorPointPredicate(double[] queryVector) {
-        this.queryVector = queryVector;
+    public VectorPointPredicate() {
+        // Empty constructor for initialization
     }
 
-    public double[] getQueryVector() {
-        return queryVector;
+    public VectorPointPredicate(double[] queryVector) {
+        // Constructor kept for compatibility with tests
+        // In runtime, query data comes via setQueryTuple()
+    }
+
+    /**
+     * Set the query tuple containing the vector field.
+     * Called by resetSearchPredicate() for each input tuple.
+     */
+    public void setQueryTuple(ITupleReference queryTuple) {
+        this.queryTuple = queryTuple;
+    }
+
+    /**
+     * Set the field index of the vector in the query tuple.
+     */
+    public void setQueryFieldIndex(int queryFieldIndex) {
+        this.queryFieldIndex = queryFieldIndex;
+    }
+
+    /**
+     * Get the query tuple reference.
+     */
+    public ITupleReference getQueryTuple() {
+        return queryTuple;
+    }
+
+    /**
+     * Get the query field index.
+     */
+    public int getQueryFieldIndex() {
+        return queryFieldIndex;
     }
 
     @Override
     public MultiComparator getLowKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
-        // This method is not applicable for vector searches
         return null;
     }
 
     @Override
     public MultiComparator getHighKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
-        // This method is not applicable for vector searches
         return null;
     }
 
     @Override
     public ITupleReference getLowKey() {
         // Vector clustering tree doesn't use traditional key searches
-        // This method is not applicable for vector searches
         return null;
     }
 
@@ -74,11 +106,6 @@ public class VectorPointPredicate implements ISearchPredicate {
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("VectorPointPredicate[");
-        if (queryVector != null) {
-            sb.append("dimensions=").append(queryVector.length);
-        }
-        sb.append("]");
-        return sb.toString();
+        return "VectorPointPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + "]";
     }
 }

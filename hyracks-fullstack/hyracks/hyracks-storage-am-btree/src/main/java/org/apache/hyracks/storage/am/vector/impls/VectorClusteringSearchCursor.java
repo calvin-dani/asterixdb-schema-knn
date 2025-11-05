@@ -18,20 +18,14 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -108,13 +102,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     public void open(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
         this.isOpen = true;
 
-        // Extract query vector from search predicate if available
-        if (searchPred instanceof VectorPointPredicate) {
-            VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
-            this.queryVector = vectorPred.getQueryVector();
-        }
-
-        // If initial state is provided, use its information
+        // Get query vector and other parameters from initial state
+        // The query vector is passed via IIndexAccessParameters from the operator layer
         if (initialState instanceof VectorCursorInitialState) {
             VectorCursorInitialState vectorState = (VectorCursorInitialState) initialState;
             if (vectorState.getQueryVector() != null) {
@@ -219,9 +208,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             int tupleCount = metadataFrame.getTupleCount();
             if (tupleCount > 0) {
                 // Get the first data page from the metadata page
-                ITreeIndexTupleReference tuple = metadataFrame.createTupleReference();
-                tuple.resetByTupleIndex(metadataFrame, 0);
-                return extractDataPageIdFromMetadataTuple(tuple);
+                return metadataFrame.getDataPagePointer(0);
             }
             return -1;
         } finally {
@@ -272,22 +259,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     /**
-     * Extract data page ID from a metadata tuple.
-     */
-    private long extractDataPageIdFromMetadataTuple(ITreeIndexTupleReference tuple) {
-        // Metadata tuple format: <max_distance, data_page_id>
-        // Data page ID is in the second field
-
-        // Metadata tuple format: <max_distance, data_page_id>
-        // Data page ID is in the second field (field index 1)
-        byte[] data = tuple.getFieldData(1); // Returns entire buffer
-        int offset = tuple.getFieldStart(1); // Offset to field 1 within buffer
-
-        // FIXED: Use IntegerPointable to extract 4-byte integer (not 8-byte long)
-        return IntegerPointable.getInteger(data, offset);
-    }
-
-    /**
      * Close current data page if open.
      */
     private void closeCurrentPage() throws HyracksDataException {
@@ -316,119 +287,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             throw new IllegalStateException("Data frame factory not set");
         }
         return (IVectorClusteringDataFrame) dataFrameFactory.createFrame();
-    }
-
-    /**
-     * Find the closest cluster by traversing the tree from root to leaf.
-     * This integrates the centroid finding logic into the cursor.
-     */
-    private ClusterSearchResult findClosestClusterFromRoot(float[] queryVector) throws HyracksDataException {
-        // Start from root page
-        int currentPageId = rootPageId;
-        double bestDistance = Double.MAX_VALUE;
-        ClusterSearchResult bestResult = null;
-        int loopCounter = 0;
-
-        // Traverse from root to leaf
-        while (true) {
-            loopCounter++;
-            if (loopCounter > 10) { // Safety check to prevent infinite loops
-                throw HyracksDataException
-                        .create(new IllegalStateException("Infinite loop detected in tree traversal"));
-            }
-
-            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
-
-            try {
-                page.acquireReadLatch();
-
-                // Check if this is a leaf page
-                IVectorClusteringLeafFrame leafFrame = createLeafFrame();
-                leafFrame.setPage(page);
-                boolean isLeaf = leafFrame.isLeaf();
-
-                if (isLeaf) {
-                    // Leaf level - find closest centroid
-                    int tupleCount = leafFrame.getTupleCount();
-                    int bestClusterIndex = -1;
-                    double leafBestDistance = Double.MAX_VALUE;
-
-                    for (int i = 0; i < tupleCount; i++) {
-                        // Get centroid from leaf frame tuple
-                        ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(leafFrame, i);
-                        double[] centroid = extractCentroidFromLeafTuple(frameTuple);
-
-                        // Check vector dimensionality
-                        if (centroid.length != queryVector.length) {
-                            continue;
-                        }
-
-                        double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-
-                        if (distance < leafBestDistance) {
-                            leafBestDistance = distance;
-                            bestClusterIndex = i;
-                        }
-                    }
-
-                    if (bestClusterIndex >= 0) {
-                        ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(leafFrame, bestClusterIndex);
-                        double[] bestCentroid = extractCentroidFromLeafTuple(frameTuple);
-                        bestResult = new ClusterSearchResult(currentPageId, bestClusterIndex, bestCentroid,
-                                leafBestDistance, 0);
-                    }
-                    break; // Found leaf level result
-
-                } else {
-                    // Interior level - find closest centroid and descend
-                    IVectorClusteringInteriorFrame interiorFrame = createInteriorFrame();
-                    interiorFrame.setPage(page);
-                    int tupleCount = interiorFrame.getTupleCount();
-                    int bestChildIndex = -1;
-                    bestDistance = Double.MAX_VALUE;
-
-                    for (int i = 0; i < tupleCount; i++) {
-                        // Get centroid from interior frame tuple
-                        ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(interiorFrame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-
-                        // Check vector dimensionality
-                        if (centroid.length != queryVector.length) {
-                            continue;
-                        }
-
-                        double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestChildIndex = i;
-                        }
-                    }
-
-                    if (bestChildIndex >= 0) {
-                        // Get child page ID for best centroid
-                        int nextPageId = interiorFrame.getChildPageId(bestChildIndex);
-                        currentPageId = nextPageId;
-                    } else {
-                        throw HyracksDataException
-                                .create(new IllegalStateException("No valid centroid found in interior page"));
-                    }
-                }
-
-            } finally {
-                page.releaseReadLatch();
-                bufferCache.unpin(page);
-            }
-        }
-
-        if (bestResult == null) {
-            throw HyracksDataException.create(new IllegalStateException("No closest cluster found"));
-        }
-
-        return bestResult;
     }
 
     /**
@@ -462,70 +320,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             throw new IllegalStateException("Leaf frame factory not set");
         }
         return (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
-    }
-
-    /**
-     * Extract centroid from a leaf frame tuple (format: <cid, centroid, metadata_ptr>).
-     */
-    private double[] extractCentroidFromLeafTuple(ITreeIndexTupleReference tuple) {
-        // Centroid is the second field in leaf frame tuples
-        try {
-            // Create field serializers array - specify only the centroid field we need
-            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
-            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-            fieldSerdes[1] = FloatArraySerializerDeserializer.INSTANCE; // Field 1: centroid
-            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
-
-            // Deserialize the tuple using the proper TupleUtils method
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-
-            // Extract the centroid from the deserialized fields
-            float[] floatCentroid = (float[]) fieldValues[1];
-
-            // Convert from float[] to double[]
-            double[] doubleCentroid = new double[floatCentroid.length];
-            for (int i = 0; i < floatCentroid.length; i++) {
-                doubleCentroid[i] = floatCentroid[i];
-            }
-
-            return doubleCentroid;
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
-        }
-    }
-
-    /**
-     * Extract centroid from an interior frame tuple (format: <cid, centroid, child_ptr>).
-     */
-    private double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
-        // Centroid is the second field in interior frame tuples
-        try {
-            // Create field serializers array - specify only the centroid field we need
-            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
-            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-            fieldSerdes[1] = FloatArraySerializerDeserializer.INSTANCE; // Field 1: centroid
-            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
-
-            // Deserialize the tuple using the proper TupleUtils method
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-
-            // Extract the centroid from the deserialized fields
-            float[] floatCentroid = (float[]) fieldValues[1];
-
-            // Convert from float[] to double[]
-            double[] doubleCentroid = new double[floatCentroid.length];
-            for (int i = 0; i < floatCentroid.length; i++) {
-                doubleCentroid[i] = floatCentroid[i];
-            }
-
-            return doubleCentroid;
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
-        }
     }
 
     @Override

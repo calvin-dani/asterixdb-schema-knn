@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
@@ -73,6 +75,8 @@ import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.util.trace.ITracer;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * LSM Vector Clustering Tree implementation for hierarchical vector clustering with LSM storage.
@@ -81,6 +85,7 @@ import org.apache.hyracks.util.trace.ITracer;
  * 
  */
 public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private static final ICursorFactory cursorFactory = LSMVCTreeSearchCursor::new;
     private static final ICursorFactory annCursorFactory = LSMVCTreeAnnCursor::new;
@@ -442,6 +447,14 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         return mutableComponent.getIndex().getInteriorFrameFactory();
     }
 
+    public ITreeIndexFrameFactory getMetadataFrameFactory() {
+        return metadataFrameFactory;
+    }
+
+    public ITreeIndexFrameFactory getDataFrameFactory() {
+        return dataFrameFactory;
+    }
+
     @Override
     public int getFieldCount() {
         LSMVCTreeMemoryComponent mutableComponent =
@@ -528,8 +541,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         if (ssFileRefeference == null) {
             return;
         }
-        ILSMDiskComponent ssComponent = createStaticStructure(componentFactory,
-                ssFileRefeference.getStaticStructureFileReference(), null, null, false);
+        ILSMDiskComponent ssComponent = createStaticStructure(componentFactory, ssFileRefeference.getStaticStructureFileReference(),
+                null, null, false);
         setStaticStructure((LSMVCTreeDiskComponent) ssComponent);
     }
 

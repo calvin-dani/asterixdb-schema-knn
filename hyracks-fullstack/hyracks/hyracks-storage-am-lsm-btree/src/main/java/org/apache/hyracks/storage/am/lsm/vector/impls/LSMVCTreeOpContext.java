@@ -46,7 +46,9 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
             IBinaryComparatorFactory[] filterCmpFactories, IExtendedModificationOperationCallback modificationCallback,
             ISearchOperationCallback searchCallback, ITracer tracer) {
         super(lsmTree, treeFields, filterFields, filterCmpFactories, searchCallback, modificationCallback, tracer);
-        this.searchInitialState = null; // Will be created when needed
+        this.searchInitialState = new LSMVCTreeCursorInitialState(lsmTree.getInteriorFrameFactory(),
+                lsmTree.getLeafFrameFactory(), lsmTree.getMetadataFrameFactory(), lsmTree.getDataFrameFactory(), null,
+                lsmTree.getHarness(), null, searchCallback, componentHolder);
     }
 
     @Override
