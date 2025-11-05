@@ -25,6 +25,7 @@ import java.util.List;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
@@ -67,7 +68,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private ITreeIndexTupleWriter dataFrameTupleWriter;
     private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
-
+    private int currentCentroidId;
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             ISerializerDeserializer[] dataFrameSerds, ITreeIndexAccessor staticAccessor) throws HyracksDataException {
@@ -86,7 +87,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
-
+        this.currentCentroidId = -1;
         VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor1 =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
         VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
@@ -233,7 +234,11 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private double[] extractVector(ITupleReference tuple) throws HyracksDataException {
         // Assuming the vector is stored in the second field of the tuple
         Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
-        return (double[]) fieldValues[1];
+        return (double[]) fieldValues[2];
+    }
+
+    private int extractCentroidId(ITupleReference tuple) throws HyracksDataException {
+        return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1)+1);
     }
 
     /**
@@ -241,7 +246,18 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
-        extractVector(tuple); // just to verify tuple format
+        int tupleCentroidId = extractCentroidId(tuple); // just to verify tuple format
+        if(currentCentroidId == -1) {
+            // First tuple being added
+            LOGGER.debug("Starting bulk load with first centroid cluster: {}", tupleCentroidId);
+            currentCentroidId = tupleCentroidId;
+        }
+        else if (currentCentroidId != tupleCentroidId) {
+            // Moved to a new centroid cluster
+            LOGGER.debug("Switching to new centroid cluster: {}", tupleCentroidId);
+            currentCentroidId = tupleCentroidId;
+            loadToNextLeafCluster();
+        }
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
             createNewDataPage();

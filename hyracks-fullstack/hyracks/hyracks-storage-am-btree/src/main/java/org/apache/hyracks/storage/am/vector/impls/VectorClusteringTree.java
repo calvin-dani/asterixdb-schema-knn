@@ -140,11 +140,24 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
             ITreeIndexAccessor static_accessor) throws HyracksDataException {
-        ISerializerDeserializer[] dataFrameSerds = new ISerializerDeserializer[4];
-        dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
-        dataFrameSerds[1] = IntegerSerializerDeserializer.INSTANCE; // cosine similarity
-        dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
-        dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
+        return createComponentBulkLoader(instance, static_accessor, null);
+    }
+
+    public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
+            ITreeIndexAccessor static_accessor, ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
+        @SuppressWarnings("rawtypes")
+        ISerializerDeserializer[] dataFrameSerds;
+        if (dataFrameSerdes != null && dataFrameSerdes.length > 0) {
+            // Use provided serializers from RecordDescriptor
+            dataFrameSerds = dataFrameSerdes;
+        } else {
+            // Fallback to hardcoded serializers for backward compatibility
+            dataFrameSerds = new ISerializerDeserializer[4];
+            dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
+            dataFrameSerds[1] = IntegerSerializerDeserializer.INSTANCE; // cosine similarity
+            dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
+            dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
+        }
         return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
                 DefaultBufferCacheWriteContext.INSTANCE, dataFrameSerds, static_accessor);
     }

@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
@@ -110,7 +111,15 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
         System.err.println("=== LSMVCTreeDiskComponent.createBulkLoader ===");
         System.err.println("Operation type: " + operation.getIOOperationType());
-        System.err.println("Parameters: " + operation.getParameters());
+        Map<String, Object> allParams = operation.getParameters();
+        System.err.println("Parameters: " + allParams);
+        System.err.println("Parameters keys: " + (allParams != null ? allParams.keySet() : "null"));
+        if (allParams != null && allParams.containsKey("dataFrameSerdes")) {
+            System.err.println("  - dataFrameSerdes key found in parameters!");
+            System.err.println("  - dataFrameSerdes value type: " + allParams.get("dataFrameSerdes").getClass().getName());
+        } else {
+            System.err.println("  - dataFrameSerdes key NOT found in parameters");
+        }
 
         ChainedLSMDiskComponentBulkLoader chainedBulkLoader =
                 new ChainedLSMDiskComponentBulkLoader(operation, this, cleanupEmptyComponent);
@@ -220,13 +229,36 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         System.err.println("  - centroidsPerCluster: " + centroidsPerCluster);
         System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
         System.err.println("  - fillFactor: " + fillFactor);
+        
+        // Extract dataFrameSerdes from parameters if available (for RecordDescriptor support)
+        @SuppressWarnings("rawtypes")
+        ISerializerDeserializer[] dataFrameSerdes = null;
+        Object serdesObj = parameters.get("dataFrameSerdes");
+        System.err.println("  - Checking for dataFrameSerdes in parameters: " + (serdesObj != null ? "found" : "not found"));
+        if (serdesObj != null) {
+            System.err.println("  - dataFrameSerdes type: " + serdesObj.getClass().getName());
+        }
+        if (serdesObj instanceof ISerializerDeserializer[]) {
+            dataFrameSerdes = (ISerializerDeserializer[]) serdesObj;
+            System.err.println("  - Using RecordDescriptor serializers (count: " + dataFrameSerdes.length + ")");
+        } else {
+            System.err.println("  - Using default hardcoded serializers");
+            if (serdesObj != null) {
+                System.err.println("  - WARNING: dataFrameSerdes found but wrong type: " + serdesObj.getClass().getName());
+            }
+        }
+        
         LSMVCTreeDiskComponent staticComponent = parameters.getOrDefault("static_structure_component", null) instanceof LSMVCTreeDiskComponent comp ? comp : null;
+        if (staticComponent == null) {
+            throw new HyracksDataException("static_structure_component must be provided in parameters for data loading");
+        }
         ITreeIndexAccessor staticAccessor = staticComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
         try {
 
             // Create VCTreeStaticStructureLoader with real structure
-            IIndexBulkLoader builder = getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE,staticAccessor );
+            IIndexBulkLoader builder = getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE,
+                    staticAccessor, dataFrameSerdes);
             // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
             return new LSMIndexBulkLoader(builder);
 

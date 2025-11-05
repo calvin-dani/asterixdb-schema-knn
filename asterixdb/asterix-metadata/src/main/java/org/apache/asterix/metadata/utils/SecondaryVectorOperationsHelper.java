@@ -375,8 +375,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 5. LSMIndexBulkLoadOperatorDescriptor - Load sorted tuples into VCTree index
         System.err.println("🔧 CREATING LSMIndexBulkLoadOperatorDescriptor for data loading");
 
-        // Create field permutation: skip distance(0) and centroidId(1), map fields 2+ to secondaryRecDesc
-        int[] fieldPermutation = createFieldPermutationForSortedDataBulkLoad();
+        // Create field permutation: include all fields in same order (identity permutation)
+        int[] fieldPermutation = createFieldPermutationForSortedDataBulkLoad(outputRecDesc);
 
         // Create primary key fields array for partitioner (numSecondaryKeys already defined above)
         int[] pkFields = createPkFieldsForBulkLoadOp(fieldPermutation, numSecondaryKeys);
@@ -652,24 +652,26 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     /**
      * Create field permutation for sorted data bulk load operation.
-     * Maps from outputRecDesc format [distance(0), centroidId(1), ...secondaryRecDesc...] 
-     * to secondaryRecDesc format by skipping distance and centroidId fields.
+     * Creates identity permutation that includes all fields from outputRecDesc in the same order.
+     * outputRecDesc format: [distance(0), centroidId(1), ...secondaryRecDesc fields(2+)...]
      * 
-     * @return fieldPermutation array mapping input fields 2+ to output fields 0+
+     * @param outputRecDesc the output record descriptor containing all fields
+     * @return fieldPermutation array mapping input fields to output fields in same order (identity)
      */
-    private int[] createFieldPermutationForSortedDataBulkLoad() {
-        int numFields = secondaryRecDesc.getFieldCount();
+    private int[] createFieldPermutationForSortedDataBulkLoad(RecordDescriptor outputRecDesc) {
+        int numFields = outputRecDesc.getFieldCount();
         int[] fieldPermutation = new int[numFields];
-        // Skip distance(0) and centroidId(1), map fields 2+ to output fields 0+
+        // Identity permutation: include all fields in same order
         for (int i = 0; i < numFields; i++) {
-            fieldPermutation[i] = 2 + i;
+            fieldPermutation[i] = i;
         }
         return fieldPermutation;
     }
 
     /**
      * Create primary key fields array for bulk load operation partitioner.
-     * Primary keys are located at the end of secondaryRecDesc after secondary keys.
+     * Primary keys are located in outputRecDesc after distance(0), centroidId(1), and secondary keys.
+     * outputRecDesc format: [distance(0), centroidId(1), ...secondaryKeys(2 to 2+numSecondaryKeys-1), ...primaryKeys(2+numSecondaryKeys to 2+numSecondaryKeys+numPrimaryKeys-1), ...filterFields...]
      * 
      * @param fieldPermutation the field permutation array
      * @param numSecondaryKeys number of secondary key fields
@@ -677,10 +679,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
      */
     private int[] createPkFieldsForBulkLoadOp(int[] fieldPermutation, int numSecondaryKeys) {
         int[] pkFields = new int[numPrimaryKeys];
-        // Primary keys start at index numSecondaryKeys in secondaryRecDesc
-        // In fieldPermutation, they map to fieldPermutation[numSecondaryKeys + i]
+        // Primary keys start at index 2 + numSecondaryKeys in outputRecDesc
+        // (accounting for distance at 0 and centroidId at 1)
+        // In identity permutation, they map to fieldPermutation[2 + numSecondaryKeys + i]
         for (int i = 0; i < numPrimaryKeys; i++) {
-            pkFields[i] = fieldPermutation[numSecondaryKeys + i];
+            pkFields[i] = fieldPermutation[2 + numSecondaryKeys + i];
         }
         return pkFields;
     }

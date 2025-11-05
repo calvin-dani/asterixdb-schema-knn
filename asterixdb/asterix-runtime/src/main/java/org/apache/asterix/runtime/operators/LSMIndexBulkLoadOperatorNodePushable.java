@@ -27,6 +27,7 @@ import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -121,6 +122,20 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
         }
         if (maxEntriesPerPage != null) {
             parameters.put("maxEntriesPerPage", maxEntriesPerPage);
+        }
+
+        // Add RecordDescriptor serializers for VCTree bulk loading (only for data loading, not static structure creation)
+        if (usage.equals(BulkLoadUsage.LOAD) && recDesc != null) {
+            @SuppressWarnings("rawtypes")
+            ISerializerDeserializer[] dataFrameSerdes = recDesc.getFields();
+            if (dataFrameSerdes != null && dataFrameSerdes.length > 0) {
+                parameters.put("dataFrameSerdes", dataFrameSerdes);
+                System.err.println("LSMIndexBulkLoadOperatorNodePushable: Added dataFrameSerdes to parameters (count: " + dataFrameSerdes.length + ")");
+            } else {
+                System.err.println("LSMIndexBulkLoadOperatorNodePushable: WARNING - recDesc.getFields() returned null or empty array");
+            }
+        } else {
+            System.err.println("LSMIndexBulkLoadOperatorNodePushable: Not adding dataFrameSerdes - usage=" + usage + ", recDesc=" + (recDesc != null ? "not null" : "null"));
         }
 
         if (usage.equals(BulkLoadUsage.LOAD)) {
