@@ -176,9 +176,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     protected VectorClusteringTreeAccessor createAccessor(ILSMComponent component, int index)
             throws HyracksDataException {
         VectorClusteringTree vcTree = (VectorClusteringTree) component.getIndex();
-        // Get iap from operation context instead of using cursor's default iap
-        LSMVCTreeOpContext vcOpCtx = (LSMVCTreeOpContext) opCtx;
-        return (VectorClusteringTreeAccessor) vcTree.createAccessor(vcOpCtx.getIndexAccessParameters());
+        return (VectorClusteringTreeAccessor) vcTree.createAccessor(iap);
     }
 
     /**
@@ -366,8 +364,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     }
 
     @Override
-    protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB)
-            throws HyracksDataException {
+    protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB) throws HyracksDataException {
         // For vector index: compare by distance (first field)
         // This ensures results are sorted by distance (nearest first)
         return cmp.compare(tupleA, tupleB);

@@ -23,16 +23,16 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
+import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
-import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.util.trace.ITracer;
 
 /**
  * Operation context for LSM Vector Clustering Tree operations.
- *
+ * 
  * This context manages the state and resources needed for vector clustering
  * operations across multiple LSM components.
  */
@@ -41,13 +41,11 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
     private LSMVCTreeCursorInitialState searchInitialState;
     private ISearchPredicate searchPredicate;
     private int currentMutableComponentId = 0;
-    private final IIndexAccessParameters iap;
 
     public LSMVCTreeOpContext(LSMVCTree lsmTree, int[] treeFields, int[] filterFields,
             IBinaryComparatorFactory[] filterCmpFactories, IExtendedModificationOperationCallback modificationCallback,
-            ISearchOperationCallback searchCallback, ITracer tracer, IIndexAccessParameters iap) {
+            ISearchOperationCallback searchCallback, ITracer tracer) {
         super(lsmTree, treeFields, filterFields, filterCmpFactories, searchCallback, modificationCallback, tracer);
-        this.iap = iap;
         this.searchInitialState = new LSMVCTreeCursorInitialState(lsmTree.getInteriorFrameFactory(),
                 lsmTree.getLeafFrameFactory(), lsmTree.getMetadataFrameFactory(), lsmTree.getDataFrameFactory(), null,
                 lsmTree.getHarness(), null, searchCallback, componentHolder);
@@ -101,18 +99,12 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
     }
 
     /**
-     * Gets the index access parameters.
-     */
-    public IIndexAccessParameters getIndexAccessParameters() {
-        return iap;
-    }
-
-    /**
      * Gets the accessor for the current mutable VectorClusteringTree component.
      */
     public ITreeIndexAccessor getCurrentMutableVCTreeAccessor() throws HyracksDataException {
         LSMVCTree lsmVCTree = (LSMVCTree) getIndex();
         LSMVCTreeMemoryComponent memComponent = (LSMVCTreeMemoryComponent) lsmVCTree.getCurrentMemoryComponent();
+        IndexAccessParameters iap = new IndexAccessParameters(getModificationCallback(), getSearchOperationCallback());
         return memComponent.getIndex().createAccessor(iap);
     }
 }

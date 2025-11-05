@@ -1489,8 +1489,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     if (factory != null) {
                         // Create accessor and extract vector from tuple
                         IVectorBinaryAccessor accessor = factory.createAccessor();
-                        accessor.reset(queryTuple.getFieldData(queryFieldIndex),
-                                queryTuple.getFieldStart(queryFieldIndex), queryTuple.getFieldLength(queryFieldIndex));
+                        accessor.reset(
+                            queryTuple.getFieldData(queryFieldIndex),
+                            queryTuple.getFieldStart(queryFieldIndex),
+                            queryTuple.getFieldLength(queryFieldIndex)
+                        );
                         queryVector = accessor.getVector();
                     }
                 }
