@@ -42,7 +42,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * File manager for LSM Vector Clustering Trees.
- * 
+ *
  * This class manages the files associated with LSM Vector Clustering Tree components,
  * including naming conventions, file creation, and cleanup operations for both
  * in-memory and disk components.
@@ -51,7 +51,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private static final String VCTREE_SUFFIX = "_vct";
-    private static final String STATIC_STRUCTURE_SUFFIX = ".static_structure_vctree";
+    private static final String STATIC_STRUCTURE_SUFFIX = ".staticstructure";
     private static final String MASK_FILE_PREFIX = ".";
 
     private final TreeIndexFactory<? extends ITreeIndex> vcTreeFactory;
@@ -60,7 +60,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
             (dir, name) -> !name.startsWith(".") && name.endsWith(VCTREE_SUFFIX);
 
     public LSMVCTreeFileManager(IIOManager ioManager, FileReference file,
-            TreeIndexFactory<? extends ITreeIndex> vcTreeFactory) {
+                                TreeIndexFactory<? extends ITreeIndex> vcTreeFactory) {
         super(ioManager, file, null);
         this.vcTreeFactory = vcTreeFactory;
     }
@@ -91,20 +91,22 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         // Sort all files
         Collections.sort(allVCTreeFiles);
 
-        // Process each VCTree file and validate its corresponding .static_structure_vctree file
-        for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
-            String baseName = vcTreeFile.getSequence();
-            FileReference staticStructureFile = baseDir.getChild(baseName + DELIMITER + STATIC_STRUCTURE_SUFFIX);
-
-            // Validate .static_structure_vctree file exists and is valid
-            if (validateStaticStructureFile(staticStructureFile)) {
-                LOGGER.debug("Valid VCTree component found: {} with .static_structure_vctree", baseName);
-                validFiles.add(new LSMComponentFileReferences(vcTreeFile.getFileRef(), null, staticStructureFile));
-            } else {
-                LOGGER.warn("Invalid or missing .static_structure_vctree file for VCTree component: {}", baseName);
-                // Clean up orphaned VCTree file if .static_structure_vctree is missing
+        // Validate the single shared static structure file (one per index, not per component)
+        FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
+        if (!validateStaticStructureFile(staticStructureFile)) {
+            LOGGER.warn("Invalid or missing shared .staticstructure file: {}", staticStructureFile.getAbsolutePath());
+            // Clean up all VCTree files since they can't work without the static structure
+            for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
                 cleanupOrphanedVCTreeFile(vcTreeFile.getFileRef());
             }
+            return validFiles; // Return empty list
+        }
+
+        // Process each VCTree file - all share the same static structure
+        for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
+            String baseName = vcTreeFile.getSequence();
+            LOGGER.debug("Valid VCTree component found: {} (using shared .staticstructure)", baseName);
+            validFiles.add(new LSMComponentFileReferences(vcTreeFile.getFileRef(), null, staticStructureFile));
         }
 
         return validFiles;
@@ -116,10 +118,26 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
+     * Validates and returns the shared static structure file reference.
+     * The static structure is shared across all LSM components and contains
+     * the hierarchical k-means clustering metadata.
+     *
+     * @return LSMVCTreeComponentFileReferences with only the static structure, or null if invalid
+     * @throws HyracksDataException if validation fails
+     */
+    public LSMVCTreeComponentFileReferences getStaticStructureFileReference() throws HyracksDataException {
+        FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
+        if (validateStaticStructureFile(staticStructureFile)) {
+            return new LSMVCTreeComponentFileReferences(null, null, null, staticStructureFile);
+        }
+        return null;
+    }
+
+    /**
      * Validates that there are no invalid files in the directory.
      */
     private void validateFiles(java.io.File dir, FilenameFilter filter, List<IndexComponentFileReference> files,
-            HashSet<String> reported, TreeIndexFactory<? extends ITreeIndex> factory) throws HyracksDataException {
+                               HashSet<String> reported, TreeIndexFactory<? extends ITreeIndex> factory) throws HyracksDataException {
 
         String[] fileNames = dir.list(filter);
         if (fileNames == null) {
@@ -134,9 +152,9 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
-     * Validates that a .static_structure_vctree file exists and is valid.
-     * 
-     * @param staticStructureFile The .static_structure_vctree file to validate
+     * Validates that a .staticstructure file exists and is valid.
+     *
+     * @param staticStructureFile The .staticstructure file to validate
      * @return true if the file exists and is valid, false otherwise
      */
     private boolean validateStaticStructureFile(FileReference staticStructureFile) {
@@ -147,38 +165,38 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
                 return false;
             }
 
-            // Check for mask file (indicates incomplete write)
-            FileReference maskFile = getMaskFile(staticStructureFile);
-            if (ioManager.exists(maskFile)) {
-                LOGGER.debug("Static structure file is being written (mask file exists): {}",
-                        maskFile.getAbsolutePath());
-                return false;
-            }
-
-            // Validate JSON structure by attempting to read it
-            byte[] data = ioManager.readAllBytes(staticStructureFile);
-            if (data == null || data.length == 0) {
-                LOGGER.debug("Static structure file is empty: {}", staticStructureFile.getAbsolutePath());
-                return false;
-            }
-
-            // Parse JSON to validate structure
-            ObjectMapper mapper = new ObjectMapper();
-            @SuppressWarnings("unchecked")
-            Map<String, Object> structureData = mapper.readValue(data, Map.class);
-
-            if (structureData == null) {
-                LOGGER.debug("Static structure file is invalid JSON: {}", staticStructureFile.getAbsolutePath());
-                return false;
-            }
-
-            // Validate required fields
-            if (!structureData.containsKey("numLevels") || !structureData.containsKey("levelDistribution")
-                    || !structureData.containsKey("clusterDistribution")) {
-                LOGGER.debug("Static structure file missing required fields: {}",
-                        staticStructureFile.getAbsolutePath());
-                return false;
-            }
+//            // Check for mask file (indicates incomplete write)
+//            FileReference maskFile = getMaskFile(staticStructureFile);
+//            if (ioManager.exists(maskFile)) {
+//                LOGGER.debug("Static structure file is being written (mask file exists): {}",
+//                        maskFile.getAbsolutePath());
+//                return false;
+//            }
+//
+//            // Validate JSON structure by attempting to read it
+//            byte[] data = ioManager.readAllBytes(staticStructureFile);
+//            if (data == null || data.length == 0) {
+//                LOGGER.debug("Static structure file is empty: {}", staticStructureFile.getAbsolutePath());
+//                return false;
+//            }
+//
+//            // Parse JSON to validate structure
+//            ObjectMapper mapper = new ObjectMapper();
+//            @SuppressWarnings("unchecked")
+//            Map<String, Object> structureData = mapper.readValue(data, Map.class);
+//
+//            if (structureData == null) {
+//                LOGGER.debug("Static structure file is invalid JSON: {}", staticStructureFile.getAbsolutePath());
+//                return false;
+//            }
+//
+//            // Validate required fields
+//            if (!structureData.containsKey("numLevels") || !structureData.containsKey("levelDistribution")
+//                    || !structureData.containsKey("clusterDistribution")) {
+//                LOGGER.debug("Static structure file missing required fields: {}",
+//                        staticStructureFile.getAbsolutePath());
+//                return false;
+//            }
 
             LOGGER.debug("Static structure file is valid: {}", staticStructureFile.getAbsolutePath());
             return true;
@@ -191,9 +209,9 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
-     * Gets the mask file for a .static_structure_vctree file.
-     * 
-     * @param staticStructureFile The .static_structure_vctree file
+     * Gets the mask file for a .staticstructure file.
+     *
+     * @param staticStructureFile The .staticstructure file
      * @return The corresponding mask file
      */
     private FileReference getMaskFile(FileReference staticStructureFile) {
@@ -202,8 +220,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     }
 
     /**
-     * Cleans up an orphaned VCTree file when its .static_structure_vctree file is missing or invalid.
-     * 
+     * Cleans up an orphaned VCTree file when its .staticstructure file is missing or invalid.
+     *
      * @param vcTreeFile The orphaned VCTree file to clean up
      */
     private void cleanupOrphanedVCTreeFile(FileReference vcTreeFile) {
