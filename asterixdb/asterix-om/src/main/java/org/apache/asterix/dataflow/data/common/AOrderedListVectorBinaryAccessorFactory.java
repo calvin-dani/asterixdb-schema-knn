@@ -25,6 +25,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Factory for creating AOrderedListVectorBinaryAccessor instances.

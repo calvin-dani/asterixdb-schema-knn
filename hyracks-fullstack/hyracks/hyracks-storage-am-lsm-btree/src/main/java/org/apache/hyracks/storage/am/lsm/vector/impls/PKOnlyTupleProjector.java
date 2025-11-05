@@ -37,8 +37,8 @@ import org.apache.hyracks.storage.common.projection.ITupleProjector;
  */
 public class PKOnlyTupleProjector implements ITupleProjector {
 
-    private final int numSecondaryKeys; // Number of fields to skip
-    private final int numPrimaryKeys; // Number of PK fields to write
+    private final int numSecondaryKeys;  // Number of fields to skip
+    private final int numPrimaryKeys;    // Number of PK fields to write
 
     public PKOnlyTupleProjector(int numSecondaryKeys, int numPrimaryKeys) {
         this.numSecondaryKeys = numSecondaryKeys;
