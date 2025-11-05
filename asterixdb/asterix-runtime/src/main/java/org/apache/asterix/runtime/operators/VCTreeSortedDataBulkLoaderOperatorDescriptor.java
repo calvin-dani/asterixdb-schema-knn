@@ -64,7 +64,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.SynchronousSchedulerProvid
 import org.apache.hyracks.storage.am.lsm.common.impls.ThreadCountingTracker;
 import org.apache.hyracks.storage.am.lsm.common.impls.VirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
-import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
@@ -144,7 +143,9 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
         private final int[] filterFields;
         private final boolean durable;
         private LSMVCTree lsmvcTree;
-        private LSMVCTreeBulkLoader bulkLoader;
+        // TODO: Migrate to use VCTreeBulkLoadOperatorDescriptor instead of manual bulk loader management
+        // private LSMVCTreeBulkLoader bulkLoader; // Deprecated - use VCTreeBulkLoadOperatorDescriptor
+        private org.apache.hyracks.storage.common.IIndexBulkLoader bulkLoader;
 
         // Centroid tracking state
         private int currentCentroidId = -1;
@@ -364,10 +365,11 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     if (currentCentroidId != -1) {
                         logCentroidSummary(currentCentroidId, tupleCountForCurrentCentroid);
                     }
-                    // TODO CALVIN DANI: to call bulkload.nextcentroid()
-                    if (!first) {
-                        bulkLoader.next();
-                    }
+                    // TODO: For centroid transitions, use VCTreeBulkLoadOperatorDescriptor which handles this automatically
+                    // The new VCTreeBulkLoadOperatorDescriptor detects centroid changes and calls loadToNextLeafCluster()
+                    // if (bulkLoader instanceof VCTreeBulkLoader) {
+                    //     ((VCTreeBulkLoader) bulkLoader).loadToNextLeafCluster();
+                    // }
                     first = false;
                     // Reset for new centroid
                     currentCentroidId = centroidId;

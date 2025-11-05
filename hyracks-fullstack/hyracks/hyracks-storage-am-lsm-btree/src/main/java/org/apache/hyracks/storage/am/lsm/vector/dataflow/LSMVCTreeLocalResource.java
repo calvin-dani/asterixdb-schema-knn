@@ -123,10 +123,10 @@ public class LSMVCTreeLocalResource extends LsmResource {
 
     public static IJsonSerializable fromJson(IPersistedResourceRegistry registry, JsonNode json)
             throws HyracksDataException {
-//        int vectorDimensions = json.get("vectorDimensions").asInt();
-//        int[] vectorFields = OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class);
-//        int[] filterFields = OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class);
-//        boolean atomic = json.get("atomic").asBoolean();
+        //        int vectorDimensions = json.get("vectorDimensions").asInt();
+        //        int[] vectorFields = OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class);
+        //        int[] filterFields = OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class);
+        //        boolean atomic = json.get("atomic").asBoolean();
         return new LSMVCTreeLocalResource(registry, json, 748, null, null, false);
     }
 }

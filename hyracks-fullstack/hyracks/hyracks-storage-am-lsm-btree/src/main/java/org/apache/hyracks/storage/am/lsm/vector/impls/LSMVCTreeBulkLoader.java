@@ -29,6 +29,22 @@ import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoade
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 
+/**
+ * @deprecated This class is obsolete and not used in the current implementation.
+ * The bulk loading functionality is now provided by:
+ * <ul>
+ * <li>VCTreeBulkLoader - actual bulk loader implementation</li>
+ * <li>LSMIndexBulkLoader - wrapper that adapts VCTreeBulkLoader to IChainedComponentBulkLoader</li>
+ * <li>LSMVCTreeDiskComponent.createBulkLoader() - creates the bulk loader chain</li>
+ * </ul>
+ * 
+ * Use LSMIndexBulkLoadOperatorDescriptor with IIndexDataflowHelperFactory instead.
+ * The bulk loader chain is automatically created by LSMVCTreeDiskComponent.createBulkLoader().
+ * 
+ * @see org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent#createBulkLoader
+ * @see org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor
+ */
+@Deprecated
 public class LSMVCTreeBulkLoader implements IChainedComponentBulkLoader {
     private final LSMVCTree lsmvcTree;
     //    private final VCTreeBulkLoader bulkLoader;

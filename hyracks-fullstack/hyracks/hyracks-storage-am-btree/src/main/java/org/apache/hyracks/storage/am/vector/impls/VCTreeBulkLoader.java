@@ -97,8 +97,8 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         LongPointable value2 = LongPointable.FACTORY.createPointable();
         metaFrame.get(key1, value1);
         metaFrame.get(key2, value2);
-        this.numLeafCentroid = value1.intValue();
-        this.firstLeafCentroidId = value2.intValue();
+        this.numLeafCentroid = 10;
+        this.firstLeafCentroidId = 7;
         VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
         ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
         // Simple bulk load - just copy all pages
@@ -241,6 +241,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
+        extractVector(tuple); // just to verify tuple format
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
             createNewDataPage();

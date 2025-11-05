@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
@@ -37,8 +36,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileRefe
 import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * File manager for LSM Vector Clustering Trees.
@@ -60,7 +57,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
             (dir, name) -> !name.startsWith(".") && name.endsWith(VCTREE_SUFFIX);
 
     public LSMVCTreeFileManager(IIOManager ioManager, FileReference file,
-                                TreeIndexFactory<? extends ITreeIndex> vcTreeFactory) {
+            TreeIndexFactory<? extends ITreeIndex> vcTreeFactory) {
         super(ioManager, file, null);
         this.vcTreeFactory = vcTreeFactory;
     }
@@ -137,7 +134,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
      * Validates that there are no invalid files in the directory.
      */
     private void validateFiles(java.io.File dir, FilenameFilter filter, List<IndexComponentFileReference> files,
-                               HashSet<String> reported, TreeIndexFactory<? extends ITreeIndex> factory) throws HyracksDataException {
+            HashSet<String> reported, TreeIndexFactory<? extends ITreeIndex> factory) throws HyracksDataException {
 
         String[] fileNames = dir.list(filter);
         if (fileNames == null) {
@@ -165,38 +162,38 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
                 return false;
             }
 
-//            // Check for mask file (indicates incomplete write)
-//            FileReference maskFile = getMaskFile(staticStructureFile);
-//            if (ioManager.exists(maskFile)) {
-//                LOGGER.debug("Static structure file is being written (mask file exists): {}",
-//                        maskFile.getAbsolutePath());
-//                return false;
-//            }
-//
-//            // Validate JSON structure by attempting to read it
-//            byte[] data = ioManager.readAllBytes(staticStructureFile);
-//            if (data == null || data.length == 0) {
-//                LOGGER.debug("Static structure file is empty: {}", staticStructureFile.getAbsolutePath());
-//                return false;
-//            }
-//
-//            // Parse JSON to validate structure
-//            ObjectMapper mapper = new ObjectMapper();
-//            @SuppressWarnings("unchecked")
-//            Map<String, Object> structureData = mapper.readValue(data, Map.class);
-//
-//            if (structureData == null) {
-//                LOGGER.debug("Static structure file is invalid JSON: {}", staticStructureFile.getAbsolutePath());
-//                return false;
-//            }
-//
-//            // Validate required fields
-//            if (!structureData.containsKey("numLevels") || !structureData.containsKey("levelDistribution")
-//                    || !structureData.containsKey("clusterDistribution")) {
-//                LOGGER.debug("Static structure file missing required fields: {}",
-//                        staticStructureFile.getAbsolutePath());
-//                return false;
-//            }
+            //            // Check for mask file (indicates incomplete write)
+            //            FileReference maskFile = getMaskFile(staticStructureFile);
+            //            if (ioManager.exists(maskFile)) {
+            //                LOGGER.debug("Static structure file is being written (mask file exists): {}",
+            //                        maskFile.getAbsolutePath());
+            //                return false;
+            //            }
+            //
+            //            // Validate JSON structure by attempting to read it
+            //            byte[] data = ioManager.readAllBytes(staticStructureFile);
+            //            if (data == null || data.length == 0) {
+            //                LOGGER.debug("Static structure file is empty: {}", staticStructureFile.getAbsolutePath());
+            //                return false;
+            //            }
+            //
+            //            // Parse JSON to validate structure
+            //            ObjectMapper mapper = new ObjectMapper();
+            //            @SuppressWarnings("unchecked")
+            //            Map<String, Object> structureData = mapper.readValue(data, Map.class);
+            //
+            //            if (structureData == null) {
+            //                LOGGER.debug("Static structure file is invalid JSON: {}", staticStructureFile.getAbsolutePath());
+            //                return false;
+            //            }
+            //
+            //            // Validate required fields
+            //            if (!structureData.containsKey("numLevels") || !structureData.containsKey("levelDistribution")
+            //                    || !structureData.containsKey("clusterDistribution")) {
+            //                LOGGER.debug("Static structure file missing required fields: {}",
+            //                        staticStructureFile.getAbsolutePath());
+            //                return false;
+            //            }
 
             LOGGER.debug("Static structure file is valid: {}", staticStructureFile.getAbsolutePath());
             return true;

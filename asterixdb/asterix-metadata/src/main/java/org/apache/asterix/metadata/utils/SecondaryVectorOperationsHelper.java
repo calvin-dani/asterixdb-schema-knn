@@ -25,6 +25,7 @@ import static org.apache.asterix.om.types.BuiltinType.AINT32;
 import java.util.List;
 import java.util.UUID;
 
+import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
@@ -38,8 +39,9 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
+import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor;
+import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
 import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorDescriptor;
-import org.apache.asterix.runtime.operators.VCTreeSortedDataBulkLoaderOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -56,11 +58,14 @@ import org.apache.hyracks.algebricks.runtime.operators.base.SinkRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.meta.AlgebricksMetaOperatorDescriptor;
 import org.apache.hyracks.api.dataflow.IOperatorDescriptor;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
+import org.apache.hyracks.api.dataflow.value.IBinaryHashFunctionFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
+import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
@@ -367,25 +372,44 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
 
-        // 5. VCTreeSortedDataBulkLoaderOperatorDescriptor - Process sorted tuples and print first 5 per centroid
-        //        System.err.println("🔧 CREATING VCTreeSortedDataBulkLoaderOperatorDescriptor");
+        // 5. LSMIndexBulkLoadOperatorDescriptor - Load sorted tuples into VCTree index
+        System.err.println("🔧 CREATING LSMIndexBulkLoadOperatorDescriptor for data loading");
 
-        // Extract vector parameters from index details
-        int vectorDimensions = 784; // Default vector dimensions
-        int[] vectorFields = { 2 }; // Vector field is at index 2 (after centroidId and distance)
-        int[] filterFields = null; // No filter fields for now
-        boolean durable = true; // Default to durable
+        // Create field permutation: skip distance(0) and centroidId(1), map fields 2+ to secondaryRecDesc
+        int[] fieldPermutation = createFieldPermutationForSortedDataBulkLoad();
 
-        VCTreeSortedDataBulkLoaderOperatorDescriptor sortedBulkLoaderOp =
-                new VCTreeSortedDataBulkLoaderOperatorDescriptor(spec, outputRecDesc, dataflowHelperFactory, 0.7f,
-                        vectorDimensions, vectorFields, filterFields, durable);
+        // Create primary key fields array for partitioner (numSecondaryKeys already defined above)
+        int[] pkFields = createPkFieldsForBulkLoadOp(fieldPermutation, numSecondaryKeys);
+
+        // Get partitioning properties
+        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
+
+        // Create primary index helper factory (for secondary indexes, this may not be needed but required by interface)
+        IndexDataflowHelperFactory primaryIndexHelperFactory = new IndexDataflowHelperFactory(
+                metadataProvider.getStorageComponentProvider().getStorageManager(), primaryFileSplitProvider);
+
+        // Create partitioner factory using primary key hash functions
+        IBinaryHashFunctionFactory[] pkHashFunFactories = dataset.getPrimaryHashFunctionFactories(metadataProvider);
+        ITuplePartitionerFactory partitionerFactory = new FieldHashPartitionerFactory(pkFields, pkHashFunFactories,
+                partitioningProperties.getNumberOfPartitions());
+
+        // Create LSMIndexBulkLoadOperatorDescriptor for data loading
+        LSMIndexBulkLoadOperatorDescriptor sortedBulkLoaderOp = new LSMIndexBulkLoadOperatorDescriptor(spec,
+                outputRecDesc, // Use secondaryRecDesc, not outputRecDesc
+                fieldPermutation, 0.7f, // fillFactor
+                false, // verifyInput
+                numElementsHint, // numElementsHint
+                false, // checkIfEmptyIndex
+                dataflowHelperFactory, primaryIndexHelperFactory, BulkLoadUsage.LOAD, dataset.getDatasetId(), null,
+                // tupleFilterFactory
+                partitionerFactory, partitioningProperties.getComputeStorageMap());
         sortedBulkLoaderOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortedBulkLoaderOp,
                 primaryPartitionConstraint);
         targetOp = sortedBulkLoaderOp;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        System.err.println("Connected: Sort → SortedDataBulkLoader");
-        System.err.println("SortedDataBulkLoader operator: " + sortedBulkLoaderOp);
+        System.err.println("Connected: Sort → LSMIndexBulkLoad");
+        System.err.println("LSMIndexBulkLoad operator: " + sortedBulkLoaderOp);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
@@ -394,10 +418,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         SinkRuntimeFactory sinkRuntimeFactory = new SinkRuntimeFactory();
         sinkRuntimeFactory.setSourceLocation(sourceLoc);
         AlgebricksMetaOperatorDescriptor sinkOp = new AlgebricksMetaOperatorDescriptor(spec, 1, 0,
-                new IPushRuntimeFactory[] { sinkRuntimeFactory }, new RecordDescriptor[] { outputRecDesc });
+                new IPushRuntimeFactory[] { sinkRuntimeFactory }, new RecordDescriptor[] { secondaryRecDesc });
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sinkOp, primaryPartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, sinkOp, 0);
-        System.err.println("Connected: SortedDataBulkLoader → Sink");
+        System.err.println("Connected: LSMIndexBulkLoad → Sink");
         System.err.println("Sink operator: " + sinkOp);
         System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
 
@@ -408,12 +432,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
         System.err.println("Root operators added:");
         System.err.println("  Root: " + sinkOp
-                + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink)");
+                + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → LSMIndexBulkLoad → Sink)");
         System.err.println("=== DATA LOADING JOB CREATED ===");
         System.err.println(
-                "=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → SortedDataBulkLoader → Sink ===");
+                "=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → LSMIndexBulkLoad → Sink ===");
         System.err.println(
-                "=== DATA LOADING: Initializes bulk loader, groups data, sorts by centroidId/distance, processes sorted tuples ===");
+                "=== DATA LOADING: Groups data, sorts by centroidId/distance, loads into VCTree using LSM bulk loading infrastructure ===");
         System.err.println("==========================================");
         System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         System.err.println("==========================================");
@@ -624,5 +648,40 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             fieldPermutation[i] = i;
         }
         return fieldPermutation;
+    }
+
+    /**
+     * Create field permutation for sorted data bulk load operation.
+     * Maps from outputRecDesc format [distance(0), centroidId(1), ...secondaryRecDesc...] 
+     * to secondaryRecDesc format by skipping distance and centroidId fields.
+     * 
+     * @return fieldPermutation array mapping input fields 2+ to output fields 0+
+     */
+    private int[] createFieldPermutationForSortedDataBulkLoad() {
+        int numFields = secondaryRecDesc.getFieldCount();
+        int[] fieldPermutation = new int[numFields];
+        // Skip distance(0) and centroidId(1), map fields 2+ to output fields 0+
+        for (int i = 0; i < numFields; i++) {
+            fieldPermutation[i] = 2 + i;
+        }
+        return fieldPermutation;
+    }
+
+    /**
+     * Create primary key fields array for bulk load operation partitioner.
+     * Primary keys are located at the end of secondaryRecDesc after secondary keys.
+     * 
+     * @param fieldPermutation the field permutation array
+     * @param numSecondaryKeys number of secondary key fields
+     * @return array of field indices where primary keys are located
+     */
+    private int[] createPkFieldsForBulkLoadOp(int[] fieldPermutation, int numSecondaryKeys) {
+        int[] pkFields = new int[numPrimaryKeys];
+        // Primary keys start at index numSecondaryKeys in secondaryRecDesc
+        // In fieldPermutation, they map to fieldPermutation[numSecondaryKeys + i]
+        for (int i = 0; i < numPrimaryKeys; i++) {
+            pkFields[i] = fieldPermutation[numSecondaryKeys + i];
+        }
+        return pkFields;
     }
 }

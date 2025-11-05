@@ -142,7 +142,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ITreeIndexAccessor static_accessor) throws HyracksDataException {
         ISerializerDeserializer[] dataFrameSerds = new ISerializerDeserializer[4];
         dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
-        dataFrameSerds[1] = DoubleSerializerDeserializer.INSTANCE; // cosine similarity
+        dataFrameSerds[1] = IntegerSerializerDeserializer.INSTANCE; // cosine similarity
         dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
         dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
         return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
