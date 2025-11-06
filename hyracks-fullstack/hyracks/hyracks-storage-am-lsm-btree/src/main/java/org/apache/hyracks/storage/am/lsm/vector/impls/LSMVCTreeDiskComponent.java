@@ -29,6 +29,8 @@ import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilter;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
@@ -37,7 +39,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.am.vector.impls.VCTreeBulkLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -110,7 +111,16 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
         System.err.println("=== LSMVCTreeDiskComponent.createBulkLoader ===");
         System.err.println("Operation type: " + operation.getIOOperationType());
-        System.err.println("Parameters: " + operation.getParameters());
+        Map<String, Object> allParams = operation.getParameters();
+        System.err.println("Parameters: " + allParams);
+        System.err.println("Parameters keys: " + (allParams != null ? allParams.keySet() : "null"));
+        if (allParams != null && allParams.containsKey("dataFrameSerdes")) {
+            System.err.println("  - dataFrameSerdes key found in parameters!");
+            System.err.println(
+                    "  - dataFrameSerdes value type: " + allParams.get("dataFrameSerdes").getClass().getName());
+        } else {
+            System.err.println("  - dataFrameSerdes key NOT found in parameters");
+        }
 
         ChainedLSMDiskComponentBulkLoader chainedBulkLoader =
                 new ChainedLSMDiskComponentBulkLoader(operation, this, cleanupEmptyComponent);
@@ -125,17 +135,19 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         Map<String, Object> parameters = operation.getParameters();
         boolean isStaticStructureLoad = parameters.containsKey("numLevels")
                 && parameters.containsKey("clustersPerLevel") && parameters.containsKey("centroidsPerCluster");
-
+        boolean test = parameters.containsKey("static_structure_component");
         IChainedComponentBulkLoader indexBulkLoader;
         if (isStaticStructureLoad) {
+            // TODO : SEE IF THIS IS COMPATIBLE WITH EXISTING INFRA
             System.err.println("Creating VCTreeStaticStructureLoader with real structure parameters");
             indexBulkLoader = createVCTreeStaticStructureBulkLoader(storageConfig, operation, fillFactor, verifyInput,
                     numElementsHint, checkIfEmptyIndex, callback);
         } else {
-            System.err.println("ERROR: Static structure parameters not found - VCTree requires hierarchical structure");
-            System.err.println("Expected parameters: numLevels, clustersPerLevel, centroidsPerCluster");
-            System.err.println("Available parameters: " + parameters.keySet());
-            throw new HyracksDataException("VCTreeStaticStructureLoader requires hierarchical structure parameters");
+            // TODO : CREATE NORMAL BULK LOADER CALVIN
+            System.err.println("Creating VCTreeStaticStructureLoader with real structure parameters");
+            indexBulkLoader = createVCTreeBulkLoader(storageConfig, operation, fillFactor, verifyInput, numElementsHint,
+                    checkIfEmptyIndex, callback);
+
         }
 
         chainedBulkLoader.addBulkLoader(indexBulkLoader);
@@ -189,6 +201,75 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         }
     }
 
+    /**
+     * Creates a VCTreeStaticStructureLoader with real hierarchical structure parameters.
+     *
+     * This method extracts the structure information from the operation parameters
+     * and creates a VCTreeStaticStructureLoader configured with the actual
+     * hierarchical k-means structure.
+     */
+    private IChainedComponentBulkLoader createVCTreeBulkLoader(NCConfig storageConfig,
+                                                                              ILSMIOOperation operation, float fillFactor, boolean verifyInput, long numElementsHint,
+                                                                              boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+
+        Map<String, Object> parameters = operation.getParameters();
+
+        // Extract structure parameters with defaults
+        int numLevels = (Integer) parameters.getOrDefault("numLevels", 2);
+        @SuppressWarnings("unchecked")
+        List<Integer> clustersPerLevel =
+                (List<Integer>) parameters.getOrDefault("clustersPerLevel", Arrays.asList(5, 10));
+        @SuppressWarnings("unchecked")
+        List<List<Integer>> centroidsPerCluster = (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster",
+                Arrays.asList(Arrays.asList(1, 1, 1, 1, 1), Arrays.asList(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
+        int maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
+
+        System.err.println("VCTreeStaticStructureLoader parameters:");
+        System.err.println("  - numLevels: " + numLevels);
+        System.err.println("  - clustersPerLevel: " + clustersPerLevel);
+        System.err.println("  - centroidsPerCluster: " + centroidsPerCluster);
+        System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
+        System.err.println("  - fillFactor: " + fillFactor);
+        
+        // Extract dataFrameSerdes from parameters if available (for RecordDescriptor support)
+        @SuppressWarnings("rawtypes")
+        ISerializerDeserializer[] dataFrameSerdes = null;
+        Object serdesObj = parameters.get("dataFrameSerdes");
+        System.err.println("  - Checking for dataFrameSerdes in parameters: " + (serdesObj != null ? "found" : "not found"));
+        if (serdesObj != null) {
+            System.err.println("  - dataFrameSerdes type: " + serdesObj.getClass().getName());
+        }
+        if (serdesObj instanceof ISerializerDeserializer[]) {
+            dataFrameSerdes = (ISerializerDeserializer[]) serdesObj;
+            System.err.println("  - Using RecordDescriptor serializers (count: " + dataFrameSerdes.length + ")");
+        } else {
+            System.err.println("  - Using default hardcoded serializers");
+            if (serdesObj != null) {
+                System.err.println("  - WARNING: dataFrameSerdes found but wrong type: " + serdesObj.getClass().getName());
+            }
+        }
+        
+        LSMVCTreeDiskComponent staticComponent = parameters.getOrDefault("static_structure_component", null) instanceof LSMVCTreeDiskComponent comp ? comp : null;
+        if (staticComponent == null) {
+            throw new HyracksDataException("static_structure_component must be provided in parameters for data loading");
+        }
+        ITreeIndexAccessor staticAccessor = staticComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+
+        try {
+
+            // Create VCTreeStaticStructureLoader with real structure
+            IIndexBulkLoader builder = getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE,
+                    staticAccessor, dataFrameSerdes);
+            // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
+            return new LSMIndexBulkLoader(builder);
+
+        } catch (Exception e) {
+            System.err.println("ERROR: Failed to create VCTreeStaticStructureLoader: " + e.getMessage());
+            e.printStackTrace();
+            throw HyracksDataException.create(e);
+        }
+    }
+
     static IMetadataPageManager getMetadataPageManager(VectorClusteringTree vcTree) {
         return (IMetadataPageManager) vcTree.getPageManager();
     }
@@ -215,27 +296,6 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
                 .setFlushLoader((VectorClusteringTreeFlushLoader) (getIndex().createFlushLoader(0, callback)));
         callback.initialize(diskComponentLoader);
         return diskComponentLoader;
-    }
-
-    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
-            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback) throws HyracksDataException {
-        // Extract static structure filename from operation parameters if available
-        String staticStructureFileName = null;
-        // Note: This method doesn't have access to operation, so staticStructureFileName will be passed
-        // through from the caller via VectorClusteringTree.createBulkLoader()
-        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
-                dataFrameSerdes, staticStructureFileName);
-    }
-
-    /**
-     * Create bulk loader with static structure filename support.
-     * This overloaded method allows passing the static structure filename directly.
-     */
-    public VCTreeBulkLoader createBulkLoader(int numLeafCentroid, int firstLeafCentroidId,
-            ISerializerDeserializer[] dataFrameSerdes, IPageWriteCallback callback, String staticStructureFileName)
-            throws HyracksDataException {
-        return getIndex().createBulkLoader((NoOpPageWriteCallback) callback, numLeafCentroid, firstLeafCentroidId,
-                dataFrameSerdes, staticStructureFileName);
     }
 
     public boolean isStaticStructure() {

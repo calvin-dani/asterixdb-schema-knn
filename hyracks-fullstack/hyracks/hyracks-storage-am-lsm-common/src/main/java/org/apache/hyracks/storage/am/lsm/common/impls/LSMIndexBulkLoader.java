@@ -85,4 +85,14 @@ public class LSMIndexBulkLoader implements IChainedComponentBulkLoader {
     public void force() throws HyracksDataException {
         bulkLoader.force();
     }
+
+    /**
+     * Get the underlying IIndexBulkLoader.
+     * This allows access to the wrapped bulk loader for specialized operations.
+     * 
+     * @return the underlying IIndexBulkLoader
+     */
+    public IIndexBulkLoader getBulkLoader() {
+        return bulkLoader;
+    }
 }

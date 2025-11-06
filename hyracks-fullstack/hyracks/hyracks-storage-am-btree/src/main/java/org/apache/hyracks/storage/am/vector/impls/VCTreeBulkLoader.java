@@ -25,12 +25,15 @@ import java.util.List;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
@@ -65,14 +68,14 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private ITreeIndexTupleWriter dataFrameTupleWriter;
     private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
+    private int currentCentroidId;
 
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
-            int numLeafCentroid, int firstLeafCentroidId, ISerializerDeserializer[] dataFrameSerds,
-            String staticStructureFileName) throws HyracksDataException {
+            ISerializerDeserializer[] dataFrameSerds, ITreeIndexAccessor staticAccessor) throws HyracksDataException {
         super(0, callback, vectorTree, leafFrame, writeContext);
-        this.numLeafCentroid = numLeafCentroid;
-        this.firstLeafCentroidId = firstLeafCentroidId;
+        //        this.numLeafCentroid = numLeafCentroid;
+        //        this.firstLeafCentroidId = firstLeafCentroidId;
 
         this.directoryPages = new ArrayList<>();
         // Initialize frames
@@ -85,10 +88,29 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
+        this.currentCentroidId = -1;
+        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor1 =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
+        VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
+        VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
+        ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
+        int maxPageId = vctree.getPageManager().getMaxPageId(metaFrame);
+        MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+        LongPointable value1 = LongPointable.FACTORY.createPointable();
+        MutableArrayValueReference key2 = new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
+        LongPointable value2 = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key1, value1);
+        metaFrame.get(key2, value2);
+        this.numLeafCentroid = value1.intValue();
+        this.firstLeafCentroidId = value2.intValue();
 
-        // Copy static structure if filename provided
-        if (staticStructureFileName != null) {
-            copyStaticStructure(staticStructureFileName);
+        // Simple bulk load - just copy all pages
+
+        for (int pageId = 1; pageId <= maxPageId; pageId++) {
+            ICachedPage sourcePage = staticAccessor1.getCachedPage(pageId);
+            copyPage(sourcePage);
+            staticAccessor1.releasePage(sourcePage);
         }
     }
 
@@ -101,6 +123,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private void copyStaticStructure(String staticStructureFileName) throws HyracksDataException {
         try {
             // Derive static structure file path from index file
+
             FileReference indexFileRef = treeIndex.getFileReference();
             FileReference staticStructureFileRef = indexFileRef.getParent().getChild(staticStructureFileName);
 
@@ -214,13 +237,11 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private double[] extractVector(ITupleReference tuple) throws HyracksDataException {
         // Assuming the vector is stored in the second field of the tuple
         Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
-        return (double[]) fieldValues[1];
+        return (double[]) fieldValues[2];
     }
 
-    private double[] extractCentroidId(ITupleReference tuple) throws HyracksDataException {
-        // Assuming the vector is stored in the second field of the tuple
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
-        return (double[]) fieldValues[1];
+    private int extractCentroidId(ITupleReference tuple) throws HyracksDataException {
+        return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1) + 1);
     }
 
     /**
@@ -228,8 +249,17 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
-
-        //        extractCentroidId(tuple);
+        int tupleCentroidId = extractCentroidId(tuple); // just to verify tuple format
+        if (currentCentroidId == -1) {
+            // First tuple being added
+            LOGGER.debug("Starting bulk load with first centroid cluster: {}", tupleCentroidId);
+            currentCentroidId = tupleCentroidId;
+        } else if (currentCentroidId != tupleCentroidId) {
+            // Moved to a new centroid cluster
+            LOGGER.debug("Switching to new centroid cluster: {}", tupleCentroidId);
+            currentCentroidId = tupleCentroidId;
+            loadToNextLeafCluster();
+        }
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
             createNewDataPage();

@@ -75,7 +75,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
-import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeStaticStructureBuilder;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -735,7 +734,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private IPointable centroidIdVal;
                 private Map<Integer, Integer> levelDistribution = null;
                 private Map<String, Map<Integer, Integer>> clusterDistribution = null;
-                private LSMVCTreeStaticStructureBuilder lsmStaticStructureBuilder;
+                private IIndexBulkLoader bulkLoader;
+                private ILSMIndex lsmIndex;
                 private IIndexDataflowHelper indexHelper;
                 // private MaterializerTaskState materializedData;
 
@@ -1015,26 +1015,33 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
                                     + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
                         }
-                        ILSMIndex lsmIndex = (ILSMIndex) indexInstance;
+                        this.lsmIndex = (ILSMIndex) indexInstance;
 
-                        if (!(lsmIndex instanceof LSMVCTree)) {
+                        if (!(this.lsmIndex instanceof LSMVCTree)) {
                             throw new HyracksDataException("Index is not an LSMVCTree instance, got: "
-                                    + lsmIndex.getClass().getName() + ", LocalResource type: "
+                                    + this.lsmIndex.getClass().getName() + ", LocalResource type: "
                                     + (resource != null ? resource.getResource().getClass().getName() : "null"));
                         }
-                        LSMVCTree lsmVCTree = (LSMVCTree) lsmIndex;
                         System.err.println("LSMVCTree instance obtained successfully");
 
                         // Reduce maxEntriesPerPage for large-dimensional vectors to fit in frame
                         int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10);
-                        System.err.println("Creating LSMVCTreeStaticStructureBuilder with " + clustersPerLevel.size()
-                                + " levels...");
+                        System.err.println(
+                                "Creating static structure bulk loader with " + clustersPerLevel.size() + " levels...");
                         System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
                                 + adjustedMaxEntriesPerPage + " for large-dimensional vectors");
 
-                        // Use LSM pattern to create static structure builder
-                        lsmStaticStructureBuilder = lsmVCTree.createStaticStructureBuilder(clustersPerLevel.size(),
-                                clustersPerLevel, centroidsPerCluster, adjustedMaxEntriesPerPage);
+                        // Build parameters map for static structure creation
+                        Map<String, Object> parameters = new HashMap<>();
+                        parameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID,
+                                LSMComponentId.DEFAULT_COMPONENT_ID);
+                        parameters.put("numLevels", clustersPerLevel.size());
+                        parameters.put("clustersPerLevel", clustersPerLevel);
+                        parameters.put("centroidsPerCluster", centroidsPerCluster);
+                        parameters.put("maxEntriesPerPage", adjustedMaxEntriesPerPage);
+
+                        // Use LSM bulk loader infrastructure to create static structure
+                        bulkLoader = this.lsmIndex.createBulkLoader(fillFactor, false, 0L, false, parameters);
 
                         System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                         // Process all accumulated tuples
@@ -1053,11 +1060,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         "=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
                                 System.err.println("Input tuple field count: " + tuple.getFieldCount());
 
-                                // Convert 4-field tuple to 2-field tuple for VCTreeStaticStructureBuilder
+                                // Convert 4-field tuple to 2-field tuple for static structure builder
                                 ITupleReference convertedTuple = convertToVCTreeBuilderFormat(tuple);
                                 System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
 
-                                lsmStaticStructureBuilder.add(convertedTuple);
+                                bulkLoader.add(convertedTuple);
                                 totalTuplesProcessed++;
                             }
 
@@ -1065,8 +1072,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         }
 
                         System.err.println("Finalizing static structure...");
-                        // Finalize the structure - LSM builder handles component registration
-                        lsmStaticStructureBuilder.end();
+                        // Finalize the structure - LSM bulk loader handles component registration
+                        bulkLoader.end();
                         System.err.println("STATIC STRUCTURE FINALIZED SUCCESSFULLY");
 
                         // Print structure parameters
@@ -1082,7 +1089,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         // Print BFS traversal of static structure
                         try {
                             LSMVCTreeDiskComponent component =
-                                    (LSMVCTreeDiskComponent) lsmStaticStructureBuilder.getComponent();
+                                    (LSMVCTreeDiskComponent) ((LSMIndexDiskComponentBulkLoader) bulkLoader)
+                                            .getComponent();
                             printStaticStructureBFS(component, null);
                         } catch (Exception e) {
                             System.err.println("WARNING: Failed to print static structure BFS: " + e.getMessage());
@@ -1277,11 +1285,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     System.err.println("=== CreateStructureActivity FAILING ===");
                     System.err.println("Total tuples processed before failure: " + tupleCount);
 
-                    if (lsmStaticStructureBuilder != null) {
+                    if (bulkLoader != null) {
                         try {
-                            lsmStaticStructureBuilder.abort();
+                            bulkLoader.abort();
                         } catch (Exception e) {
-                            System.err.println("ERROR: Failed to abort static structure builder: " + e.getMessage());
+                            System.err.println("ERROR: Failed to abort bulk loader: " + e.getMessage());
                         }
                     }
 

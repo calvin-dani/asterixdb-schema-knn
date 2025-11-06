@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.asterix.runtime.operators;
 
 import java.util.List;
@@ -30,30 +29,19 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.common.dataflow.TreeIndexBulkLoadOperatorDescriptor;
 
-public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperatorDescriptor {
+/**
+ * Bulk load operator descriptor for VCTree that handles centroid transitions.
+ * 
+ * This operator extends LSMIndexBulkLoadOperatorDescriptor to add support for
+ * detecting centroid changes in sorted tuples and calling loadToNextLeafCluster()
+ * on the underlying VCTreeBulkLoader when centroids change.
+ */
+public class VCTreeBulkLoadOperatorDescriptor extends LSMIndexBulkLoadOperatorDescriptor {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 1L;
 
-    public enum BulkLoadUsage {
-        LOAD,
-        CREATE_INDEX
-    }
-
-    protected final IIndexDataflowHelperFactory primaryIndexHelperFactory;
-
-    protected final BulkLoadUsage usage;
-
-    protected final int datasetId;
-
-    // Static structure parameters for Vector Clustering Tree
-    protected final Integer numLevels;
-    protected final List<Integer> clustersPerLevel;
-    protected final List<List<Integer>> centroidsPerCluster;
-    protected final Integer maxEntriesPerPage;
-
-    public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
+    public VCTreeBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IIndexDataflowHelperFactory indexHelperFactory,
             IIndexDataflowHelperFactory primaryIndexHelperFactory, BulkLoadUsage usage, int datasetId,
@@ -64,7 +52,7 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
                 partitionsMap, null, null, null, null);
     }
 
-    public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
+    public VCTreeBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, IIndexDataflowHelperFactory indexHelperFactory,
             IIndexDataflowHelperFactory primaryIndexHelperFactory, BulkLoadUsage usage, int datasetId,
@@ -72,20 +60,14 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
             Integer numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster,
             Integer maxEntriesPerPage) {
         super(spec, outRecDesc, fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
-                indexHelperFactory, tupleFilterFactory, partitionerFactory, partitionsMap);
-        this.primaryIndexHelperFactory = primaryIndexHelperFactory;
-        this.usage = usage;
-        this.datasetId = datasetId;
-        this.numLevels = numLevels;
-        this.clustersPerLevel = clustersPerLevel;
-        this.centroidsPerCluster = centroidsPerCluster;
-        this.maxEntriesPerPage = maxEntriesPerPage;
+                indexHelperFactory, primaryIndexHelperFactory, usage, datasetId, tupleFilterFactory, partitionerFactory,
+                partitionsMap, numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
     }
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
-        return new LSMIndexBulkLoadOperatorNodePushable(indexHelperFactory, primaryIndexHelperFactory, ctx, partition,
+        return new VCTreeBulkLoadOperatorNodePushable(indexHelperFactory, primaryIndexHelperFactory, ctx, partition,
                 fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
                 recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0), usage, datasetId,
                 tupleFilterFactory, partitionerFactory, partitionsMap, numLevels, clustersPerLevel, centroidsPerCluster,
