@@ -73,6 +73,8 @@ import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.util.trace.ITracer;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * LSM Vector Clustering Tree implementation for hierarchical vector clustering with LSM storage.
@@ -81,6 +83,7 @@ import org.apache.hyracks.util.trace.ITracer;
  * 
  */
 public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private static final ICursorFactory cursorFactory = LSMVCTreeSearchCursor::new;
     private static final ICursorFactory annCursorFactory = LSMVCTreeAnnCursor::new;
@@ -423,7 +426,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public LSMVCTreeOpContext createOpContext(IIndexAccessParameters iap) {
         return new LSMVCTreeOpContext(this, getTreeFields(), getFilterFields(), getFilterCmpFactories(),
                 (IExtendedModificationOperationCallback) iap.getModificationCallback(),
-                iap.getSearchOperationCallback(), tracer);
+                iap.getSearchOperationCallback(), tracer, iap);
     }
 
     @Override
@@ -440,6 +443,14 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         LSMVCTreeMemoryComponent mutableComponent =
                 (LSMVCTreeMemoryComponent) memoryComponents.get(currentMutableComponentId.get());
         return mutableComponent.getIndex().getInteriorFrameFactory();
+    }
+
+    public ITreeIndexFrameFactory getMetadataFrameFactory() {
+        return metadataFrameFactory;
+    }
+
+    public ITreeIndexFrameFactory getDataFrameFactory() {
+        return dataFrameFactory;
     }
 
     @Override

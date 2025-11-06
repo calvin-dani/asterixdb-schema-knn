@@ -144,6 +144,8 @@ public class Dataset implements IMetadataEntity<Dataset>, IDataset {
             RTreeResourceFactoryProvider.INSTANCE;
     private static final InvertedIndexResourceFactoryProvider invertedIndexResourceFactoryProvider =
             InvertedIndexResourceFactoryProvider.INSTANCE;
+    private static final VCTreeResourceFactoryProvider vcTreeResourceFactoryProvider =
+            VCTreeResourceFactoryProvider.INSTANCE;
     /*
      * Members
      */
@@ -490,10 +492,9 @@ public class Dataset implements IMetadataEntity<Dataset>, IDataset {
                         recordType, metaType, mergePolicyFactory, mergePolicyProperties, null, null);
                 break;
             case VECTOR:
-                // VECTOR indexes use LSMVCTree structure for vector clustering
-                resourceFactory = VCTreeResourceFactoryProvider.INSTANCE.getResourceFactory(mdProvider, this, index,
-                        recordType, metaType, mergePolicyFactory, mergePolicyProperties, filterTypeTraits,
-                        filterCmpFactories);
+                // VECTOR indexes use LSMVCTree (Vector Clustering Tree) for hierarchical IVF
+                resourceFactory = vcTreeResourceFactoryProvider.getResourceFactory(mdProvider, this, index, recordType,
+                        metaType, mergePolicyFactory, mergePolicyProperties, filterTypeTraits, filterCmpFactories);
                 break;
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,

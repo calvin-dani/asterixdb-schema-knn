@@ -59,6 +59,7 @@ import org.apache.asterix.common.transactions.ITxnIdFactory;
 import org.apache.asterix.common.transactions.TxnId;
 import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.asterix.common.utils.StoragePathUtil;
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.asterix.dataflow.data.nontagged.MissingWriterFactory;
 import org.apache.asterix.dataflow.data.nontagged.serde.SerializerDeserializerUtil;
 import org.apache.asterix.external.adapter.factory.ExternalAdapterFactory;
@@ -173,6 +174,7 @@ import org.apache.hyracks.storage.am.lsm.btree.dataflow.LSMBTreeBatchPointSearch
 import org.apache.hyracks.storage.am.lsm.invertedindex.dataflow.BinaryTokenizerOperatorDescriptor;
 import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.IFullTextConfigEvaluatorFactory;
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.IBinaryTokenizerFactory;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor;
 import org.apache.hyracks.storage.am.rtree.dataflow.RTreeSearchOperatorDescriptor;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
@@ -823,19 +825,20 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // But we only output PK fields, so we skip these 3 fields in the tuple projector
         // TODO: Verify KeyFieldTypeUtil.getNumSecondaryKeys() works correctly for vector indexes,
         //       or keep hardcoded value if tuple format is always <distance, cosine, embedding, pk...>
+        int numSecondaryKeys = 3; // Hardcoded: distance, cosine, embedding
 
-        //       int numSecondaryKeys = 3;  // Hardcoded: distance, cosine, embedding
-        //       Create VectorSearchOperatorDescriptor
-        //       int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
-        //       VectorSearchOperatorDescriptor vectorSearchOp =
-        //       new VectorSearchOperatorDescriptor(jobSpec,
-        //       outputRecDesc, queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory,
-        //       partitionsMap, numPrimaryKeys, numSecondaryKeys);
-        //
-        //       return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
+        // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples
+        // This factory is serializable and passed through the job pipeline
+        // The operator uses it to create accessors that parse AsterixDB's vector format
+        AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory = new AOrderedListVectorBinaryAccessorFactory();
 
-        // TODO: Implement vector search operator creation
-        throw new UnsupportedOperationException("Vector search operator not yet implemented");
+        // Create VectorSearchOperatorDescriptor
+        int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
+        VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
+                queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
+                partitionsMap, numPrimaryKeys, numSecondaryKeys);
+
+        return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }
 
     @Override

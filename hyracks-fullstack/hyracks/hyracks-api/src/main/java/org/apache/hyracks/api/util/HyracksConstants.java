@@ -32,6 +32,9 @@ public class HyracksConstants {
 
     public static final String ATOMIC_OP_CONTEXT = "ATOMIC_OP_CONTEXT";
 
+    // Vector search query vector (extracted double[] from input tuple)
+    public static final String VECTOR_QUERY = "VECTOR_QUERY";
+
     private HyracksConstants() {
     }
 }
