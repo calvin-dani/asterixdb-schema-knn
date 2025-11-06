@@ -72,14 +72,11 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // Note: No tuple filter for now (pass null)
         // Note: No output limit for now (pass -1)
         // Note: No search callback result needed (pass false)
-        super(ctx, inputRecDesc, partition,
-                null, // minFilterFieldIndexes
+        super(ctx, inputRecDesc, partition, null, // minFilterFieldIndexes
                 null, // maxFilterFieldIndexes
-                indexHelperFactory, retainInput,
-                false, // retainMissing
+                indexHelperFactory, retainInput, false, // retainMissing
                 null, // nonMatchWriterFactory
-                searchCallbackFactory,
-                false, // appendIndexFilter
+                searchCallbackFactory, false, // appendIndexFilter
                 null, // nonFilterWriterFactory
                 null, // tupleFilterFactory
                 -1, // outputLimit
@@ -117,7 +114,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             // Following RTree pattern: predicate holds reference, updated per-tuple
             VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
             vectorPred.setQueryTuple(queryParamsTuple);
-            vectorPred.setQueryFieldIndex(0);  // Field 0 is the vector field
+            vectorPred.setQueryFieldIndex(0); // Field 0 is the vector field
         }
     }
 

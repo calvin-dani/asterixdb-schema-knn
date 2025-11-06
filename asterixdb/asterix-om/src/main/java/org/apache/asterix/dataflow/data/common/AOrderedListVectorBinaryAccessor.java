@@ -21,7 +21,6 @@ package org.apache.asterix.dataflow.data.common;
 import org.apache.asterix.dataflow.data.nontagged.serde.AOrderedListSerializerDeserializer;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
-import org.apache.asterix.om.utils.NonTaggedFormatUtil;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
@@ -98,7 +97,7 @@ public class AOrderedListVectorBinaryAccessor implements IVectorBinaryAccessor {
         if (itemType == ATypeTag.ANY) {
             // Heterogeneous list - read type tag from item
             actualType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[itemOffset]);
-            valueOffset = itemOffset + 1;  // Skip type tag
+            valueOffset = itemOffset + 1; // Skip type tag
         }
 
         switch (actualType) {

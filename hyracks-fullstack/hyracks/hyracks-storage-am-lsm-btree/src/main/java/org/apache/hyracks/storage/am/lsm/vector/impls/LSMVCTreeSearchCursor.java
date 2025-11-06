@@ -366,7 +366,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     }
 
     @Override
-    protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB) throws HyracksDataException {
+    protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB)
+            throws HyracksDataException {
         // For vector index: compare by distance (first field)
         // This ensures results are sorted by distance (nearest first)
         return cmp.compare(tupleA, tupleB);

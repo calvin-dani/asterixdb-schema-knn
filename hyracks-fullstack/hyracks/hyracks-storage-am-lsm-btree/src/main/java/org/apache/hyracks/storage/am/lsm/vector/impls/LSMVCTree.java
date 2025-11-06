@@ -23,8 +23,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
-import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
@@ -569,8 +567,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         if (ssFileRefeference == null) {
             return;
         }
-        ILSMDiskComponent ssComponent = createStaticStructure(componentFactory, ssFileRefeference.getStaticStructureFileReference(),
-                null, null, false);
+        ILSMDiskComponent ssComponent = createStaticStructure(componentFactory,
+                ssFileRefeference.getStaticStructureFileReference(), null, null, false);
         setStaticStructure((LSMVCTreeDiskComponent) ssComponent);
     }
 

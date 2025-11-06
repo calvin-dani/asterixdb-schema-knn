@@ -34,8 +34,8 @@ public class PKOnlyTupleProjectorFactory implements ITupleProjectorFactory {
 
     private static final long serialVersionUID = 1L;
 
-    private final int numSecondaryKeys;  // Number of fields to skip
-    private final int numPrimaryKeys;    // Number of PK fields to write
+    private final int numSecondaryKeys; // Number of fields to skip
+    private final int numPrimaryKeys; // Number of PK fields to write
 
     public PKOnlyTupleProjectorFactory(int numSecondaryKeys, int numPrimaryKeys) {
         this.numSecondaryKeys = numSecondaryKeys;
