@@ -116,7 +116,8 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         System.err.println("Parameters keys: " + (allParams != null ? allParams.keySet() : "null"));
         if (allParams != null && allParams.containsKey("dataFrameSerdes")) {
             System.err.println("  - dataFrameSerdes key found in parameters!");
-            System.err.println("  - dataFrameSerdes value type: " + allParams.get("dataFrameSerdes").getClass().getName());
+            System.err.println(
+                    "  - dataFrameSerdes value type: " + allParams.get("dataFrameSerdes").getClass().getName());
         } else {
             System.err.println("  - dataFrameSerdes key NOT found in parameters");
         }

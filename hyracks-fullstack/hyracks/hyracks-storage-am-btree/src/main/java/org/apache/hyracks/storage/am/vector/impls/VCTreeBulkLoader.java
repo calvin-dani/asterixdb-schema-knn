@@ -69,6 +69,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
     private int currentCentroidId;
+
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             ISerializerDeserializer[] dataFrameSerds, ITreeIndexAccessor staticAccessor) throws HyracksDataException {
@@ -92,18 +93,20 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
                 (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
         VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
+        VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
+        ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
+        int maxPageId = vctree.getPageManager().getMaxPageId(metaFrame);
         MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
         LongPointable value1 = LongPointable.FACTORY.createPointable();
         MutableArrayValueReference key2 = new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
         LongPointable value2 = LongPointable.FACTORY.createPointable();
         metaFrame.get(key1, value1);
         metaFrame.get(key2, value2);
-        this.numLeafCentroid = 10;
-        this.firstLeafCentroidId = 7;
-        VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
-        ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
+        this.numLeafCentroid = value1.intValue();
+        this.firstLeafCentroidId = value2.intValue();
+
         // Simple bulk load - just copy all pages
-        int maxPageId = vctree.getPageManager().getMaxPageId(metaFrame);
+
         for (int pageId = 1; pageId <= maxPageId; pageId++) {
             ICachedPage sourcePage = staticAccessor1.getCachedPage(pageId);
             copyPage(sourcePage);
@@ -238,7 +241,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     }
 
     private int extractCentroidId(ITupleReference tuple) throws HyracksDataException {
-        return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1)+1);
+        return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1) + 1);
     }
 
     /**
@@ -247,12 +250,11 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
         int tupleCentroidId = extractCentroidId(tuple); // just to verify tuple format
-        if(currentCentroidId == -1) {
+        if (currentCentroidId == -1) {
             // First tuple being added
             LOGGER.debug("Starting bulk load with first centroid cluster: {}", tupleCentroidId);
             currentCentroidId = tupleCentroidId;
-        }
-        else if (currentCentroidId != tupleCentroidId) {
+        } else if (currentCentroidId != tupleCentroidId) {
             // Moved to a new centroid cluster
             LOGGER.debug("Switching to new centroid cluster: {}", tupleCentroidId);
             currentCentroidId = tupleCentroidId;
