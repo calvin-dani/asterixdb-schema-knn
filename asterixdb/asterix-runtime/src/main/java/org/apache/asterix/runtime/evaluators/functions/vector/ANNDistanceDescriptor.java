@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 package org.apache.asterix.runtime.evaluators.functions.vector;
 
 import org.apache.asterix.om.functions.BuiltinFunctions;

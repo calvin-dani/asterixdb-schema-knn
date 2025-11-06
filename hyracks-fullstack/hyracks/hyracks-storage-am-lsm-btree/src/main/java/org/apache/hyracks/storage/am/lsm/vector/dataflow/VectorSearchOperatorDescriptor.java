@@ -69,7 +69,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVectorBinaryAccessorFactory vectorAccessorFactory,
             int[][] partitionsMap, int numPrimaryKeys, int numSecondaryKeys) {
-        super(spec, 1, 1);  // 1 input, 1 output
+        super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
         this.retainInput = retainInput;

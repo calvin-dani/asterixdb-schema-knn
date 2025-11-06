@@ -493,9 +493,8 @@ public class Dataset implements IMetadataEntity<Dataset>, IDataset {
                 break;
             case VECTOR:
                 // VECTOR indexes use LSMVCTree (Vector Clustering Tree) for hierarchical IVF
-                resourceFactory = vcTreeResourceFactoryProvider.getResourceFactory(mdProvider, this, index,
-                        recordType, metaType, mergePolicyFactory, mergePolicyProperties, filterTypeTraits,
-                        filterCmpFactories);
+                resourceFactory = vcTreeResourceFactoryProvider.getResourceFactory(mdProvider, this, index, recordType,
+                        metaType, mergePolicyFactory, mergePolicyProperties, filterTypeTraits, filterCmpFactories);
                 break;
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,
