@@ -266,6 +266,10 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType, metaRecordType, chosenIndex,
                         assignSearchKeys, jobGenParams, context, false, false, isIndexOnlyPlan, null);
 
+        // Update type environment to register variables produced by vector index search
+        // (e.g., $32 = primary keys). This is critical so downstream operators can use these variables.
+        context.computeAndSetTypeEnvironmentForOperator(secondaryIndexUnnestOp);
+
         // Add primary index lookup to get full record
         // This uses the PKs returned from vector index to fetch complete records
         ILogicalOperator primaryIndexUnnestOp = AccessMethodUtils.createRestOfIndexSearchPlan(null, // afterTopOpRefs - not needed for ORDER BY case
