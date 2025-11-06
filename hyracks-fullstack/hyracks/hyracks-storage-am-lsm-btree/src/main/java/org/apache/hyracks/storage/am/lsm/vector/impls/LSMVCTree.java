@@ -428,7 +428,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public LSMVCTreeOpContext createOpContext(IIndexAccessParameters iap) {
         return new LSMVCTreeOpContext(this, getTreeFields(), getFilterFields(), getFilterCmpFactories(),
                 (IExtendedModificationOperationCallback) iap.getModificationCallback(),
-                iap.getSearchOperationCallback(), tracer);
+                iap.getSearchOperationCallback(), tracer, iap);
     }
 
     @Override

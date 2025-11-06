@@ -87,7 +87,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     private VectorClusteringTreeStaticInitializer staticInitializer;
 
-    private boolean isStaticStructureInitialized = false;
+    private boolean isStaticStructureInitialized = true;
 
     public VectorClusteringTree(IBufferCache bufferCache, IPageManager freePageManager,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,

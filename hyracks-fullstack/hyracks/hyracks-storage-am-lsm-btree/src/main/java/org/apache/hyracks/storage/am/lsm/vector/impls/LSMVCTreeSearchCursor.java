@@ -176,7 +176,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     protected VectorClusteringTreeAccessor createAccessor(ILSMComponent component, int index)
             throws HyracksDataException {
         VectorClusteringTree vcTree = (VectorClusteringTree) component.getIndex();
-        return (VectorClusteringTreeAccessor) vcTree.createAccessor(iap);
+        // Get iap from operation context instead of using cursor's default iap
+        LSMVCTreeOpContext vcOpCtx = (LSMVCTreeOpContext) opCtx;
+        return (VectorClusteringTreeAccessor) vcTree.createAccessor(vcOpCtx.getIndexAccessParameters());
     }
 
     /**

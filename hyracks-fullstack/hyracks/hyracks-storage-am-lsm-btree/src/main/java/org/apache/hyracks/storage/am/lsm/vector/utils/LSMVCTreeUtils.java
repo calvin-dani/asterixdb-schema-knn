@@ -28,6 +28,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.FloatPointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
@@ -126,7 +127,7 @@ public class LSMVCTreeUtils {
 
         // Metadata frames need 2-field metadata tuples: <max_distance, page_pointer>
         ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];
-        metadataTypeTraits[0] = FloatPointable.TYPE_TRAITS; // max distance (double) - Fixed 4 bytes
+        metadataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // max distance (double) - Fixed 8 bytes
         metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer (int) - Fixed 4 bytes
 
         // Data frames need 4-field data tuples: <distance, cosine_similarity, vector, primary_key>
