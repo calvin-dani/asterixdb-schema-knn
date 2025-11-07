@@ -521,7 +521,35 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         return new LSMVCTreeAnnCursor(opCtx);
     }
 
-    // TODO - HY: also override deactivate()
+    @Override
+    public synchronized void deactivate(boolean flush) throws HyracksDataException {
+        // Clean up static structure component before parent deactivation
+        if (staticStructure != null) {
+            try {
+                staticStructure.deactivateAndPurge();
+            } catch (Exception e) {
+                // Log but don't fail deactivation if static structure cleanup fails
+                LOGGER.warn("Failed to deactivate static structure component: {}", e.getMessage());
+            }
+            staticStructure = null; // Clear reference after deactivation
+        }
+        super.deactivate(flush);
+    }
+
+    @Override
+    public synchronized void destroy() throws HyracksDataException {
+        // Clean up static structure component before parent destruction
+        if (staticStructure != null) {
+            try {
+                staticStructure.destroy();
+            } catch (Exception e) {
+                // Log but don't fail destruction if static structure cleanup fails
+                LOGGER.warn("Failed to destroy static structure component: {}", e.getMessage());
+            }
+            staticStructure = null; // Clear reference after destruction
+        }
+        super.destroy();
+    }
 
     @Override
     public synchronized void activate() throws HyracksDataException {
