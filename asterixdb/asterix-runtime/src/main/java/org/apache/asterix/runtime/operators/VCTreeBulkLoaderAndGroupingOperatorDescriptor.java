@@ -662,7 +662,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 if (writer != null && outputAppender != null) {
                     // Append tuple to output frame
 
-                    if (outputAppender.append(transformedTuple)) {
+                    if (!outputAppender.append(transformedTuple)) {
                         FrameUtils.flushFrame(outputAppender.getBuffer(), writer);
                         outputAppender.reset(new VSizeFrame(ctx), true);
                         outputAppender.append(transformedTuple);
