@@ -132,29 +132,27 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 return false;
             }
 
-            // Check child is ORDER
-            if (limitOp.getInputs().size() == 1) {
-                Mutable<ILogicalOperator> childRef = limitOp.getInputs().get(0);
-                AbstractLogicalOperator childOp = (AbstractLogicalOperator) childRef.getValue();
+            // Find ORDER operator by skipping intermediate operators (ASSIGN, EXCHANGE, etc.)
+            Pair<Mutable<ILogicalOperator>, OrderOperator> orderPair = findOrderOperator(limitOp);
 
-                System.err.println("LIMIT child: " + childOp.getOperatorTag());
+            if (orderPair != null) {
+                orderRef = orderPair.first;
+                orderOp = orderPair.second;
 
-                if (childOp.getOperatorTag() == LogicalOperatorTag.ORDER) {
-                    orderRef = childRef;
-                    orderOp = (OrderOperator) childOp;
+                System.err.println("=== Found ORDER operator ===");
+                System.err.println("ORDER expressions count: " + orderOp.getOrderExpressions().size());
 
-                    System.err.println("=== Found ORDER operator ===");
-                    System.err.println("ORDER expressions count: " + orderOp.getOrderExpressions().size());
-
-                    // Check if ORDER BY uses ANN_DISTANCE function
-                    if (matchesAnnDistancePattern()) {
-                        System.err.println("=== Pattern matched! Calling analyzeAndTransform ===");
-                        // Try to apply transformation
-                        return analyzeAndTransform(context);
-                    } else {
-                        System.err.println("Pattern did not match (not single ORDER BY expression)");
-                    }
+                // Check if ORDER BY uses ANN_DISTANCE function
+                if (matchesAnnDistancePattern()) {
+                    System.err.println("=== Pattern matched! Calling analyzeAndTransform ===");
+                    // Try to apply transformation
+                    return analyzeAndTransform(context);
+                } else {
+                    System.err.println("Pattern did not match (not single ORDER BY expression)");
                 }
+            } else {
+                System.err.println("LIMIT child: " + (limitOp.getInputs().isEmpty() ? "NONE" :
+                    ((AbstractLogicalOperator) limitOp.getInputs().get(0).getValue()).getOperatorTag()));
             }
         }
 
@@ -167,6 +165,60 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         }
 
         return false;
+    }
+
+    /**
+     * Finds the ORDER operator by traversing through intermediate operators.
+     * Skips ASSIGN, EXCHANGE, and nested LIMIT operators that are added for
+     * distributed execution optimization.
+     *
+     * The optimizer often adds intermediate operators between LIMIT and ORDER:
+     * - ASSIGN: For result projection
+     * - EXCHANGE: For data redistribution in distributed execution
+     * - LIMIT: For distributed top-k optimization
+     *
+     * This method traverses through these intermediate operators until it finds
+     * the ORDER operator or encounters an operator it doesn't recognize.
+     *
+     * @param limitOp The LIMIT operator to start from
+     * @return Pair of (orderRef, orderOp) if found, null otherwise
+     */
+    protected Pair<Mutable<ILogicalOperator>, OrderOperator> findOrderOperator(LimitOperator limitOp) {
+        if (limitOp.getInputs().isEmpty()) {
+            return null;
+        }
+
+        Mutable<ILogicalOperator> currentRef = limitOp.getInputs().get(0);
+        AbstractLogicalOperator currentOp = (AbstractLogicalOperator) currentRef.getValue();
+
+        // Traverse through intermediate operators until we find ORDER or fail
+        // The loop will terminate when:
+        // 1. We find ORDER operator (success)
+        // 2. We hit an empty input list (no more children)
+        // 3. We hit an operator we don't know how to skip through
+        while (true) {
+            // Check if we found the ORDER operator
+            if (currentOp.getOperatorTag() == LogicalOperatorTag.ORDER) {
+                return new Pair<>(currentRef, (OrderOperator) currentOp);
+            }
+
+            // Skip through known intermediate operators
+            if (currentOp.getOperatorTag() == LogicalOperatorTag.ASSIGN
+                    || currentOp.getOperatorTag() == LogicalOperatorTag.EXCHANGE
+                    || currentOp.getOperatorTag() == LogicalOperatorTag.LIMIT) {
+
+                if (currentOp.getInputs().isEmpty()) {
+                    // No more children to traverse
+                    return null;
+                }
+                currentRef = currentOp.getInputs().get(0);
+                currentOp = (AbstractLogicalOperator) currentRef.getValue();
+            } else {
+                // Hit an operator we don't know how to skip through
+                // This means LIMIT is not directly above ORDER BY ANN_DISTANCE
+                return null;
+            }
+        }
     }
 
     /**
