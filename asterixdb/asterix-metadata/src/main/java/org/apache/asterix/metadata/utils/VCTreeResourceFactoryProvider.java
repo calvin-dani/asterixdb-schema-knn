@@ -98,7 +98,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         }
 
         // Extract vector dimensions (assuming float array)
-        int vectorDimensions = 784; // Default dimension, should be extracted from vectorType
+        int vectorDimensions = 384; // Default dimension, should be extracted from vectorType
         // TODO: Extract actual dimensions from vectorType.getTypeTag() == ATypeTag.ARRAY
 
         List<List<String>> primaryKeyFields = dataset.getPrimaryKeys();
