@@ -149,7 +149,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Permit UUID: " + permitUUID);
         System.err.println("Permit state will be used by StaticStructureCreator operator");
 
-        int K = 10;
+        int K = 50;
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)

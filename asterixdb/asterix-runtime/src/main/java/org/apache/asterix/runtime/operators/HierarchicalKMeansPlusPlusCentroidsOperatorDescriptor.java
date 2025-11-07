@@ -542,6 +542,42 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             }
             return maxLevel;
         }
+
+        /**
+         * Calculate estimated tuple size for hierarchical output format (DOUBLE type).
+         * Formula: 38 + 13 × dimension bytes
+         * Breakdown:
+         * - Tuple overhead: 20 bytes (4 bytes tuple offset + 4×4 bytes field offsets)
+         * - Fixed fields: 12 bytes (3 integers: treeLevel, centroidId, parentClusterId)
+         * - AOrderedList overhead: 6 bytes (tag + itemTag + list size)
+         * - Item offsets: 4 bytes × dimension
+         * - Item data: 9 bytes × dimension (1 byte type tag + 8 bytes double)
+         * 
+         * @param embeddingDimension The dimension of the embedding vector
+         * @return Estimated tuple size in bytes
+         */
+        public static long calculateEstimatedTupleSize(int embeddingDimension) {
+            return 38L + 13L * embeddingDimension;
+        }
+
+        /**
+         * Check if a level with given number of centroids fits in one frame.
+         * 
+         * @param centroidCount Number of centroids at the level
+         * @param embeddingDimension Dimension of embedding vectors
+         * @param frameSize Frame size in bytes
+         * @return true if the level fits in one frame, false otherwise
+         */
+        public static boolean doesLevelFitInFrame(int centroidCount, int embeddingDimension, int frameSize) {
+            if (centroidCount <= 0 || embeddingDimension <= 0 || frameSize <= 0) {
+                return false;
+            }
+            long tupleSize = calculateEstimatedTupleSize(embeddingDimension);
+            long totalDataSize = (long) centroidCount * tupleSize;
+            long frameOverhead = 9L + (4L * centroidCount); // META_DATA_LEN + tuple offsets
+            long totalSize = totalDataSize + frameOverhead;
+            return totalSize <= frameSize;
+        }
     }
 
     // Distance function constants
@@ -1667,6 +1703,16 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return structure;
                     }
 
+                    // Extract embedding dimension and frame size for frame fit calculations
+                    int embeddingDimension = initialResult.centroids.get(0).length;
+                    if (embeddingDimension <= 0) {
+                        System.err.println("Invalid embedding dimension: " + embeddingDimension);
+                        return structure;
+                    }
+                    int frameSize = ctx.getInitialFrameSize();
+                    System.err.println("Embedding dimension: " + embeddingDimension + ", Frame size: " + frameSize
+                            + " bytes");
+
                     System.err.println("Generated " + initialResult.centroids.size()
                             + " initial centroids from all data, starting hierarchical clustering");
 
@@ -1689,6 +1735,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     while (currentCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
                         System.err.println("Level " + currentLevel + ": Clustering " + currentCentroids.size()
                                 + " centroids into " + currentK + " clusters");
+                        System.err.println("Checking frame fit: target " + currentK + " centroids, frame size: "
+                                + frameSize + " bytes");
 
                         // Initialize parent level with empty centroids
                         structure.initializeParentLevel(currentLevel, currentK);
@@ -1699,6 +1747,22 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         if (levelResult.centroids.isEmpty()) {
                             System.err.println("K-means++ produced no centroids, stopping clustering");
+                            break;
+                        }
+
+                        // Check if current level fits in one frame
+                        if (HierarchicalClusterStructure.doesLevelFitInFrame(levelResult.centroids.size(),
+                                embeddingDimension, frameSize)) {
+                            long tupleSize = HierarchicalClusterStructure.calculateEstimatedTupleSize(embeddingDimension);
+                            long totalDataSize = (long) levelResult.centroids.size() * tupleSize;
+                            long frameOverhead = 9L + (4L * levelResult.centroids.size());
+                            long totalSize = totalDataSize + frameOverhead;
+                            System.err.println("Level " + currentLevel + " with " + levelResult.centroids.size()
+                                    + " centroids fits in frame (estimated size: " + totalSize + " bytes, frame size: "
+                                    + frameSize + " bytes), stopping here as root level");
+                            // Build this level before breaking (so it's stored in structure)
+                            structure.buildLevelFromAssignments(currentCentroids, levelResult.centroids,
+                                    levelResult.assignments, currentLevel, currentLevel - 1);
                             break;
                         }
 

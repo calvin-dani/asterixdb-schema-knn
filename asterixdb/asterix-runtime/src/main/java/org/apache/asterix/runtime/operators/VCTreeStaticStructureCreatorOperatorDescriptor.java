@@ -897,8 +897,21 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     // Process all accumulated tuples and create static structure
                     System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
                     System.err.println("Analyzing " + tupleCount + " tuples to determine structure...");
-                    createStaticStructure();
-                    System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
+                    try {
+                        createStaticStructure();
+                        System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
+                    } finally {
+                        // Ensure indexHelper is closed even if createStaticStructure() throws
+                        if (indexHelper != null) {
+                            try {
+                                indexHelper.close();
+                                System.err.println("IndexHelper closed successfully");
+                            } catch (Exception e) {
+                                System.err.println("ERROR: Failed to close index helper: " + e.getMessage());
+                                // Don't throw - cleanup failures shouldn't mask original exceptions
+                            }
+                        }
+                    }
 
                     // Signal Branch 2 that structure creation is complete
 
