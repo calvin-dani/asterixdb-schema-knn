@@ -81,7 +81,7 @@ import org.apache.hyracks.storage.common.IIndexAccessor;
 public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
-    private static final int VECTOR_DIMENSION = 784;
+    private static final int VECTOR_DIMENSION = 384;
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final float fillFactor; // TODO: Use fillFactor in future bulk loading operations
     private final UUID permitUUID;

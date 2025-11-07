@@ -36,6 +36,8 @@ import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.util.IndexCursorUtils;
 
+import java.util.PriorityQueue;
+
 /**
  * LSM search cursor for Vector Clustering Tree.
  *
@@ -142,6 +144,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // Note: Priority queue setup is kept for compatibility with base class,
         // but not used in simplified sequential iteration
+        // initPriorityQueue() is overridden to NOT advance cursors
         try {
             setPriorityQueueComparator();
             initPriorityQueue();
@@ -149,6 +152,43 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             IndexCursorUtils.close(rangeCursors, th);
             throw HyracksDataException.create(th);
         }
+    }
+
+    @Override
+    public void initPriorityQueue() throws HyracksDataException {
+        // Don't use priority queue for vector search
+        // Base class initPriorityQueue() would advance all cursors via pushIntoQueueFromCursorAndReplaceThisElement(),
+        // but we need to preserve the first tuple for sequential iteration
+
+        // Just initialize the priority queue structure without populating it
+        int pqInitSize = (rangeCursors.length > 0) ? rangeCursors.length : 1;
+        if (outputPriorityQueue == null) {
+            outputPriorityQueue = new PriorityQueue<>(pqInitSize, pqCmp);
+            pqes = new PriorityQueueElement[pqInitSize];
+            for (int i = 0; i < pqInitSize; i++) {
+                pqes[i] = new PriorityQueueElement(i);
+            }
+            // DON'T call pushIntoQueueFromCursorAndReplaceThisElement()
+            // This would advance cursors and lose first tuples
+        } else {
+            outputPriorityQueue.clear();
+            // Did size change?
+            if (pqInitSize != pqes.length) {
+                // Size changed (due to flushes, merges, etc) -> re-create
+                pqes = new PriorityQueueElement[pqInitSize];
+                for (int i = 0; i < pqInitSize; i++) {
+                    pqes[i] = new PriorityQueueElement(i);
+                }
+            }
+        }
+    }
+
+    @Override
+    protected void pushIntoQueueFromCursorAndReplaceThisElement(PriorityQueueElement e)
+            throws HyracksDataException {
+        // No-op: Vector search uses sequential iteration, not priority queue merge
+        // If this gets called (e.g., during component switching), just do nothing
+        // instead of throwing exception to avoid breaking base class flow
     }
 
     /**

@@ -308,13 +308,14 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         int overflowPageId = freePageManager.takePage(metaFrame);
 
         // Set next page pointer in current page
-        if (currentLevel == 0) {
+        if (currentLevel == numLevels - 1) {
             // Leaf page - set next leaf pointer
             leafFrame.setNextLeaf(overflowPageId);
             leafFrame.setOverflowFlagBit(true);
         } else {
             // Interior page - set next page pointer
             interiorFrame.setNextPage(overflowPageId);
+            interiorFrame.setOverflowFlagBit(true);
         }
 
         // Create the new overflow page
