@@ -243,7 +243,18 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             return false;
         }
 
-        // 2. Get type environment for type checking
+        // 2. Check if there are filter predicates (SELECT operators) between ORDER and DATASOURCE_SCAN
+        // If yes, skip vector index optimization to avoid returning too few results
+        // Reason: Vector index partitions by similarity, not by other fields.
+        // Filtering top-k results by other predicates may yield insufficient results.
+        if (hasSelectOperatorInSubTree()) {
+            System.err.println("Query has WHERE clause (SELECT operator) - skipping vector index optimization");
+            System.err.println("Reason: Vector index + filters may return too few results");
+            context.addToDontApplySet(this, limitOp);
+            return false;
+        }
+
+        // 3. Get type environment for type checking
         typeEnvironment = context.getOutputTypeEnvironment(orderOp);
 
         // 3. Load dataset metadata (including vector indexes)
@@ -281,6 +292,44 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         context.addToDontApplySet(this, limitOp);
 
         return transformed;
+    }
+
+    /**
+     * Checks if there are any SELECT operators between ORDER and DATASOURCE_SCAN.
+     * SELECT operators represent WHERE clause predicates that filter rows.
+     *
+     * We skip vector index optimization when filters exist because:
+     * - Vector index returns top-k results partitioned by vector similarity
+     * - Applying additional filters (e.g., year > 2000) may yield too few results
+     * - Better to scan all data and apply filters, then sort by ANN distance
+     */
+    protected boolean hasSelectOperatorInSubTree() {
+        if (orderOp.getInputs().isEmpty()) {
+            return false;
+        }
+
+        // Traverse from ORDER down to DATASOURCE_SCAN
+        AbstractLogicalOperator currentOp = (AbstractLogicalOperator) orderOp.getInputs().get(0).getValue();
+
+        while (currentOp != null) {
+            if (currentOp.getOperatorTag() == LogicalOperatorTag.SELECT) {
+                // Found SELECT operator - query has WHERE clause
+                return true;
+            }
+
+            // Stop at DATASOURCE_SCAN
+            if (currentOp.getOperatorTag() == LogicalOperatorTag.DATASOURCESCAN) {
+                break;
+            }
+
+            // Continue to next child
+            if (currentOp.getInputs().isEmpty()) {
+                break;
+            }
+            currentOp = (AbstractLogicalOperator) currentOp.getInputs().get(0).getValue();
+        }
+
+        return false;
     }
 
     /**
