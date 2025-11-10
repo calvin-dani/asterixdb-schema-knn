@@ -1710,8 +1710,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return structure;
                     }
                     int frameSize = ctx.getInitialFrameSize();
-                    System.err.println("Embedding dimension: " + embeddingDimension + ", Frame size: " + frameSize
-                            + " bytes");
+                    System.err.println(
+                            "Embedding dimension: " + embeddingDimension + ", Frame size: " + frameSize + " bytes");
 
                     System.err.println("Generated " + initialResult.centroids.size()
                             + " initial centroids from all data, starting hierarchical clustering");
@@ -1726,7 +1726,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     // Build subsequent levels using scalable K-means++ on centroids
                     List<double[]> currentCentroids = initialResult.centroids;
-                    int currentK = Math.min(K, Math.max(1, initialResult.centroids.size() / 2));
+                    // Initialize currentK using square root reduction for balanced hierarchical structure
+                    int currentK = Math.min(K, Math.max(1, (int) Math.floor(Math.sqrt(initialResult.centroids.size()))));
                     int maxIterations = 20;
                     int maxLevels = 5;
                     int currentLevel = 1;
@@ -1753,7 +1754,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Check if current level fits in one frame
                         if (HierarchicalClusterStructure.doesLevelFitInFrame(levelResult.centroids.size(),
                                 embeddingDimension, frameSize)) {
-                            long tupleSize = HierarchicalClusterStructure.calculateEstimatedTupleSize(embeddingDimension);
+                            long tupleSize =
+                                    HierarchicalClusterStructure.calculateEstimatedTupleSize(embeddingDimension);
                             long totalDataSize = (long) levelResult.centroids.size() * tupleSize;
                             long frameOverhead = 9L + (4L * levelResult.centroids.size());
                             long totalSize = totalDataSize + frameOverhead;
@@ -1772,7 +1774,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Prepare for next level
                         currentCentroids = levelResult.centroids;
-                        currentK = Math.max(1, currentK / 2);
+                        // Update currentK using square root reduction (more gradual than division by 2)
+                        currentK = Math.max(1, (int) Math.floor(Math.sqrt(currentK)));
                         currentLevel++;
                     }
 

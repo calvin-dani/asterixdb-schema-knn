@@ -36,6 +36,7 @@ import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
@@ -149,7 +150,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("Permit UUID: " + permitUUID);
         System.err.println("Permit state will be used by StaticStructureCreator operator");
 
-        int K = 20;
+        // Extract K value from WITH clause
+        AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
+        int K = 20; // default value
+        if (withObjectNode != null) {
+            K = withObjectNode.getOptionalInt("num_k", 20);
+        }
+        // Validate K value
+        if (K <= 0) {
+            System.err.println("WARNING: Invalid num_k value: " + K + ", using default: 20");
+            K = 20;
+        }
+        System.err.println("Using K value: " + K + " for K-means clustering");
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
