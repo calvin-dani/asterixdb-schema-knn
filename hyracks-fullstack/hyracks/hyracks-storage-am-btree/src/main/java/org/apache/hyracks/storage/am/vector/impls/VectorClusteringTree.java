@@ -1079,6 +1079,79 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     }
 
     /**
+     * Convert distance metric string to IVectorDistanceFunction implementation.
+     * 
+     * @param distanceMetric Distance metric string (e.g., "euclidean", "cosine similarity", etc.)
+     * @return IVectorDistanceFunction implementation, or Euclidean as default
+     */
+    private static IVectorDistanceFunction convertDistanceMetricToFunction(String distanceMetric) {
+        if (distanceMetric == null || distanceMetric.trim().isEmpty()) {
+            return VectorUtils::calculateEuclideanDistance;
+        }
+
+        String metricLower = distanceMetric.toLowerCase().trim();
+
+        // Map distance metric strings to IVectorDistanceFunction implementations
+        switch (metricLower) {
+            case "euclidean":
+            case "l2":
+                return VectorUtils::calculateEuclideanDistance;
+            case "euclidean_squared":
+            case "l2_squared":
+                return (a, b) -> {
+                    double sum = 0.0;
+                    for (int i = 0; i < a.length; i++) {
+                        double diff = a[i] - b[i];
+                        sum += diff * diff;
+                    }
+                    return sum; // Return squared distance (no sqrt)
+                };
+            case "manhattan distance":
+            case "manhattan":
+            case "l1":
+                return (a, b) -> {
+                    double sum = 0.0;
+                    for (int i = 0; i < a.length; i++) {
+                        sum += Math.abs(a[i] - b[i]);
+                    }
+                    return sum;
+                };
+            case "cosine similarity":
+            case "cosine":
+                return (a, b) -> {
+                    // Cosine similarity returns 1 - similarity as distance (for minimization)
+                    double dotProduct = 0.0;
+                    double normA = 0.0;
+                    double normB = 0.0;
+                    for (int i = 0; i < a.length; i++) {
+                        dotProduct += a[i] * b[i];
+                        normA += a[i] * a[i];
+                        normB += b[i] * b[i];
+                    }
+                    if (normA == 0.0 || normB == 0.0) {
+                        return 1.0; // Maximum distance for zero vectors
+                    }
+                    double similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+                    return 1.0 - similarity; // Convert similarity to distance
+                };
+            case "dot":
+            case "dot product":
+                return (a, b) -> {
+                    // Dot product as distance (negated for minimization - higher dot product = closer)
+                    double dotProduct = 0.0;
+                    for (int i = 0; i < a.length; i++) {
+                        dotProduct += a[i] * b[i];
+                    }
+                    return -dotProduct; // Negate for minimization
+                };
+            default:
+                System.err.println(
+                        "WARNING: Unsupported distance function: " + distanceMetric + ", defaulting to euclidean");
+                return VectorUtils::calculateEuclideanDistance;
+        }
+    }
+
+    /**
      * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
      * interior and leaf frames.
      */
@@ -1476,9 +1549,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             vectorCursor.setFrameFactories(tree.interiorFrameFactory, tree.leafFrameFactory, tree.metadataFrameFactory,
                     tree.dataFrameFactory);
 
-            // Extract query vector from predicate using the accessor factory
+            // Extract query vector and distance metric from predicate using the accessor factory
             // The predicate holds the tuple reference (updated per-tuple in resetSearchPredicate)
             double[] queryVector = null;
+            String distanceMetric = null;
             if (searchPred instanceof VectorPointPredicate) {
                 VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
                 ITupleReference queryTuple = vectorPred.getQueryTuple();
@@ -1497,14 +1571,44 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                         queryVector = accessor.getVector();
                     }
                 }
+
+                // Extract distance metric from predicate
+                distanceMetric = vectorPred.getDistanceMetric();
             }
 
-            // Create initial state with query vector
+            // Convert distance metric string to IVectorDistanceFunction
+            // Try to use factory from AsterixDB (wraps VectorDistanceArrCalculation) if available
+            // Otherwise fall back to local implementation for backward compatibility
+            IVectorDistanceFunction distanceFunction = null;
+            java.io.Serializable factoryObj =
+                    (java.io.Serializable) iap.getParameters().get(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY);
+
+            if (factoryObj != null) {
+                // Use factory from AsterixDB (wraps VectorDistanceArrCalculation)
+                try {
+                    // Use reflection to call createDistanceFunction() method
+                    // This avoids importing AsterixDB classes in Hyracks
+                    java.lang.reflect.Method createMethod =
+                            factoryObj.getClass().getMethod("createDistanceFunction", String.class);
+                    distanceFunction = (IVectorDistanceFunction) createMethod.invoke(factoryObj, distanceMetric);
+                } catch (Exception e) {
+                    System.err.println(
+                            "WARNING: Failed to use distance function factory, falling back to local implementation: "
+                                    + e.getMessage());
+                    distanceFunction = convertDistanceMetricToFunction(distanceMetric);
+                }
+            } else {
+                // Fallback to local implementation (for backward compatibility or when factory not provided)
+                distanceFunction = convertDistanceMetricToFunction(distanceMetric);
+            }
+
+            // Create initial state with query vector and distance function
             VectorCursorInitialState initialState = new VectorCursorInitialState(ctx.getAccessor());
             initialState.setRootPageId(tree.rootPage);
             if (queryVector != null) {
                 initialState.setQueryVector(queryVector);
             }
+            initialState.setDistanceFunction(distanceFunction);
 
             // Open the cursor - it will perform centroid finding and position on data pages
             vectorCursor.open(initialState, searchPred);

@@ -65,16 +65,22 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     // Factory for creating vector binary accessors (for extracting AOrderedList<ADouble>)
     protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
+    // Factory for creating distance functions (wraps VectorDistanceArrCalculation from AsterixDB)
+    // This is passed from AsterixDB layer to avoid circular dependencies
+    protected final java.io.Serializable distanceFunctionFactory;
+
     public VectorSearchOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int[][] partitionsMap, int numPrimaryKeys, int numSecondaryKeys) {
+            java.io.Serializable distanceFunctionFactory, int[][] partitionsMap, int numPrimaryKeys,
+            int numSecondaryKeys) {
         super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
         this.retainInput = retainInput;
         this.searchCallbackFactory = searchCallbackFactory;
         this.vectorAccessorFactory = vectorAccessorFactory;
+        this.distanceFunctionFactory = distanceFunctionFactory;
         this.partitionsMap = partitionsMap;
         this.numPrimaryKeys = numPrimaryKeys;
         this.numSecondaryKeys = numSecondaryKeys;
@@ -90,6 +96,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         return new VectorSearchOperatorNodePushable(ctx, partition,
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
-                retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory, partitionsMap);
+                retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
+                distanceFunctionFactory, partitionsMap);
     }
 }

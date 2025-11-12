@@ -19,8 +19,7 @@
 package org.apache.asterix.metadata.utils;
 
 import static org.apache.asterix.om.types.ATypeTag.ARRAY;
-import static org.apache.asterix.om.types.BuiltinType.ADOUBLE;
-import static org.apache.asterix.om.types.BuiltinType.AINT32;
+import static org.apache.asterix.om.types.BuiltinType.*;
 
 import java.util.List;
 import java.util.UUID;
@@ -324,8 +323,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
 
-        ISerializerDeserializer[] outputRecFields = new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount()];
-        ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount()];
+        ISerializerDeserializer[] outputRecFields = new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount() - 1];
+        ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount() - 1];
 
         outputRecFields[0] = serdeProvider.getSerializerDeserializer(ADOUBLE);
         outputTypeTraits[0] = typeTraitProvider.getTypeTrait(ADOUBLE);
@@ -335,9 +334,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         outputTypeTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
 
         // Copy all original fields from secondaryRecDesc
-        for (int i = 0; i < secondaryRecDesc.getFieldCount(); i++) {
-            outputRecFields[2 + i] = secondaryRecDesc.getFields()[i];
-            outputTypeTraits[2 + i] = secondaryRecDesc.getTypeTraits()[i];
+        for (int i = 1; i < secondaryRecDesc.getFieldCount(); i++) {
+            outputRecFields[2 + i -1] = secondaryRecDesc.getFields()[i];
+            outputTypeTraits[2 + i - 1] = secondaryRecDesc.getTypeTraits()[i];
         }
 
         RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
@@ -370,10 +369,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
         System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         System.err.println("SortNumFrames from config: " + sortNumFrames);
-        int[] sortFields = { 1, 0 }; // Sort by centroidId (0) first, then distance (1)
+        int[] sortFields = { 1, 0 , 2 }; // Sort by centroidId (0) first, then distance (1)
         IBinaryComparatorFactory[] sortComparatorFactories =
                 { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
-                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true) // distance
+                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true), // distance
+                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT64, true) // distance
                 };
         // Ensure minimum frames for sort operator (must be > 1)
         int sortFrames = Math.max(sortNumFrames, 2);
@@ -702,7 +702,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // (accounting for distance at 0 and centroidId at 1)
         // In identity permutation, they map to fieldPermutation[2 + numSecondaryKeys + i]
         for (int i = 0; i < numPrimaryKeys; i++) {
-            pkFields[i] = fieldPermutation[2 + numSecondaryKeys + i];
+            pkFields[i] = fieldPermutation[1 + numSecondaryKeys + i];
         }
         return pkFields;
     }

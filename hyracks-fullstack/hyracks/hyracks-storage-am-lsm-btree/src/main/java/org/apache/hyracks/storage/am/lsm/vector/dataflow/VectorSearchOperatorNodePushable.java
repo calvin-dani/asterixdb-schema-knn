@@ -22,6 +22,8 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
+import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
 import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
@@ -58,13 +60,20 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // Factory for creating vector accessors (passed from AsterixDB layer)
     protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
+    // Factory for creating distance functions (passed from AsterixDB layer, wraps VectorDistanceArrCalculation)
+    protected final java.io.Serializable distanceFunctionFactory;
+
     // Tuple reference for extracting query parameters
     protected PermutingFrameTupleReference queryParamsTuple;
+
+    // Reusable pointable for extracting string values
+    private final UTF8StringPointable stringPointable = new UTF8StringPointable();
 
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
-            IVectorBinaryAccessorFactory vectorAccessorFactory, int[][] partitionsMap) throws HyracksDataException {
+            IVectorBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
+            int[][] partitionsMap) throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -89,6 +98,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
 
         this.queryFields = queryFields;
         this.vectorAccessorFactory = vectorAccessorFactory;
+        this.distanceFunctionFactory = distanceFunctionFactory;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
@@ -115,7 +125,39 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
             vectorPred.setQueryTuple(queryParamsTuple);
             vectorPred.setQueryFieldIndex(0); // Field 0 is the vector field
+
+            // Extract distance metric from field index 2 (after query vector at 0, k at 1)
+            if (queryFields != null && queryFields.length > 2) {
+                String distanceMetric = extractDistanceMetricFromTuple(queryParamsTuple, 2);
+                vectorPred.setDistanceMetric(distanceMetric);
+            }
         }
+    }
+
+    /**
+     * Extract distance metric string from tuple field.
+     * 
+     * @param tuple Input tuple containing the distance metric
+     * @param fieldIndex Field index containing the distance metric string
+     * @return Distance metric string, or "euclidean" as default
+     */
+    private String extractDistanceMetricFromTuple(ITupleReference tuple, int fieldIndex) {
+        try {
+            if (tuple.getFieldCount() > fieldIndex) {
+                byte[] fieldData = tuple.getFieldData(fieldIndex);
+                int fieldStart = tuple.getFieldStart(fieldIndex);
+                int fieldLength = tuple.getFieldLength(fieldIndex);
+
+                // Reset pointable to read the string value
+                stringPointable.set(fieldData, fieldStart + 1, fieldLength);
+                return stringPointable.toString();
+            }
+        } catch (Exception e) {
+            // If extraction fails, default to euclidean
+            System.err.println("WARNING: Failed to extract distance metric from tuple, defaulting to euclidean: "
+                    + e.getMessage());
+        }
+        return "euclidean"; // Default fallback
     }
 
     @Override
@@ -138,5 +180,10 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // The VCTree accessor will extract the query vector from the predicate during search()
         // This maintains layer separation: extraction happens in storage layer using the factory
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, vectorAccessorFactory);
+
+        // Store the distance function factory in parameters
+        // The VCTree will use this factory to create IVectorDistanceFunction implementations
+        // that wrap VectorDistanceArrCalculation from AsterixDB
+        iap.getParameters().put(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY, distanceFunctionFactory);
     }
 }

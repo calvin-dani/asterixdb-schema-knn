@@ -234,7 +234,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
 
             // Create combined serializers: [new fields] + [original fields]
-            int totalFields = 2 + originalTuple.getFieldCount(); // 2 new fields + all original fields
+            int totalFields = 2 + originalTuple.getFieldCount() - 1; // 2 new fields + all original fields - embedding
             ISerializerDeserializer<?>[] combinedSerdes = new ISerializerDeserializer<?>[totalFields];
 
             // Set serializers for new fields
@@ -243,8 +243,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             combinedSerdes[0] = ADoubleSerializerDeserializer.INSTANCE; // distance
 
             // Set serializers for original fields
-            for (int i = 0; i < originalTuple.getFieldCount(); i++) {
-                combinedSerdes[2 + i] = originalFieldSerdes[i];
+            for (int i = 1; i < originalTuple.getFieldCount(); i++) {
+                combinedSerdes[2 + i - 1] = originalFieldSerdes[i];
             }
 
             // Deserialize original fields to get their values
@@ -254,12 +254,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             Object[] combinedValues = new Object[totalFields];
             //            combinedValues[0] = searchResult.centroidId; // centroidId
             //            combinedValues[1] = searchResult.distance;   // distance
-            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
             combinedValues[0] = new ADouble(searchResult.distance);
+            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
 
             // Add original field values
-            for (int i = 0; i < originalFieldValues.length; i++) {
-                combinedValues[2 + i] = originalFieldValues[i];
+            for (int i = 1; i < originalFieldValues.length; i++) {
+                combinedValues[2 + i - 1] = originalFieldValues[i];
             }
 
             // Use TupleUtils.createTuple() with combined serializers and values

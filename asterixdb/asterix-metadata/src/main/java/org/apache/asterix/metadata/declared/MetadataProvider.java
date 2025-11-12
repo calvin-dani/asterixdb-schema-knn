@@ -111,6 +111,7 @@ import org.apache.asterix.runtime.operators.LSMPrimaryInsertOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMSecondaryInsertDeleteWithNestedPlanOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMSecondaryUpsertOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMSecondaryUpsertWithNestedPlanOperatorDescriptor;
+import org.apache.asterix.runtime.utils.VectorDistanceFunctionFactory;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -832,11 +833,16 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // The operator uses it to create accessors that parse AsterixDB's vector format
         AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory = new AOrderedListVectorBinaryAccessorFactory();
 
+        // Create distance function factory that wraps VectorDistanceArrCalculation
+        // This factory allows passing VectorDistanceArrCalculation implementations to Hyracks
+        // without creating circular dependencies
+        VectorDistanceFunctionFactory distanceFunctionFactory = new VectorDistanceFunctionFactory();
+
         // Create VectorSearchOperatorDescriptor
         int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
         VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
                 queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
-                partitionsMap, numPrimaryKeys, numSecondaryKeys);
+                distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }

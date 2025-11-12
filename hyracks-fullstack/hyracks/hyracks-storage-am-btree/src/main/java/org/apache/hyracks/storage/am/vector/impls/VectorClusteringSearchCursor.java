@@ -63,6 +63,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private int currentTupleIndex;
     private int tupleCount;
     private IIndexAccessor accessor;
+    private IVectorDistanceFunction distanceFunction;
 
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
@@ -121,6 +122,13 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
 
             this.accessor = vectorState.getIndexAccessor();
+
+            // Get distance function from initial state
+            this.distanceFunction = vectorState.getDistanceFunction();
+            // Fallback to Euclidean if not provided
+            if (this.distanceFunction == null) {
+                this.distanceFunction = VectorUtils::calculateEuclideanDistance;
+            }
         }
 
         // If targetMetadataPageId is not set, find the closest cluster first
@@ -130,11 +138,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                         .create(new IllegalArgumentException("Query vector must be provided for centroid finding"));
             }
 
-            // Find closest cluster via tree traversal
-            // Use default Euclidean distance function (will be made dynamic later)
-            IVectorDistanceFunction defaultDistanceFunction = VectorUtils::calculateEuclideanDistance;
+            // Find closest cluster via tree traversal using the provided distance function
             ClusterSearchResult clusterResult = ((VectorClusteringTree.VectorClusteringTreeAccessor) accessor)
-                    .findClosestLeafCentroid(queryVector, defaultDistanceFunction);
+                    .findClosestLeafCentroid(queryVector, this.distanceFunction);
             this.targetMetadataPageId = getMetadataPageIdFromCluster(clusterResult);
         }
 
