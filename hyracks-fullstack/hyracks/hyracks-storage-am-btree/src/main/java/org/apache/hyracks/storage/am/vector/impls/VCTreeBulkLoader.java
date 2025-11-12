@@ -69,6 +69,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
     private int currentCentroidId;
+    private int counter;
 
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
@@ -264,6 +265,10 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
             createFirstDirectoryPages();
             createNewDataPage();
         }
+        // Log which cluster this record is loaded into
+        LOGGER.info("===== record #{} is loaded into cluster #{} ======",
+                counter, currentLeafClusterIndex);
+        counter += 1;
         try {
             // Calculate space needed for this tuple - following BTreeNSMBulkLoader pattern
             int spaceNeeded = dataFrameTupleWriter.bytesRequired(tuple) + slotSize;
