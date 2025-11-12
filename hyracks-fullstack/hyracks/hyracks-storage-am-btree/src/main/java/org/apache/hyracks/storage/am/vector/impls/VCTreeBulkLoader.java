@@ -89,11 +89,9 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
         this.currentCentroidId = -1;
-        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor1 =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
         VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
-        VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
+        VectorClusteringTree vctree = vcTreeAccessor.getIndex();
         ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
         int maxPageId = vctree.getPageManager().getMaxPageId(metaFrame);
         MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
@@ -108,9 +106,9 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         // Simple bulk load - just copy all pages
 
         for (int pageId = 1; pageId <= maxPageId; pageId++) {
-            ICachedPage sourcePage = staticAccessor1.getCachedPage(pageId);
+            ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
             copyPage(sourcePage);
-            staticAccessor1.releasePage(sourcePage);
+            vcTreeAccessor.releasePage(sourcePage);
         }
     }
 
@@ -256,9 +254,11 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
             currentCentroidId = tupleCentroidId;
         } else if (currentCentroidId != tupleCentroidId) {
             // Moved to a new centroid cluster
-            LOGGER.debug("Switching to new centroid cluster: {}", tupleCentroidId);
+            LOGGER.debug("Switching from centroid {} to centroid {}", currentCentroidId, tupleCentroidId);
             currentCentroidId = tupleCentroidId;
-            loadToNextLeafCluster();
+            // Calculate target cluster index from centroid ID (handle gaps in centroid IDs)
+            int targetClusterIndex = tupleCentroidId - firstLeafCentroidId;
+            loadToNextLeafCluster(targetClusterIndex);
         }
         if (directoryPages.isEmpty()) {
             createFirstDirectoryPages();
@@ -294,28 +294,47 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         }
     }
 
-    public void loadToNextLeafCluster() throws HyracksDataException {
+    /**
+     * Load to a specific leaf cluster by index.
+     * Handles gaps in centroid IDs by jumping directly to the target cluster.
+     *
+     * @param targetClusterIndex Target cluster index (0-based) calculated from centroid ID
+     * @throws HyracksDataException if cluster index is out of bounds
+     */
+    public void loadToNextLeafCluster(int targetClusterIndex) throws HyracksDataException {
+        // Validate target cluster index
+        if (targetClusterIndex < 0 || targetClusterIndex >= directoryPages.size()) {
+            throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
+                    "Target cluster index out of bounds: " + targetClusterIndex + " (valid range: 0-"
+                            + (directoryPages.size() - 1) + ")");
+        }
+
+        // Skip if already at target cluster
+        if (currentLeafClusterIndex == targetClusterIndex) {
+            LOGGER.debug("Already at target cluster {}, skipping", targetClusterIndex);
+            return;
+        }
+
         // Finish current data page if it exists and has data
         if (currentDataPage != null && entriesInCurrentDataPage > 0) {
             writeDataPageToDirectory(true);
         }
 
-        // Move to next leaf cluster
-        currentLeafClusterIndex++;
-
-        if (currentLeafClusterIndex == directoryPages.size()) {
-            // Finished all leaf clusters
-            LOGGER.debug("Finished loading all leaf clusters");
-            return;
+        // Write current directory page before switching
+        if (currentDirectoryPage != null) {
+            write(currentDirectoryPage);
         }
 
-        // Check if we have more clusters to load
-        if (currentLeafClusterIndex > directoryPages.size()) {
-            throw new HyracksDataException("No more leaf clusters to load");
+        // Log gap if skipping clusters
+        if (targetClusterIndex > currentLeafClusterIndex + 1) {
+            LOGGER.info("Skipping empty clusters from {} to {} (gap detected)", currentLeafClusterIndex + 1,
+                    targetClusterIndex - 1);
         }
-        write(currentDirectoryPage);
 
-        // Set current directory page to the next cluster's directory page
+        // Move to target leaf cluster
+        currentLeafClusterIndex = targetClusterIndex;
+
+        // Set current directory page to the target cluster's directory page
         currentDirectoryPage = directoryPages.get(currentLeafClusterIndex);
 
         // Initialize directory frame for the new cluster
@@ -326,7 +345,8 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         // Reset data page state for new cluster
         entriesInCurrentDataPage = 0;
 
-        LOGGER.debug("Moved to leaf cluster {}", currentLeafClusterIndex);
+        LOGGER.debug("Moved to leaf cluster {} (centroid ID: {})", currentLeafClusterIndex,
+                firstLeafCentroidId + currentLeafClusterIndex);
     }
 
     /**

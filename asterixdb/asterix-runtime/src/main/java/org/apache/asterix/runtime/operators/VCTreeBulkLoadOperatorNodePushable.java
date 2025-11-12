@@ -108,7 +108,7 @@ public class VCTreeBulkLoadOperatorNodePushable extends LSMIndexBulkLoadOperator
                 // New centroid - call loadToNextLeafCluster if not first tuple
                 if (!firstTuple[storageIdx] && vcTreeBulkLoaders[storageIdx] != null) {
                     try {
-                        vcTreeBulkLoaders[storageIdx].loadToNextLeafCluster();
+                        vcTreeBulkLoaders[storageIdx].loadToNextLeafCluster(0);
                     } catch (HyracksDataException e) {
                         System.err.println("ERROR: Failed to transition to next leaf cluster: " + e.getMessage());
                         throw e;

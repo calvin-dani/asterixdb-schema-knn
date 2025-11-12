@@ -105,7 +105,8 @@ public class VCTreeNavigationUtils {
                     leafEnterFields.put("fileId", fileId);
                     logTraversalEvent("leaf_page_enter", leafEnterFields);
 
-                    bestResult = findClosestInLeafPage(queryVector, currentPageId, leafFrame);
+                    bestResult = findClosestInLeafPage(bufferCache, fileId, queryVector, currentPageId, leafFrame,
+                            leafFrameFactory);
                     break; // Found leaf level result
 
                 } else {
@@ -118,7 +119,8 @@ public class VCTreeNavigationUtils {
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
-                    int nextPageId = findClosestInInteriorPage(queryVector, currentPageId, interiorFrame);
+                    int nextPageId = findClosestInInteriorPage(bufferCache, fileId, queryVector, currentPageId,
+                            interiorFrame, interiorFrameFactory);
                     if (nextPageId == -1) {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                                 "No valid centroid found in interior cluster");
@@ -238,175 +240,247 @@ public class VCTreeNavigationUtils {
     }
 
     /**
-     * Find the closest centroid in a leaf page.
-     * 
+     * Find the closest centroid in a leaf cluster, handling overflow pages.
+     * Unified loop iterates through all pages in the overflow chain (e.g., p10 -> p20 -> p21).
+     *
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
      * @param queryVector Query vector to find closest centroid for
-     * @param pageId Page ID of the leaf page
-     * @param leafFrame Leaf frame for accessing page data
-     * @return ClusterSearchResult containing closest centroid information
+     * @param startPageId Starting page ID of the leaf cluster
+     * @param initialLeafFrame Leaf frame already set to the initial page (already pinned by caller)
+     * @param leafFrameFactory Factory for creating leaf frames for overflow pages
+     * @return ClusterSearchResult containing closest centroid information (pageId, tupleIndex, centroid, distance, centroidId)
      * @throws HyracksDataException if any error occurs during search
      */
-    private static ClusterSearchResult findClosestInLeafPage(double[] queryVector, int pageId,
-            IVectorClusteringLeafFrame leafFrame) throws HyracksDataException {
-
-        int tupleCount = leafFrame.getTupleCount();
+    private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
+            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory)
+            throws HyracksDataException {
 
         double bestDistance = Double.MAX_VALUE;
-        int bestClusterIndex = -1;
+        int bestTupleIndex = -1;
+        int bestPageId = -1;
         double[] bestCentroid = null;
         int bestCentroidId = -1;
         int candidatesProcessed = 0;
+        int pagesProcessed = 0;
 
         Map<String, Object> searchStartFields = new HashMap<>();
-        searchStartFields.put("pageId", pageId);
-        searchStartFields.put("tupleCount", tupleCount);
+        searchStartFields.put("startPageId", startPageId);
         searchStartFields.put("vectorDim", queryVector.length);
         searchStartFields.put("queryVector", queryVector);
         logTraversalEvent("leaf_search_start", searchStartFields);
 
-        // Search all centroids in this page
-        for (int i = 0; i < tupleCount; i++) {
+        // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
+        int currentPageId = startPageId;
+        IVectorClusteringLeafFrame currentFrame = initialLeafFrame;
+        boolean isFirstPage = true;
+        ICachedPage currentPage = null;
+
+        while (currentPageId != -1) {
             try {
-                ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
-                frameTuple.resetByTupleIndex(leafFrame, i);
-                double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-                int centroidID = leafFrame.getCentroidId(i);
-
-                // Check vector dimensionality before distance calculation
-                if (centroid.length != queryVector.length) {
-                    continue;
+                // For the first page, use the frame passed by caller (already pinned/latched)
+                // For overflow pages, pin and latch them ourselves
+                if (!isFirstPage) {
+                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    currentPage.acquireReadLatch();
+                    currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                    currentFrame.setPage(currentPage);
                 }
 
-                double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-                candidatesProcessed++;
+                int tupleCount = currentFrame.getTupleCount();
+                boolean hasOverflow = currentFrame.getOverflowFlagBit();
+                int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
+                pagesProcessed++;
 
-                Map<String, Object> candidateFields = new HashMap<>();
-                candidateFields.put("pageId", pageId);
-                candidateFields.put("tupleIndex", i);
-                candidateFields.put("centroidId", centroidID);
-                candidateFields.put("centroidDim", centroid.length);
-                candidateFields.put("distance", distance);
-                logTraversalEvent("leaf_candidate", candidateFields);
+                Map<String, Object> pageFields = new HashMap<>();
+                pageFields.put("pageId", currentPageId);
+                pageFields.put("tupleCount", tupleCount);
+                pageFields.put("hasOverflow", hasOverflow);
+                pageFields.put("nextPageId", nextPageId);
+                pageFields.put("isFirstPage", isFirstPage);
+                logTraversalEvent("leaf_page_search", pageFields);
 
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestClusterIndex = i;
-                    bestCentroid = centroid.clone();
-                    bestCentroidId = centroidID;
+                // Search all centroids in this page
+                for (int i = 0; i < tupleCount; i++) {
+                    try {
+                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
+                        frameTuple.resetByTupleIndex(currentFrame, i);
+                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+                        int centroidID = currentFrame.getCentroidId(i);
+
+                        // Check vector dimensionality before distance calculation
+                        if (centroid.length != queryVector.length) {
+                            continue;
+                        }
+
+                        double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                        candidatesProcessed++;
+
+                        Map<String, Object> candidateFields = new HashMap<>();
+                        candidateFields.put("pageId", currentPageId);
+                        candidateFields.put("tupleIndex", i);
+                        candidateFields.put("centroidId", centroidID);
+                        candidateFields.put("centroidDim", centroid.length);
+                        candidateFields.put("distance", distance);
+                        logTraversalEvent("leaf_candidate", candidateFields);
+
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestTupleIndex = i;
+                            bestPageId = currentPageId;
+                            bestCentroid = centroid.clone();
+                            bestCentroidId = centroidID;
+                        }
+                    } catch (Exception e) {
+                        System.err.println(
+                                "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
+                        continue;
+                    }
                 }
-            } catch (Exception e) {
-                System.err.println("ERROR processing tuple " + i + ": " + e.getMessage());
-                continue;
+
+                // Move to next page in chain
+                currentPageId = nextPageId;
+                isFirstPage = false;
+
+            } finally {
+                // Only unpin/unlatch overflow pages, not the first page (caller handles that)
+                if (!isFirstPage && currentPage != null) {
+                    currentPage.releaseReadLatch();
+                    bufferCache.unpin(currentPage);
+                    currentPage = null;
+                }
             }
         }
 
-        if (bestClusterIndex >= 0) {
+        if (bestTupleIndex >= 0) {
             Map<String, Object> searchSelectFields = new HashMap<>();
-            searchSelectFields.put("pageId", pageId);
-            searchSelectFields.put("selectedTupleIndex", bestClusterIndex);
+            searchSelectFields.put("bestPageId", bestPageId);
+            searchSelectFields.put("selectedTupleIndex", bestTupleIndex);
             searchSelectFields.put("centroidId", bestCentroidId);
             searchSelectFields.put("bestDistance", bestDistance);
             searchSelectFields.put("candidatesProcessed", candidatesProcessed);
+            searchSelectFields.put("pagesProcessed", pagesProcessed);
             logTraversalEvent("leaf_search_select", searchSelectFields);
 
-            return ClusterSearchResult.create(pageId, bestClusterIndex, bestCentroid, bestDistance, bestCentroidId);
+            return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId);
         }
         // TODO : SOME RETURN EMPTY
         return null;
     }
 
     /**
-     * Find the closest centroid in an interior page and return child page ID.
-     * 
+     * Find the closest centroid in an interior cluster and return child page ID, handling overflow pages.
+     * Unified loop iterates through all pages in the overflow chain (e.g., p10 -> p20 -> p21).
+     *
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
      * @param queryVector Query vector to find closest centroid for
-     * @param pageId Page ID of the interior page
-     * @param interiorFrame Interior frame for accessing page data
+     * @param startPageId Starting page ID of the interior cluster
+     * @param initialInteriorFrame Interior frame already set to the initial page (already pinned by caller)
+     * @param interiorFrameFactory Factory for creating interior frames for overflow pages
      * @return Child page ID to descend to, or -1 if no valid child found
      * @throws HyracksDataException if any error occurs during search
      */
-    private static int findClosestInInteriorPage(double[] queryVector, int pageId,
-            IVectorClusteringInteriorFrame interiorFrame) throws HyracksDataException {
+    private static int findClosestInInteriorPage(IBufferCache bufferCache, int fileId, double[] queryVector,
+            int startPageId, IVectorClusteringInteriorFrame initialInteriorFrame,
+            ITreeIndexFrameFactory interiorFrameFactory) throws HyracksDataException {
 
-        int tupleCount = interiorFrame.getTupleCount();
         double bestDistance = Double.MAX_VALUE;
         int bestChildPageId = -1;
         int candidatesProcessed = 0;
+        int pagesProcessed = 0;
 
         Map<String, Object> searchStartFields = new HashMap<>();
-        searchStartFields.put("pageId", pageId);
-        searchStartFields.put("tupleCount", tupleCount);
+        searchStartFields.put("startPageId", startPageId);
         searchStartFields.put("vectorDim", queryVector.length);
         searchStartFields.put("queryVector", queryVector);
         logTraversalEvent("interior_search_start", searchStartFields);
 
-        // Search all centroids in this page
-        for (int i = 0; i < tupleCount; i++) {
-            ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
-            frameTuple.resetByTupleIndex(interiorFrame, i);
-            double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+        // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
+        int currentPageId = startPageId;
+        IVectorClusteringInteriorFrame currentFrame = initialInteriorFrame;
+        boolean isFirstPage = true;
+        ICachedPage currentPage = null;
 
-            // Check vector dimensionality before distance calculation
-            if (centroid.length != queryVector.length) {
-                continue;
-            }
+        while (currentPageId != -1) {
+            try {
+                // For the first page, use the frame passed by caller (already pinned/latched)
+                // For overflow pages, pin and latch them ourselves
+                if (!isFirstPage) {
+                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    currentPage.acquireReadLatch();
+                    currentFrame = (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                    currentFrame.setPage(currentPage);
+                }
 
-            double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-            int childPageId = interiorFrame.getChildPageId(i);
-            candidatesProcessed++;
+                int tupleCount = currentFrame.getTupleCount();
+                boolean hasOverflow = currentFrame.getOverflowFlagBit();
+                int nextPageId = hasOverflow ? currentFrame.getNextPage() : -1;
+                pagesProcessed++;
 
-            Map<String, Object> candidateFields = new HashMap<>();
-            candidateFields.put("pageId", pageId);
-            candidateFields.put("tupleIndex", i);
-            candidateFields.put("centroidDim", centroid.length);
-            candidateFields.put("distance", distance);
-            candidateFields.put("childPageId", childPageId);
-            logTraversalEvent("interior_candidate", candidateFields);
+                Map<String, Object> pageFields = new HashMap<>();
+                pageFields.put("pageId", currentPageId);
+                pageFields.put("tupleCount", tupleCount);
+                pageFields.put("hasOverflow", hasOverflow);
+                pageFields.put("nextPageId", nextPageId);
+                pageFields.put("isFirstPage", isFirstPage);
+                logTraversalEvent("interior_page_search", pageFields);
 
-            //                    VectorDistanceArrCalculation.euclidean_squared(centroid, queryVector);
+                // Search all centroids in this page
+                for (int i = 0; i < tupleCount; i++) {
+                    try {
+                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
+                        frameTuple.resetByTupleIndex(currentFrame, i);
+                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
 
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestChildPageId = childPageId;
+                        // Check vector dimensionality before distance calculation
+                        if (centroid.length != queryVector.length) {
+                            continue;
+                        }
+
+                        double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                        int childPageId = currentFrame.getChildPageId(i);
+                        candidatesProcessed++;
+
+                        Map<String, Object> candidateFields = new HashMap<>();
+                        candidateFields.put("pageId", currentPageId);
+                        candidateFields.put("tupleIndex", i);
+                        candidateFields.put("centroidDim", centroid.length);
+                        candidateFields.put("distance", distance);
+                        candidateFields.put("childPageId", childPageId);
+                        logTraversalEvent("interior_candidate", candidateFields);
+
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestChildPageId = childPageId;
+                        }
+                    } catch (Exception e) {
+                        System.err.println(
+                                "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
+                        continue;
+                    }
+                }
+
+                // Move to next page in chain
+                currentPageId = nextPageId;
+                isFirstPage = false;
+
+            } finally {
+                // Only unpin/unlatch overflow pages, not the first page (caller handles that)
+                if (!isFirstPage && currentPage != null) {
+                    currentPage.releaseReadLatch();
+                    bufferCache.unpin(currentPage);
+                    currentPage = null;
+                }
             }
         }
 
         Map<String, Object> searchSelectFields = new HashMap<>();
-        searchSelectFields.put("pageId", pageId);
         searchSelectFields.put("selectedChildPageId", bestChildPageId);
         searchSelectFields.put("bestDistance", bestDistance);
         searchSelectFields.put("candidatesProcessed", candidatesProcessed);
+        searchSelectFields.put("pagesProcessed", pagesProcessed);
         logTraversalEvent("interior_search_select", searchSelectFields);
-
-        return bestChildPageId;
-    }
-
-    private static int findClosestInInteriorPage(double[] queryVector, IVectorClusteringInteriorFrame interiorFrame)
-            throws HyracksDataException {
-
-        int tupleCount = interiorFrame.getTupleCount();
-        double bestDistance = Double.MAX_VALUE;
-        int bestChildPageId = -1;
-
-        // Search all centroids in this page
-        for (int i = 0; i < tupleCount; i++) {
-            ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
-            frameTuple.resetByTupleIndex(interiorFrame, i);
-            double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-
-            // Check vector dimensionality before distance calculation
-            if (centroid.length != queryVector.length) {
-                continue;
-            }
-
-            double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-
-            //                    VectorDistanceArrCalculation.euclidean_squared(centroid, queryVector);
-
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestChildPageId = interiorFrame.getChildPageId(i);
-            }
-        }
 
         return bestChildPageId;
     }

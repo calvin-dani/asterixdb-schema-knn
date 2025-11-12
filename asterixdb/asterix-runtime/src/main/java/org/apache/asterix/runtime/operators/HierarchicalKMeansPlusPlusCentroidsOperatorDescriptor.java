@@ -1727,7 +1727,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Build subsequent levels using scalable K-means++ on centroids
                     List<double[]> currentCentroids = initialResult.centroids;
                     // Initialize currentK using square root reduction for balanced hierarchical structure
-                    int currentK = Math.min(K, Math.max(1, (int) Math.floor(Math.sqrt(initialResult.centroids.size()))));
+                    int currentK =
+                            Math.min(K, Math.max(1, (int) Math.floor(Math.sqrt(initialResult.centroids.size()))));
                     int maxIterations = 20;
                     int maxLevels = 5;
                     int currentLevel = 1;
