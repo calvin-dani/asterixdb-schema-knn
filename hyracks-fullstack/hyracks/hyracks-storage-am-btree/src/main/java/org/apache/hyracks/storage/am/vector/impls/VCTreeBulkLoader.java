@@ -89,11 +89,9 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
         this.currentCentroidId = -1;
-        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor1 =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
         VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) staticAccessor;
-        VectorClusteringTree vctree = (VectorClusteringTree) vcTreeAccessor.getIndex();
+        VectorClusteringTree vctree = vcTreeAccessor.getIndex();
         ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
         int maxPageId = vctree.getPageManager().getMaxPageId(metaFrame);
         MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
@@ -108,9 +106,9 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         // Simple bulk load - just copy all pages
 
         for (int pageId = 1; pageId <= maxPageId; pageId++) {
-            ICachedPage sourcePage = staticAccessor1.getCachedPage(pageId);
+            ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
             copyPage(sourcePage);
-            staticAccessor1.releasePage(sourcePage);
+            vcTreeAccessor.releasePage(sourcePage);
         }
     }
 
