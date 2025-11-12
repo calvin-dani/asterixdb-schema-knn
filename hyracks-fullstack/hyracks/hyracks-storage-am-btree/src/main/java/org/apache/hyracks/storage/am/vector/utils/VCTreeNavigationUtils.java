@@ -252,9 +252,9 @@ public class VCTreeNavigationUtils {
      * @return ClusterSearchResult containing closest centroid information (pageId, tupleIndex, centroid, distance, centroidId)
      * @throws HyracksDataException if any error occurs during search
      */
-    private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId,
-            double[] queryVector, int startPageId, IVectorClusteringLeafFrame initialLeafFrame,
-            ITreeIndexFrameFactory leafFrameFactory) throws HyracksDataException {
+    private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
+            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory)
+            throws HyracksDataException {
 
         double bestDistance = Double.MAX_VALUE;
         int bestTupleIndex = -1;

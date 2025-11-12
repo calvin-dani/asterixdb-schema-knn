@@ -151,8 +151,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     System.err.println("Pattern did not match (not single ORDER BY expression)");
                 }
             } else {
-                System.err.println("LIMIT child: " + (limitOp.getInputs().isEmpty() ? "NONE" :
-                    ((AbstractLogicalOperator) limitOp.getInputs().get(0).getValue()).getOperatorTag()));
+                System.err.println("LIMIT child: " + (limitOp.getInputs().isEmpty() ? "NONE"
+                        : ((AbstractLogicalOperator) limitOp.getInputs().get(0).getValue()).getOperatorTag()));
             }
         }
 

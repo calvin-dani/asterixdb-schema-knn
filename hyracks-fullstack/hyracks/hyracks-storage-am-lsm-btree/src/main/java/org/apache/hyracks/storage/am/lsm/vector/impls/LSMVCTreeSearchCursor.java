@@ -19,6 +19,8 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
+import java.util.PriorityQueue;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -35,8 +37,6 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.util.IndexCursorUtils;
-
-import java.util.PriorityQueue;
 
 /**
  * LSM search cursor for Vector Clustering Tree.
@@ -184,8 +184,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     }
 
     @Override
-    protected void pushIntoQueueFromCursorAndReplaceThisElement(PriorityQueueElement e)
-            throws HyracksDataException {
+    protected void pushIntoQueueFromCursorAndReplaceThisElement(PriorityQueueElement e) throws HyracksDataException {
         // No-op: Vector search uses sequential iteration, not priority queue merge
         // If this gets called (e.g., during component switching), just do nothing
         // instead of throwing exception to avoid breaking base class flow
