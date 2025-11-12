@@ -342,12 +342,19 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
 
+        // Extract distance metric from WITH clause
+        AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
+        String distanceMetric =
+                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
+        System.err.println("Distance metric from CREATE INDEX: " + distanceMetric);
+
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
-                        secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor);
+                        secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
+                        distanceMetric);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);

@@ -49,6 +49,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
@@ -1081,14 +1082,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
      * interior and leaf frames.
      */
-    public ClusterSearchResult findClosestClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx)
-            throws HyracksDataException {
+    public ClusterSearchResult findClosestClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
 
         // Use the common navigation logic from VCTreeNavigationUtils
         return VCTreeNavigationUtils.findClosestCentroid(bufferCache, getFileId(), rootPage, getInteriorFrameFactory(),
-                getLeafFrameFactory(), queryVector);
+                getLeafFrameFactory(), queryVector, distanceFunction);
     }
 
     /**
@@ -1356,7 +1357,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
 
         // Find the closest cluster by traversing from root to leaf
-        ClusterSearchResult clusterResult = findClosestClusterFromRoot(vector, ctx);
+        // Use default Euclidean distance for internal operations (backward compatibility)
+        IVectorDistanceFunction defaultDistanceFunction = VectorUtils::calculateEuclideanDistance;
+        ClusterSearchResult clusterResult = findClosestClusterFromRoot(vector, ctx, defaultDistanceFunction);
         if (clusterResult == null) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No cluster found for vector");
         }
@@ -1512,10 +1515,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
          * This method delegates to the tree's findClosestClusterFromRoot implementation.
          *
          * @param queryVector The query vector to find the closest centroid for
+         * @param distanceFunction The distance function to use for centroid finding
          * @return ClusterSearchResult containing information about the closest leaf centroid
          * @throws HyracksDataException if any error occurs during the search
          */
-        public ClusterSearchResult findClosestLeafCentroid(double[] queryVector) throws HyracksDataException {
+        public ClusterSearchResult findClosestLeafCentroid(double[] queryVector,
+                IVectorDistanceFunction distanceFunction) throws HyracksDataException {
             if (destroyed) {
                 throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
             }
@@ -1535,7 +1540,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             }
 
             // Delegate to the tree's implementation
-            return tree.findClosestClusterFromRoot(queryVector, ctx);
+            return tree.findClosestClusterFromRoot(queryVector, ctx, distanceFunction);
         }
 
         @Override

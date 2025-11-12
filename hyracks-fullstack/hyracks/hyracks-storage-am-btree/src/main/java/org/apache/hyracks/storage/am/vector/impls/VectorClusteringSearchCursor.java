@@ -26,6 +26,8 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -129,8 +131,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
 
             // Find closest cluster via tree traversal
-            ClusterSearchResult clusterResult =
-                    ((VectorClusteringTree.VectorClusteringTreeAccessor) accessor).findClosestLeafCentroid(queryVector);
+            // Use default Euclidean distance function (will be made dynamic later)
+            IVectorDistanceFunction defaultDistanceFunction = VectorUtils::calculateEuclideanDistance;
+            ClusterSearchResult clusterResult = ((VectorClusteringTree.VectorClusteringTreeAccessor) accessor)
+                    .findClosestLeafCentroid(queryVector, defaultDistanceFunction);
             this.targetMetadataPageId = getMetadataPageIdFromCluster(clusterResult);
         }
 

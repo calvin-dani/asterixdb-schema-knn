@@ -24,7 +24,6 @@ import java.util.Queue;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
-import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
@@ -74,23 +73,23 @@ public class VCTreeStaticStructureNavigator {
      * @return ClusterSearchResult containing closest centroid information
      * @throws HyracksDataException if any error occurs during traversal
      */
-    public ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
-        if (queryVector == null || queryVector.length == 0) {
-            throw new IllegalArgumentException("Query vector cannot be null or empty");
-        }
-
-        LOGGER.debug("Finding closest centroid for vector of dimension {}", queryVector.length);
-
-        // Validate structure on first use
-        if (!isValidated) {
-            validateStaticStructure();
-            isValidated = true;
-        }
-
-        // Use the common navigation logic
-        return VCTreeNavigationUtils.findClosestCentroid(bufferCache, fileId, rootPageId, interiorFrameFactory,
-                leafFrameFactory, queryVector);
-    }
+    //    public ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
+    //        if (queryVector == null || queryVector.length == 0) {
+    //            throw new IllegalArgumentException("Query vector cannot be null or empty");
+    //        }
+    //
+    //        LOGGER.debug("Finding closest centroid for vector of dimension {}", queryVector.length);
+    //
+    //        // Validate structure on first use
+    //        if (!isValidated) {
+    //            validateStaticStructure();
+    //            isValidated = true;
+    //        }
+    //
+    //        // Use the common navigation logic
+    //        return VCTreeNavigationUtils.findClosestCentroid(bufferCache, fileId, rootPageId, interiorFrameFactory,
+    //                leafFrameFactory, queryVector);
+    //    }
 
     /**
      * Check if the static structure is valid and accessible.
