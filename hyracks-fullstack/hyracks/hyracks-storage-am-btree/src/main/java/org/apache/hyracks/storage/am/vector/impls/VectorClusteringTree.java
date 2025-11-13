@@ -1647,6 +1647,38 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             return tree.findClosestClusterFromRoot(queryVector, ctx, distanceFunction);
         }
 
+        /**
+         * Find all leaf-level clusters sorted by distance to query vector.
+         * Used for multi-cluster scanning when single cluster doesn't have enough records.
+         *
+         * @param queryVector The query vector to compute distances from
+         * @return List of all leaf clusters sorted by distance (closest first)
+         * @throws HyracksDataException if any error occurs during the search
+         */
+        public List<ClusterSearchResult> findAllLeafClustersSorted(double[] queryVector) throws HyracksDataException {
+            if (destroyed) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
+            }
+
+            if (queryVector == null) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
+            }
+
+            if (queryVector.length != tree.vectorDimensions) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
+                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
+            }
+
+            // Ensure the tree is initialized
+            if (!tree.isStaticStructureInitialized()) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
+            }
+
+            // Delegate to navigation utils for implementation
+            return VCTreeNavigationUtils.findAllLeafClustersSorted(tree.bufferCache, tree.getFileId(),
+                    tree.rootPage, queryVector, tree.leafFrameFactory, tree.interiorFrameFactory);
+        }
+
         @Override
         public void destroy() throws HyracksDataException {
             if (destroyed) {
