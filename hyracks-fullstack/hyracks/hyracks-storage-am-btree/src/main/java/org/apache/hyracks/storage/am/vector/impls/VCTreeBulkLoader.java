@@ -37,7 +37,6 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
-import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
@@ -214,17 +213,17 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      * ========= Clustering records to leaf centroids =======
      */
 
-    public ClusterSearchResult findCluster(ITupleReference tuple) throws HyracksDataException {
-        /*  use static structure to find the closest leaf centroid for the given tuple
-            return the leaf centroid ID and the distance
-        */
-        VectorClusteringTree.VectorClusteringTreeAccessor accessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) vcTreeIndex
-                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-
-        double[] vectorEmbedding = extractVector(tuple);
-        return accessor.findClosestLeafCentroid(vectorEmbedding); // Placeholder
-    }
+    //    public ClusterSearchResult findCluster(ITupleReference tuple) throws HyracksDataException {
+    //        /*  use static structure to find the closest leaf centroid for the given tuple
+    //            return the leaf centroid ID and the distance
+    //        */
+    //        VectorClusteringTree.VectorClusteringTreeAccessor accessor =
+    //                (VectorClusteringTree.VectorClusteringTreeAccessor) vcTreeIndex
+    //                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+    //
+    //        double[] vectorEmbedding = extractVector(tuple);
+    //        return accessor.findClosestLeafCentroid(vectorEmbedding); // Placeholder
+    //    }
 
     private double extractDistance(ITupleReference tuple) throws HyracksDataException {
         // Assuming the distance is stored in the first field of the tuple

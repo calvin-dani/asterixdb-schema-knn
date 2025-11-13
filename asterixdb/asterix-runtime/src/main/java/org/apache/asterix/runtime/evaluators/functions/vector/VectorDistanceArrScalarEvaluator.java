@@ -23,6 +23,7 @@ import static org.apache.asterix.om.types.EnumDeserializer.ATYPETAGDESERIALIZER;
 
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.asterix.common.exceptions.ErrorCode;
@@ -91,12 +92,76 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
         double apply(double[] a, double[] b) throws HyracksDataException;
     }
 
+    @FunctionalInterface
+    protected interface TypeSpecificExtractor {
+        void extractAndSet(Object array, int index, byte[] data, int offset) throws HyracksDataException;
+    }
+
     private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(MANHATTAN_FORMAT.hash(),
             VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(), VectorDistanceArrCalculation::euclidean,
             EUCLIDEAN_DISTANCE_L2.hash(), VectorDistanceArrCalculation::euclidean, EUCLIDEAN_DISTANCE_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, EUCLIDEAN_DISTANCE_L2_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
             DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
+
+    private static final Map<ATypeTag, TypeSpecificExtractor> HOMOGENEOUS_EXTRACTORS = new HashMap<>();
+
+    static {
+        HOMOGENEOUS_EXTRACTORS.put(ATypeTag.TINYINT, (array, index, data, offset) -> {
+            if (array instanceof int[]) {
+                ((int[]) array)[index] = AInt8SerializerDeserializer.getByte(data, offset);
+            } else if (array instanceof long[]) {
+                ((long[]) array)[index] = AInt8SerializerDeserializer.getByte(data, offset);
+            } else if (array instanceof float[]) {
+                ((float[]) array)[index] = AInt8SerializerDeserializer.getByte(data, offset);
+            } else if (array instanceof double[]) {
+                ((double[]) array)[index] = AInt8SerializerDeserializer.getByte(data, offset);
+            }
+        });
+        HOMOGENEOUS_EXTRACTORS.put(ATypeTag.SMALLINT, (array, index, data, offset) -> {
+            if (array instanceof int[]) {
+                ((int[]) array)[index] = AInt16SerializerDeserializer.getShort(data, offset);
+            } else if (array instanceof long[]) {
+                ((long[]) array)[index] = AInt16SerializerDeserializer.getShort(data, offset);
+            } else if (array instanceof float[]) {
+                ((float[]) array)[index] = AInt16SerializerDeserializer.getShort(data, offset);
+            } else if (array instanceof double[]) {
+                ((double[]) array)[index] = AInt16SerializerDeserializer.getShort(data, offset);
+            }
+        });
+        HOMOGENEOUS_EXTRACTORS.put(ATypeTag.INTEGER, (array, index, data, offset) -> {
+            if (array instanceof int[]) {
+                ((int[]) array)[index] = AInt32SerializerDeserializer.getInt(data, offset);
+            } else if (array instanceof long[]) {
+                ((long[]) array)[index] = AInt32SerializerDeserializer.getInt(data, offset);
+            } else if (array instanceof float[]) {
+                ((float[]) array)[index] = AInt32SerializerDeserializer.getInt(data, offset);
+            } else if (array instanceof double[]) {
+                ((double[]) array)[index] = AInt32SerializerDeserializer.getInt(data, offset);
+            }
+        });
+        HOMOGENEOUS_EXTRACTORS.put(ATypeTag.BIGINT, (array, index, data, offset) -> {
+            if (array instanceof long[]) {
+                ((long[]) array)[index] = AInt64SerializerDeserializer.getLong(data, offset);
+            } else if (array instanceof float[]) {
+                ((float[]) array)[index] = AInt64SerializerDeserializer.getLong(data, offset);
+            } else if (array instanceof double[]) {
+                ((double[]) array)[index] = AInt64SerializerDeserializer.getLong(data, offset);
+            }
+        });
+        HOMOGENEOUS_EXTRACTORS.put(ATypeTag.FLOAT, (array, index, data, offset) -> {
+            if (array instanceof float[]) {
+                ((float[]) array)[index] = AFloatSerializerDeserializer.getFloat(data, offset);
+            } else if (array instanceof double[]) {
+                ((double[]) array)[index] = AFloatSerializerDeserializer.getFloat(data, offset);
+            }
+        });
+        HOMOGENEOUS_EXTRACTORS.put(ATypeTag.DOUBLE, (array, index, data, offset) -> {
+            if (array instanceof double[]) {
+                ((double[]) array)[index] = ADoubleSerializerDeserializer.getDouble(data, offset);
+            }
+        });
+    }
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];
@@ -201,16 +266,259 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
 
     }
 
-    protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException {
-        ATypeTag typeTag = listAccessor.getItemType();
-        double[] primitiveArray = new double[listAccessor.size()];
+    protected Object createPrimitiveArray(ATypeTag itemType, int size) throws HyracksDataException {
+        switch (itemType) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+                return new int[size];
+            case BIGINT:
+                return new long[size];
+            case FLOAT:
+                return new float[size];
+            case DOUBLE:
+                return new double[size];
+            case ANY:
+                return new double[size];
+            default:
+                throw new HyracksDataException("Unsupported type for primitive array: " + itemType);
+        }
+    }
+
+    protected void extractValueIntoArray(int[] array, int index, IPointable item, ATypeTag typeTag)
+            throws HyracksDataException {
+        byte[] data = item.getByteArray();
+        int offset = item.getStartOffset();
+        ATypeTag actualType = typeTag;
+        int valueOffset = offset + 1;
+
+        if (typeTag == ATypeTag.ANY) {
+            actualType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            valueOffset = offset + 1;
+        }
+
+        switch (actualType) {
+            case TINYINT:
+                array[index] = AInt8SerializerDeserializer.getByte(data, valueOffset);
+                break;
+            case SMALLINT:
+                array[index] = AInt16SerializerDeserializer.getShort(data, valueOffset);
+                break;
+            case INTEGER:
+                array[index] = AInt32SerializerDeserializer.getInt(data, valueOffset);
+                break;
+            case BIGINT:
+                long longVal = AInt64SerializerDeserializer.getLong(data, valueOffset);
+                if (longVal < Integer.MIN_VALUE || longVal > Integer.MAX_VALUE) {
+                    throw new HyracksDataException("BIGINT value " + longVal + " out of range for int[]");
+                }
+                array[index] = (int) longVal;
+                break;
+            case FLOAT:
+            case DOUBLE:
+                throw new HyracksDataException("FLOAT/DOUBLE value cannot be stored in int[] array");
+            default:
+                throw new HyracksDataException("Unsupported type for int[]: " + actualType);
+        }
+    }
+
+    protected void extractValueIntoArray(long[] array, int index, IPointable item, ATypeTag typeTag)
+            throws HyracksDataException {
+        byte[] data = item.getByteArray();
+        int offset = item.getStartOffset();
+        ATypeTag actualType = typeTag;
+        int valueOffset = offset + 1;
+
+        if (typeTag == ATypeTag.ANY) {
+            actualType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            valueOffset = offset + 1;
+        }
+
+        switch (actualType) {
+            case TINYINT:
+                array[index] = AInt8SerializerDeserializer.getByte(data, valueOffset);
+                break;
+            case SMALLINT:
+                array[index] = AInt16SerializerDeserializer.getShort(data, valueOffset);
+                break;
+            case INTEGER:
+                array[index] = AInt32SerializerDeserializer.getInt(data, valueOffset);
+                break;
+            case BIGINT:
+                array[index] = AInt64SerializerDeserializer.getLong(data, valueOffset);
+                break;
+            case FLOAT:
+            case DOUBLE:
+                throw new HyracksDataException("FLOAT/DOUBLE value cannot be stored in long[] array");
+            default:
+                throw new HyracksDataException("Unsupported type for long[]: " + actualType);
+        }
+    }
+
+    protected void extractValueIntoArray(float[] array, int index, IPointable item, ATypeTag typeTag)
+            throws HyracksDataException {
+        byte[] data = item.getByteArray();
+        int offset = item.getStartOffset();
+        ATypeTag actualType = typeTag;
+        int valueOffset = offset + 1;
+
+        if (typeTag == ATypeTag.ANY) {
+            actualType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            valueOffset = offset + 1;
+        }
+
+        switch (actualType) {
+            case TINYINT:
+                array[index] = AInt8SerializerDeserializer.getByte(data, valueOffset);
+                break;
+            case SMALLINT:
+                array[index] = AInt16SerializerDeserializer.getShort(data, valueOffset);
+                break;
+            case INTEGER:
+                array[index] = AInt32SerializerDeserializer.getInt(data, valueOffset);
+                break;
+            case BIGINT:
+                array[index] = AInt64SerializerDeserializer.getLong(data, valueOffset);
+                break;
+            case FLOAT:
+                array[index] = AFloatSerializerDeserializer.getFloat(data, valueOffset);
+                break;
+            case DOUBLE:
+                double doubleVal = ADoubleSerializerDeserializer.getDouble(data, valueOffset);
+                array[index] = (float) doubleVal;
+                break;
+            default:
+                throw new HyracksDataException("Unsupported type for float[]: " + actualType);
+        }
+    }
+
+    protected void extractValueIntoArray(double[] array, int index, IPointable item, ATypeTag typeTag)
+            throws HyracksDataException {
+        byte[] data = item.getByteArray();
+        int offset = item.getStartOffset();
+        ATypeTag actualType = typeTag;
+        int valueOffset = offset + 1;
+
+        if (typeTag == ATypeTag.ANY) {
+            actualType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            valueOffset = offset + 1;
+        }
+
+        switch (actualType) {
+            case TINYINT:
+                array[index] = AInt8SerializerDeserializer.getByte(data, valueOffset);
+                break;
+            case SMALLINT:
+                array[index] = AInt16SerializerDeserializer.getShort(data, valueOffset);
+                break;
+            case INTEGER:
+                array[index] = AInt32SerializerDeserializer.getInt(data, valueOffset);
+                break;
+            case BIGINT:
+                array[index] = AInt64SerializerDeserializer.getLong(data, valueOffset);
+                break;
+            case FLOAT:
+                array[index] = AFloatSerializerDeserializer.getFloat(data, valueOffset);
+                break;
+            case DOUBLE:
+                array[index] = ADoubleSerializerDeserializer.getDouble(data, valueOffset);
+                break;
+            default:
+                throw new HyracksDataException("Unsupported type for double[]: " + actualType);
+        }
+    }
+
+    protected void extractValueIntoArray(Object array, int index, IPointable item, ATypeTag typeTag)
+            throws HyracksDataException {
+        byte[] data = item.getByteArray();
+        int offset = item.getStartOffset();
+        ATypeTag actualType = typeTag;
+        int valueOffset = offset + 1;
+
+        if (typeTag == ATypeTag.ANY) {
+            actualType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+            valueOffset = offset + 1;
+        }
+
+        TypeSpecificExtractor extractor = HOMOGENEOUS_EXTRACTORS.get(actualType);
+        if (extractor != null) {
+            extractor.extractAndSet(array, index, data, valueOffset);
+        } else {
+            if (array instanceof int[]) {
+                extractValueIntoArray((int[]) array, index, item, typeTag);
+            } else if (array instanceof long[]) {
+                extractValueIntoArray((long[]) array, index, item, typeTag);
+            } else if (array instanceof float[]) {
+                extractValueIntoArray((float[]) array, index, item, typeTag);
+            } else if (array instanceof double[]) {
+                extractValueIntoArray((double[]) array, index, item, typeTag);
+            } else {
+                throw new HyracksDataException("Unsupported array type: " + array.getClass());
+            }
+        }
+    }
+
+    protected Object createPrimitiveList(ListAccessor listAccessor) throws IOException, HyracksDataException {
+        int size = listAccessor.size();
+        if (size == 0) {
+            return null;
+        }
+
+        ATypeTag declaredItemType = listAccessor.getItemType();
+        ATypeTag detectedType = null;
+        Object array = null;
+
+        if (declaredItemType == ATypeTag.ANY) {
+            IPointable firstItem = new VoidPointable();
+            ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+            listAccessor.getOrWriteItem(0, firstItem, storage);
+
+            byte[] data = firstItem.getByteArray();
+            int offset = firstItem.getStartOffset();
+            detectedType = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
+
+            array = new double[size];
+        } else {
+            detectedType = declaredItemType;
+            array = createPrimitiveArray(detectedType, size);
+        }
+
         IPointable tempVal = new VoidPointable();
         ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
-        for (int i = 0; i < listAccessor.size(); i++) {
+        for (int i = 0; i < size; i++) {
             listAccessor.getOrWriteItem(i, tempVal, storage);
-            primitiveArray[i] = extractNumericVector(tempVal, typeTag);
+            extractValueIntoArray(array, i, tempVal, detectedType);
         }
-        return primitiveArray;
+
+        return array;
+    }
+
+    protected double[] createPrimitveList(ListAccessor listAccessor) throws IOException, HyracksDataException {
+        Object result = createPrimitiveList(listAccessor);
+        if (result == null) {
+            return new double[0];
+        }
+        if (result instanceof double[]) {
+            return (double[]) result;
+        }
+        double[] doubleArray = new double[listAccessor.size()];
+        if (result instanceof int[]) {
+            int[] intArray = (int[]) result;
+            for (int i = 0; i < intArray.length; i++) {
+                doubleArray[i] = intArray[i];
+            }
+        } else if (result instanceof long[]) {
+            long[] longArray = (long[]) result;
+            for (int i = 0; i < longArray.length; i++) {
+                doubleArray[i] = longArray[i];
+            }
+        } else if (result instanceof float[]) {
+            float[] floatArray = (float[]) result;
+            for (int i = 0; i < floatArray.length; i++) {
+                doubleArray[i] = floatArray[i];
+            }
+        }
+        return doubleArray;
     }
 
     protected double extractNumericVector(IPointable pointable, ATypeTag derivedTypeTag) throws HyracksDataException {

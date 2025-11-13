@@ -30,6 +30,8 @@ import org.apache.asterix.om.base.ADouble;
 import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
+import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -43,6 +45,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
@@ -64,9 +67,11 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexAccessor;
+import org.apache.hyracks.util.string.UTF8StringUtil;
 
 /**
  * Operator that handles bulk loader initialization and recursive data grouping to run files.
@@ -89,14 +94,112 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final IScalarEvaluatorFactory args;
     private final RecordDescriptor inputRecDesc;
     private final RecordDescriptor outputRecDesc;
+    private final String distanceMetric;
 
     // Partitioning components
     private VCTreePartitioner partitioner;
 
+    // Distance function constants
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
+            UTF8StringPointable.generateUTF8Pointable("euclidean");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2_SQUARED =
+            UTF8StringPointable.generateUTF8Pointable("l2_squared");
+    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
+            UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
+    private static final UTF8StringPointable MANHATTAN_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+    private static final UTF8StringPointable COSINE_FORMAT =
+            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+    private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
+
+    // Serializable distance function implementations
+    private static class ManhattanDistanceFunction implements DistanceFunction, java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public double apply(double[] a, double[] b) throws HyracksDataException {
+            return VectorDistanceArrCalculation.manhattan(a, b);
+        }
+    }
+
+    private static class EuclideanDistanceFunction implements DistanceFunction, java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public double apply(double[] a, double[] b) throws HyracksDataException {
+            return VectorDistanceArrCalculation.euclidean(a, b);
+        }
+    }
+
+    private static class EuclideanSquaredDistanceFunction implements DistanceFunction, java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public double apply(double[] a, double[] b) throws HyracksDataException {
+            return VectorDistanceArrCalculation.euclidean_squared(a, b);
+        }
+    }
+
+    private static class CosineDistanceFunction implements DistanceFunction, java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public double apply(double[] a, double[] b) throws HyracksDataException {
+            return VectorDistanceArrCalculation.cosine(a, b);
+        }
+    }
+
+    private static class DotProductDistanceFunction implements DistanceFunction, java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public double apply(double[] a, double[] b) throws HyracksDataException {
+            return VectorDistanceArrCalculation.dot(a, b);
+        }
+    }
+
+    // Distance function hash map
+    private static final java.util.Map<Integer, DistanceFunction> DISTANCE_MAP =
+            java.util.Map.of(MANHATTAN_FORMAT.hash(), new ManhattanDistanceFunction(), EUCLIDEAN_DISTANCE.hash(),
+                    new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction(),
+                    EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
+                    EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
+                    new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+
+    /**
+     * Convert distance metric string to DistanceFunction implementation.
+     * 
+     * @param distanceType Distance metric string (e.g., "euclidean", "cosine similarity", etc.)
+     * @return DistanceFunction implementation
+     * @throws IllegalArgumentException if distance type is not supported
+     */
+    private static DistanceFunction getDistanceFunction(String distanceType) {
+        UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
+        DistanceFunction func = DISTANCE_MAP
+                .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
+        if (func == null) {
+            // Default to Euclidean if not found
+            System.err.println("WARNING: Unsupported distance function: " + distanceType + ", defaulting to euclidean");
+            return new EuclideanDistanceFunction();
+        }
+        return func;
+    }
+
+    /**
+     * Convert DistanceFunction to IVectorDistanceFunction for use in Hyracks modules.
+     * 
+     * @param distanceFunction AsterixDB DistanceFunction
+     * @return IVectorDistanceFunction wrapper
+     */
+    private static IVectorDistanceFunction wrapDistanceFunction(DistanceFunction distanceFunction) {
+        return distanceFunction::apply;
+    }
+
     public VCTreeBulkLoaderAndGroupingOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args) {
+            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -105,12 +208,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.permitUUID = permitUUID;
         this.materializedDataUUID = materializedDataUUID;
         this.args = args;
+        this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
 
         System.err.println("VCTreeBulkLoaderAndGroupingOperatorDescriptor created with permit UUID: " + permitUUID);
         System.err.println("Output record descriptor set: " + outputRecordDescriptor);
+        System.err.println("Distance metric: " + this.distanceMetric);
     }
 
     /**
@@ -129,7 +234,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
 
             // Create combined serializers: [new fields] + [original fields]
-            int totalFields = 2 + originalTuple.getFieldCount(); // 2 new fields + all original fields
+            int totalFields = 2 + originalTuple.getFieldCount() - 1; // 2 new fields + all original fields - embedding
             ISerializerDeserializer<?>[] combinedSerdes = new ISerializerDeserializer<?>[totalFields];
 
             // Set serializers for new fields
@@ -138,8 +243,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             combinedSerdes[0] = ADoubleSerializerDeserializer.INSTANCE; // distance
 
             // Set serializers for original fields
-            for (int i = 0; i < originalTuple.getFieldCount(); i++) {
-                combinedSerdes[2 + i] = originalFieldSerdes[i];
+            for (int i = 1; i < originalTuple.getFieldCount(); i++) {
+                combinedSerdes[2 + i - 1] = originalFieldSerdes[i];
             }
 
             // Deserialize original fields to get their values
@@ -149,12 +254,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             Object[] combinedValues = new Object[totalFields];
             //            combinedValues[0] = searchResult.centroidId; // centroidId
             //            combinedValues[1] = searchResult.distance;   // distance
-            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
             combinedValues[0] = new ADouble(searchResult.distance);
+            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
 
             // Add original field values
-            for (int i = 0; i < originalFieldValues.length; i++) {
-                combinedValues[2 + i] = originalFieldValues[i];
+            for (int i = 1; i < originalFieldValues.length; i++) {
+                combinedValues[2 + i - 1] = originalFieldValues[i];
             }
 
             // Use TupleUtils.createTuple() with combined serializers and values
@@ -433,6 +538,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private ArrayTupleBuilder outputTupleBuilder;
         private ArrayTupleReference outputTupleRef;
         private RecordDescriptor outputRecDesc;
+        private DistanceFunction distanceFunction;
+        private IVectorDistanceFunction hyracksDistanceFunction;
 
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
@@ -460,6 +567,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 // Initialize output infrastructure for transformed tuples
                 initializeOutputInfrastructure();
+
+                // Convert distance metric string to DistanceFunction
+                distanceFunction = getDistanceFunction(distanceMetric);
+                // Wrap for use in Hyracks modules
+                hyracksDistanceFunction = wrapDistanceFunction(distanceFunction);
+                System.err.println("Initialized distance function for metric: " + distanceMetric);
 
                 // Open the output writer
                 if (writer != null) {
@@ -566,8 +679,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
                 }
 
-                // Use accessor to find closest leaf centroid
-                ClusterSearchResult result = vcTreeAccessor.findClosestLeafCentroid(queryVector);
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                // Use accessor to find closest leaf centroid with distance function
+                ClusterSearchResult result =
+                        vcTreeAccessor.findClosestLeafCentroid(queryVector, hyracksDistanceFunction);
 
                 if (result == null) {
                     System.err.println("WARNING: No closest centroid found for query vector");

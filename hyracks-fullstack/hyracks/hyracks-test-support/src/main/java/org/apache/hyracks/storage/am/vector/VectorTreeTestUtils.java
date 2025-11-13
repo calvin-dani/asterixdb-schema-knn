@@ -49,10 +49,12 @@ import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
@@ -243,8 +245,9 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
-
-        ClusterSearchResult searchResult = vcTreeAccessor.findClosestLeafCentroid(new double[] { 21.0d, 31.0d, 21.0d });
+        IVectorDistanceFunction defaultDistanceFunction = VectorUtils::calculateEuclideanDistance;
+        ClusterSearchResult searchResult =
+                vcTreeAccessor.findClosestLeafCentroid(new double[] { 21.0d, 31.0d, 21.0d }, defaultDistanceFunction);
     }
 
     public List<TestClusterData> insertRecordsIntoMultipleClusters(AbstractVectorTreeTestContext ctx) throws Exception {

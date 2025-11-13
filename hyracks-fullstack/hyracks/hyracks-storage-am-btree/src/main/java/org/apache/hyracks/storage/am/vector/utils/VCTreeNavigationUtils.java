@@ -35,6 +35,7 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -56,12 +57,13 @@ public class VCTreeNavigationUtils {
      * @param interiorFrameFactory Factory for creating interior frames
      * @param leafFrameFactory Factory for creating leaf frames
      * @param queryVector Query vector to find closest centroid for
+     * @param distanceFunction Distance function to use for centroid finding
      * @return ClusterSearchResult containing closest centroid information
      * @throws HyracksDataException if any error occurs during traversal
      */
     public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
-            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector)
-            throws HyracksDataException {
+            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         Map<String, Object> startFields = new HashMap<>();
         startFields.put("treeFileId", fileId);
@@ -106,7 +108,7 @@ public class VCTreeNavigationUtils {
                     logTraversalEvent("leaf_page_enter", leafEnterFields);
 
                     bestResult = findClosestInLeafPage(bufferCache, fileId, queryVector, currentPageId, leafFrame,
-                            leafFrameFactory);
+                            leafFrameFactory, distanceFunction);
                     break; // Found leaf level result
 
                 } else {
@@ -120,7 +122,7 @@ public class VCTreeNavigationUtils {
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
                     int nextPageId = findClosestInInteriorPage(bufferCache, fileId, queryVector, currentPageId,
-                            interiorFrame, interiorFrameFactory);
+                            interiorFrame, interiorFrameFactory, distanceFunction);
                     if (nextPageId == -1) {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                                 "No valid centroid found in interior cluster");
@@ -250,11 +252,13 @@ public class VCTreeNavigationUtils {
      * @param initialLeafFrame Leaf frame already set to the initial page (already pinned by caller)
      * @param leafFrameFactory Factory for creating leaf frames for overflow pages
      * @return ClusterSearchResult containing closest centroid information (pageId, tupleIndex, centroid, distance, centroidId)
+     * @param distanceFunction Distance function to use for distance calculation
+     * @return ClusterSearchResult containing closest centroid information
      * @throws HyracksDataException if any error occurs during search
      */
     private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
-            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory)
-            throws HyracksDataException {
+            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         double bestDistance = Double.MAX_VALUE;
         int bestTupleIndex = -1;
@@ -313,7 +317,7 @@ public class VCTreeNavigationUtils {
                             continue;
                         }
 
-                        double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                        double distance = distanceFunction.apply(queryVector, centroid);
                         candidatesProcessed++;
 
                         Map<String, Object> candidateFields = new HashMap<>();
@@ -378,12 +382,14 @@ public class VCTreeNavigationUtils {
      * @param startPageId Starting page ID of the interior cluster
      * @param initialInteriorFrame Interior frame already set to the initial page (already pinned by caller)
      * @param interiorFrameFactory Factory for creating interior frames for overflow pages
+     * @param distanceFunction Distance function to use for distance calculation
      * @return Child page ID to descend to, or -1 if no valid child found
      * @throws HyracksDataException if any error occurs during search
      */
     private static int findClosestInInteriorPage(IBufferCache bufferCache, int fileId, double[] queryVector,
             int startPageId, IVectorClusteringInteriorFrame initialInteriorFrame,
-            ITreeIndexFrameFactory interiorFrameFactory) throws HyracksDataException {
+            ITreeIndexFrameFactory interiorFrameFactory, IVectorDistanceFunction distanceFunction)
+            throws HyracksDataException {
 
         double bestDistance = Double.MAX_VALUE;
         int bestChildPageId = -1;
@@ -438,7 +444,7 @@ public class VCTreeNavigationUtils {
                             continue;
                         }
 
-                        double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                        double distance = distanceFunction.apply(queryVector, centroid);
                         int childPageId = currentFrame.getChildPageId(i);
                         candidatesProcessed++;
 

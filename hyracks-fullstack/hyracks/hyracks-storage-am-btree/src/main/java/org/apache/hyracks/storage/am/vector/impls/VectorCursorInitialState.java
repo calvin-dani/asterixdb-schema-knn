@@ -18,6 +18,7 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
@@ -40,11 +41,13 @@ public class VectorCursorInitialState implements ICursorInitialState {
     private ISearchOperationCallback searchCallback;
     private MultiComparator originalKeyCmp;
     private final IIndexAccessor accessor;
+    private IVectorDistanceFunction distanceFunction;
 
     public VectorCursorInitialState(IIndexAccessor accessor) {
         this.accessor = accessor;
         this.targetDataPageId = -1;
         this.metadataPageId = -1;
+        this.distanceFunction = null;
     }
 
     public VectorCursorInitialState(long metadataPageId, double[] queryVector, IIndexAccessor accessor) {
@@ -144,5 +147,19 @@ public class VectorCursorInitialState implements ICursorInitialState {
 
     public IIndexAccessor getAccessor() {
         return accessor;
+    }
+
+    /**
+     * Set the distance function for vector distance calculations.
+     */
+    public void setDistanceFunction(IVectorDistanceFunction distanceFunction) {
+        this.distanceFunction = distanceFunction;
+    }
+
+    /**
+     * Get the distance function for vector distance calculations.
+     */
+    public IVectorDistanceFunction getDistanceFunction() {
+        return distanceFunction;
     }
 }

@@ -35,9 +35,11 @@ public class VectorPointPredicate implements ISearchPredicate {
 
     private ITupleReference queryTuple;
     private int queryFieldIndex;
+    private String distanceMetric;
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
+        this.distanceMetric = null;
     }
 
     public VectorPointPredicate(double[] queryVector) {
@@ -74,6 +76,20 @@ public class VectorPointPredicate implements ISearchPredicate {
         return queryFieldIndex;
     }
 
+    /**
+     * Set the distance metric string (e.g., "euclidean", "cosine similarity", etc.).
+     */
+    public void setDistanceMetric(String distanceMetric) {
+        this.distanceMetric = distanceMetric;
+    }
+
+    /**
+     * Get the distance metric string.
+     */
+    public String getDistanceMetric() {
+        return distanceMetric;
+    }
+
     @Override
     public MultiComparator getLowKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
@@ -106,6 +122,7 @@ public class VectorPointPredicate implements ISearchPredicate {
 
     @Override
     public String toString() {
-        return "VectorPointPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + "]";
+        return "VectorPointPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + ", distanceMetric="
+                + distanceMetric + "]";
     }
 }
