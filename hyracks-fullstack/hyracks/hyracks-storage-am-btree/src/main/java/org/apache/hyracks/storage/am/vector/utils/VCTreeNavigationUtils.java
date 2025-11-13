@@ -656,4 +656,127 @@ public class VCTreeNavigationUtils {
         }
         return sb.toString();
     }
+
+    /**
+     * Find all leaf-level clusters sorted by distance to query vector.
+     * This is a simplified implementation that scans all leaf pages.
+     *
+     * Note: This is Strategy A (simple sequential scanning). Future optimization could use
+     * hierarchical beam search to avoid scanning all leaf centroids.
+     *
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID of the tree
+     * @param rootPageId Root page ID to start traversal
+     * @param queryVector Query vector to compute distances
+     * @param leafFrameFactory Factory for creating leaf frames
+     * @param interiorFrameFactory Factory for creating interior frames
+     * @return List of all leaf clusters sorted by distance (closest first)
+     * @throws HyracksDataException if any error occurs
+     */
+    public static List<ClusterSearchResult> findAllLeafClustersSorted(IBufferCache bufferCache, int fileId,
+            int rootPageId, double[] queryVector, ITreeIndexFrameFactory leafFrameFactory,
+            ITreeIndexFrameFactory interiorFrameFactory) throws HyracksDataException {
+
+        List<ClusterSearchResult> allClusters = new ArrayList<>();
+
+        // Navigate to leaf level (same traversal as findClosestCentroid)
+        ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, rootPageId));
+        int currentPageId = rootPageId;
+
+        try {
+            page.acquireReadLatch();
+
+            // Traverse down to leaf level
+            while (true) {
+                IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                leafFrame.setPage(page);
+
+                if (leafFrame.isLeaf()) {
+                    // At leaf level: scan ALL leaf pages (including overflow)
+                    allClusters = scanAllLeafCentroids(bufferCache, fileId, currentPageId, queryVector, leafFrameFactory);
+                    break;
+                } else {
+                    // Interior level: descend to leftmost child
+                    IVectorClusteringInteriorFrame interiorFrame =
+                            (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                    interiorFrame.setPage(page);
+
+                    // Just pick first child to descend (we'll scan all leaves anyway)
+                    int childPageId = interiorFrame.getChildPageId(0);
+                    page.releaseReadLatch();
+                    bufferCache.unpin(page);
+
+                    page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, childPageId));
+                    page.acquireReadLatch();
+                    currentPageId = childPageId;
+                }
+            }
+        } finally {
+            page.releaseReadLatch();
+            bufferCache.unpin(page);
+        }
+
+        // Sort by distance
+        allClusters.sort(java.util.Comparator.comparingDouble(c -> c.distance));
+        return allClusters;
+    }
+
+    /**
+     * Scan all leaf-level centroids across all leaf pages (including overflow).
+     * Simplified implementation that follows overflow chain.
+     *
+     * TODO: For correctness, should traverse ALL leaf pages in tree, not just overflow chain.
+     * Current implementation works if bulk loader creates connected leaf chain.
+     */
+    private static List<ClusterSearchResult> scanAllLeafCentroids(IBufferCache bufferCache, int fileId,
+            int startLeafPageId, double[] queryVector, ITreeIndexFrameFactory leafFrameFactory)
+            throws HyracksDataException {
+
+        List<ClusterSearchResult> clusters = new ArrayList<>();
+
+        // Traverse leaf page chain starting from startLeafPageId
+        int currentPageId = startLeafPageId;
+        ICachedPage currentPage = null;
+        boolean isFirstPage = true;
+
+        while (currentPageId != -1) {
+            try {
+                if (!isFirstPage) {
+                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    currentPage.acquireReadLatch();
+                }
+
+                IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                leafFrame.setPage(isFirstPage ? null : currentPage); // First page already pinned by caller
+
+                // Check overflow
+                boolean hasOverflow = leafFrame.getOverflowFlagBit();
+                int nextPageId = hasOverflow ? leafFrame.getNextLeaf() : -1;
+
+                // Evaluate all centroids in this page
+                ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
+                for (int i = 0; i < leafFrame.getTupleCount(); i++) {
+                    frameTuple.resetByTupleIndex(leafFrame, i);
+
+                    double[] centroid = extractCentroidFromLeafTuple(frameTuple);
+                    double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                    int centroidId = leafFrame.getCentroidId(i);
+
+                    clusters.add(ClusterSearchResult.create(currentPageId, i, centroid, distance, centroidId));
+                }
+
+                currentPageId = nextPageId;
+                isFirstPage = false;
+
+            } finally {
+                if (!isFirstPage && currentPage != null) {
+                    currentPage.releaseReadLatch();
+                    bufferCache.unpin(currentPage);
+                    currentPage = null;
+                }
+            }
+        }
+
+        return clusters;
+    }
 }

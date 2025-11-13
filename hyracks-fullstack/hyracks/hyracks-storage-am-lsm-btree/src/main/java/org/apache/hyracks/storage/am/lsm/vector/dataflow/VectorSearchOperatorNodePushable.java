@@ -29,6 +29,7 @@ import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.impls.VectorAnnPredicate;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -136,7 +137,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
 
     /**
      * Extract distance metric string from tuple field.
-     * 
+     *
      * @param tuple Input tuple containing the distance metric
      * @param fieldIndex Field index containing the distance metric string
      * @return Distance metric string, or "euclidean" as default
@@ -180,6 +181,12 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // The VCTree accessor will extract the query vector from the predicate during search()
         // This maintains layer separation: extraction happens in storage layer using the factory
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, vectorAccessorFactory);
+
+        // Store the K field index (field 1 in queryFields: [vector, k, metric])
+        // The cursor will extract K from the query tuple using this index
+        if (queryFields != null && queryFields.length > 1) {
+            iap.getParameters().put(HyracksConstants.VECTOR_K, 1); // K is at field index 1
+        }
 
         // Store the distance function factory in parameters
         // The VCTree will use this factory to create IVectorDistanceFunction implementations
