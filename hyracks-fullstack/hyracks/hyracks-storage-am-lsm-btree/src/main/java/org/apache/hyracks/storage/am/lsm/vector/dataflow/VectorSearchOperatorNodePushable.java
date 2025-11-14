@@ -22,6 +22,7 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
@@ -126,6 +127,16 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             vectorPred.setQueryTuple(queryParamsTuple);
             vectorPred.setQueryFieldIndex(0); // Field 0 is the vector field
 
+            // Extract K value from field 1 if available
+            if (queryFields.length > 1) {
+                // K is at field index 1 in queryParamsTuple (after permutation)
+                // Skip type tag (1 byte) to get the actual integer value
+                int k = IntegerPointable.getInteger(queryParamsTuple.getFieldData(1),
+                        queryParamsTuple.getFieldStart(1) + 1 // +1 to skip type tag
+                );
+                vectorPred.setK(k);
+            }
+
             // Extract distance metric from field index 2 (after query vector at 0, k at 1)
             if (queryFields != null && queryFields.length > 2) {
                 String distanceMetric = extractDistanceMetricFromTuple(queryParamsTuple, 2);
@@ -136,7 +147,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
 
     /**
      * Extract distance metric string from tuple field.
-     * 
+     *
      * @param tuple Input tuple containing the distance metric
      * @param fieldIndex Field index containing the distance metric string
      * @return Distance metric string, or "euclidean" as default
@@ -180,6 +191,12 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // The VCTree accessor will extract the query vector from the predicate during search()
         // This maintains layer separation: extraction happens in storage layer using the factory
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, vectorAccessorFactory);
+
+        // Store the K field index (field 1 in queryFields: [vector, k, metric])
+        // The cursor will extract K from the query tuple using this index
+        if (queryFields != null && queryFields.length > 1) {
+            iap.getParameters().put(HyracksConstants.VECTOR_K, 1); // K is at field index 1
+        }
 
         // Store the distance function factory in parameters
         // The VCTree will use this factory to create IVectorDistanceFunction implementations

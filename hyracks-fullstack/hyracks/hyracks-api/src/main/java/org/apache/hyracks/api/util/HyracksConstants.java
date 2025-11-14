@@ -35,6 +35,9 @@ public class HyracksConstants {
     // Vector search query vector (extracted double[] from input tuple)
     public static final String VECTOR_QUERY = "VECTOR_QUERY";
 
+    // Vector search K parameter (number of nearest neighbors to return)
+    public static final String VECTOR_K = "VECTOR_K";
+
     // Vector distance function factory (wraps VectorDistanceArrCalculation from AsterixDB)
     public static final String VECTOR_DISTANCE_FUNCTION_FACTORY = "VECTOR_DISTANCE_FUNCTION_FACTORY";
 

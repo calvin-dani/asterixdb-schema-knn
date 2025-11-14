@@ -23,12 +23,14 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 
 /**
- * Search predicate for vector point queries.
+ * Search predicate for vector ANN (Approximate Nearest Neighbor) queries.
  * Holds a reference to the query tuple for per-tuple vector searches.
  *
  * Following the Reference Pattern (like RTree): The predicate holds an ITupleReference
  * that is updated per-tuple by resetSearchPredicate(). The storage layer extracts
  * the query vector when needed during search.
+ *
+ * For top-K ANN queries, also includes the k parameter (number of nearest neighbors).
  */
 public class VectorPointPredicate implements ISearchPredicate {
     private static final long serialVersionUID = 1L;
@@ -36,15 +38,25 @@ public class VectorPointPredicate implements ISearchPredicate {
     private ITupleReference queryTuple;
     private int queryFieldIndex;
     private String distanceMetric;
+    private int k; // Number of nearest neighbors to return (for ANN queries)
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
+        this.distanceMetric = null;
+        this.k = Integer.MAX_VALUE; // Default: no limit
+        this.distanceMetric = null;
+    }
+
+    public VectorPointPredicate(int k) {
+        // Constructor for ANN queries with K parameter
+        this.k = k;
         this.distanceMetric = null;
     }
 
     public VectorPointPredicate(double[] queryVector) {
         // Constructor kept for compatibility with tests
         // In runtime, query data comes via setQueryTuple()
+        this.k = Integer.MAX_VALUE; // Default: no limit
     }
 
     /**
@@ -88,6 +100,20 @@ public class VectorPointPredicate implements ISearchPredicate {
      */
     public String getDistanceMetric() {
         return distanceMetric;
+    }
+
+    /**
+     * Set the K parameter (number of nearest neighbors to return).
+     */
+    public void setK(int k) {
+        this.k = k;
+    }
+
+    /**
+     * Get the K parameter (number of nearest neighbors to return).
+     */
+    public int getK() {
+        return k;
     }
 
     @Override
