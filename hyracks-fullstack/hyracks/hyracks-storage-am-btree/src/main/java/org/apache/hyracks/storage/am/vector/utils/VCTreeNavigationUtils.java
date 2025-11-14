@@ -289,7 +289,7 @@ public class VCTreeNavigationUtils {
                 // For the first page, use the frame passed by caller (already pinned/latched)
                 // For overflow pages, pin and latch them ourselves
                 if (!isFirstPage) {
-                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
                     currentPage.acquireReadLatch();
                     currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
                     currentFrame.setPage(currentPage);
@@ -498,7 +498,7 @@ public class VCTreeNavigationUtils {
     /**
      * Extract centroid from a leaf frame tuple (format: <cid, centroid, metadata_ptr>).
      * Uses direct byte parsing to match the tuple writer's getCentroid() method.
-     * 
+     *
      * @param tuple Leaf frame tuple
      * @return Centroid vector
      */
