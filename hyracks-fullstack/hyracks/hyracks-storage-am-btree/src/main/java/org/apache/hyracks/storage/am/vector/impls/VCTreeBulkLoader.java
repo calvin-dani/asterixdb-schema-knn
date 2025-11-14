@@ -68,6 +68,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
     private int currentCentroidId;
+    private int counter = 0;
 
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
@@ -490,8 +491,17 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
+        // Write the final data page if it has entries
+        // BUG FIX: Previously, we called write(currentDataPage) directly,
+        // which wrote the page but didn't create a directory entry.
+        // This made the last records inaccessible during search.
+        if (entriesInCurrentDataPage > 0) {
+            writeDataPageToDirectory(true);  // Creates directory entry AND writes page
+        }
+
+        // Write the directory page
         write(currentDirectoryPage);
-        write(currentDataPage);
+
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(numLeafCentroid));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),

@@ -826,7 +826,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // But we only output PK fields, so we skip these 3 fields in the tuple projector
         // TODO: Verify KeyFieldTypeUtil.getNumSecondaryKeys() works correctly for vector indexes,
         //       or keep hardcoded value if tuple format is always <distance, cosine, embedding, pk...>
-        int numSecondaryKeys = 3; // Hardcoded: distance, cosine, embedding
+        int numSecondaryKeys = 2; // Hardcoded: distance, cosine, embedding
 
         // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples
         // This factory is serializable and passed through the job pipeline

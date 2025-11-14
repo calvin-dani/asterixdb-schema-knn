@@ -28,6 +28,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -35,7 +36,6 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 
 /**
  * Search cursor for vector clustering tree operations.
@@ -67,14 +67,12 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private IVectorDistanceFunction distanceFunction;
 
     // Multi-cluster support fields
-    private int K;  // Target number of records
-    private int recordsCollected;  // Count of records returned so far
-    private ClusterSearchResult currentClusterResult;  // Current cluster being scanned
-    private boolean exhaustedAllClusters;  // Flag to stop searching for more clusters
-    private VCTreeNavigationUtils.NavigationState iteratorState;  // DFS navigation state
-    private int clustersProbed;  // Count of clusters scanned during this search
-
-
+    private int K; // Target number of records
+    private int recordsCollected; // Count of records returned so far
+    private ClusterSearchResult currentClusterResult; // Current cluster being scanned
+    private boolean exhaustedAllClusters; // Flag to stop searching for more clusters
+    private VCTreeNavigationUtils.NavigationState iteratorState; // DFS navigation state
+    private int clustersProbed; // Count of clusters scanned during this search
 
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
@@ -136,7 +134,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.exhaustedAllClusters = false;
         this.clustersProbed = 0;
 
-
         // Get query vector and other parameters from initial state
         // The query vector is passed via IIndexAccessParameters from the operator layer
         if (initialState instanceof VectorCursorInitialState) {
@@ -177,7 +174,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 interiorFrameFactory, leafFrameFactory, queryVector);
 
         // Initialize iterator and get first (closest) cluster
-        this.currentClusterResult = VCTreeNavigationUtils.initializeClusterIterator(iteratorState);
+        this.currentClusterResult = VCTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
 
         if (this.currentClusterResult == null) {
             // Empty tree
@@ -200,7 +197,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             this.tupleCount = 0;
         }
         this.currentTupleIndex = 0;
-        this.clustersProbed = 1;  // First cluster opened
+        this.clustersProbed = 1; // First cluster opened
     }
 
     @Override
@@ -218,50 +215,50 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         // Current page exhausted, try to move to next data page in same cluster
         if (moveToNextDataPage()) {
             System.err.println(String.format(
-                "[VectorClusteringSearchCursor.hasNext] Moved to next data page, tupleCount=%d", tupleCount
-            ));
-            return true;  // Found more data pages in current cluster
+                    "[VectorClusteringSearchCursor.hasNext] Moved to next data page, tupleCount=%d", tupleCount));
+            return true; // Found more data pages in current cluster
         }
 
         System.err.println(String.format(
-            "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsCollected=%d, K=%d, exhaustedAllClusters=%s",
-            recordsCollected, K, exhaustedAllClusters
-        ));
+                "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsCollected=%d, K=%d, exhaustedAllClusters=%s",
+                recordsCollected, K, exhaustedAllClusters));
 
         // Current cluster exhausted
         // Check if we have enough records
         if (recordsCollected >= K) {
-            System.err.println("[VectorClusteringSearchCursor.hasNext] Collected enough records (K reached), returning false");
-            return false;  // We have K records, done!
+            System.err.println(
+                    "[VectorClusteringSearchCursor.hasNext] Collected enough records (K reached), returning false");
+            return false; // We have K records, done!
         }
 
         // Check if we've exhausted all clusters
         if (exhaustedAllClusters) {
             System.err.println("[VectorClusteringSearchCursor.hasNext] All clusters exhausted, returning false");
-            return false;  // No more clusters to scan
+            return false; // No more clusters to scan
         }
 
         // Need more records: find and open next closest cluster
         // Loop to skip empty clusters
         while (true) {
             System.err.println("[VectorClusteringSearchCursor.hasNext] Finding next closest cluster...");
-            ClusterSearchResult nextCluster = VCTreeNavigationUtils.findNextClosestCluster(iteratorState);
+            ClusterSearchResult nextCluster =
+                    VCTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
             if (nextCluster == null) {
                 exhaustedAllClusters = true;
-                System.err.println("[VectorClusteringSearchCursor.hasNext] findNextClosestCluster returned null, marking exhausted");
-                return false;  // No more clusters available
+                System.err.println(
+                        "[VectorClusteringSearchCursor.hasNext] findNextClosestCluster returned null, marking exhausted");
+                return false; // No more clusters available
             }
 
             // Open next cluster
             openCluster(nextCluster);
             boolean hasData = currentTupleIndex < tupleCount;
             System.err.println(String.format(
-                "[VectorClusteringSearchCursor.hasNext] Opened next cluster, hasData=%s, tupleCount=%d",
-                hasData, tupleCount
-            ));
+                    "[VectorClusteringSearchCursor.hasNext] Opened next cluster, hasData=%s, tupleCount=%d", hasData,
+                    tupleCount));
 
             if (hasData) {
-                return true;  // Found cluster with data
+                return true; // Found cluster with data
             }
 
             // Empty cluster, continue to next one
@@ -284,7 +281,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             this.currentTuple = this.frameTuple;
         }
         currentTupleIndex++;
-        recordsCollected++;  // Track how many records we've returned
+        recordsCollected++; // Track how many records we've returned
     }
 
     @Override
@@ -390,7 +387,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         }
 
         this.currentClusterResult = cluster;
-        this.clustersProbed++;  // Increment cluster counter
+        this.clustersProbed++; // Increment cluster counter
 
         // Get metadata page pointer from leaf frame
         this.targetMetadataPageId = getMetadataPageIdFromCluster(cluster);
@@ -409,18 +406,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Log cluster probing
         System.err.println(String.format(
-            "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records collected so far: %d | Target K: %d",
-            clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsCollected, K
-        ));
-    }
-
-    /**
-     * Find all leaf clusters sorted by distance to query vector.
-     * This is called lazily only when we need more clusters.
-     */
-    private List<ClusterSearchResult> findAllLeafClustersSorted() throws HyracksDataException {
-        return ((VectorClusteringTree.VectorClusteringTreeAccessor) accessor)
-                .findAllLeafClustersSorted(queryVector);
+                "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records collected so far: %d | Target K: %d",
+                clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsCollected, K));
     }
 
     /**
@@ -483,9 +470,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Log final statistics
             System.err.println(String.format(
-                "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records returned: %d | Target K: %d | Exhausted all clusters: %s",
-                clustersProbed, recordsCollected, K, exhaustedAllClusters
-            ));
+                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records returned: %d | Target K: %d | Exhausted all clusters: %s",
+                    clustersProbed, recordsCollected, K, exhaustedAllClusters));
         }
         this.isOpen = false;
         this.currentTuple = null;

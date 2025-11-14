@@ -22,15 +22,14 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
 import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
-import org.apache.hyracks.storage.am.vector.impls.VectorAnnPredicate;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -132,9 +131,8 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             if (queryFields.length > 1) {
                 // K is at field index 1 in queryParamsTuple (after permutation)
                 // Skip type tag (1 byte) to get the actual integer value
-                int k = IntegerPointable.getInteger(
-                    queryParamsTuple.getFieldData(1),
-                    queryParamsTuple.getFieldStart(1) + 1  // +1 to skip type tag
+                int k = IntegerPointable.getInteger(queryParamsTuple.getFieldData(1),
+                        queryParamsTuple.getFieldStart(1) + 1 // +1 to skip type tag
                 );
                 vectorPred.setK(k);
             }

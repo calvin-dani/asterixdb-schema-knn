@@ -39,7 +39,6 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int queryFieldIndex;
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
-    private String distanceMetric;
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
@@ -115,20 +114,6 @@ public class VectorPointPredicate implements ISearchPredicate {
      */
     public int getK() {
         return k;
-    }
-
-    /**
-     * Set the distance metric string (e.g., "euclidean", "cosine similarity", etc.).
-     */
-    public void setDistanceMetric(String distanceMetric) {
-        this.distanceMetric = distanceMetric;
-    }
-
-    /**
-     * Get the distance metric string.
-     */
-    public String getDistanceMetric() {
-        return distanceMetric;
     }
 
     @Override

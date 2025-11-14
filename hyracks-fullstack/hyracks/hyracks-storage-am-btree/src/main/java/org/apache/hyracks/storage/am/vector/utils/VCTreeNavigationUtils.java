@@ -289,7 +289,7 @@ public class VCTreeNavigationUtils {
                 // For the first page, use the frame passed by caller (already pinned/latched)
                 // For overflow pages, pin and latch them ourselves
                 if (!isFirstPage) {
-                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
                     currentPage.acquireReadLatch();
                     currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
                     currentFrame.setPage(currentPage);
@@ -498,7 +498,7 @@ public class VCTreeNavigationUtils {
     /**
      * Extract centroid from a leaf frame tuple (format: <cid, centroid, metadata_ptr>).
      * Uses direct byte parsing to match the tuple writer's getCentroid() method.
-     * 
+     *
      * @param tuple Leaf frame tuple
      * @return Centroid vector
      */
@@ -670,7 +670,7 @@ public class VCTreeNavigationUtils {
     public static class ChildCentroid {
         public final int childPageId;
         public final double distance;
-        public final int tupleIndex;  // Index in parent page
+        public final int tupleIndex; // Index in parent page
 
         public ChildCentroid(int childPageId, double distance, int tupleIndex) {
             this.childPageId = childPageId;
@@ -706,9 +706,9 @@ public class VCTreeNavigationUtils {
     public static class NavigationFrame {
         public final int pageId;
         public final boolean isLeaf;
-        public final List<ChildCentroid> sortedChildren;  // For interior nodes
-        public final List<LeafCentroid> sortedCentroids;  // For leaf nodes
-        public int nextIndex;  // Next child/centroid to explore
+        public final List<ChildCentroid> sortedChildren; // For interior nodes
+        public final List<LeafCentroid> sortedCentroids; // For leaf nodes
+        public int nextIndex; // Next child/centroid to explore
 
         // Constructor for interior frame
         public NavigationFrame(int pageId, List<ChildCentroid> sortedChildren) {
@@ -787,7 +787,8 @@ public class VCTreeNavigationUtils {
      * @return The first (closest) cluster, or null if tree is empty
      * @throws HyracksDataException if any error occurs
      */
-    public static ClusterSearchResult initializeClusterIterator(NavigationState state) throws HyracksDataException {
+    public static ClusterSearchResult initializeClusterIterator(NavigationState state,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
         if (state.initialized) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Iterator already initialized");
         }
@@ -812,10 +813,10 @@ public class VCTreeNavigationUtils {
                 if (isLeaf) {
                     // At leaf level: collect and sort all centroids in this page (including overflow)
                     List<LeafCentroid> sortedCentroids =
-                            collectAndSortLeafCentroids(state, currentPageId, leafFrame);
+                            collectAndSortLeafCentroids(state, currentPageId, leafFrame, distanceFunction);
 
                     if (sortedCentroids.isEmpty()) {
-                        return null;  // Empty tree
+                        return null; // Empty tree
                     }
 
                     // Push leaf frame onto stack
@@ -834,7 +835,7 @@ public class VCTreeNavigationUtils {
                     interiorFrame.setPage(page);
 
                     List<ChildCentroid> sortedChildren =
-                            collectAndSortChildren(state, currentPageId, interiorFrame);
+                            collectAndSortChildren(state, currentPageId, interiorFrame, distanceFunction);
 
                     if (sortedChildren.isEmpty()) {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
@@ -871,7 +872,8 @@ public class VCTreeNavigationUtils {
      * @return Next closest cluster, or null if all clusters exhausted
      * @throws HyracksDataException if any error occurs
      */
-    public static ClusterSearchResult findNextClosestCluster(NavigationState state) throws HyracksDataException {
+    public static ClusterSearchResult findNextClosestCluster(NavigationState state,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
         if (!state.initialized) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                     "Iterator not initialized. Call initializeClusterIterator() first");
@@ -885,17 +887,16 @@ public class VCTreeNavigationUtils {
                 if (topFrame.hasNext()) {
                     LeafCentroid next = topFrame.nextCentroid();
                     System.err.println(String.format(
-                        "[DFS] Leaf frame pageId=%d has next centroid: cid=%d, distance=%.4f, nextIndex=%d/%d",
-                        topFrame.pageId, next.centroidId, next.distance, topFrame.nextIndex, topFrame.sortedCentroids.size()
-                    ));
+                            "[DFS] Leaf frame pageId=%d has next centroid: cid=%d, distance=%.4f, nextIndex=%d/%d",
+                            topFrame.pageId, next.centroidId, next.distance, topFrame.nextIndex,
+                            topFrame.sortedCentroids.size()));
                     return ClusterSearchResult.create(next.pageId, next.tupleIndex, next.centroid, next.distance,
                             next.centroidId);
                 } else {
                     // Current leaf exhausted, backtrack
                     System.err.println(String.format(
-                        "[DFS] Leaf frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
-                        topFrame.pageId, topFrame.nextIndex, topFrame.sortedCentroids.size(), state.stack.size()
-                    ));
+                            "[DFS] Leaf frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
+                            topFrame.pageId, topFrame.nextIndex, topFrame.sortedCentroids.size(), state.stack.size()));
                     state.stack.pop();
                     continue;
                 }
@@ -905,28 +906,26 @@ public class VCTreeNavigationUtils {
                 if (topFrame.hasNext()) {
                     ChildCentroid nextChild = topFrame.nextChild();
                     System.err.println(String.format(
-                        "[DFS] Interior frame pageId=%d exploring child: childPageId=%d, distance=%.4f, nextIndex=%d/%d",
-                        topFrame.pageId, nextChild.childPageId, nextChild.distance, topFrame.nextIndex, topFrame.sortedChildren.size()
-                    ));
+                            "[DFS] Interior frame pageId=%d exploring child: childPageId=%d, distance=%.4f, nextIndex=%d/%d",
+                            topFrame.pageId, nextChild.childPageId, nextChild.distance, topFrame.nextIndex,
+                            topFrame.sortedChildren.size()));
 
                     // Descend to this child and navigate to leaf
-                    ClusterSearchResult result = descendToLeaf(state, nextChild.childPageId);
+                    ClusterSearchResult result = descendToLeaf(state, nextChild.childPageId, distanceFunction);
                     if (result != null) {
                         return result;
                     }
                     // If descend failed, continue with next child
-                    System.err.println(String.format(
-                        "[DFS] descendToLeaf returned null for childPageId=%d, trying next child",
-                        nextChild.childPageId
-                    ));
+                    System.err.println(
+                            String.format("[DFS] descendToLeaf returned null for childPageId=%d, trying next child",
+                                    nextChild.childPageId));
                     continue;
 
                 } else {
                     // All children explored, backtrack
                     System.err.println(String.format(
-                        "[DFS] Interior frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
-                        topFrame.pageId, topFrame.nextIndex, topFrame.sortedChildren.size(), state.stack.size()
-                    ));
+                            "[DFS] Interior frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
+                            topFrame.pageId, topFrame.nextIndex, topFrame.sortedChildren.size(), state.stack.size()));
                     state.stack.pop();
                     continue;
                 }
@@ -947,8 +946,8 @@ public class VCTreeNavigationUtils {
      * @return First centroid at leaf level, or null if no valid path
      * @throws HyracksDataException if any error occurs
      */
-    private static ClusterSearchResult descendToLeaf(NavigationState state, int startPageId)
-            throws HyracksDataException {
+    private static ClusterSearchResult descendToLeaf(NavigationState state, int startPageId,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         int currentPageId = startPageId;
 
@@ -966,10 +965,10 @@ public class VCTreeNavigationUtils {
                 if (isLeaf) {
                     // Reached leaf: collect and sort centroids
                     List<LeafCentroid> sortedCentroids =
-                            collectAndSortLeafCentroids(state, currentPageId, leafFrame);
+                            collectAndSortLeafCentroids(state, currentPageId, leafFrame, distanceFunction);
 
                     if (sortedCentroids.isEmpty()) {
-                        return null;  // Empty leaf
+                        return null; // Empty leaf
                     }
 
                     // Push leaf frame onto stack
@@ -988,10 +987,10 @@ public class VCTreeNavigationUtils {
                     interiorFrame.setPage(page);
 
                     List<ChildCentroid> sortedChildren =
-                            collectAndSortChildren(state, currentPageId, interiorFrame);
+                            collectAndSortChildren(state, currentPageId, interiorFrame, distanceFunction);
 
                     if (sortedChildren.isEmpty()) {
-                        return null;  // No valid children
+                        return null; // No valid children
                     }
 
                     // Push interior frame
@@ -1021,7 +1020,8 @@ public class VCTreeNavigationUtils {
      * @throws HyracksDataException if any error occurs
      */
     private static List<ChildCentroid> collectAndSortChildren(NavigationState state, int startPageId,
-            IVectorClusteringInteriorFrame initialFrame) throws HyracksDataException {
+            IVectorClusteringInteriorFrame initialFrame, IVectorDistanceFunction distanceFunction)
+            throws HyracksDataException {
 
         List<ChildCentroid> children = new ArrayList<>();
 
@@ -1033,7 +1033,7 @@ public class VCTreeNavigationUtils {
                 double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
                 if (centroid.length == state.queryVector.length) {
-                    double distance = VectorUtils.calculateEuclideanDistance(state.queryVector, centroid);
+                    double distance = distanceFunction.apply(state.queryVector, centroid);
                     int childPageId = initialFrame.getChildPageId(i);
                     children.add(new ChildCentroid(childPageId, distance, i));
                 }
@@ -1046,7 +1046,7 @@ public class VCTreeNavigationUtils {
         boolean hasOverflow = initialFrame.getOverflowFlagBit();
         if (hasOverflow) {
             int nextPageId = initialFrame.getNextPage();
-            collectChildrenFromOverflow(state, nextPageId, children);
+            collectChildrenFromOverflow(state, nextPageId, children, distanceFunction);
         }
 
         // Sort by distance (ascending)
@@ -1057,8 +1057,8 @@ public class VCTreeNavigationUtils {
     /**
      * Collect children from overflow pages.
      */
-    private static void collectChildrenFromOverflow(NavigationState state, int pageId, List<ChildCentroid> children)
-            throws HyracksDataException {
+    private static void collectChildrenFromOverflow(NavigationState state, int pageId, List<ChildCentroid> children,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         int currentPageId = pageId;
         while (currentPageId != -1) {
@@ -1076,7 +1076,7 @@ public class VCTreeNavigationUtils {
                         double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
                         if (centroid.length == state.queryVector.length) {
-                            double distance = VectorUtils.calculateEuclideanDistance(state.queryVector, centroid);
+                            double distance = distanceFunction.apply(state.queryVector, centroid);
                             int childPageId = frame.getChildPageId(i);
                             children.add(new ChildCentroid(childPageId, distance, i));
                         }
@@ -1106,7 +1106,8 @@ public class VCTreeNavigationUtils {
      * @throws HyracksDataException if any error occurs
      */
     private static List<LeafCentroid> collectAndSortLeafCentroids(NavigationState state, int startPageId,
-            IVectorClusteringLeafFrame initialFrame) throws HyracksDataException {
+            IVectorClusteringLeafFrame initialFrame, IVectorDistanceFunction distanceFunction)
+            throws HyracksDataException {
 
         List<LeafCentroid> centroids = new ArrayList<>();
 
@@ -1118,7 +1119,7 @@ public class VCTreeNavigationUtils {
                 double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
                 if (centroid.length == state.queryVector.length) {
-                    double distance = VectorUtils.calculateEuclideanDistance(state.queryVector, centroid);
+                    double distance = distanceFunction.apply(state.queryVector, centroid);
                     int centroidId = initialFrame.getCentroidId(i);
                     centroids.add(new LeafCentroid(centroidId, distance, i, startPageId, centroid));
                 }
@@ -1131,7 +1132,7 @@ public class VCTreeNavigationUtils {
         boolean hasOverflow = initialFrame.getOverflowFlagBit();
         if (hasOverflow) {
             int nextPageId = initialFrame.getNextLeaf();
-            collectCentroidsFromOverflow(state, nextPageId, centroids);
+            collectCentroidsFromOverflow(state, nextPageId, centroids, distanceFunction);
         }
 
         // Sort by distance (ascending)
@@ -1142,16 +1143,15 @@ public class VCTreeNavigationUtils {
     /**
      * Collect centroids from overflow pages.
      */
-    private static void collectCentroidsFromOverflow(NavigationState state, int pageId, List<LeafCentroid> centroids)
-            throws HyracksDataException {
+    private static void collectCentroidsFromOverflow(NavigationState state, int pageId, List<LeafCentroid> centroids,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         int currentPageId = pageId;
         while (currentPageId != -1) {
             ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
             try {
                 page.acquireReadLatch();
-                IVectorClusteringLeafFrame frame =
-                        (IVectorClusteringLeafFrame) state.leafFrameFactory.createFrame();
+                IVectorClusteringLeafFrame frame = (IVectorClusteringLeafFrame) state.leafFrameFactory.createFrame();
                 frame.setPage(page);
 
                 for (int i = 0; i < frame.getTupleCount(); i++) {
@@ -1161,7 +1161,7 @@ public class VCTreeNavigationUtils {
                         double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
                         if (centroid.length == state.queryVector.length) {
-                            double distance = VectorUtils.calculateEuclideanDistance(state.queryVector, centroid);
+                            double distance = distanceFunction.apply(state.queryVector, centroid);
                             int centroidId = frame.getCentroidId(i);
                             centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid));
                         }
