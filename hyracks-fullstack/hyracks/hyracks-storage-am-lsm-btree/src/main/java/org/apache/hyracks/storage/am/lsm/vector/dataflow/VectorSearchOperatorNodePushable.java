@@ -24,6 +24,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
 import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
@@ -126,6 +127,17 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
             vectorPred.setQueryTuple(queryParamsTuple);
             vectorPred.setQueryFieldIndex(0); // Field 0 is the vector field
+
+            // Extract K value from field 1 if available
+            if (queryFields.length > 1) {
+                // K is at field index 1 in queryParamsTuple (after permutation)
+                // Skip type tag (1 byte) to get the actual integer value
+                int k = IntegerPointable.getInteger(
+                    queryParamsTuple.getFieldData(1),
+                    queryParamsTuple.getFieldStart(1) + 1  // +1 to skip type tag
+                );
+                vectorPred.setK(k);
+            }
 
             // Extract distance metric from field index 2 (after query vector at 0, k at 1)
             if (queryFields != null && queryFields.length > 2) {
