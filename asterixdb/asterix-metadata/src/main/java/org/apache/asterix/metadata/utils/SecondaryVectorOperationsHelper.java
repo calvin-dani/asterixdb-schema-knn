@@ -323,7 +323,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
 
-        ISerializerDeserializer[] outputRecFields = new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount() - 1];
+        ISerializerDeserializer[] outputRecFields =
+                new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount() - 1];
         ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount() - 1];
 
         outputRecFields[0] = serdeProvider.getSerializerDeserializer(ADOUBLE);
@@ -335,7 +336,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Copy all original fields from secondaryRecDesc
         for (int i = 1; i < secondaryRecDesc.getFieldCount(); i++) {
-            outputRecFields[2 + i -1] = secondaryRecDesc.getFields()[i];
+            outputRecFields[2 + i - 1] = secondaryRecDesc.getFields()[i];
             outputTypeTraits[2 + i - 1] = secondaryRecDesc.getTypeTraits()[i];
         }
 
@@ -369,7 +370,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
         System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         System.err.println("SortNumFrames from config: " + sortNumFrames);
-        int[] sortFields = { 1, 0 , 2 }; // Sort by centroidId (0) first, then distance (1)
+        int[] sortFields = { 1, 0, 2 }; // Sort by centroidId (0) first, then distance (1)
         IBinaryComparatorFactory[] sortComparatorFactories =
                 { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
                         BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true), // distance

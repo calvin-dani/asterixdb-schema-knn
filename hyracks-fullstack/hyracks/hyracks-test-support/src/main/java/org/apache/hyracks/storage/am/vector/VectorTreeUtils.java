@@ -75,22 +75,23 @@ public class VectorTreeUtils {
 
         // Create specific type traits using primitive type traits for better performance
         // Interior/Leaf frames need 3-field cluster tuples: <cid, centroid, pointer>
+        //TODO : make it dynamic based on actual types used
         ITypeTraits[] clusterTypeTraits = new ITypeTraits[3];
         clusterTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
         clusterTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
         clusterTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
-
+        //TODO : make it dynamic based on actual types used
         // Metadata frames need 2-field metadata tuples: <max_distance, page_pointer>
         ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];
         metadataTypeTraits[0] = FloatPointable.TYPE_TRAITS; // max distance (double) - Fixed 4 bytes
         metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer (int) - Fixed 4 bytes
-
+        //TODO : make it dynamic based on actual types used
         // Data frames need 4-field data tuples: <distance, cosine_similarity, vector, primary_key>
-        ITypeTraits[] dataTypeTraits = new ITypeTraits[4];
+        ITypeTraits[] dataTypeTraits = new ITypeTraits[3];
         dataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // distance (double) - Fixed 8 bytes
         dataTypeTraits[1] = DoublePointable.TYPE_TRAITS; // cosine similarity (double) - Fixed 8 bytes
-        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
-        dataTypeTraits[3] = VarLengthTypeTrait.INSTANCE; // primary key (string/variable) - Variable
+//        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
+        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // primary key (string/variable) - Variable
 
         // Create individual tuple writer factories with correct type traits for each frame type
         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
