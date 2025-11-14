@@ -177,8 +177,10 @@ public class VCTreeNavigationUtils {
             // Deserialize the tuple using the proper TupleUtils method
             Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
 
-            // Extract and return the centroid from the deserialized fields
-            return (double[]) fieldValues[1];
+            // Extract the centroid from the deserialized fields
+            double[] doubleCentroid = (double[]) fieldValues[1];
+
+            return doubleCentroid;
 
         } catch (Exception e) {
             throw new RuntimeException(
@@ -340,7 +342,7 @@ public class VCTreeNavigationUtils {
                     } catch (Exception e) {
                         System.err.println(
                                 "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
-                        // Skip malformed tuples
+                        continue;
                     }
                 }
 
@@ -465,7 +467,7 @@ public class VCTreeNavigationUtils {
                     } catch (Exception e) {
                         System.err.println(
                                 "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
-                        // Skip malformed tuples
+                        continue;
                     }
                 }
 
