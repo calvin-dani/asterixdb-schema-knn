@@ -37,11 +37,19 @@ public class VectorPointPredicate implements ISearchPredicate {
 
     private ITupleReference queryTuple;
     private int queryFieldIndex;
+    private int k; // Number of nearest neighbors to return (for ANN queries)
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
+        this.k = Integer.MAX_VALUE; // Default: no limit
+        this.distanceMetric = null;
+    }
+
+    public VectorPointPredicate(int k) {
+        // Constructor for ANN queries with K parameter
+        this.k = k;
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
         this.distanceMetric = null;
@@ -86,6 +94,20 @@ public class VectorPointPredicate implements ISearchPredicate {
      */
     public int getQueryFieldIndex() {
         return queryFieldIndex;
+    }
+
+    /**
+     * Set the K parameter (number of nearest neighbors to return).
+     */
+    public void setK(int k) {
+        this.k = k;
+    }
+
+    /**
+     * Get the K parameter (number of nearest neighbors to return).
+     */
+    public int getK() {
+        return k;
     }
 
     /**
