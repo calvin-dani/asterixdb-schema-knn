@@ -127,6 +127,6 @@ public class LSMVCTreeLocalResource extends LsmResource {
         //        int[] vectorFields = OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class);
         //        int[] filterFields = OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class);
         //        boolean atomic = json.get("atomic").asBoolean();
-        return new LSMVCTreeLocalResource(registry, json, 384, null, null, false);
+        return new LSMVCTreeLocalResource(registry, json, 784, null, null, false);
     }
 }
