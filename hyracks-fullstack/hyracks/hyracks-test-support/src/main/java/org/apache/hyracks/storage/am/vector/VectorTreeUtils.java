@@ -90,7 +90,7 @@ public class VectorTreeUtils {
         ITypeTraits[] dataTypeTraits = new ITypeTraits[3];
         dataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // distance (double) - Fixed 8 bytes
         dataTypeTraits[1] = DoublePointable.TYPE_TRAITS; // cosine similarity (double) - Fixed 8 bytes
-//        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
+        //        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
         dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // primary key (string/variable) - Variable
 
         // Create individual tuple writer factories with correct type traits for each frame type

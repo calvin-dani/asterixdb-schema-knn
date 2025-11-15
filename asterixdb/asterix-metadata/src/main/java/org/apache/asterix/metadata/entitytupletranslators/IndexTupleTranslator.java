@@ -49,7 +49,9 @@ import org.apache.asterix.metadata.entities.Datatype;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.utils.Creator;
 import org.apache.asterix.metadata.utils.KeyFieldTypeUtil;
+import org.apache.asterix.object.base.AdmBigIntNode;
 import org.apache.asterix.object.base.AdmObjectNode;
+import org.apache.asterix.object.base.AdmStringNode;
 import org.apache.asterix.om.base.ABoolean;
 import org.apache.asterix.om.base.ACollectionCursor;
 import org.apache.asterix.om.base.AInt32;
@@ -469,9 +471,10 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
                 excludeUnknownKey = OptionalBoolean.empty();
                 castDefaultNull = OptionalBoolean.empty();
+                AdmObjectNode withObjectNode = readWithProperties(indexRecord);
                 indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), keyFieldNames,
                         keyFieldSourceIndicator, keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
-                        castDefaultNull, null, null, null, null);
+                        castDefaultNull, null, null, null, withObjectNode);
                 break;
             case TEXT:
                 keyFieldNames =
@@ -858,6 +861,78 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         aString.setValue(similarity);
         stringSerde.serialize(aString, fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
+    }
+
+    private AdmObjectNode readWithProperties(ARecord indexRecord) throws AlgebricksException {
+        // Default values (matching writeWithProperties defaults)
+        int dimension = -1;
+        int train_list = -1;
+        String description = "default";
+        String similarity = "euclidean";
+
+        // Read dimension field
+        int dimensionPos = indexRecord.getType().getFieldIndex("dimension");
+        if (dimensionPos >= 0) {
+            IAObject dimensionObj = indexRecord.getValueByPos(dimensionPos);
+            if (dimensionObj != null && dimensionObj.getType().getTypeTag() == ATypeTag.INTEGER) {
+                dimension = ((AInt32) dimensionObj).getIntegerValue();
+            }
+        }
+
+        // Read train_list field
+        int trainListPos = indexRecord.getType().getFieldIndex("train_list");
+        if (trainListPos >= 0) {
+            IAObject trainListObj = indexRecord.getValueByPos(trainListPos);
+            if (trainListObj != null && trainListObj.getType().getTypeTag() == ATypeTag.INTEGER) {
+                train_list = ((AInt32) trainListObj).getIntegerValue();
+            }
+        }
+
+        // Read description field
+        int descriptionPos = indexRecord.getType().getFieldIndex("description");
+        if (descriptionPos >= 0) {
+            IAObject descriptionObj = indexRecord.getValueByPos(descriptionPos);
+            if (descriptionObj != null && descriptionObj.getType().getTypeTag() == ATypeTag.STRING) {
+                description = ((AString) descriptionObj).getStringValue();
+            }
+        }
+
+        // Read similarity field
+        int similarityPos = indexRecord.getType().getFieldIndex("similarity");
+        if (similarityPos >= 0) {
+            IAObject similarityObj = indexRecord.getValueByPos(similarityPos);
+            if (similarityObj != null && similarityObj.getType().getTypeTag() == ATypeTag.STRING) {
+                similarity = ((AString) similarityObj).getStringValue();
+            }
+        }
+
+        // Reconstruct AdmObjectNode only if at least one field differs from default
+        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || !"default".equals(description)
+                || !"euclidean".equals(similarity);
+
+        if (!hasNonDefaultValues) {
+            return null;
+        }
+
+        AdmObjectNode withObjectNode = new AdmObjectNode();
+
+        if (dimension != -1) {
+            withObjectNode.set("dimension", new AdmBigIntNode(dimension));
+        }
+
+        if (train_list != -1) {
+            withObjectNode.set("train_list", new AdmBigIntNode(train_list));
+        }
+
+        if (!"default".equals(description)) {
+            withObjectNode.set("description", new AdmStringNode(description));
+        }
+
+        if (!"euclidean".equals(similarity)) {
+            withObjectNode.set("similarity", new AdmStringNode(similarity));
+        }
+
+        return withObjectNode;
     }
 
     private void writeIncludeFields(Index.VectorIndexDetails index) throws HyracksDataException {

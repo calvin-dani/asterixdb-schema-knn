@@ -72,6 +72,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
     protected AbstractFunctionCallExpression annDistanceExpr = null;
     protected IVariableTypeEnvironment typeEnvironment = null;
     protected final OptimizableOperatorSubTree subTree = new OptimizableOperatorSubTree();
+    protected String queryDistanceMetric = null; // Distance metric from the query (e.g., "euclidean", "cosine")
 
     // Register vector index access method
     protected static Map<FunctionIdentifier, List<IAccessMethod>> accessMethods = new HashMap<>();
@@ -395,6 +396,25 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             return false;
         }
 
+        // Extract distance metric from ANN_DISTANCE function (arg2)
+        // ANN_DISTANCE(vectorField, queryVector, distanceMetric)
+        if (annDistanceExpr.getArguments().size() >= 3) {
+            try {
+                ILogicalExpression distanceMetricExpr = annDistanceExpr.getArguments().get(2).getValue();
+                queryDistanceMetric = AccessMethodUtils
+                        .getStringConstant(new org.apache.commons.lang3.mutable.MutableObject<>(distanceMetricExpr));
+                if (queryDistanceMetric != null) {
+                    queryDistanceMetric = VectorIndexAccessMethod.normalizeDistanceMetric(queryDistanceMetric);
+                    System.err.println("=== Extracted query distance metric: " + queryDistanceMetric + " ===");
+                }
+            } catch (Exception e) {
+                // If we can't extract the metric, continue without metric-aware selection
+                // This maintains backward compatibility
+                queryDistanceMetric = null;
+                System.err.println("=== Could not extract distance metric from query, using field-only matching ===");
+            }
+        }
+
         // Now analyze the ANN_DISTANCE function arguments
         AccessMethodAnalysisContext analysisCtx = new AccessMethodAnalysisContext();
 
@@ -464,7 +484,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
 
     /**
      * Chooses the best vector index from candidates.
-     * For now, simply picks the first matching vector index.
+     * Prefers indexes with matching distance metrics when query metric is available.
+     * Falls back to first field match if no metric match is found.
      */
     protected void chooseVectorIndex(Map<IAccessMethod, AccessMethodAnalysisContext> analyzedAMs,
             List<Pair<IAccessMethod, Index>> result) {
@@ -478,16 +499,44 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         Iterator<Map.Entry<Index, List<Pair<Integer, Integer>>>> indexIt =
                 analysisCtx.getIteratorForIndexExprsAndVars();
 
+        Pair<IAccessMethod, Index> exactMatch = null; // Index with matching field AND metric
+        Pair<IAccessMethod, Index> fieldMatch = null; // Index with matching field only
+
         while (indexIt.hasNext()) {
             Map.Entry<Index, List<Pair<Integer, Integer>>> indexEntry = indexIt.next();
             Index index = indexEntry.getKey();
 
             if (index.getIndexType() == IndexType.VECTOR) {
-                // TODO: Add cost-based selection if multiple vector indexes exist
-                // For now, just use the first matching vector index
-                result.add(new Pair<>(VectorIndexAccessMethod.INSTANCE, index));
-                break;
+                // If query distance metric is available, check for metric compatibility
+                if (queryDistanceMetric != null && !queryDistanceMetric.isEmpty()) {
+                    String indexMetric = VectorIndexAccessMethod.getIndexDistanceMetric(index);
+                    if (queryDistanceMetric.equals(indexMetric)) {
+                        // Exact match: field name AND distance metric match
+                        exactMatch = new Pair<>(VectorIndexAccessMethod.INSTANCE, index);
+                        System.err.println("=== Found exact match: index " + index.getIndexName() + " with metric "
+                                + indexMetric + " ===");
+                        break; // Prefer exact match, use first one found
+                    } else {
+                        // Field matches but metric doesn't - store as fallback only if no exact match
+                        if (fieldMatch == null) {
+                            fieldMatch = new Pair<>(VectorIndexAccessMethod.INSTANCE, index);
+                        }
+                    }
+                } else {
+                    // No query metric available - use first field match (backward compatibility)
+                    result.add(new Pair<>(VectorIndexAccessMethod.INSTANCE, index));
+                    break;
+                }
             }
+        }
+
+        // Select best match: exact match preferred, fallback to field match
+        if (exactMatch != null) {
+            result.add(exactMatch);
+            System.err.println("=== Selected index with matching distance metric ===");
+        } else if (fieldMatch != null) {
+            result.add(fieldMatch);
+            System.err.println("=== Selected index with matching field (metric mismatch, may affect accuracy) ===");
         }
     }
 
@@ -544,6 +593,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         orderOp = null;
         annDistanceExpr = null;
         typeEnvironment = null;
+        queryDistanceMetric = null;
         subTree.reset();
     }
 

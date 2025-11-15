@@ -27,6 +27,7 @@ import org.apache.asterix.common.annotations.AbstractExpressionAnnotationWithInd
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -296,6 +297,21 @@ public class VectorIndexAccessMethod implements IAccessMethod {
     @Override
     public boolean exprIsOptimizable(Index index, IOptimizableFuncExpr optFuncExpr, boolean checkApplicableOnly)
             throws AlgebricksException {
+        return exprIsOptimizable(index, optFuncExpr, checkApplicableOnly, null);
+    }
+
+    /**
+     * Checks if this ANN_DISTANCE expression can use the given vector index.
+     * Validates both field name and distance metric compatibility.
+     * 
+     * @param index The vector index to check
+     * @param optFuncExpr The optimizable function expression
+     * @param checkApplicableOnly Whether to only check applicability
+     * @param queryDistanceMetric The distance metric from the query (optional, for metric-aware matching)
+     * @return true if the index can be used, false otherwise
+     */
+    public boolean exprIsOptimizable(Index index, IOptimizableFuncExpr optFuncExpr, boolean checkApplicableOnly,
+            String queryDistanceMetric) throws AlgebricksException {
         // Check if this ANN_DISTANCE expression can use the given vector index
 
         if (index.getIndexType() != IndexType.VECTOR) {
@@ -318,7 +334,22 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         }
 
         // Match field name
-        return indexKeyFieldNames.get(0).equals(fieldName);
+        if (!indexKeyFieldNames.get(0).equals(fieldName)) {
+            return false;
+        }
+
+        // If query distance metric is provided, check metric compatibility
+        if (queryDistanceMetric != null && !queryDistanceMetric.isEmpty()) {
+            String indexMetric = getIndexDistanceMetric(index);
+            String normalizedQueryMetric = normalizeDistanceMetric(queryDistanceMetric);
+            if (!normalizedQueryMetric.equals(indexMetric)) {
+                // Field matches but distance metric doesn't - reject this index
+                return false;
+            }
+        }
+
+        // Field name matches (and metric matches if provided)
+        return true;
     }
 
     @Override
@@ -345,5 +376,82 @@ public class VectorIndexAccessMethod implements IAccessMethod {
     @Override
     public int compareTo(IAccessMethod o) {
         return this.getName().compareTo(o.getName());
+    }
+
+    /**
+     * Normalizes a distance metric string to its canonical form.
+     * Handles aliases and case-insensitive matching.
+     * 
+     * Supported metrics and aliases:
+     * - "euclidean", "l2" → "euclidean"
+     * - "euclidean_squared", "l2_squared" → "euclidean_squared"
+     * - "manhattan", "manhattan distance", "l1" → "manhattan"
+     * - "cosine", "cosine similarity" → "cosine"
+     * - "dot" → "dot"
+     * 
+     * @param metric The distance metric string (may be null or empty)
+     * @return Normalized canonical metric name, or "euclidean" as default
+     */
+    public static String normalizeDistanceMetric(String metric) {
+        if (metric == null || metric.trim().isEmpty()) {
+            return "euclidean"; // Default metric
+        }
+
+        String normalized = metric.toLowerCase().trim();
+
+        // Map aliases to canonical names
+        switch (normalized) {
+            case "l2":
+                return "euclidean";
+            case "l2_squared":
+                return "euclidean_squared";
+            case "l1":
+            case "manhattan distance":
+                return "manhattan";
+            case "cosine similarity":
+                return "cosine";
+            case "euclidean":
+            case "euclidean_squared":
+            case "manhattan":
+            case "cosine":
+            case "dot":
+                return normalized; // Already canonical
+            default:
+                // Unknown metric, return as-is (will be handled by distance function)
+                return normalized;
+        }
+    }
+
+    /**
+     * Extracts and normalizes the distance metric from a vector index.
+     * 
+     * @param index The vector index
+     * @return Normalized distance metric string, or "euclidean" as default
+     */
+    public static String getIndexDistanceMetric(Index index) {
+        if (index.getIndexType() != IndexType.VECTOR) {
+            return "euclidean"; // Default for non-vector indexes
+        }
+
+        Index.VectorIndexDetails vectorDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+        AdmObjectNode withObjectNode = vectorDetails.getWithObjectNode();
+
+        String indexMetric =
+                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
+
+        return normalizeDistanceMetric(indexMetric);
+    }
+
+    /**
+     * Checks if two distance metrics are compatible (same canonical form).
+     * 
+     * @param metric1 First distance metric
+     * @param metric2 Second distance metric
+     * @return true if metrics are compatible, false otherwise
+     */
+    public static boolean areDistanceMetricsCompatible(String metric1, String metric2) {
+        String normalized1 = normalizeDistanceMetric(metric1);
+        String normalized2 = normalizeDistanceMetric(metric2);
+        return normalized1.equals(normalized2);
     }
 }
