@@ -496,7 +496,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         // which wrote the page but didn't create a directory entry.
         // This made the last records inaccessible during search.
         if (entriesInCurrentDataPage > 0) {
-            writeDataPageToDirectory(true);  // Creates directory entry AND writes page
+            writeDataPageToDirectory(true); // Creates directory entry AND writes page
         }
 
         // Write the directory page

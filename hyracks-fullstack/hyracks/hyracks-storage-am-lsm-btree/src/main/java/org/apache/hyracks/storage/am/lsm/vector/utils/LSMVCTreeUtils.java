@@ -133,7 +133,7 @@ public class LSMVCTreeUtils {
         ITypeTraits[] dataTypeTraits = new ITypeTraits[3];
         dataTypeTraits[0] = new FixedLengthTypeTrait(9); // distance (double) - Fixed 8 bytes
         dataTypeTraits[1] = new FixedLengthTypeTrait(5); // cosine similarity (double) - Fixed 8 bytes
-//        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
+        //        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
         dataTypeTraits[2] = new FixedLengthTypeTrait(9); // primary key (string/variable) - Variable
 
         // Create individual tuple writer factories with correct type traits for each frame type
