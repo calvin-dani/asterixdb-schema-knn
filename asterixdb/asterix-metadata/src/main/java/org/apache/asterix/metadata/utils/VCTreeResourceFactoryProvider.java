@@ -31,6 +31,7 @@ import org.apache.asterix.metadata.api.IResourceFactoryProvider;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -97,9 +98,9 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                     LogRedactionUtil.userData(vectorFieldNames.toString()));
         }
 
-        // Extract vector dimensions (assuming float array)
-        int vectorDimensions = 384; // Default dimension, should be extracted from vectorType
-        // TODO: Extract actual dimensions from vectorType.getTypeTag() == ATypeTag.ARRAY
+        // Extract vector dimensions from WITH clause
+        AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
+        int vectorDimensions = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
 
         List<List<String>> primaryKeyFields = dataset.getPrimaryKeys();
         int numPrimaryKeys = primaryKeyFields.size();
