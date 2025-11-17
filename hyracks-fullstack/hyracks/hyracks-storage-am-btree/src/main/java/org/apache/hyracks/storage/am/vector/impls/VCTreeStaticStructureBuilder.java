@@ -167,10 +167,14 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         ITupleReference entryTuple = createEntryTuple(tuple, childPageId);
         System.err.println("createEntryTuple completed successfully");
 
-        // Check if current page has space
-        if (entriesInCurrentPage >= maxEntriesPerPage) {
+        // Check if current page has SPACE for this tuple (not just entry count)
+        int spaceNeeded = currentFrame.getBytesRequiredToWriteTuple(entryTuple) + slotSize;
+        int spaceAvailable = currentFrame.getTotalFreeSpace();
+        System.err.println("Space check: needed=" + spaceNeeded + ", available=" + spaceAvailable);
+
+        if (spaceNeeded > spaceAvailable) {
             // Create overflow page for same cluster
-            System.err.println("Creating overflow page...");
+            System.err.println("Creating overflow page (insufficient space)...");
             createOverflowPage();
         }
 
