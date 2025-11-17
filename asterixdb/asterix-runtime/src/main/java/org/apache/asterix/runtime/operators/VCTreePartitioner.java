@@ -862,8 +862,11 @@ public class VCTreePartitioner {
      * @throws HyracksDataException if flushing fails
      */
     private void flushAllPartitions() throws HyracksDataException {
-        for (int partitionId = 0; partitionId < partitionFiles.size(); partitionId++) {
-            flushPartitionFrame(partitionId);
+        // Only flush partitions that have both files and appenders
+        for (Integer partitionId : partitionFiles.keySet()) {
+            if (partitionAppenders.containsKey(partitionId)) {
+                flushPartitionFrame(partitionId);
+            }
         }
     }
 

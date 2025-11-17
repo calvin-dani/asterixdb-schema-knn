@@ -1046,7 +1046,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
                                 try {
                                     double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
-
                                     // Compute D(x) = min distance to current centers
                                     double minDist = Double.POSITIVE_INFINITY;
                                     for (double[] center : currentCenters) {

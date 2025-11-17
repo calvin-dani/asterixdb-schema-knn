@@ -161,6 +161,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             K = 20;
         }
         System.err.println("Using K value: " + K + " for K-means clustering");
+
+        // Extract distance metric from WITH clause
+        // Extract vector dimension from WITH clause
+        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
+        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
+
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
@@ -348,13 +354,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
         System.err.println("Distance metric from CREATE INDEX: " + distanceMetric);
 
+        // Extract vector dimension from WITH clause
+        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
+        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
+
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
-                        distanceMetric);
+                        distanceMetric, vectorDimension);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);

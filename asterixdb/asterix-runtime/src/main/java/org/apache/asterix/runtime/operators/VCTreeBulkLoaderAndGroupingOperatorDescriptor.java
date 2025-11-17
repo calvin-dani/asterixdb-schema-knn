@@ -86,7 +86,6 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
-    private static final int VECTOR_DIMENSION = 784;
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final float fillFactor; // TODO: Use fillFactor in future bulk loading operations
     private final UUID permitUUID;
@@ -95,6 +94,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final RecordDescriptor inputRecDesc;
     private final RecordDescriptor outputRecDesc;
     private final String distanceMetric;
+    private final int vectorDimension;
 
     // Partitioning components
     private VCTreePartitioner partitioner;
@@ -199,7 +199,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     public VCTreeBulkLoaderAndGroupingOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric) {
+            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -209,6 +209,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.materializedDataUUID = materializedDataUUID;
         this.args = args;
         this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
+        this.vectorDimension = vectorDimension > 0 ? vectorDimension : 384; // Default to 384 if invalid
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -216,6 +217,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         System.err.println("VCTreeBulkLoaderAndGroupingOperatorDescriptor created with permit UUID: " + permitUUID);
         System.err.println("Output record descriptor set: " + outputRecordDescriptor);
         System.err.println("Distance metric: " + this.distanceMetric);
+        System.err.println("Vector dimension: " + this.vectorDimension);
     }
 
     /**
@@ -345,7 +347,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             }
 
             // Validate embedding dimensions
-            if (embedding.length != VECTOR_DIMENSION) {
+            if (embedding.length != vectorDimension) {
                 return null;
             }
 
@@ -669,9 +671,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 // Validate vector dimensions
-                if (queryVector.length != VECTOR_DIMENSION) {
+                if (queryVector.length != vectorDimension) {
                     System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + VECTOR_DIMENSION + ")");
+                            + ") does not match expected dimension (" + vectorDimension + ")");
                 }
 
                 // Validate accessor is initialized
@@ -738,11 +740,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 // Create transformed tuple with [centroidId, distance, ...original fields...]
                                 ITupleReference transformedTuple = createTransformedTuple(tuple, result);
 
-                                // Send transformed tuple to VCTreePartitioner
-                                //                                if (partitioner != null) {
-                                //                                    partitioner.writeStreamingTuple(transformedTuple);
-                                //                                }
-
                                 // Output the transformed tuple to downstream operators
                                 outputTransformedTuple(transformedTuple);
 
@@ -755,12 +752,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to process tuple " + (i + 1) + ": " + e.getMessage());
-                        e.printStackTrace();
+                        throw HyracksDataException.create(e);
                     }
                 }
 
             } catch (Exception e) {
-                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }
