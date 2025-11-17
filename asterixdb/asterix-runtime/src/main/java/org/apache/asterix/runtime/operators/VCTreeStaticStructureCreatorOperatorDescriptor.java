@@ -1194,9 +1194,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                     }
                                 }
 
-                                int nextLeaf = leafFrame.getNextLeaf();
-                                if (nextLeaf != -1 && visited.add(nextLeaf)) {
-                                    queue.add(new int[] { nextLeaf, level });
+                                // Only follow next leaf if overflow flag is set
+                                boolean hasOverflow = leafFrame.getOverflowFlagBit();
+                                if (hasOverflow) {
+                                    int nextLeaf = leafFrame.getNextLeaf();
+                                    if (visited.add(nextLeaf)) {
+                                        queue.add(new int[] { nextLeaf, level });
+                                    }
                                 }
 
                             } else {
@@ -1237,9 +1241,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                     }
                                 }
 
-                                int nextPage = interiorFrame.getNextPage();
-                                if (nextPage != 0 && visited.add(nextPage)) {
-                                    queue.add(new int[] { nextPage, level });
+                                // Only follow next page if overflow flag is set
+                                boolean hasOverflow = interiorFrame.getOverflowFlagBit();
+                                if (hasOverflow) {
+                                    int nextPage = interiorFrame.getNextPage();
+                                    if (visited.add(nextPage)) {
+                                        queue.add(new int[] { nextPage, level });
+                                    }
                                 }
                             }
 
