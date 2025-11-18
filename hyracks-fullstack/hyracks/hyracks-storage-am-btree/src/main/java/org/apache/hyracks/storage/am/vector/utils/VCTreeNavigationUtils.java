@@ -45,6 +45,8 @@ import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Utility class for VCTree navigation operations.
@@ -65,16 +67,18 @@ public class VCTreeNavigationUtils {
      * @return ClusterSearchResult containing closest centroid information
      * @throws HyracksDataException if any error occurs during traversal
      */
+
+    private static final Logger LOGGER = LogManager.getLogger();
     public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
-        Map<String, Object> startFields = new HashMap<>();
-        startFields.put("treeFileId", fileId);
-        startFields.put("rootPageId", rootPageId);
-        startFields.put("vectorDim", queryVector.length);
-        startFields.put("queryVector", queryVector);
-        logTraversalEvent("traversal_start", startFields);
+        //        Map<String, Object> startFields = new HashMap<>();
+        //        startFields.put("treeFileId", fileId);
+        //        startFields.put("rootPageId", rootPageId);
+        //        startFields.put("vectorDim", queryVector.length);
+        //        startFields.put("queryVector", queryVector);
+        //        logTraversalEvent("traversal_start", startFields);
 
         // Start from root page
         int currentPageId = rootPageId;
@@ -99,17 +103,17 @@ public class VCTreeNavigationUtils {
                 boolean isLeaf = leafFrame.isLeaf();
 
                 Map<String, Object> pageVisitFields = new HashMap<>();
-                pageVisitFields.put("pageId", currentPageId);
-                pageVisitFields.put("isLeaf", isLeaf);
-                pageVisitFields.put("loopIteration", loopCounter);
-                logTraversalEvent("page_visit", pageVisitFields);
+                //                pageVisitFields.put("pageId", currentPageId);
+                //                pageVisitFields.put("isLeaf", isLeaf);
+                //                pageVisitFields.put("loopIteration", loopCounter);
+                //                logTraversalEvent("page_visit", pageVisitFields);
 
                 if (isLeaf) {
                     // Leaf level - find closest centroid
-                    Map<String, Object> leafEnterFields = new HashMap<>();
-                    leafEnterFields.put("pageId", currentPageId);
-                    leafEnterFields.put("fileId", fileId);
-                    logTraversalEvent("leaf_page_enter", leafEnterFields);
+                    //                    Map<String, Object> leafEnterFields = new HashMap<>();
+                    //                    leafEnterFields.put("pageId", currentPageId);
+                    //                    leafEnterFields.put("fileId", fileId);
+                    //                    logTraversalEvent("leaf_page_enter", leafEnterFields);
 
                     bestResult = findClosestInLeafPage(bufferCache, fileId, queryVector, currentPageId, leafFrame,
                             leafFrameFactory, distanceFunction);
@@ -117,10 +121,10 @@ public class VCTreeNavigationUtils {
 
                 } else {
                     // Interior level - find closest centroid and descend
-                    Map<String, Object> interiorEnterFields = new HashMap<>();
-                    interiorEnterFields.put("pageId", currentPageId);
-                    interiorEnterFields.put("fileId", fileId);
-                    logTraversalEvent("interior_page_enter", interiorEnterFields);
+                    //                    Map<String, Object> interiorEnterFields = new HashMap<>();
+                    //                    interiorEnterFields.put("pageId", currentPageId);
+                    //                    interiorEnterFields.put("fileId", fileId);
+                    //                    logTraversalEvent("interior_page_enter", interiorEnterFields);
 
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
@@ -132,11 +136,11 @@ public class VCTreeNavigationUtils {
                                 "No valid centroid found in interior cluster");
                     }
 
-                    Map<String, Object> interiorDescendFields = new HashMap<>();
-                    interiorDescendFields.put("pageId", currentPageId);
-                    interiorDescendFields.put("selectedChildPageId", nextPageId);
-                    interiorDescendFields.put("fileId", fileId);
-                    logTraversalEvent("interior_descend", interiorDescendFields);
+                    //                    Map<String, Object> interiorDescendFields = new HashMap<>();
+                    //                    interiorDescendFields.put("pageId", currentPageId);
+                    //                    interiorDescendFields.put("selectedChildPageId", nextPageId);
+                    //                    interiorDescendFields.put("fileId", fileId);
+                    //                    logTraversalEvent("interior_descend", interiorDescendFields);
 
                     currentPageId = nextPageId;
                 }
@@ -151,13 +155,13 @@ public class VCTreeNavigationUtils {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest cluster found");
         }
 
-        Map<String, Object> finishFields = new HashMap<>();
-        finishFields.put("leafPageId", bestResult.leafPageId);
-        finishFields.put("centroidId", bestResult.centroidId);
-        finishFields.put("bestDistance", bestResult.distance);
-        finishFields.put("vectorDim", queryVector.length);
-        finishFields.put("queryVector", queryVector);
-        logTraversalEvent("traversal_finish", finishFields);
+        //        Map<String, Object> finishFields = new HashMap<>();
+        //        finishFields.put("leafPageId", bestResult.leafPageId);
+        //        finishFields.put("centroidId", bestResult.centroidId);
+        //        finishFields.put("bestDistance", bestResult.distance);
+        //        finishFields.put("vectorDim", queryVector.length);
+        //        finishFields.put("queryVector", queryVector);
+        //        logTraversalEvent("traversal_finish", finishFields);
 
         return bestResult;
     }
@@ -272,11 +276,11 @@ public class VCTreeNavigationUtils {
         int candidatesProcessed = 0;
         int pagesProcessed = 0;
 
-        Map<String, Object> searchStartFields = new HashMap<>();
-        searchStartFields.put("startPageId", startPageId);
-        searchStartFields.put("vectorDim", queryVector.length);
-        searchStartFields.put("queryVector", queryVector);
-        logTraversalEvent("leaf_search_start", searchStartFields);
+        //        Map<String, Object> searchStartFields = new HashMap<>();
+        //        searchStartFields.put("startPageId", startPageId);
+        //        searchStartFields.put("vectorDim", queryVector.length);
+        //        searchStartFields.put("queryVector", queryVector);
+        //        logTraversalEvent("leaf_search_start", searchStartFields);
 
         // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
         int currentPageId = startPageId;
@@ -300,13 +304,13 @@ public class VCTreeNavigationUtils {
                 int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
                 pagesProcessed++;
 
-                Map<String, Object> pageFields = new HashMap<>();
-                pageFields.put("pageId", currentPageId);
-                pageFields.put("tupleCount", tupleCount);
-                pageFields.put("hasOverflow", hasOverflow);
-                pageFields.put("nextPageId", nextPageId);
-                pageFields.put("isFirstPage", isFirstPage);
-                logTraversalEvent("leaf_page_search", pageFields);
+                //                Map<String, Object> pageFields = new HashMap<>();
+                //                pageFields.put("pageId", currentPageId);
+                //                pageFields.put("tupleCount", tupleCount);
+                //                pageFields.put("hasOverflow", hasOverflow);
+                //                pageFields.put("nextPageId", nextPageId);
+                //                pageFields.put("isFirstPage", isFirstPage);
+                //                logTraversalEvent("leaf_page_search", pageFields);
 
                 // Search all centroids in this page
                 for (int i = 0; i < tupleCount; i++) {
@@ -324,13 +328,13 @@ public class VCTreeNavigationUtils {
                         double distance = distanceFunction.apply(queryVector, centroid);
                         candidatesProcessed++;
 
-                        Map<String, Object> candidateFields = new HashMap<>();
-                        candidateFields.put("pageId", currentPageId);
-                        candidateFields.put("tupleIndex", i);
-                        candidateFields.put("centroidId", centroidID);
-                        candidateFields.put("centroidDim", centroid.length);
-                        candidateFields.put("distance", distance);
-                        logTraversalEvent("leaf_candidate", candidateFields);
+                        //                        Map<String, Object> candidateFields = new HashMap<>();
+                        //                        candidateFields.put("pageId", currentPageId);
+                        //                        candidateFields.put("tupleIndex", i);
+                        //                        candidateFields.put("centroidId", centroidID);
+                        //                        candidateFields.put("centroidDim", centroid.length);
+                        //                        candidateFields.put("distance", distance);
+                        //                        logTraversalEvent("leaf_candidate", candidateFields);
 
                         if (distance < bestDistance) {
                             bestDistance = distance;
@@ -361,14 +365,14 @@ public class VCTreeNavigationUtils {
         }
 
         if (bestTupleIndex >= 0) {
-            Map<String, Object> searchSelectFields = new HashMap<>();
-            searchSelectFields.put("bestPageId", bestPageId);
-            searchSelectFields.put("selectedTupleIndex", bestTupleIndex);
-            searchSelectFields.put("centroidId", bestCentroidId);
-            searchSelectFields.put("bestDistance", bestDistance);
-            searchSelectFields.put("candidatesProcessed", candidatesProcessed);
-            searchSelectFields.put("pagesProcessed", pagesProcessed);
-            logTraversalEvent("leaf_search_select", searchSelectFields);
+            //            Map<String, Object> searchSelectFields = new HashMap<>();
+            //            searchSelectFields.put("bestPageId", bestPageId);
+            //            searchSelectFields.put("selectedTupleIndex", bestTupleIndex);
+            //            searchSelectFields.put("centroidId", bestCentroidId);
+            //            searchSelectFields.put("bestDistance", bestDistance);
+            //            searchSelectFields.put("candidatesProcessed", candidatesProcessed);
+            //            searchSelectFields.put("pagesProcessed", pagesProcessed);
+            //            logTraversalEvent("leaf_search_select", searchSelectFields);
 
             return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId);
         }
@@ -400,11 +404,11 @@ public class VCTreeNavigationUtils {
         int candidatesProcessed = 0;
         int pagesProcessed = 0;
 
-        Map<String, Object> searchStartFields = new HashMap<>();
-        searchStartFields.put("startPageId", startPageId);
-        searchStartFields.put("vectorDim", queryVector.length);
-        searchStartFields.put("queryVector", queryVector);
-        logTraversalEvent("interior_search_start", searchStartFields);
+        //        Map<String, Object> searchStartFields = new HashMap<>();
+        //        searchStartFields.put("startPageId", startPageId);
+        //        searchStartFields.put("vectorDim", queryVector.length);
+        //        searchStartFields.put("queryVector", queryVector);
+        //        logTraversalEvent("interior_search_start", searchStartFields);
 
         // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
         int currentPageId = startPageId;
@@ -428,13 +432,13 @@ public class VCTreeNavigationUtils {
                 int nextPageId = hasOverflow ? currentFrame.getNextPage() : -1;
                 pagesProcessed++;
 
-                Map<String, Object> pageFields = new HashMap<>();
-                pageFields.put("pageId", currentPageId);
-                pageFields.put("tupleCount", tupleCount);
-                pageFields.put("hasOverflow", hasOverflow);
-                pageFields.put("nextPageId", nextPageId);
-                pageFields.put("isFirstPage", isFirstPage);
-                logTraversalEvent("interior_page_search", pageFields);
+                //                Map<String, Object> pageFields = new HashMap<>();
+                //                pageFields.put("pageId", currentPageId);
+                //                pageFields.put("tupleCount", tupleCount);
+                //                pageFields.put("hasOverflow", hasOverflow);
+                //                pageFields.put("nextPageId", nextPageId);
+                //                pageFields.put("isFirstPage", isFirstPage);
+                //                logTraversalEvent("interior_page_search", pageFields);
 
                 // Search all centroids in this page
                 for (int i = 0; i < tupleCount; i++) {
@@ -452,13 +456,13 @@ public class VCTreeNavigationUtils {
                         int childPageId = currentFrame.getChildPageId(i);
                         candidatesProcessed++;
 
-                        Map<String, Object> candidateFields = new HashMap<>();
-                        candidateFields.put("pageId", currentPageId);
-                        candidateFields.put("tupleIndex", i);
-                        candidateFields.put("centroidDim", centroid.length);
-                        candidateFields.put("distance", distance);
-                        candidateFields.put("childPageId", childPageId);
-                        logTraversalEvent("interior_candidate", candidateFields);
+                        //                        Map<String, Object> candidateFields = new HashMap<>();
+                        //                        candidateFields.put("pageId", currentPageId);
+                        //                        candidateFields.put("tupleIndex", i);
+                        //                        candidateFields.put("centroidDim", centroid.length);
+                        //                        candidateFields.put("distance", distance);
+                        //                        candidateFields.put("childPageId", childPageId);
+                        //                        logTraversalEvent("interior_candidate", candidateFields);
 
                         if (distance < bestDistance) {
                             bestDistance = distance;
@@ -485,12 +489,12 @@ public class VCTreeNavigationUtils {
             }
         }
 
-        Map<String, Object> searchSelectFields = new HashMap<>();
-        searchSelectFields.put("selectedChildPageId", bestChildPageId);
-        searchSelectFields.put("bestDistance", bestDistance);
-        searchSelectFields.put("candidatesProcessed", candidatesProcessed);
-        searchSelectFields.put("pagesProcessed", pagesProcessed);
-        logTraversalEvent("interior_search_select", searchSelectFields);
+        //        Map<String, Object> searchSelectFields = new HashMap<>();
+        //        searchSelectFields.put("selectedChildPageId", bestChildPageId);
+        //        searchSelectFields.put("bestDistance", bestDistance);
+        //        searchSelectFields.put("candidatesProcessed", candidatesProcessed);
+        //        searchSelectFields.put("pagesProcessed", pagesProcessed);
+        //        logTraversalEvent("interior_search_select", searchSelectFields);
 
         return bestChildPageId;
     }
@@ -540,7 +544,7 @@ public class VCTreeNavigationUtils {
                 boolean isLeaf = leafFrame.isLeaf();
 
                 if (isLeaf) {
-                    System.err.println("=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: LEAF ===");
+                    LOGGER.info("=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: LEAF ===");
                     int tupleCount = leafFrame.getTupleCount();
                     for (int i = 0; i < tupleCount; i++) {
                         try {
@@ -561,7 +565,7 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            System.err.println(
+                            LOGGER.info(
                                     "tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
                                             + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
                             processedTuples++;
@@ -580,7 +584,7 @@ public class VCTreeNavigationUtils {
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
-                    System.err.println("=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: INTERIOR ===");
+                    LOGGER.info("=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: INTERIOR ===");
                     int tupleCount = interiorFrame.getTupleCount();
                     for (int i = 0; i < tupleCount; i++) {
                         try {
@@ -600,7 +604,7 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            System.err.println("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr
+                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr
                                     + " | dist=" + distStr + " | child=" + childPageId);
                             processedTuples++;
 
