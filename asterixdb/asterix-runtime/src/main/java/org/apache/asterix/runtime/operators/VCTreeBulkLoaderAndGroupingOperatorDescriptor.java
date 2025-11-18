@@ -369,12 +369,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * @param frameSize Frame size in bytes
      */
     public void initializePartitioner(IHyracksTaskContext ctx, int memoryBudget, int frameSize) {
-        System.err.println("=== INITIALIZING VCTreePartitioner ===");
-        System.err.println("Memory budget: " + memoryBudget + " frames");
-        System.err.println("Frame size: " + frameSize + " bytes");
+//        System.err.println("=== INITIALIZING VCTreePartitioner ===");
+//        System.err.println("Memory budget: " + memoryBudget + " frames");
+//        System.err.println("Frame size: " + frameSize + " bytes");
 
         this.partitioner = new VCTreePartitioner(ctx, memoryBudget, frameSize);
-        System.err.println(" VCTreePartitioner initialized successfully");
+//        System.err.println(" VCTreePartitioner initialized successfully");
     }
 
     /**
@@ -442,9 +442,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      */
     public void closePartitioner() throws HyracksDataException {
         if (partitioner != null) {
-            System.err.println("=== CLOSING VCTreePartitioner ===");
+//            System.err.println("=== CLOSING VCTreePartitioner ===");
             partitioner.closeAllFiles();
-            System.err.println("✅ VCTreePartitioner closed successfully");
+//            System.err.println("✅ VCTreePartitioner closed successfully");
         }
     }
 
@@ -574,7 +574,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 distanceFunction = getDistanceFunction(distanceMetric);
                 // Wrap for use in Hyracks modules
                 hyracksDistanceFunction = wrapDistanceFunction(distanceFunction);
-                System.err.println("Initialized distance function for metric: " + distanceMetric);
+//                System.err.println("Initialized distance function for metric: " + distanceMetric);
 
                 // Open the output writer
                 if (writer != null) {
@@ -592,14 +592,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 // Initialize index helper to access static structure via LSM index system
-                System.err.println("=== INITIALIZING INDEX-BASED STATIC STRUCTURE ACCESS ===");
+//                System.err.println("=== INITIALIZING INDEX-BASED STATIC STRUCTURE ACCESS ===");
                 indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                 indexHelper.open();
 
                 // Get LSMVCTree instance
                 org.apache.hyracks.storage.common.IIndex indexInstance = indexHelper.getIndexInstance();
-                System.err.println("Index instance type: "
-                        + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
+//                System.err.println("Index instance type: "
+//                        + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
 
                 if (!(indexInstance instanceof ILSMIndex)) {
                     throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
@@ -612,13 +612,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             "Index is not an LSMVCTree instance, got: " + lsmIndex.getClass().getName());
                 }
                 lsmVCTree = (LSMVCTree) lsmIndex;
-                System.err.println("LSMVCTree instance obtained successfully");
+//                System.err.println("LSMVCTree instance obtained successfully");
 
                 // Get static structure and create accessor
                 LSMVCTreeDiskComponent staticStructure = lsmVCTree.getStaticStructure();
                 IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
                 vcTreeAccessor = (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
-                System.err.println("✅ VectorClusteringTreeAccessor created successfully");
+//                System.err.println("✅ VectorClusteringTreeAccessor created successfully");
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -633,7 +633,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
          */
         private void initializeOutputInfrastructure() throws HyracksDataException {
             try {
-                System.err.println("=== INITIALIZING OUTPUT INFRASTRUCTURE ===");
+//                System.err.println("=== INITIALIZING OUTPUT INFRASTRUCTURE ===");
 
                 // Initialize tuple building components
                 outputTupleBuilder = new ArrayTupleBuilder(outputRecDesc.getFieldCount());
@@ -643,10 +643,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 org.apache.hyracks.api.comm.VSizeFrame outputFrame = new org.apache.hyracks.api.comm.VSizeFrame(ctx);
                 outputAppender = new FrameTupleAppender(outputFrame);
 
-                System.err.println("Output infrastructure initialized successfully");
+//                System.err.println("Output infrastructure initialized successfully");
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to initialize output infrastructure: " + e.getMessage());
-                e.printStackTrace();
+//                System.err.println("ERROR: Failed to initialize output infrastructure: " + e.getMessage());
+//                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }
@@ -803,16 +803,16 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         @Override
         public void close() throws HyracksDataException {
-            System.err.println("Total tuples processed: " + totalTuplesProcessed);
-            System.err.println("Successful extractions: " + successfulQueries);
+//            System.err.println("Total tuples processed: " + totalTuplesProcessed);
+//            System.err.println("Successful extractions: " + successfulQueries);
 
             try {
                 // CRITICAL: Write any remaining output data before closing
                 // This ensures the downstream sort operator receives all data
                 if (writer != null && outputAppender != null) {
-                    System.err.println("Writing final output data to downstream sort operator...");
+//                    System.err.println("Writing final output data to downstream sort operator...");
                     outputAppender.write(writer, false); // false = don't clear frame, just write remaining data
-                    System.err.println("Final output data written successfully");
+//                    System.err.println("Final output data written successfully");
                 }
 
                 // Finalize partitioning after all data is processed
@@ -845,12 +845,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 // Close the writer AFTER flushing all data
                 if (writer != null) {
                     writer.close();
-                    System.err.println("Writer closed after flushing all data");
+//                    System.err.println("Writer closed after flushing all data");
                 }
 
             } catch (Exception e) {
-                System.err.println("ERROR: Failed to close VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
-                e.printStackTrace();
+//                System.err.println("ERROR: Failed to close VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
+//                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }

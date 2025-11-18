@@ -91,8 +91,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     @Override
     public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
         // Force output to both System.out and System.err to ensure visibility
-        System.out.println(
-                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
+//        System.out.println(
+//                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -112,10 +112,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // key provider -> primary idx scan -> cast assign -> k-means -> static structure creator -> sink
         IndexUtil.bindJobEventListener(spec, metadataProvider);
 
-        System.err.println("=== STATIC STRUCTURE JOB SETUP ===");
-        System.err.println("Dataset: " + dataset.getDatasetName());
-        System.err.println("Index: " + index.getIndexName());
-        System.err.println("Creating static structure job for K-means + structure creation");
+//        System.err.println("=== STATIC STRUCTURE JOB SETUP ===");
+//        System.err.println("Dataset: " + dataset.getDatasetName());
+//        System.err.println("Index: " + index.getIndexName());
+//        System.err.println("Creating static structure job for K-means + structure creation");
 
         // if format == column, then project only the indexed fields
         ITupleProjectorFactory projectorFactory =
@@ -127,15 +127,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
+//        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
 
         sourceOp = targetOp;
         // primary index -> cast assign op (produces the secondary index entry)
         targetOp = createAssignOp(spec, numSecondaryKeys, recordDesc);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: PrimaryIndexScan → CastAssign");
-        System.err.println("CastAssign operator: " + targetOp);
+//        System.err.println("Connected: PrimaryIndexScan → CastAssign");
+//        System.err.println("CastAssign operator: " + targetOp);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
@@ -145,9 +145,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID permitUUID = UUID.randomUUID();
 
         // Register permit state for structure creation coordination
-        System.err.println("=== REGISTERING PERMIT STATE ===");
-        System.err.println("Permit UUID: " + permitUUID);
-        System.err.println("Permit state will be used by StaticStructureCreator operator");
+//        System.err.println("=== REGISTERING PERMIT STATE ===");
+//        System.err.println("Permit UUID: " + permitUUID);
+//        System.err.println("Permit state will be used by StaticStructureCreator operator");
 
         // Extract K value from WITH clause
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
@@ -157,15 +157,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         }
         // Validate K value
         if (K <= 0) {
-            System.err.println("WARNING: Invalid num_k value: " + K + ", using default: 20");
+//            System.err.println("WARNING: Invalid num_k value: " + K + ", using default: 20");
             K = 20;
         }
-        System.err.println("Using K value: " + K + " for K-means clustering");
+//        System.err.println("Using K value: " + K + " for K-means clustering");
 
         // Extract distance metric from WITH clause
         // Extract vector dimension from WITH clause
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
-        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
+//        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
 
         int maxScalableKmeansIter = 2;
 
@@ -191,12 +191,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         RecordDescriptor hierarchicalRecDesc = new RecordDescriptor(hierarchicalSerde, hierarchicalTraits);
 
-        System.err.println("=== RECORD DESCRIPTOR COMPARISON ===");
+//        System.err.println("=== RECORD DESCRIPTOR COMPARISON ===");
 
         // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
 
         // 1. K-means operator
-        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
+//        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
         UUID materializedDataUUID = UUID.randomUUID();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
@@ -207,14 +207,14 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         targetOp = candidates;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: CastAssign → K-means");
-        System.err.println("K-means operator: " + candidates);
+//        System.err.println("Connected: CastAssign → K-means");
+//        System.err.println("K-means operator: " + candidates);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
 
         // 2. VCTree static structure creator
-        System.err.println("🔧 CREATING VCTreeStaticStructureCreator");
+//        System.err.println("🔧 CREATING VCTreeStaticStructureCreator");
         VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
                 new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
                         hierarchicalRecDesc, permitUUID, materializedDataUUID);
@@ -223,8 +223,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         targetOp = vcTreeCreator;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: K-means → StaticStructureCreator");
-        System.err.println("StaticStructureCreator operator: " + vcTreeCreator);
+//        System.err.println("Connected: K-means → StaticStructureCreator");
+//        System.err.println("StaticStructureCreator operator: " + vcTreeCreator);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
@@ -237,42 +237,42 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, primaryPartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: StaticStructureCreator → Sink");
-        System.err.println("Sink operator: " + targetOp);
-        System.err.println("=== STATIC STRUCTURE PIPELINE COMPLETE ===");
+//        System.err.println("Connected: StaticStructureCreator → Sink");
+//        System.err.println("Sink operator: " + targetOp);
+//        System.err.println("=== STATIC STRUCTURE PIPELINE COMPLETE ===");
 
         // Add single branch as root
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
-        System.err.println("=== STATIC STRUCTURE JOB SPECIFICATION COMPLETE ===");
-        System.err.println("Root operators added:");
-        System.err.println("  Root: " + targetOp + " (Static Structure - K-means → StaticStructureCreator → Sink)");
-        System.err.println("=== STATIC STRUCTURE JOB CREATED ===");
-        System.err.println("=== PIPELINE: DataSource → CastAssign → K-means → StaticStructureCreator → Sink ===");
-        System.err.println(
-                "=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
-        System.err.println("==========================================");
-        System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
-        System.err.println("==========================================");
-        System.out.println(
-                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
+//        System.err.println("=== STATIC STRUCTURE JOB SPECIFICATION COMPLETE ===");
+//        System.err.println("Root operators added:");
+//        System.err.println("  Root: " + targetOp + " (Static Structure - K-means → StaticStructureCreator → Sink)");
+//        System.err.println("=== STATIC STRUCTURE JOB CREATED ===");
+//        System.err.println("=== PIPELINE: DataSource → CastAssign → K-means → StaticStructureCreator → Sink ===");
+//        System.err.println(
+//                "=== STRUCTURE CREATION: K-means creates centroids, StaticStructureCreator stores structure ===");
+//        System.err.println("==========================================");
+//        System.err.println("*** SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
+//        System.err.println("==========================================");
+//        System.out.println(
+//                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() COMPLETED ***");
         return spec;
     }
 
     @Override
     public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
         // Force output to both System.out and System.err to ensure visibility
-        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
-        System.err.println("==========================================");
-        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
-        System.err.println("==========================================");
-        System.err.println("Dataset: " + dataset.getDatasetName());
-        System.err.println("Index: " + index.getIndexName());
-        System.err.println("Index type: " + index.getIndexType());
-        System.err.println("Index details: " + index.getIndexDetails());
-        System.err.println("Creating Data Loading Job with Bulk Loader and Grouping (Job 3)");
-        System.err.println("==========================================");
+//        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+//        System.err.println("==========================================");
+//        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
+//        System.err.println("==========================================");
+//        System.err.println("Dataset: " + dataset.getDatasetName());
+//        System.err.println("Index: " + index.getIndexName());
+//        System.err.println("Index type: " + index.getIndexType());
+//        System.err.println("Index details: " + index.getIndexDetails());
+//        System.err.println("Creating Data Loading Job with Bulk Loader and Grouping (Job 3)");
+//        System.err.println("==========================================");
 
         JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
         Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
@@ -283,10 +283,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Job spec: key provider -> primary idx scan -> cast assign -> bulk loader and grouping -> sink
         IndexUtil.bindJobEventListener(spec, metadataProvider);
 
-        System.err.println("=== DATA LOADING JOB SETUP ===");
-        System.err.println("Dataset: " + dataset.getDatasetName());
-        System.err.println("Index: " + index.getIndexName());
-        System.err.println("Creating data loading job with bulk loader and grouping functionality");
+//        System.err.println("=== DATA LOADING JOB SETUP ===");
+//        System.err.println("Dataset: " + dataset.getDatasetName());
+//        System.err.println("Index: " + index.getIndexName());
+//        System.err.println("Creating data loading job with bulk loader and grouping functionality");
 
         // if format == column, then project only the indexed fields
         ITupleProjectorFactory projectorFactory =
@@ -299,25 +299,25 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
+//        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
 
         sourceOp = targetOp;
         // primary index -> cast assign op (produces the secondary index entry)
         targetOp = createAssignOp(spec, numSecondaryKeys, recordDesc);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        System.err.println("Connected: PrimaryIndexScan → CastAssign");
-        System.err.println("CastAssign operator: " + targetOp);
+//        System.err.println("Connected: PrimaryIndexScan → CastAssign");
+//        System.err.println("CastAssign operator: " + targetOp);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
 
         // ====== DATA LOADING JOB: CAST ASSIGN → BULK LOADER AND GROUPING → SINK ======
-        System.out.println("*** VECTOR INDEX DEBUG: CREATING DATA LOADING PIPELINE ***");
-        System.err.println("==========================================");
-        System.err.println("*** CREATING DATA LOADING PIPELINE ***");
-        System.err.println("==========================================");
-        System.err.println("Pipeline: CastAssign → BulkLoaderAndGrouping → Sink");
+//        System.out.println("*** VECTOR INDEX DEBUG: CREATING DATA LOADING PIPELINE ***");
+//        System.err.println("==========================================");
+//        System.err.println("*** CREATING DATA LOADING PIPELINE ***");
+//        System.err.println("==========================================");
+//        System.err.println("Pipeline: CastAssign → BulkLoaderAndGrouping → Sink");
 
         // Create permit UUIDs for coordination
         UUID permitUUID = UUID.randomUUID();
@@ -352,11 +352,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
         String distanceMetric =
                 (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
-        System.err.println("Distance metric from CREATE INDEX: " + distanceMetric);
+//        System.err.println("Distance metric from CREATE INDEX: " + distanceMetric);
 
         // Extract vector dimension from WITH clause
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
-        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
+//        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
 
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
@@ -371,15 +371,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Connect CastAssign → BulkLoaderAndGrouping (which now outputs transformed tuples)
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, bulkLoaderAndGroupingOp, 0);
-        System.err.println("Connected: CastAssign → BulkLoaderAndGrouping");
-        System.err.println("BulkLoaderAndGrouping operator: " + bulkLoaderAndGroupingOp);
+//        System.err.println("Connected: CastAssign → BulkLoaderAndGrouping");
+//        System.err.println("BulkLoaderAndGrouping operator: " + bulkLoaderAndGroupingOp);
 
         // Update sourceOp to continue the chain
         sourceOp = bulkLoaderAndGroupingOp;
 
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
-        System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
-        System.err.println("SortNumFrames from config: " + sortNumFrames);
+//        System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
+//        System.err.println("SortNumFrames from config: " + sortNumFrames);
         int[] sortFields = { 1, 0, 2 }; // Sort by centroidId (0) first, then distance (1)
         IBinaryComparatorFactory[] sortComparatorFactories =
                 { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
@@ -388,22 +388,22 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 };
         // Ensure minimum frames for sort operator (must be > 1)
         int sortFrames = Math.max(sortNumFrames, 2);
-        System.err.println("Using sortFrames: " + sortFrames);
-        System.err.println("OutputRecDesc field count: " + outputRecDesc.getFieldCount());
+//        System.err.println("Using sortFrames: " + sortFrames);
+//        System.err.println("OutputRecDesc field count: " + outputRecDesc.getFieldCount());
         ExternalSortOperatorDescriptor sortOp = new ExternalSortOperatorDescriptor(spec, sortFrames, sortFields,
                 sortComparatorFactories, outputRecDesc);
         sortOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sortOp, primaryPartitionConstraint);
         targetOp = sortOp;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        System.err.println("Connected: BulkLoaderAndGrouping → Sort");
-        System.err.println("Sort operator: " + sortOp);
+//        System.err.println("Connected: BulkLoaderAndGrouping → Sort");
+//        System.err.println("Sort operator: " + sortOp);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
 
         // 5. LSMIndexBulkLoadOperatorDescriptor - Load sorted tuples into VCTree index
-        System.err.println("🔧 CREATING LSMIndexBulkLoadOperatorDescriptor for data loading");
+//        System.err.println("🔧 CREATING LSMIndexBulkLoadOperatorDescriptor for data loading");
 
         // Create field permutation: include all fields in same order (identity permutation)
         int[] fieldPermutation = createFieldPermutationForSortedDataBulkLoad(outputRecDesc);
@@ -438,8 +438,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 primaryPartitionConstraint);
         targetOp = sortedBulkLoaderOp;
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        System.err.println("Connected: Sort → LSMIndexBulkLoad");
-        System.err.println("LSMIndexBulkLoad operator: " + sortedBulkLoaderOp);
+//        System.err.println("Connected: Sort → LSMIndexBulkLoad");
+//        System.err.println("LSMIndexBulkLoad operator: " + sortedBulkLoaderOp);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
@@ -451,28 +451,28 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new IPushRuntimeFactory[] { sinkRuntimeFactory }, new RecordDescriptor[] { secondaryRecDesc });
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sinkOp, primaryPartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, sinkOp, 0);
-        System.err.println("Connected: LSMIndexBulkLoad → Sink");
-        System.err.println("Sink operator: " + sinkOp);
-        System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
+//        System.err.println("Connected: LSMIndexBulkLoad → Sink");
+//        System.err.println("Sink operator: " + sinkOp);
+//        System.err.println("=== DATA LOADING PIPELINE COMPLETE ===");
 
         // Add sink as root
         spec.addRoot(sinkOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
-        System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
-        System.err.println("Root operators added:");
-        System.err.println("  Root: " + sinkOp
-                + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → LSMIndexBulkLoad → Sink)");
-        System.err.println("=== DATA LOADING JOB CREATED ===");
-        System.err.println(
-                "=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → LSMIndexBulkLoad → Sink ===");
-        System.err.println(
-                "=== DATA LOADING: Groups data, sorts by centroidId/distance, loads into VCTree using LSM bulk loading infrastructure ===");
-        System.err.println("==========================================");
-        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
-        System.err.println("==========================================");
-        System.out
-                .println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
+//        System.err.println("=== DATA LOADING JOB SPECIFICATION COMPLETE ===");
+//        System.err.println("Root operators added:");
+//        System.err.println("  Root: " + sinkOp
+//                + " (Data Loading - CastAssign → BulkLoaderAndGrouping → Sort → LSMIndexBulkLoad → Sink)");
+//        System.err.println("=== DATA LOADING JOB CREATED ===");
+//        System.err.println(
+//                "=== PIPELINE: DataSource → CastAssign → BulkLoaderAndGrouping → Sort → LSMIndexBulkLoad → Sink ===");
+//        System.err.println(
+//                "=== DATA LOADING: Groups data, sorts by centroidId/distance, loads into VCTree using LSM bulk loading infrastructure ===");
+//        System.err.println("==========================================");
+//        System.err.println("*** SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
+//        System.err.println("==========================================");
+//        System.out
+//                .println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() COMPLETED ***");
         return spec;
     }
 

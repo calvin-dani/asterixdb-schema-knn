@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Utility class for reading and managing hierarchical cluster index files.
@@ -35,7 +37,7 @@ public class HierarchicalClusterIndexReader {
 
     private final ObjectMapper objectMapper;
     private Map<String, Object> indexData;
-
+    private static final Logger LOGGER = LogManager.getLogger();
     public HierarchicalClusterIndexReader() {
         this.objectMapper = new ObjectMapper();
     }
@@ -248,32 +250,32 @@ public class HierarchicalClusterIndexReader {
     public void printLevelDetails(int level) {
         Map<String, Object> levelData = getClusterLevel(level);
         if (levelData == null) {
-            System.out.println("Level " + level + " not found.");
+            LOGGER.info("Level " + level + " not found.");
             return;
         }
 
-        System.out.println("\n=== Level " + level + " Details ===");
-        System.out.println("Centroid Count: " + levelData.get("centroid_count"));
+        LOGGER.info("\n=== Level " + level + " Details ===");
+        LOGGER.info("Centroid Count: " + levelData.get("centroid_count"));
 
         List<Map<String, Object>> centroids = (List<Map<String, Object>>) levelData.get("centroids");
         if (centroids != null) {
-            System.out.println("\nCentroids:");
+            LOGGER.info("\nCentroids:");
             for (int i = 0; i < centroids.size(); i++) {
                 Map<String, Object> centroid = centroids.get(i);
-                System.out.println("  " + (i + 1) + ". Cluster ID: " + centroid.get("cluster_id") + ", Global ID: "
+                LOGGER.info("  " + (i + 1) + ". Cluster ID: " + centroid.get("cluster_id") + ", Global ID: "
                         + centroid.get("global_id") + ", Has Parent: " + centroid.get("has_parent"));
                 if ((Boolean) centroid.get("has_parent")) {
-                    System.out.println("     Parent Cluster ID: " + centroid.get("parent_cluster_id"));
+                    LOGGER.info("     Parent Cluster ID: " + centroid.get("parent_cluster_id"));
                 }
 
                 List<Double> coords = (List<Double>) centroid.get("coordinates");
                 if (coords != null && !coords.isEmpty()) {
-                    System.out.println("     Coordinates: [" + coords.subList(0, Math.min(3, coords.size()))
+                    LOGGER.info("     Coordinates: [" + coords.subList(0, Math.min(3, coords.size()))
                             + (coords.size() > 3 ? "..." : "") + "]");
                 }
             }
         }
-        System.out.println("=====================================\n");
+        LOGGER.info("=====================================\n");
     }
 
     /**

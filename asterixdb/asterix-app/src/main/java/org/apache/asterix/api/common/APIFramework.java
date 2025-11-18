@@ -308,15 +308,15 @@ public class APIFramework {
 
                 // ===== DEBUG: Print optimized logical plan =====
                 try {
-                    System.err.println("\n========================================");
-                    System.err.println("OPTIMIZED LOGICAL PLAN:");
-                    System.err.println("========================================");
+                    //                    System.err.println("\n========================================");
+                    //                    System.err.println("OPTIMIZED LOGICAL PLAN:");
+                    //                    System.err.println("========================================");
                     org.apache.hyracks.algebricks.core.algebra.prettyprint.IPlanPrettyPrinter pPrinter =
                             org.apache.hyracks.algebricks.core.algebra.prettyprint.PlanPrettyPrinter
                                     .createStringPlanPrettyPrinter();
                     pPrinter.printPlan(plan, false);
-                    System.err.println(pPrinter.toString());
-                    System.err.println("========================================\n");
+                    //                    System.err.println(pPrinter.toString());
+                    //                    System.err.println("========================================\n");
                 } catch (Exception e) {
                     System.err.println("Failed to print plan: " + e.getMessage());
                 }

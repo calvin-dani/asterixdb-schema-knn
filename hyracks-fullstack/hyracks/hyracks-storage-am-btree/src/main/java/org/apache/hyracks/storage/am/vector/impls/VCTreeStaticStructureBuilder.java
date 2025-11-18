@@ -152,37 +152,37 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
-        System.err.println("=== VCTreeStaticStructureBuilder.add ===");
-        System.err.println("Input tuple field count: " + tuple.getFieldCount());
-        for (int i = 0; i < tuple.getFieldCount(); i++) {
-            System.err.println("  Field " + i + ": length=" + tuple.getFieldLength(i));
-        }
+//        System.err.println("=== VCTreeStaticStructureBuilder.add ===");
+//        System.err.println("Input tuple field count: " + tuple.getFieldCount());
+//        for (int i = 0; i < tuple.getFieldCount(); i++) {
+//            System.err.println("  Field " + i + ": length=" + tuple.getFieldLength(i));
+//        }
 
         // Compute child page ID mathematically
         int childPageId = determineChildPageId();
-        System.err.println("Child page ID: " + childPageId);
+//        System.err.println("Child page ID: " + childPageId);
 
         // Create entry tuple: <centroid_id, embedding, child_page_id>
-        System.err.println("Calling createEntryTuple...");
+//        System.err.println("Calling createEntryTuple...");
         ITupleReference entryTuple = createEntryTuple(tuple, childPageId);
-        System.err.println("createEntryTuple completed successfully");
+//        System.err.println("createEntryTuple completed successfully");
 
         // Check if current page has SPACE for this tuple (not just entry count)
         int spaceNeeded = currentFrame.getBytesRequiredToWriteTuple(entryTuple) + slotSize;
         int spaceAvailable = currentFrame.getTotalFreeSpace();
-        System.err.println("Space check: needed=" + spaceNeeded + ", available=" + spaceAvailable);
+//        System.err.println("Space check: needed=" + spaceNeeded + ", available=" + spaceAvailable);
 
         if (spaceNeeded > spaceAvailable) {
             // Create overflow page for same cluster
-            System.err.println("Creating overflow page (insufficient space)...");
+//            System.err.println("Creating overflow page (insufficient space)...");
             createOverflowPage();
         }
 
         // Insert entry into current page
-        System.err.println("Inserting entry into current page...");
+//        System.err.println("Inserting entry into current page...");
         ((IVectorClusteringFrame) currentFrame).insertSorted(entryTuple);
         entriesInCurrentPage++;
-        System.err.println("Entry inserted successfully. Total entries in current page: " + entriesInCurrentPage);
+//        System.err.println("Entry inserted successfully. Total entries in current page: " + entriesInCurrentPage);
 
         // Advance position in structure
         advancePosition();

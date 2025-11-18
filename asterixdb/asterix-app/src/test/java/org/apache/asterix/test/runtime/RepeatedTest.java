@@ -102,7 +102,7 @@ public class RepeatedTest extends SqlppExecutionTest {
     @Test
     @Repeat(times = 100)
     public void test() throws Exception {
-        System.err.println("***** Test Count: " + (++count) + " ******");
+        //        System.err.println("***** Test Count: " + (++count) + " ******");
         super.test();
     }
 }
