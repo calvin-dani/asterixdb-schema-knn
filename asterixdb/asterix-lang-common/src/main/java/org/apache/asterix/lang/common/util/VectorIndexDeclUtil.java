@@ -35,7 +35,7 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_DESCRIPTION = "description";
     public static final String VECTOR_INDEX_PARAMETER_TRAIN_LIST = "train_list";
     public static final String VECTOR_INDEX_PARAMETER_SIMILARITY = "similarity";
-    public static final String VECTOR_INDEX_PARAMETER_NUM_K = "num_k";
+    public static final String VECTOR_INDEX_PARAMETER_NUM_K = "num_clusters";
 
     private static final ARecordType WITH_OBJECT_TYPE = getWithObjectType();
 
