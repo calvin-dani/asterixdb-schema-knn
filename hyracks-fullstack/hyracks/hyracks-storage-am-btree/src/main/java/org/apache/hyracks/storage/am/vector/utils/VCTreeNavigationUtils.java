@@ -22,10 +22,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 
@@ -69,16 +69,17 @@ public class VCTreeNavigationUtils {
      */
 
     private static final Logger LOGGER = LogManager.getLogger();
+
     public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
-        //        Map<String, Object> startFields = new HashMap<>();
-        //        startFields.put("treeFileId", fileId);
-        //        startFields.put("rootPageId", rootPageId);
-        //        startFields.put("vectorDim", queryVector.length);
-        //        startFields.put("queryVector", queryVector);
-        //        logTraversalEvent("traversal_start", startFields);
+        //                Map<String, Object> startFields = new HashMap<>();
+        //                startFields.put("treeFileId", fileId);
+        //                startFields.put("rootPageId", rootPageId);
+        //                startFields.put("vectorDim", queryVector.length);
+        //                startFields.put("queryVector", queryVector);
+        //                logTraversalEvent("traversal_start", startFields);
 
         // Start from root page
         int currentPageId = rootPageId;
@@ -102,18 +103,18 @@ public class VCTreeNavigationUtils {
                 leafFrame.setPage(page);
                 boolean isLeaf = leafFrame.isLeaf();
 
-                Map<String, Object> pageVisitFields = new HashMap<>();
-                //                pageVisitFields.put("pageId", currentPageId);
-                //                pageVisitFields.put("isLeaf", isLeaf);
-                //                pageVisitFields.put("loopIteration", loopCounter);
-                //                logTraversalEvent("page_visit", pageVisitFields);
+                //                Map<String, Object> pageVisitFields = new HashMap<>();
+                //                                pageVisitFields.put("pageId", currentPageId);
+                //                                pageVisitFields.put("isLeaf", isLeaf);
+                //                                pageVisitFields.put("loopIteration", loopCounter);
+                //                                logTraversalEvent("page_visit", pageVisitFields);
 
                 if (isLeaf) {
                     // Leaf level - find closest centroid
-                    //                    Map<String, Object> leafEnterFields = new HashMap<>();
-                    //                    leafEnterFields.put("pageId", currentPageId);
-                    //                    leafEnterFields.put("fileId", fileId);
-                    //                    logTraversalEvent("leaf_page_enter", leafEnterFields);
+                    //                                        Map<String, Object> leafEnterFields = new HashMap<>();
+                    //                                        leafEnterFields.put("pageId", currentPageId);
+                    //                                        leafEnterFields.put("fileId", fileId);
+                    //                                        logTraversalEvent("leaf_page_enter", leafEnterFields);
 
                     bestResult = findClosestInLeafPage(bufferCache, fileId, queryVector, currentPageId, leafFrame,
                             leafFrameFactory, distanceFunction);
@@ -121,6 +122,141 @@ public class VCTreeNavigationUtils {
 
                 } else {
                     // Interior level - find closest centroid and descend
+                    //                                        Map<String, Object> interiorEnterFields = new HashMap<>();
+                    //                                        interiorEnterFields.put("pageId", currentPageId);
+                    //                                        interiorEnterFields.put("fileId", fileId);
+                    //                                        logTraversalEvent("interior_page_enter", interiorEnterFields);
+
+                    IVectorClusteringInteriorFrame interiorFrame =
+                            (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                    interiorFrame.setPage(page);
+                    int nextPageId = findClosestInInteriorPage(bufferCache, fileId, queryVector, currentPageId,
+                            interiorFrame, interiorFrameFactory, distanceFunction);
+                    if (nextPageId == -1) {
+                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                                "No valid centroid found in interior cluster");
+                    }
+
+                    //                                        Map<String, Object> interiorDescendFields = new HashMap<>();
+                    //                                        interiorDescendFields.put("pageId", currentPageId);
+                    //                                        interiorDescendFields.put("selectedChildPageId", nextPageId);
+                    //                                        interiorDescendFields.put("fileId", fileId);
+                    //                                        logTraversalEvent("interior_descend", interiorDescendFields);
+
+                    currentPageId = nextPageId;
+                }
+
+            } finally {
+                page.releaseReadLatch();
+                bufferCache.unpin(page);
+            }
+        }
+
+        if (bestResult == null) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest cluster found");
+        }
+
+        //                Map<String, Object> finishFields = new HashMap<>();
+        //                finishFields.put("leafPageId", bestResult.leafPageId);
+        //                finishFields.put("centroidId", bestResult.centroidId);
+        //                finishFields.put("bestDistance", bestResult.distance);
+        //                finishFields.put("vectorDim", queryVector.length);
+        //                finishFields.put("queryVector", queryVector);
+        //                logTraversalEvent("traversal_finish", finishFields);
+
+        return bestResult;
+    }
+
+    /**
+     * Find all centroids within an epsilon range of the closest centroid by traversing
+     * from the root. Returns the closest cluster plus any others within epsilon of
+     * the best distance.
+     */
+    public static List<ClusterSearchResult> findCloseLeafCentroids(IBufferCache bufferCache, int fileId, int rootPageId,
+            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
+            IVectorDistanceFunction distanceFunction, double epsilon) throws HyracksDataException {
+
+        //        Map<String, Object> startFields = new HashMap<>();
+        //        startFields.put("treeFileId", fileId);
+        //        startFields.put("rootPageId", rootPageId);
+        //        startFields.put("vectorDim", queryVector.length);
+        //        startFields.put("queryVector", queryVector);
+        //        startFields.put("epsilon", epsilon);
+        //        logTraversalEvent("traversal_start", startFields);
+
+        int currentPageId = rootPageId;
+        List<ClusterSearchResult> closeCentroids = null;
+        int loopCounter = 0;
+
+        while (true) {
+            loopCounter++;
+            if (loopCounter > 10) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Infinite loop detected in tree traversal");
+            }
+
+            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+
+            try {
+                page.acquireReadLatch();
+
+                IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                leafFrame.setPage(page);
+                boolean isLeaf = leafFrame.isLeaf();
+
+                //                Map<String, Object> pageVisitFields = new HashMap<>();
+                //                pageVisitFields.put("pageId", currentPageId);
+                //                pageVisitFields.put("isLeaf", isLeaf);
+                //                pageVisitFields.put("loopIteration", loopCounter);
+                //                logTraversalEvent("page_visit", pageVisitFields);
+
+                if (isLeaf) {
+                    //                    Map<String, Object> leafEnterFields = new HashMap<>();
+                    //                    leafEnterFields.put("pageId", currentPageId);
+                    //                    leafEnterFields.put("fileId", fileId);
+                    //                    logTraversalEvent("leaf_page_enter", leafEnterFields);
+
+                    //                    Map<String, Object> searchStartFields = new HashMap<>();
+                    //                    searchStartFields.put("startPageId", currentPageId);
+                    //                    searchStartFields.put("vectorDim", queryVector.length);
+                    //                    searchStartFields.put("queryVector", queryVector);
+                    //                    logTraversalEvent("leaf_search_start", searchStartFields);
+
+                    LeafCollectionStats stats = collectLeafCentroids(bufferCache, fileId, queryVector, currentPageId,
+                            leafFrame, leafFrameFactory, distanceFunction);
+
+                    if (stats.centroids.isEmpty()) {
+                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Leaf cluster has no centroids");
+                    }
+
+                    double bestDistance = stats.centroids.get(0).distance;
+                    double threshold = bestDistance + epsilon;
+                    List<ClusterSearchResult> results = new ArrayList<>();
+
+                    for (LeafCentroid centroid : stats.centroids) {
+                        if (centroid.distance <= threshold) {
+                            results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
+                                    centroid.centroid, centroid.distance, centroid.centroidId));
+                        } else {
+                            break;
+                        }
+                    }
+
+                    //                    Map<String, Object> searchSelectFields = new HashMap<>();
+                    //                    LeafCentroid bestLeaf = stats.centroids.get(0);
+                    //                    searchSelectFields.put("bestPageId", bestLeaf.pageId);
+                    //                    searchSelectFields.put("selectedTupleIndex", bestLeaf.tupleIndex);
+                    //                    searchSelectFields.put("centroidId", bestLeaf.centroidId);
+                    //                    searchSelectFields.put("bestDistance", bestLeaf.distance);
+                    //                    searchSelectFields.put("candidatesProcessed", stats.candidatesProcessed);
+                    //                    searchSelectFields.put("pagesProcessed", stats.pagesProcessed);
+                    //                    searchSelectFields.put("resultsCount", results.size());
+                    //                    searchSelectFields.put("epsilon", epsilon);
+                    //                    logTraversalEvent("leaf_search_select", searchSelectFields);
+
+                    closeCentroids = results;
+                    break; // Found leaf-level candidates
+
+                } else {
                     //                    Map<String, Object> interiorEnterFields = new HashMap<>();
                     //                    interiorEnterFields.put("pageId", currentPageId);
                     //                    interiorEnterFields.put("fileId", fileId);
@@ -151,19 +287,544 @@ public class VCTreeNavigationUtils {
             }
         }
 
-        if (bestResult == null) {
-            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest cluster found");
+        if (closeCentroids == null || closeCentroids.isEmpty()) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest clusters found");
         }
 
+        //        ClusterSearchResult bestResult = closeCentroids.get(0);
         //        Map<String, Object> finishFields = new HashMap<>();
         //        finishFields.put("leafPageId", bestResult.leafPageId);
         //        finishFields.put("centroidId", bestResult.centroidId);
         //        finishFields.put("bestDistance", bestResult.distance);
         //        finishFields.put("vectorDim", queryVector.length);
         //        finishFields.put("queryVector", queryVector);
+        //        finishFields.put("epsilon", epsilon);
+        //        finishFields.put("resultsCount", closeCentroids.size());
         //        logTraversalEvent("traversal_finish", finishFields);
 
-        return bestResult;
+        return closeCentroids;
+    }
+
+    /**
+     * Find clusters by expanding multiple tree paths within an epsilon radius around the closest centroid.
+     */
+    public static List<ClusterSearchResult> findCloseCentroidsFrontier(IBufferCache bufferCache, int fileId,
+            int rootPageId, ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+            double[] queryVector, IVectorDistanceFunction distanceFunction, double epsilon)
+            throws HyracksDataException {
+
+        //        Map<String, Object> startFields = new HashMap<>();
+        //        startFields.put("treeFileId", fileId);
+        //        startFields.put("rootPageId", rootPageId);
+        //        startFields.put("vectorDim", queryVector.length);
+        //        startFields.put("queryVector", queryVector);
+        //        startFields.put("epsilon", epsilon);
+        //        startFields.put("strategy", "frontier");
+        //        logTraversalEvent("traversal_start", startFields);
+
+        List<ClusterSearchResult> results = new ArrayList<>();
+        Set<Integer> visitedLeafPages = new HashSet<>();
+        List<InteriorNodeInfo> pathNodes = new ArrayList<>();
+        double bestDistance = Double.MAX_VALUE;
+        double threshold = Double.MAX_VALUE;
+
+        int currentPageId = rootPageId;
+
+        while (true) {
+            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+            try {
+                page.acquireReadLatch();
+
+                IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                leafFrame.setPage(page);
+                boolean isLeaf = leafFrame.isLeaf();
+
+                //                Map<String, Object> pageVisitFields = new HashMap<>();
+                //                pageVisitFields.put("pageId", currentPageId);
+                //                pageVisitFields.put("isLeaf", isLeaf);
+                //                logTraversalEvent("page_visit", pageVisitFields);
+
+                if (isLeaf) {
+                    //                    Map<String, Object> leafEnterFields = new HashMap<>();
+                    //                    leafEnterFields.put("pageId", currentPageId);
+                    //                    leafEnterFields.put("fileId", fileId);
+                    //                    logTraversalEvent("leaf_page_enter", leafEnterFields);
+                    //
+                    //                    Map<String, Object> searchStartFields = new HashMap<>();
+                    //                    searchStartFields.put("startPageId", currentPageId);
+                    //                    searchStartFields.put("vectorDim", queryVector.length);
+                    //                    searchStartFields.put("queryVector", queryVector);
+                    //                    logTraversalEvent("leaf_search_start", searchStartFields);
+
+                    LeafCollectionStats stats = collectLeafCentroids(bufferCache, fileId, queryVector, currentPageId,
+                            leafFrame, leafFrameFactory, distanceFunction);
+                    if (stats.centroids.isEmpty()) {
+                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Leaf cluster has no centroids");
+                    }
+
+                    bestDistance = stats.centroids.get(0).distance;
+                    threshold = bestDistance + epsilon;
+                    appendLeafResults(results, stats, threshold, epsilon);
+                    visitedLeafPages.add(currentPageId);
+                    break;
+
+                } else {
+                    //                    Map<String, Object> interiorEnterFields = new HashMap<>();
+                    //                    interiorEnterFields.put("pageId", currentPageId);
+                    //                    interiorEnterFields.put("fileId", fileId);
+                    //                    logTraversalEvent("interior_page_enter", interiorEnterFields);
+
+                    IVectorClusteringInteriorFrame interiorFrame =
+                            (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                    interiorFrame.setPage(page);
+
+                    List<ChildCentroid> sortedChildren = collectChildrenForFrontier(bufferCache, fileId, queryVector,
+                            currentPageId, interiorFrame, interiorFrameFactory, distanceFunction);
+
+                    if (sortedChildren.isEmpty()) {
+                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                                "Interior node has no valid children");
+                    }
+
+                    pathNodes.add(new InteriorNodeInfo(sortedChildren));
+                    ChildCentroid closest = sortedChildren.get(0);
+
+                    //                    Map<String, Object> interiorDescendFields = new HashMap<>();
+                    //                    interiorDescendFields.put("pageId", currentPageId);
+                    //                    interiorDescendFields.put("selectedChildPageId", closest.childPageId);
+                    //                    interiorDescendFields.put("fileId", fileId);
+                    //                    logTraversalEvent("interior_descend", interiorDescendFields);
+
+                    currentPageId = closest.childPageId;
+                }
+
+            } finally {
+                page.releaseReadLatch();
+                bufferCache.unpin(page);
+            }
+        }
+
+        if (results.isEmpty()) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest clusters found");
+        }
+
+        PriorityQueue<FrontierNode> frontier = new PriorityQueue<>(Comparator.comparingDouble(n -> n.bestDistance));
+
+        for (InteriorNodeInfo node : pathNodes) {
+            List<ChildCentroid> children = node.sortedChildren;
+            for (int i = 1; i < children.size(); i++) {
+                expandChildForFrontier(bufferCache, fileId, queryVector, interiorFrameFactory, leafFrameFactory,
+                        distanceFunction, children.get(i), threshold, epsilon, frontier, results, visitedLeafPages);
+            }
+        }
+
+        while (!frontier.isEmpty() && frontier.peek().bestDistance <= threshold) {
+            FrontierNode node = frontier.poll();
+            for (ChildCentroid child : node.sortedChildren) {
+                if (child.distance > threshold) {
+                    break;
+                }
+                expandChildForFrontier(bufferCache, fileId, queryVector, interiorFrameFactory, leafFrameFactory,
+                        distanceFunction, child, threshold, epsilon, frontier, results, visitedLeafPages);
+            }
+        }
+
+        ClusterSearchResult bestResult = results.get(0);
+        //        Map<String, Object> finishFields = new HashMap<>();
+        //        finishFields.put("leafPageId", bestResult.leafPageId);
+        //        finishFields.put("centroidId", bestResult.centroidId);
+        //        finishFields.put("bestDistance", bestResult.distance);
+        //        finishFields.put("vectorDim", queryVector.length);
+        //        finishFields.put("queryVector", queryVector);
+        //        finishFields.put("epsilon", epsilon);
+        //        finishFields.put("resultsCount", results.size());
+        //        logTraversalEvent("traversal_finish", finishFields);
+
+        return results;
+    }
+
+    /**
+     * Find close centroids using level-by-level cross-pollination.
+     * At each interior node, finds closest sibling and explores all siblings within closestDistance + epsilon.
+     * At each leaf node, finds closest centroid and collects all centroids within closestDistance + epsilon.
+     * 
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
+     * @param rootPageId Root page ID to start traversal
+     * @param interiorFrameFactory Factory for creating interior frames
+     * @param leafFrameFactory Factory for creating leaf frames
+     * @param queryVector Query vector to find closest centroids for
+     * @param distanceFunction Distance function to use for centroid finding
+     * @param epsilon Absolute distance threshold added to closest sibling/centroid at each level
+     * @return List of ClusterSearchResult containing all qualifying centroids
+     * @throws HyracksDataException if any error occurs during traversal
+     */
+    public static List<ClusterSearchResult> findCloseCentroidsLevelWise(IBufferCache bufferCache, int fileId,
+            int rootPageId, ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+            double[] queryVector, IVectorDistanceFunction distanceFunction, double epsilon)
+            throws HyracksDataException {
+
+        //        Map<String, Object> startFields = new HashMap<>();
+        //        startFields.put("treeFileId", fileId);
+        //        startFields.put("rootPageId", rootPageId);
+        //        startFields.put("vectorDim", queryVector.length);
+        //        startFields.put("queryVector", queryVector);
+        //        startFields.put("epsilon", epsilon);
+        //        startFields.put("strategy", "levelwise");
+        //        logTraversalEvent("traversal_start", startFields);
+
+        List<ClusterSearchResult> results = new ArrayList<>();
+        Set<Integer> visitedLeafPages = new HashSet<>();
+        Queue<LevelNode> queue = new ArrayDeque<>();
+        queue.add(new LevelNode(rootPageId, 0));
+
+        int levelsProcessed = 0;
+
+        while (!queue.isEmpty()) {
+            int currentLevel = queue.peek().level;
+            List<LevelNode> currentLevelNodes = new ArrayList<>();
+
+            // Collect all nodes at current level
+            while (!queue.isEmpty() && queue.peek().level == currentLevel) {
+                currentLevelNodes.add(queue.poll());
+            }
+
+            levelsProcessed = currentLevel;
+
+            // Process all nodes at current level
+            for (LevelNode node : currentLevelNodes) {
+                ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, node.pageId));
+                try {
+                    page.acquireReadLatch();
+
+                    IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                    leafFrame.setPage(page);
+                    boolean isLeaf = leafFrame.isLeaf();
+
+                    //                    Map<String, Object> pageVisitFields = new HashMap<>();
+                    //                    pageVisitFields.put("pageId", node.pageId);
+                    //                    pageVisitFields.put("isLeaf", isLeaf);
+                    //                    pageVisitFields.put("level", currentLevel);
+                    //                    logTraversalEvent("page_visit", pageVisitFields);
+
+                    if (isLeaf) {
+                        // Leaf node processing
+                        if (!visitedLeafPages.add(node.pageId)) {
+                            continue; // Already visited
+                        }
+
+                        //                        Map<String, Object> leafEnterFields = new HashMap<>();
+                        //                        leafEnterFields.put("pageId", node.pageId);
+                        //                        leafEnterFields.put("fileId", fileId);
+                        //                        leafEnterFields.put("level", currentLevel);
+                        //                        logTraversalEvent("leaf_page_enter", leafEnterFields);
+
+                        //                        Map<String, Object> searchStartFields = new HashMap<>();
+                        //                        searchStartFields.put("startPageId", node.pageId);
+                        //                        searchStartFields.put("vectorDim", queryVector.length);
+                        //                        searchStartFields.put("queryVector", queryVector);
+                        //                        searchStartFields.put("level", currentLevel);
+                        //                        logTraversalEvent("leaf_search_start", searchStartFields);
+
+                        LeafCollectionStats stats = collectLeafCentroids(bufferCache, fileId, queryVector, node.pageId,
+                                leafFrame, leafFrameFactory, distanceFunction);
+
+                        if (stats.centroids.isEmpty()) {
+                            continue;
+                        }
+
+                        double closestDistance = stats.centroids.get(0).distance;
+                        double localThreshold = closestDistance + epsilon;
+                        int resultsAdded = 0;
+
+                        for (LeafCentroid centroid : stats.centroids) {
+                            if (centroid.distance <= localThreshold) {
+                                results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
+                                        centroid.centroid, centroid.distance, centroid.centroidId));
+                                resultsAdded++;
+                            } else {
+                                break; // Centroids are sorted, no more qualify
+                            }
+                        }
+
+                        //                        Map<String, Object> searchSelectFields = new HashMap<>();
+                        //                        LeafCentroid bestLeaf = stats.centroids.get(0);
+                        //                        searchSelectFields.put("bestPageId", bestLeaf.pageId);
+                        //                        searchSelectFields.put("selectedTupleIndex", bestLeaf.tupleIndex);
+                        //                        searchSelectFields.put("centroidId", bestLeaf.centroidId);
+                        //                        searchSelectFields.put("bestDistance", bestLeaf.distance);
+                        //                        searchSelectFields.put("candidatesProcessed", stats.candidatesProcessed);
+                        //                        searchSelectFields.put("pagesProcessed", stats.pagesProcessed);
+                        //                        searchSelectFields.put("resultsAdded", resultsAdded);
+                        //                        searchSelectFields.put("epsilon", epsilon);
+                        //                        searchSelectFields.put("localThreshold", localThreshold);
+                        //                        searchSelectFields.put("level", currentLevel);
+                        //                        logTraversalEvent("leaf_search_select", searchSelectFields);
+
+                    } else {
+                        // Interior node processing
+                        //                        Map<String, Object> interiorEnterFields = new HashMap<>();
+                        //                        interiorEnterFields.put("pageId", node.pageId);
+                        //                        interiorEnterFields.put("fileId", fileId);
+                        //                        interiorEnterFields.put("level", currentLevel);
+                        //                        logTraversalEvent("interior_page_enter", interiorEnterFields);
+
+                        //                        Map<String, Object> searchStartFields = new HashMap<>();
+                        //                        searchStartFields.put("startPageId", node.pageId);
+                        //                        searchStartFields.put("vectorDim", queryVector.length);
+                        //                        searchStartFields.put("queryVector", queryVector);
+                        //                        searchStartFields.put("level", currentLevel);
+                        //                        logTraversalEvent("interior_search_start", searchStartFields);
+
+                        IVectorClusteringInteriorFrame interiorFrame =
+                                (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                        interiorFrame.setPage(page);
+
+                        List<ChildCentroid> sortedChildren = collectChildrenForFrontier(bufferCache, fileId,
+                                queryVector, node.pageId, interiorFrame, interiorFrameFactory, distanceFunction);
+
+                        if (sortedChildren.isEmpty()) {
+                            continue;
+                        }
+
+                        double closestDistance = sortedChildren.get(0).distance;
+                        double localThreshold = closestDistance + epsilon;
+                        int childrenEnqueued = 0;
+
+                        //                        Map<String, Object> searchSelectFields = new HashMap<>();
+                        //                        searchSelectFields.put("pageId", node.pageId);
+                        //                        searchSelectFields.put("closestDistance", closestDistance);
+                        //                        searchSelectFields.put("localThreshold", localThreshold);
+                        //                        searchSelectFields.put("candidatesProcessed", sortedChildren.size());
+                        //                        searchSelectFields.put("epsilon", epsilon);
+                        //                        searchSelectFields.put("level", currentLevel);
+                        //                        logTraversalEvent("interior_search_select", searchSelectFields);
+
+                        for (ChildCentroid child : sortedChildren) {
+                            if (child.distance <= localThreshold) {
+                                queue.add(new LevelNode(child.childPageId, currentLevel + 1));
+                                childrenEnqueued++;
+
+                                //                                Map<String, Object> candidateFields = new HashMap<>();
+                                //                                candidateFields.put("pageId", node.pageId);
+                                //                                candidateFields.put("tupleIndex", child.tupleIndex);
+                                //                                candidateFields.put("centroidDim", queryVector.length);
+                                //                                candidateFields.put("distance", child.distance);
+                                //                                candidateFields.put("childPageId", child.childPageId);
+                                //                                candidateFields.put("enqueued", true);
+                                //                                candidateFields.put("level", currentLevel);
+                                //                                logTraversalEvent("interior_candidate", candidateFields);
+                            } else {
+                                break; // Children are sorted, no more qualify
+                            }
+                        }
+
+                        //                        Map<String, Object> descendFields = new HashMap<>();
+                        //                        descendFields.put("pageId", node.pageId);
+                        //                        descendFields.put("childrenEnqueued", childrenEnqueued);
+                        //                        descendFields.put("level", currentLevel);
+                        //                        logTraversalEvent("interior_descend", descendFields);
+                    }
+
+                } finally {
+                    page.releaseReadLatch();
+                    bufferCache.unpin(page);
+                }
+            }
+        }
+
+        if (results.isEmpty()) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest clusters found");
+        }
+
+        //        Map<String, Object> finishFields = new HashMap<>();
+        //        ClusterSearchResult bestResult = results.get(0);
+        //        finishFields.put("leafPageId", bestResult.leafPageId);
+        //        finishFields.put("centroidId", bestResult.centroidId);
+        //        finishFields.put("bestDistance", bestResult.distance);
+        //        finishFields.put("vectorDim", queryVector.length);
+        //        finishFields.put("queryVector", queryVector);
+        //        finishFields.put("epsilon", epsilon);
+        //        finishFields.put("resultsCount", results.size());
+        //        finishFields.put("levelsProcessed", levelsProcessed);
+        //        finishFields.put("strategy", "levelwise");
+        //        logTraversalEvent("traversal_finish", finishFields);
+
+        return results;
+    }
+
+    private static List<ChildCentroid> collectChildrenForFrontier(IBufferCache bufferCache, int fileId,
+            double[] queryVector, int startPageId, IVectorClusteringInteriorFrame initialFrame,
+            ITreeIndexFrameFactory interiorFrameFactory, IVectorDistanceFunction distanceFunction)
+            throws HyracksDataException {
+
+        List<ChildCentroid> children = new ArrayList<>();
+        int currentPageId = startPageId;
+        IVectorClusteringInteriorFrame currentFrame = initialFrame;
+        boolean isFirstPage = true;
+        ICachedPage currentPage = null;
+
+        while (currentPageId != -1) {
+            try {
+                if (!isFirstPage) {
+                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    currentPage.acquireReadLatch();
+                    currentFrame = (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                    currentFrame.setPage(currentPage);
+                }
+
+                int tupleCount = currentFrame.getTupleCount();
+                boolean hasOverflow = currentFrame.getOverflowFlagBit();
+                int nextPageId = hasOverflow ? currentFrame.getNextPage() : -1;
+
+                //                Map<String, Object> pageFields = new HashMap<>();
+                //                pageFields.put("pageId", currentPageId);
+                //                pageFields.put("tupleCount", tupleCount);
+                //                pageFields.put("hasOverflow", hasOverflow);
+                //                pageFields.put("nextPageId", nextPageId);
+                //                pageFields.put("isFirstPage", isFirstPage);
+                //                logTraversalEvent("interior_page_search", pageFields);
+
+                for (int i = 0; i < tupleCount; i++) {
+                    try {
+                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
+                        frameTuple.resetByTupleIndex(currentFrame, i);
+                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+
+                        if (centroid.length != queryVector.length) {
+                            continue;
+                        }
+
+                        double distance = distanceFunction.apply(queryVector, centroid);
+                        int childPageId = currentFrame.getChildPageId(i);
+
+                        //                        Map<String, Object> candidateFields = new HashMap<>();
+                        //                        candidateFields.put("pageId", currentPageId);
+                        //                        candidateFields.put("tupleIndex", i);
+                        //                        candidateFields.put("centroidDim", centroid.length);
+                        //                        candidateFields.put("distance", distance);
+                        //                        candidateFields.put("childPageId", childPageId);
+                        //                        logTraversalEvent("interior_candidate", candidateFields);
+
+                        children.add(new ChildCentroid(childPageId, distance, i));
+                    } catch (Exception e) {
+                        System.err.println(
+                                "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
+                    }
+                }
+
+                currentPageId = nextPageId;
+                isFirstPage = false;
+
+            } finally {
+                if (!isFirstPage && currentPage != null) {
+                    currentPage.releaseReadLatch();
+                    bufferCache.unpin(currentPage);
+                    currentPage = null;
+                }
+            }
+        }
+
+        children.sort(Comparator.comparingDouble(c -> c.distance));
+        return children;
+    }
+
+    private static void appendLeafResults(List<ClusterSearchResult> results, LeafCollectionStats stats,
+            double threshold, double epsilon) {
+        if (stats == null || stats.centroids.isEmpty()) {
+            return;
+        }
+
+        LeafCentroid bestLeaf = stats.centroids.get(0);
+        int added = 0;
+        for (LeafCentroid centroid : stats.centroids) {
+            if (centroid.distance <= threshold) {
+                results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex, centroid.centroid,
+                        centroid.distance, centroid.centroidId));
+                added++;
+            } else {
+                break;
+            }
+        }
+
+        //        Map<String, Object> searchSelectFields = new HashMap<>();
+        //        searchSelectFields.put("bestPageId", bestLeaf.pageId);
+        //        searchSelectFields.put("selectedTupleIndex", bestLeaf.tupleIndex);
+        //        searchSelectFields.put("centroidId", bestLeaf.centroidId);
+        //        searchSelectFields.put("bestDistance", bestLeaf.distance);
+        //        searchSelectFields.put("candidatesProcessed", stats.candidatesProcessed);
+        //        searchSelectFields.put("pagesProcessed", stats.pagesProcessed);
+        //        searchSelectFields.put("resultsAdded", added);
+        //        searchSelectFields.put("epsilon", epsilon);
+        //        searchSelectFields.put("threshold", threshold);
+        //        logTraversalEvent("leaf_search_select", searchSelectFields);
+    }
+
+    private static void expandChildForFrontier(IBufferCache bufferCache, int fileId, double[] queryVector,
+            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+            IVectorDistanceFunction distanceFunction, ChildCentroid child, double threshold, double epsilon,
+            PriorityQueue<FrontierNode> frontier, List<ClusterSearchResult> results, Set<Integer> visitedLeafPages)
+            throws HyracksDataException {
+
+        if (child.distance > threshold) {
+            return;
+        }
+
+        ICachedPage childPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, child.childPageId));
+        try {
+            childPage.acquireReadLatch();
+
+            IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+            leafFrame.setPage(childPage);
+            boolean isLeaf = leafFrame.isLeaf();
+
+            //            Map<String, Object> pageVisitFields = new HashMap<>();
+            //            pageVisitFields.put("pageId", child.childPageId);
+            //            pageVisitFields.put("isLeaf", isLeaf);
+            //            logTraversalEvent("page_visit", pageVisitFields);
+
+            if (isLeaf) {
+                if (visitedLeafPages.add(child.childPageId)) {
+                    //                    Map<String, Object> leafEnterFields = new HashMap<>();
+                    //                    leafEnterFields.put("pageId", child.childPageId);
+                    //                    leafEnterFields.put("fileId", fileId);
+                    //                    logTraversalEvent("leaf_page_enter", leafEnterFields);
+
+                    //                    Map<String, Object> searchStartFields = new HashMap<>();
+                    //                    searchStartFields.put("startPageId", child.childPageId);
+                    //                    searchStartFields.put("vectorDim", queryVector.length);
+                    //                    searchStartFields.put("queryVector", queryVector);
+                    //                    logTraversalEvent("leaf_search_start", searchStartFields);
+
+                    LeafCollectionStats stats = collectLeafCentroids(bufferCache, fileId, queryVector,
+                            child.childPageId, leafFrame, leafFrameFactory, distanceFunction);
+                    appendLeafResults(results, stats, threshold, epsilon);
+                }
+            } else {
+                //                Map<String, Object> interiorEnterFields = new HashMap<>();
+                //                interiorEnterFields.put("pageId", child.childPageId);
+                //                interiorEnterFields.put("fileId", fileId);
+                //                logTraversalEvent("interior_page_enter", interiorEnterFields);
+
+                IVectorClusteringInteriorFrame interiorFrame =
+                        (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                interiorFrame.setPage(childPage);
+
+                List<ChildCentroid> sortedChildren = collectChildrenForFrontier(bufferCache, fileId, queryVector,
+                        child.childPageId, interiorFrame, interiorFrameFactory, distanceFunction);
+
+                if (!sortedChildren.isEmpty()) {
+                    FrontierNode node = new FrontierNode(sortedChildren);
+                    if (node.bestDistance <= threshold) {
+                        frontier.add(node);
+                    }
+                }
+            }
+
+        } finally {
+            childPage.releaseReadLatch();
+            bufferCache.unpin(childPage);
+        }
     }
 
     /**
@@ -276,11 +937,11 @@ public class VCTreeNavigationUtils {
         int candidatesProcessed = 0;
         int pagesProcessed = 0;
 
-        //        Map<String, Object> searchStartFields = new HashMap<>();
-        //        searchStartFields.put("startPageId", startPageId);
-        //        searchStartFields.put("vectorDim", queryVector.length);
-        //        searchStartFields.put("queryVector", queryVector);
-        //        logTraversalEvent("leaf_search_start", searchStartFields);
+        //                Map<String, Object> searchStartFields = new HashMap<>();
+        //                searchStartFields.put("startPageId", startPageId);
+        //                searchStartFields.put("vectorDim", queryVector.length);
+        //                searchStartFields.put("queryVector", queryVector);
+        //                logTraversalEvent("leaf_search_start", searchStartFields);
 
         // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
         int currentPageId = startPageId;
@@ -303,14 +964,14 @@ public class VCTreeNavigationUtils {
                 boolean hasOverflow = currentFrame.getOverflowFlagBit();
                 int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
                 pagesProcessed++;
-
-                //                Map<String, Object> pageFields = new HashMap<>();
-                //                pageFields.put("pageId", currentPageId);
-                //                pageFields.put("tupleCount", tupleCount);
-                //                pageFields.put("hasOverflow", hasOverflow);
-                //                pageFields.put("nextPageId", nextPageId);
-                //                pageFields.put("isFirstPage", isFirstPage);
-                //                logTraversalEvent("leaf_page_search", pageFields);
+                //
+                //                                Map<String, Object> pageFields = new HashMap<>();
+                //                                pageFields.put("pageId", currentPageId);
+                //                                pageFields.put("tupleCount", tupleCount);
+                //                                pageFields.put("hasOverflow", hasOverflow);
+                //                                pageFields.put("nextPageId", nextPageId);
+                //                                pageFields.put("isFirstPage", isFirstPage);
+                //                                logTraversalEvent("leaf_page_search", pageFields);
 
                 // Search all centroids in this page
                 for (int i = 0; i < tupleCount; i++) {
@@ -328,13 +989,13 @@ public class VCTreeNavigationUtils {
                         double distance = distanceFunction.apply(queryVector, centroid);
                         candidatesProcessed++;
 
-                        //                        Map<String, Object> candidateFields = new HashMap<>();
-                        //                        candidateFields.put("pageId", currentPageId);
-                        //                        candidateFields.put("tupleIndex", i);
-                        //                        candidateFields.put("centroidId", centroidID);
-                        //                        candidateFields.put("centroidDim", centroid.length);
-                        //                        candidateFields.put("distance", distance);
-                        //                        logTraversalEvent("leaf_candidate", candidateFields);
+                        //                                                Map<String, Object> candidateFields = new HashMap<>();
+                        //                                                candidateFields.put("pageId", currentPageId);
+                        //                                                candidateFields.put("tupleIndex", i);
+                        //                                                candidateFields.put("centroidId", centroidID);
+                        //                                                candidateFields.put("centroidDim", centroid.length);
+                        //                                                candidateFields.put("distance", distance);
+                        //                                                logTraversalEvent("leaf_candidate", candidateFields);
 
                         if (distance < bestDistance) {
                             bestDistance = distance;
@@ -365,19 +1026,102 @@ public class VCTreeNavigationUtils {
         }
 
         if (bestTupleIndex >= 0) {
-            //            Map<String, Object> searchSelectFields = new HashMap<>();
-            //            searchSelectFields.put("bestPageId", bestPageId);
-            //            searchSelectFields.put("selectedTupleIndex", bestTupleIndex);
-            //            searchSelectFields.put("centroidId", bestCentroidId);
-            //            searchSelectFields.put("bestDistance", bestDistance);
-            //            searchSelectFields.put("candidatesProcessed", candidatesProcessed);
-            //            searchSelectFields.put("pagesProcessed", pagesProcessed);
-            //            logTraversalEvent("leaf_search_select", searchSelectFields);
+            //                        Map<String, Object> searchSelectFields = new HashMap<>();
+            //                        searchSelectFields.put("bestPageId", bestPageId);
+            //                        searchSelectFields.put("selectedTupleIndex", bestTupleIndex);
+            //                        searchSelectFields.put("centroidId", bestCentroidId);
+            //                        searchSelectFields.put("bestDistance", bestDistance);
+            //                        searchSelectFields.put("candidatesProcessed", candidatesProcessed);
+            //                        searchSelectFields.put("pagesProcessed", pagesProcessed);
+            //                        logTraversalEvent("leaf_search_select", searchSelectFields);
 
             return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId);
         }
         // TODO : SOME RETURN EMPTY
         return null;
+    }
+
+    /**
+     * Collects all centroids in the leaf page chain, logging pages and candidates.
+     */
+    private static LeafCollectionStats collectLeafCentroids(IBufferCache bufferCache, int fileId, double[] queryVector,
+            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory,
+            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
+
+        List<LeafCentroid> centroids = new ArrayList<>();
+        int currentPageId = startPageId;
+        IVectorClusteringLeafFrame currentFrame = initialLeafFrame;
+        boolean isFirstPage = true;
+        ICachedPage currentPage = null;
+        int candidatesProcessed = 0;
+        int pagesProcessed = 0;
+
+        while (currentPageId != -1) {
+            try {
+                if (!isFirstPage) {
+                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    currentPage.acquireReadLatch();
+                    currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                    currentFrame.setPage(currentPage);
+                }
+
+                int tupleCount = currentFrame.getTupleCount();
+                boolean hasOverflow = currentFrame.getOverflowFlagBit();
+                int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
+                pagesProcessed++;
+
+                //                Map<String, Object> pageFields = new HashMap<>();
+                //                pageFields.put("pageId", currentPageId);
+                //                pageFields.put("tupleCount", tupleCount);
+                //                pageFields.put("hasOverflow", hasOverflow);
+                //                pageFields.put("nextPageId", nextPageId);
+                //                pageFields.put("isFirstPage", isFirstPage);
+                //                logTraversalEvent("leaf_page_search", pageFields);
+
+                for (int i = 0; i < tupleCount; i++) {
+                    try {
+                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
+                        frameTuple.resetByTupleIndex(currentFrame, i);
+                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+                        int centroidId = currentFrame.getCentroidId(i);
+
+                        if (centroid.length != queryVector.length) {
+                            continue;
+                        }
+
+                        double distance = distanceFunction.apply(queryVector, centroid);
+                        candidatesProcessed++;
+
+                        //                        Map<String, Object> candidateFields = new HashMap<>();
+                        //                        candidateFields.put("pageId", currentPageId);
+                        //                        candidateFields.put("tupleIndex", i);
+                        //                        candidateFields.put("centroidId", centroidId);
+                        //                        candidateFields.put("centroidDim", centroid.length);
+                        //                        candidateFields.put("distance", distance);
+                        //                        logTraversalEvent("leaf_candidate", candidateFields);
+
+                        centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid.clone()));
+                    } catch (Exception e) {
+                        System.err.println(
+                                "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
+                        continue;
+                    }
+                }
+
+                currentPageId = nextPageId;
+                isFirstPage = false;
+
+            } finally {
+                if (!isFirstPage && currentPage != null) {
+                    currentPage.releaseReadLatch();
+                    bufferCache.unpin(currentPage);
+                    currentPage = null;
+                }
+            }
+        }
+
+        centroids.sort(Comparator.comparingDouble(c -> c.distance));
+        return new LeafCollectionStats(centroids, candidatesProcessed, pagesProcessed);
     }
 
     /**
@@ -404,11 +1148,11 @@ public class VCTreeNavigationUtils {
         int candidatesProcessed = 0;
         int pagesProcessed = 0;
 
-        //        Map<String, Object> searchStartFields = new HashMap<>();
-        //        searchStartFields.put("startPageId", startPageId);
-        //        searchStartFields.put("vectorDim", queryVector.length);
-        //        searchStartFields.put("queryVector", queryVector);
-        //        logTraversalEvent("interior_search_start", searchStartFields);
+        //                Map<String, Object> searchStartFields = new HashMap<>();
+        //                searchStartFields.put("startPageId", startPageId);
+        //                searchStartFields.put("vectorDim", queryVector.length);
+        //                searchStartFields.put("queryVector", queryVector);
+        //                logTraversalEvent("interior_search_start", searchStartFields);
 
         // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
         int currentPageId = startPageId;
@@ -432,13 +1176,13 @@ public class VCTreeNavigationUtils {
                 int nextPageId = hasOverflow ? currentFrame.getNextPage() : -1;
                 pagesProcessed++;
 
-                //                Map<String, Object> pageFields = new HashMap<>();
-                //                pageFields.put("pageId", currentPageId);
-                //                pageFields.put("tupleCount", tupleCount);
-                //                pageFields.put("hasOverflow", hasOverflow);
-                //                pageFields.put("nextPageId", nextPageId);
-                //                pageFields.put("isFirstPage", isFirstPage);
-                //                logTraversalEvent("interior_page_search", pageFields);
+                //                                Map<String, Object> pageFields = new HashMap<>();
+                //                                pageFields.put("pageId", currentPageId);
+                //                                pageFields.put("tupleCount", tupleCount);
+                //                                pageFields.put("hasOverflow", hasOverflow);
+                //                                pageFields.put("nextPageId", nextPageId);
+                //                                pageFields.put("isFirstPage", isFirstPage);
+                //                                logTraversalEvent("interior_page_search", pageFields);
 
                 // Search all centroids in this page
                 for (int i = 0; i < tupleCount; i++) {
@@ -456,13 +1200,13 @@ public class VCTreeNavigationUtils {
                         int childPageId = currentFrame.getChildPageId(i);
                         candidatesProcessed++;
 
-                        //                        Map<String, Object> candidateFields = new HashMap<>();
-                        //                        candidateFields.put("pageId", currentPageId);
-                        //                        candidateFields.put("tupleIndex", i);
-                        //                        candidateFields.put("centroidDim", centroid.length);
-                        //                        candidateFields.put("distance", distance);
-                        //                        candidateFields.put("childPageId", childPageId);
-                        //                        logTraversalEvent("interior_candidate", candidateFields);
+                        //                                                Map<String, Object> candidateFields = new HashMap<>();
+                        //                                                candidateFields.put("pageId", currentPageId);
+                        //                                                candidateFields.put("tupleIndex", i);
+                        //                                                candidateFields.put("centroidDim", centroid.length);
+                        //                                                candidateFields.put("distance", distance);
+                        //                                                candidateFields.put("childPageId", childPageId);
+                        //                                                logTraversalEvent("interior_candidate", candidateFields);
 
                         if (distance < bestDistance) {
                             bestDistance = distance;
@@ -489,12 +1233,12 @@ public class VCTreeNavigationUtils {
             }
         }
 
-        //        Map<String, Object> searchSelectFields = new HashMap<>();
-        //        searchSelectFields.put("selectedChildPageId", bestChildPageId);
-        //        searchSelectFields.put("bestDistance", bestDistance);
-        //        searchSelectFields.put("candidatesProcessed", candidatesProcessed);
-        //        searchSelectFields.put("pagesProcessed", pagesProcessed);
-        //        logTraversalEvent("interior_search_select", searchSelectFields);
+        //                Map<String, Object> searchSelectFields = new HashMap<>();
+        //                searchSelectFields.put("selectedChildPageId", bestChildPageId);
+        //                searchSelectFields.put("bestDistance", bestDistance);
+        //                searchSelectFields.put("candidatesProcessed", candidatesProcessed);
+        //                searchSelectFields.put("pagesProcessed", pagesProcessed);
+        //                logTraversalEvent("interior_search_select", searchSelectFields);
 
         return bestChildPageId;
     }
@@ -565,9 +1309,8 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            LOGGER.info(
-                                    "tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
-                                            + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
+                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
+                                    + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
                             processedTuples++;
                         } catch (Exception e) {
                             System.err.println("ERROR processing leaf tuple " + i + " on page " + currentPageId + ": "
@@ -604,8 +1347,8 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr
-                                    + " | dist=" + distStr + " | child=" + childPageId);
+                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr + " | dist="
+                                    + distStr + " | child=" + childPageId);
                             processedTuples++;
 
                             if (childPageId != -1 && visited.add(childPageId)) {
@@ -700,6 +1443,46 @@ public class VCTreeNavigationUtils {
             this.tupleIndex = tupleIndex;
             this.pageId = pageId;
             this.centroid = centroid;
+        }
+    }
+
+    private static class LeafCollectionStats {
+        public final List<LeafCentroid> centroids;
+        public final int candidatesProcessed;
+        public final int pagesProcessed;
+
+        private LeafCollectionStats(List<LeafCentroid> centroids, int candidatesProcessed, int pagesProcessed) {
+            this.centroids = centroids;
+            this.candidatesProcessed = candidatesProcessed;
+            this.pagesProcessed = pagesProcessed;
+        }
+    }
+
+    private static class InteriorNodeInfo {
+        public final List<ChildCentroid> sortedChildren;
+
+        private InteriorNodeInfo(List<ChildCentroid> sortedChildren) {
+            this.sortedChildren = sortedChildren;
+        }
+    }
+
+    private static class FrontierNode {
+        public final List<ChildCentroid> sortedChildren;
+        public final double bestDistance;
+
+        private FrontierNode(List<ChildCentroid> sortedChildren) {
+            this.sortedChildren = sortedChildren;
+            this.bestDistance = sortedChildren.isEmpty() ? Double.MAX_VALUE : sortedChildren.get(0).distance;
+        }
+    }
+
+    private static class LevelNode {
+        public final int pageId;
+        public final int level;
+
+        private LevelNode(int pageId, int level) {
+            this.pageId = pageId;
+            this.level = level;
         }
     }
 
@@ -829,6 +1612,9 @@ public class VCTreeNavigationUtils {
 
                     // Return first centroid as closest cluster
                     LeafCentroid first = leafFrame_nav.nextCentroid();
+                    LOGGER.info("is leaf " + first.pageId + " " + first.tupleIndex + " " + first.centroid + " "
+                            + first.distance + " " + first.centroidId + " next="
+                            + formatNextSortedEntries(leafFrame_nav, 5));
                     return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid, first.distance,
                             first.centroidId);
 
@@ -853,6 +1639,8 @@ public class VCTreeNavigationUtils {
                     // Descend to closest child
                     ChildCentroid closest = interiorFrame_nav.nextChild();
                     currentPageId = closest.childPageId;
+                    LOGGER.info("is interior " + closest.childPageId + " " + closest.distance + " next="
+                            + formatNextSortedEntries(interiorFrame_nav, 5));
                 }
 
             } finally {
@@ -860,6 +1648,48 @@ public class VCTreeNavigationUtils {
                 state.bufferCache.unpin(page);
             }
         }
+    }
+
+    /**
+     * Format the next few sorted entries from the current navigation frame without
+     * advancing the iterator. Used purely for logging the closest upcoming candidates.
+     */
+    private static String formatNextSortedEntries(NavigationFrame frame, int maxEntries) {
+        if (frame == null || maxEntries <= 0) {
+            return "[]";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        boolean first = true;
+        int start = frame.nextIndex;
+
+        if (frame.isLeaf && frame.sortedCentroids != null) {
+            List<LeafCentroid> centroids = frame.sortedCentroids;
+            int limit = Math.min(centroids.size(), start + maxEntries);
+            for (int i = start; i < limit; i++) {
+                if (!first) {
+                    sb.append(", ");
+                }
+                LeafCentroid centroid = centroids.get(i);
+                sb.append(String.format("(cid=%d, dist=%.4f)", centroid.centroidId, centroid.distance));
+                first = false;
+            }
+        } else if (!frame.isLeaf && frame.sortedChildren != null) {
+            List<ChildCentroid> children = frame.sortedChildren;
+            int limit = Math.min(children.size(), start + maxEntries);
+            for (int i = start; i < limit; i++) {
+                if (!first) {
+                    sb.append(", ");
+                }
+                ChildCentroid child = children.get(i);
+                sb.append(String.format("(child=%d, dist=%.4f)", child.childPageId, child.distance));
+                first = false;
+            }
+        }
+
+        sb.append("]");
+        return sb.toString();
     }
 
     /**
