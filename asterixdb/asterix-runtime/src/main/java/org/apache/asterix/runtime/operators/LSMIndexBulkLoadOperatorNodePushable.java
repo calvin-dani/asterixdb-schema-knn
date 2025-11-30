@@ -130,15 +130,15 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
             ISerializerDeserializer[] dataFrameSerdes = recDesc.getFields();
             if (dataFrameSerdes != null && dataFrameSerdes.length > 0) {
                 parameters.put("dataFrameSerdes", dataFrameSerdes);
-//                System.err.println("LSMIndexBulkLoadOperatorNodePushable: Added dataFrameSerdes to parameters (count: "
-//                        + dataFrameSerdes.length + ")");
+                //                System.err.println("LSMIndexBulkLoadOperatorNodePushable: Added dataFrameSerdes to parameters (count: "
+                //                        + dataFrameSerdes.length + ")");
             } else {
-//                System.err.println(
-//                        "LSMIndexBulkLoadOperatorNodePushable: WARNING - recDesc.getFields() returned null or empty array");
+                //                System.err.println(
+                //                        "LSMIndexBulkLoadOperatorNodePushable: WARNING - recDesc.getFields() returned null or empty array");
             }
         } else {
-//            System.err.println("LSMIndexBulkLoadOperatorNodePushable: Not adding dataFrameSerdes - usage=" + usage
-//                    + ", recDesc=" + (recDesc != null ? "not null" : "null"));
+            //            System.err.println("LSMIndexBulkLoadOperatorNodePushable: Not adding dataFrameSerdes - usage=" + usage
+            //                    + ", recDesc=" + (recDesc != null ? "not null" : "null"));
         }
 
         if (usage.equals(BulkLoadUsage.LOAD)) {

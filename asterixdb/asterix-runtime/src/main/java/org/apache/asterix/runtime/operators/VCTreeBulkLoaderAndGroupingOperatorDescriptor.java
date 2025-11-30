@@ -369,12 +369,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * @param frameSize Frame size in bytes
      */
     public void initializePartitioner(IHyracksTaskContext ctx, int memoryBudget, int frameSize) {
-//        System.err.println("=== INITIALIZING VCTreePartitioner ===");
-//        System.err.println("Memory budget: " + memoryBudget + " frames");
-//        System.err.println("Frame size: " + frameSize + " bytes");
+        //        System.err.println("=== INITIALIZING VCTreePartitioner ===");
+        //        System.err.println("Memory budget: " + memoryBudget + " frames");
+        //        System.err.println("Frame size: " + frameSize + " bytes");
 
         this.partitioner = new VCTreePartitioner(ctx, memoryBudget, frameSize);
-//        System.err.println(" VCTreePartitioner initialized successfully");
+        //        System.err.println(" VCTreePartitioner initialized successfully");
     }
 
     /**
@@ -442,9 +442,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      */
     public void closePartitioner() throws HyracksDataException {
         if (partitioner != null) {
-//            System.err.println("=== CLOSING VCTreePartitioner ===");
+            //            System.err.println("=== CLOSING VCTreePartitioner ===");
             partitioner.closeAllFiles();
-//            System.err.println("✅ VCTreePartitioner closed successfully");
+            //            System.err.println("✅ VCTreePartitioner closed successfully");
         }
     }
 
@@ -574,7 +574,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 distanceFunction = getDistanceFunction(distanceMetric);
                 // Wrap for use in Hyracks modules
                 hyracksDistanceFunction = wrapDistanceFunction(distanceFunction);
-//                System.err.println("Initialized distance function for metric: " + distanceMetric);
+                //                System.err.println("Initialized distance function for metric: " + distanceMetric);
 
                 // Open the output writer
                 if (writer != null) {
@@ -592,14 +592,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 // Initialize index helper to access static structure via LSM index system
-//                System.err.println("=== INITIALIZING INDEX-BASED STATIC STRUCTURE ACCESS ===");
+                //                System.err.println("=== INITIALIZING INDEX-BASED STATIC STRUCTURE ACCESS ===");
                 indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                 indexHelper.open();
 
                 // Get LSMVCTree instance
                 org.apache.hyracks.storage.common.IIndex indexInstance = indexHelper.getIndexInstance();
-//                System.err.println("Index instance type: "
-//                        + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
+                //                System.err.println("Index instance type: "
+                //                        + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
 
                 if (!(indexInstance instanceof ILSMIndex)) {
                     throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
@@ -612,13 +612,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             "Index is not an LSMVCTree instance, got: " + lsmIndex.getClass().getName());
                 }
                 lsmVCTree = (LSMVCTree) lsmIndex;
-//                System.err.println("LSMVCTree instance obtained successfully");
+                //                System.err.println("LSMVCTree instance obtained successfully");
 
                 // Get static structure and create accessor
                 LSMVCTreeDiskComponent staticStructure = lsmVCTree.getStaticStructure();
                 IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
                 vcTreeAccessor = (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
-//                System.err.println("✅ VectorClusteringTreeAccessor created successfully");
+                //                System.err.println("✅ VectorClusteringTreeAccessor created successfully");
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -633,7 +633,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
          */
         private void initializeOutputInfrastructure() throws HyracksDataException {
             try {
-//                System.err.println("=== INITIALIZING OUTPUT INFRASTRUCTURE ===");
+                //                System.err.println("=== INITIALIZING OUTPUT INFRASTRUCTURE ===");
 
                 // Initialize tuple building components
                 outputTupleBuilder = new ArrayTupleBuilder(outputRecDesc.getFieldCount());
@@ -643,10 +643,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 org.apache.hyracks.api.comm.VSizeFrame outputFrame = new org.apache.hyracks.api.comm.VSizeFrame(ctx);
                 outputAppender = new FrameTupleAppender(outputFrame);
 
-//                System.err.println("Output infrastructure initialized successfully");
+                //                System.err.println("Output infrastructure initialized successfully");
             } catch (Exception e) {
-//                System.err.println("ERROR: Failed to initialize output infrastructure: " + e.getMessage());
-//                e.printStackTrace();
+                //                System.err.println("ERROR: Failed to initialize output infrastructure: " + e.getMessage());
+                //                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }
@@ -686,9 +686,176 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     throw new IllegalStateException("DistanceFunction not initialized");
                 }
 
-                // Use accessor to find closest leaf centroid with distance function
                 ClusterSearchResult result =
                         vcTreeAccessor.findClosestLeafCentroid(queryVector, hyracksDistanceFunction);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
+         */
+        private List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector, double epi)
+                throws HyracksDataException {
+            try {
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
+                }
+
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
+                }
+
+                // Validate vector dimensions
+                if (queryVector.length != vectorDimension) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + vectorDimension + ")");
+                }
+
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                List<ClusterSearchResult> result =
+                        vcTreeAccessor.findCloseLeafCentroid(queryVector, hyracksDistanceFunction, epi);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
+         */
+        private List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector, double epi)
+                throws HyracksDataException {
+            try {
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
+                }
+
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
+                }
+
+                // Validate vector dimensions
+                if (queryVector.length != vectorDimension) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + vectorDimension + ")");
+                }
+
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                List<ClusterSearchResult> result =
+                        vcTreeAccessor.findCloseCentroidsFrontier(queryVector, hyracksDistanceFunction, epi);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
+         */
+        private List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector, double epi)
+                throws HyracksDataException {
+            try {
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
+                }
+
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
+                }
+
+                // Validate vector dimensions
+                if (queryVector.length != vectorDimension) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + vectorDimension + ")");
+                }
+
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                List<ClusterSearchResult> result =
+                        vcTreeAccessor.findCloseCentroidsLevelWise(queryVector, hyracksDistanceFunction, epi);
 
                 if (result == null) {
                     System.err.println("WARNING: No closest centroid found for query vector");
@@ -733,19 +900,74 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                         if (embedding != null && embedding.length > 0) {
                             // Find closest centroid using the extracted embedding
-                            ClusterSearchResult result = findClosestCentroid(embedding);
-                            if (result != null) {
-                                successfulQueries++;
+                            // Use accessor to find closest leaf centroid with distance function
+                            boolean crossPollinate = true; // Do not cross partition boundaries
+                            boolean leafPollinate = false;
+                            boolean interiorPollinate = true;
+                            if (!crossPollinate) {
+                                ClusterSearchResult result = findClosestCentroid(embedding);
+                                if (result != null) {
+                                    successfulQueries++;
 
-                                // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                ITupleReference transformedTuple = createTransformedTuple(tuple, result);
+                                    // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                    ITupleReference transformedTuple = createTransformedTuple(tuple, result);
 
-                                // Output the transformed tuple to downstream operators
-                                outputTransformedTuple(transformedTuple);
+                                    // Output the transformed tuple to downstream operators
+                                    outputTransformedTuple(transformedTuple);
+
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
+                            } else if (crossPollinate && leafPollinate) {
+                                // FUTURE: Implement cross-partition centroid search
+                                List<ClusterSearchResult> result = findCloseLeafCentroid(embedding, 0.1);
+                                if (result != null) {
+                                    successfulQueries++;
+                                    for (ClusterSearchResult res : result) {
+                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+
+                                        // Output the transformed tuple to downstream operators
+                                        outputTransformedTuple(transformedTuple);
+                                    }
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
+
+                            } else if (crossPollinate && interiorPollinate) {
+                                // FUTURE: Implement cross-partition centroid search
+                                List<ClusterSearchResult> result = findCloseCentroidsLevelWise(embedding, 0.1);
+                                if (result != null) {
+                                    successfulQueries++;
+                                    for (ClusterSearchResult res : result) {
+                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+
+                                        // Output the transformed tuple to downstream operators
+                                        outputTransformedTuple(transformedTuple);
+                                    }
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
 
                             } else {
-                                System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                // FUTURE: Implement cross-partition centroid search
+                                List<ClusterSearchResult> result = findCloseCentroidsFrontier(embedding, 0.1);
+                                if (result != null) {
+                                    successfulQueries++;
+                                    for (ClusterSearchResult res : result) {
+                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+
+                                        // Output the transformed tuple to downstream operators
+                                        outputTransformedTuple(transformedTuple);
+                                    }
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
+
                             }
+
                         } else {
                             System.err.println("Skipping tuple " + (i + 1) + " - no valid embedding extracted");
                         }
@@ -803,16 +1025,16 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         @Override
         public void close() throws HyracksDataException {
-//            System.err.println("Total tuples processed: " + totalTuplesProcessed);
-//            System.err.println("Successful extractions: " + successfulQueries);
+            //            System.err.println("Total tuples processed: " + totalTuplesProcessed);
+            //            System.err.println("Successful extractions: " + successfulQueries);
 
             try {
                 // CRITICAL: Write any remaining output data before closing
                 // This ensures the downstream sort operator receives all data
                 if (writer != null && outputAppender != null) {
-//                    System.err.println("Writing final output data to downstream sort operator...");
+                    //                    System.err.println("Writing final output data to downstream sort operator...");
                     outputAppender.write(writer, false); // false = don't clear frame, just write remaining data
-//                    System.err.println("Final output data written successfully");
+                    //                    System.err.println("Final output data written successfully");
                 }
 
                 // Finalize partitioning after all data is processed
@@ -845,12 +1067,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 // Close the writer AFTER flushing all data
                 if (writer != null) {
                     writer.close();
-//                    System.err.println("Writer closed after flushing all data");
+                    //                    System.err.println("Writer closed after flushing all data");
                 }
 
             } catch (Exception e) {
-//                System.err.println("ERROR: Failed to close VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
-//                e.printStackTrace();
+                //                System.err.println("ERROR: Failed to close VCTreeBulkLoaderAndGroupingNodePushable: " + e.getMessage());
+                //                e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
         }

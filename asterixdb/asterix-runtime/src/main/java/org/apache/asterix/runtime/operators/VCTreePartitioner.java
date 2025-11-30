@@ -481,8 +481,8 @@ public class VCTreePartitioner {
      * @throws HyracksDataException if initialization fails
      */
     public void preInitializePartitioning(int K, int memoryBudget, int frameSize) throws HyracksDataException {
-//        System.err.println("=== preInitializePartitioning called ===");
-//        System.err.println("K: " + K + ", memoryBudget: " + memoryBudget + ", frameSize: " + frameSize);
+        //        System.err.println("=== preInitializePartitioning called ===");
+        //        System.err.println("K: " + K + ", memoryBudget: " + memoryBudget + ", frameSize: " + frameSize);
 
         this.K = K;
 
@@ -492,14 +492,14 @@ public class VCTreePartitioner {
         // Calculate number of partitions using SHAPIRO formula
         long estimatedDataSize = K * 1024L; // Rough estimate for pre-calculation
         this.numPartitions = calculatePartitionsUsingShapiro(K, estimatedDataSize, frameSize, memoryBudget);
-//        System.err.println("Calculated numPartitions: " + numPartitions);
+        //        System.err.println("Calculated numPartitions: " + numPartitions);
 
         // Pre-calculate partition mapping using range partitioning
         calculatePartitionMapping();
 
         // Initialize partition buffers and files
         initializePartitionBuffers(numPartitions);
-//        System.err.println("=== preInitializePartitioning completed ===");
+        //        System.err.println("=== preInitializePartitioning completed ===");
     }
 
     /**
@@ -722,7 +722,7 @@ public class VCTreePartitioner {
 
         if (useModuloPartitioning) {
             // Modulo-based partitioning: centroidId % numPartitions
-//            System.err.println("Using modulo-based partitioning: centroidId % " + numPartitions);
+            //            System.err.println("Using modulo-based partitioning: centroidId % " + numPartitions);
             // Note: We don't pre-populate the mapping since we don't know centroid IDs in advance
             // The mapping will be calculated dynamically in writeStreamingTuple()
         } else {
