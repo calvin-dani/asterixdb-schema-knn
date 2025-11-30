@@ -902,8 +902,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             // Find closest centroid using the extracted embedding
                             // Use accessor to find closest leaf centroid with distance function
                             boolean crossPollinate = true; // Do not cross partition boundaries
-                            boolean leafPollinate = false;
-                            boolean interiorPollinate = true;
+                            boolean leafPollinate = true;
+                            boolean interiorPollinate = false;
                             if (!crossPollinate) {
                                 ClusterSearchResult result = findClosestCentroid(embedding);
                                 if (result != null) {
