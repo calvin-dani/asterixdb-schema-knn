@@ -44,6 +44,18 @@ public class VectorClusteringInteriorFrame extends VectorClusteringNSMFrame impl
         this.cmpFrameTuple = tupleWriter.createTupleReference();
     }
 
+    @Override
+    public void initBuffer(byte level) {
+        super.initBuffer(level);
+        buf.putInt(NEXT_PAGE_OFFSET, -1); // Initialize next page pointer to -1
+    }
+
+    @Override
+    public int getPageHeaderSize() {
+        // Include all header fields: base header + cluster ID + centroid ID + next page + overflow flag
+        return OVERFLOW_FLAG_OFFSET + 1;
+    }
+
     public void setOverflowFlagBit(boolean overflowFlag) {
         buf.put(OVERFLOW_FLAG_OFFSET, (byte) (overflowFlag ? 1 : 0));
     }
