@@ -1731,8 +1731,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     int currentK =
                             Math.min(K, Math.max(1, (int) Math.floor(Math.sqrt(initialResult.centroids.size()))));
                     int maxIterations = 20;
-                    int maxLevels = 5;
-                    int currentLevel = 1;
+                    int maxLevels = 2;
+                    int currentLevel = 0;
 
                     // Build subsequent levels
                     while (currentCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
