@@ -71,10 +71,13 @@ import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
 
     private RecordDescriptor recordDesc;
+    private IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     protected SecondaryVectorOperationsHelper(Dataset dataset, Index index, MetadataProvider metadataProvider,
             SourceLocation sourceLoc) throws AlgebricksException {
@@ -86,6 +89,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         super.init();
         recordDesc = dataset.getPrimaryRecordDescriptor(metadataProvider);
 
+        // Initialize vector accessor factory for extracting vectors from ADM ordered lists
+        vectorAccessorFactory = new AOrderedListVectorBinaryAccessorFactory();
+    }
+
+    /**
+     * Get the vector accessor factory for extracting vectors from tuples.
+     * This factory is passed to the Hyracks layer to handle ADM-specific vector deserialization.
+     */
+    public IVectorBinaryAccessorFactory getVectorAccessorFactory() {
+        return vectorAccessorFactory;
     }
 
     @Override

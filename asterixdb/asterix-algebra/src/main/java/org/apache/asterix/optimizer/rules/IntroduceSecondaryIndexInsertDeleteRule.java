@@ -318,6 +318,17 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                 case ARRAY:
                     // These details are handled separately for array indexes.
                     break;
+                case VECTOR:
+                    // Vector indexes are handled similarly to VALUE indexes
+                    Index.VectorIndexDetails vectorIndexDetails2 = (Index.VectorIndexDetails) index.getIndexDetails();
+                    secondaryKeyFields = vectorIndexDetails2.getKeyFieldNames();
+                    // For vector indexes, create type list with ANY type
+                    secondaryKeyTypes = new ArrayList<>();
+                    secondaryKeyTypes.add(BuiltinType.ANY);
+                    secondaryKeySources = new ArrayList<>();
+                    secondaryKeySources.add(Index.RECORD_INDICATOR);
+                    // TODO: Handle include fields
+                    break;
                 default:
                     continue;
             }
@@ -833,6 +844,25 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                     skNames = textIndexDetails.getKeyFieldNames();
                     skTypes = textIndexDetails.getKeyFieldTypes();
                     indicators = textIndexDetails.getKeyFieldSourceIndicators();
+                    break;
+                case VECTOR:
+                    Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+                    // For vector indexes, get the vector field name
+                    skNames = vectorIndexDetails.getKeyFieldNames();
+                    // For vector fields, try to get the actual type from the schema
+                    // If not available (open field), use ANY type for type inference
+                    skTypes = new ArrayList<>();
+                    List<String> vectorFieldName = skNames.get(0);
+                    IAType vectorFieldType = recType.getSubFieldType(vectorFieldName);
+                    if (vectorFieldType == null) {
+                        // Open field - use ANY type to allow runtime type inference
+                        vectorFieldType = BuiltinType.ANY;
+                    }
+                    skTypes.add(vectorFieldType);
+                    // Vector field is always from the record
+                    indicators = new ArrayList<>();
+                    indicators.add(Index.RECORD_INDICATOR);
+                    // TODO: Handle include fields (vectorIndexDetails.getIncludeFieldNames())
                     break;
                 default:
                     throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,

@@ -116,8 +116,9 @@ public class VectorClusteringTupleUtils {
 
         try {
             ISerializerDeserializer[] fieldSerdes =
-                    new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
-                            DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
+                    new ISerializerDeserializer[] {
+                            DoubleArraySerializerDeserializer.INSTANCE, // embedding as double array
+                            IntegerSerializerDeserializer.INSTANCE // centroid ID
                     };
             //            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
             //            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
@@ -135,32 +136,4 @@ public class VectorClusteringTupleUtils {
         }
     }
 
-    /**
-     * Extract vector from tuple.
-     *
-     * @param tuple The tuple to extract vector from
-     * @return Double array containing the vector, or null if extraction fails
-     */
-    private double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
-        // Centroid is the second field in interior frame tuples
-        try {
-            // Create field serializers array - specify only the centroid field we need
-            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
-            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
-            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
-
-            // Deserialize the tuple using the proper TupleUtils method
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-
-            // Extract the centroid from the deserialized fields
-            double[] doubleCentroid = (double[]) fieldValues[1];
-
-            return doubleCentroid;
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
-        }
-    }
 }

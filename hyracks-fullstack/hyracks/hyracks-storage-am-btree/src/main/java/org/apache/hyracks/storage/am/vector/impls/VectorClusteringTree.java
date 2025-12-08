@@ -30,6 +30,7 @@ import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
@@ -38,9 +39,13 @@ import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
@@ -82,27 +87,33 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private final int vectorDimensions;
     private final ITreeIndexFrameFactory metadataFrameFactory;
     private final ITreeIndexFrameFactory dataFrameFactory;
+    private final org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     // Add missing frameTuple declaration
     private ITreeIndexTupleReference frameTuple;
 
     private VectorClusteringTreeStaticInitializer staticInitializer;
 
+    // TODO: leave only one flag
     private boolean isStaticStructureInitialized = true;
+
+    private boolean initialized = false;
 
     public VectorClusteringTree(IBufferCache bufferCache, IPageManager freePageManager,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
-            IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file) {
+            IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file,
+            org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
-        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-        //                + "] VectorClusteringTree constructor: Started, super() call completed");
+//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+//                + "] VectorClusteringTree constructor: Started, super() call completed");
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
+        this.vectorAccessorFactory = vectorAccessorFactory;
         staticInitializer = null;
-        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-        //                + "] VectorClusteringTree constructor: Constructor completed");
+//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+//                + "] VectorClusteringTree constructor: Constructor completed");
     }
 
     /**
@@ -201,14 +212,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * [additional_fields]>
      */
     private void insertVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-        // Use unified cluster search and access pattern
-        if (!isStaticStructureInitialized()) {
-            staticInitializer = new VectorClusteringTreeStaticInitializer(this);
-            /* TODO: FOR TESTING ONLY */
-            staticInitializer.initializeThreeLevelStructure();
-            setStaticStructureInitialized();
-        }
-
         ClusterAccessResult accessResult = findClusterAndPrepareAccess(tuple, ctx, true);
 
         try {
@@ -218,10 +221,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // Calculate distance and cosine similarity to cluster centroid
             double[] centroidDouble = accessResult.clusterResult.centroid;
             double distance = VectorUtils.calculateEuclideanDistance(vector, centroidDouble);
-            double cosineSim = VectorUtils.calculateCosineSimilarity(vector, centroidDouble);
 
             // Insert into appropriate data page based on distance
-            insertIntoDataPages(accessResult.metadataPageId, vector, distance, cosineSim, tuple, ctx);
+            insertIntoDataPages(accessResult.metadataPageId, vector, distance, 0, tuple, ctx);
 
         } finally {
             accessResult.leafPage.releaseWriteLatch(true);
@@ -247,7 +249,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 metadataPage.acquireWriteLatch();
                 ctx.getMetadataFrame().setPage(metadataPage);
 
-                System.out.println(
+                System.err.println(
                         "DEBUG: Searching metadata page " + currentMetadataPageId + " for distance " + distance);
 
                 // Try to find appropriate data page in current metadata page based on distance
@@ -255,31 +257,32 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                 if (targetDataPageId != -1) {
                     // Found appropriate data page - try to insert
-                    System.out.println("DEBUG: Found target data page " + targetDataPageId + " in metadata page "
+                    System.err.println("DEBUG: Found target data page " + targetDataPageId + " in metadata page "
                             + currentMetadataPageId);
 
                     boolean inserted =
                             tryInsertIntoDataPage(targetDataPageId, vector, distance, cosineSim, originalTuple, ctx);
 
                     if (inserted) {
-                        System.out.println("DEBUG: Successfully inserted into data page " + targetDataPageId);
+                        System.err.println("DEBUG: Successfully inserted into data page " + targetDataPageId);
                         return; // Successfully inserted
                     }
 
                     // If insert failed due to space, we need to handle overflow
-                    System.out.println("DEBUG: Data page " + targetDataPageId + " is full, handling overflow");
+                    System.err.println("DEBUG: Data page " + targetDataPageId + " is full, handling overflow");
                     handleDataPageOverflow(currentMetadataPageId, vector, distance, cosineSim, originalTuple, ctx);
                     return;
                 }
 
                 // Check if there's a next metadata page to examine
                 int nextMetadataPageId = ctx.getMetadataFrame().getNextPage();
-                System.out.println("DEBUG: No suitable data page found in metadata page " + currentMetadataPageId
+                System.err.println("DEBUG: No suitable data page found in metadata page " + currentMetadataPageId
                         + ", next metadata page: " + nextMetadataPageId);
 
-                if (nextMetadataPageId == -1) {
+                // TODO: properly handle empty directory page
+                if (nextMetadataPageId == 0 || nextMetadataPageId == -1) {
                     // Reached end of metadata chain - need to create new data page
-                    System.out.println("DEBUG: Reached end of metadata chain, creating new data page");
+                    System.err.println("DEBUG: Reached end of metadata chain, creating new data page");
                     handleDataPageOverflow(currentMetadataPageId, vector, distance, cosineSim, originalTuple, ctx);
                     return;
                 }
@@ -343,7 +346,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             dataPage.acquireWriteLatch();
             ctx.getDataFrame().setPage(dataPage);
 
-            // Create data tuple: <distance, cosine, vector, PK>
+            // Create data tuple: <distance, vector, PK>
             ITupleReference dataTuple = ctx.getDataFrame().createDataTuple(vector, distance, cosineSim, originalTuple);
 
             // Check if there's space for the tuple
@@ -368,13 +371,13 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     // Update page LSN
                     ctx.getDataFrame().setPageLsn(ctx.getDataFrame().getPageLsn() + 1);
 
-                    System.out.println("DEBUG: Successfully inserted tuple at index " + insertIndex + " in data page "
+                    System.err.println("DEBUG: Successfully inserted tuple at index " + insertIndex + " in data page "
                             + dataPageId);
                     return true;
 
                 case INSUFFICIENT_SPACE:
                     // Handle overflow by splitting the data page
-                    System.out.println(
+                    System.err.println(
                             "DEBUG: Insufficient space in data page " + dataPageId + ", triggering data page split");
 
                     // Find correct insertion position to maintain sorted order by distance
@@ -384,11 +387,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     // Split the data page while maintaining distance-based ordering
                     splitDataPageMaintainOrder(dataPageId, dataTuple, splitInsertIndex, ctx);
 
-                    System.out.println("DEBUG: Successfully split data page " + dataPageId + " and inserted tuple");
+                    System.err.println("DEBUG: Successfully split data page " + dataPageId + " and inserted tuple");
                     return true;
 
                 default:
-                    System.out.println("DEBUG: Unexpected space status in data page " + dataPageId + ", spaceStatus="
+                    System.err.println("DEBUG: Unexpected space status in data page " + dataPageId + ", spaceStatus="
                             + spaceStatus);
                     return false; // Unexpected space status
             }
@@ -461,11 +464,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             IVectorClusteringDataFrame newDataFrame = (IVectorClusteringDataFrame) dataFrameFactory.createFrame();
             newDataFrame.setPage(newDataPage);
 
-            float maxDistance = 0.0f;
+            double maxDistance = 0.0f;
             int tupleCount = newDataFrame.getTupleCount();
 
             if (tupleCount > 0) {
-                maxDistance = (float) newDataFrame.getDistanceToCentroid(tupleCount - 1);
+                maxDistance = newDataFrame.getDistanceToCentroid(tupleCount - 1);
             }
 
             System.out.println("DEBUG: New data page " + newDataPageId + " has maxDistance=" + maxDistance
@@ -692,8 +695,20 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Extract vector from tuple.
      */
-    private double[] extractVectorFromTuple(ITupleReference tuple) {
-        return VectorClusteringTupleUtils.extractVectorFromTuple(tuple);
+    private double[] extractVectorFromTuple(ITupleReference tuple) throws HyracksDataException {
+        if (tuple == null || tuple.getFieldCount() == 0 || vectorAccessorFactory == null) {
+            return null;
+        }
+
+        // Vector is always at field 0 in the permuted tuple
+        byte[] data = tuple.getFieldData(0);
+        int offset = tuple.getFieldStart(0);
+        int length = tuple.getFieldLength(0);
+
+        // Use the vector accessor factory to extract the vector
+        IVectorBinaryAccessor accessor = vectorAccessorFactory.createAccessor();
+        accessor.reset(data, offset, length);
+        return accessor.getVector();
     }
 
     // Missing method implementations
@@ -988,7 +1003,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             dataFrame.insert(dataTuple, 0);
 
             // Update metadata page to include the new data page
-            updateMetadataWithNewDataPage(metadataPageId, newDataPageId, (float) distance, ctx);
+            updateMetadataWithNewDataPage(metadataPageId, newDataPageId, distance, ctx);
 
         } finally {
             newPage.releaseWriteLatch(true);
@@ -1002,7 +1017,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Update metadata page to include a new data page. Handles metadata page overflow by splitting when necessary.
      */
-    private void updateMetadataWithNewDataPage(long metadataPageId, int newDataPageId, float maxDistance,
+    private void updateMetadataWithNewDataPage(long metadataPageId, int newDataPageId, double maxDistance,
             VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
@@ -1013,17 +1028,19 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Create metadata tuple for new data page
             ITupleReference metadataTuple = ctx.getMetadataFrame().createMetadataTuple(maxDistance, newDataPageId);
+            ITreeIndexTupleWriter metadataFrameTupleWriter = ctx.getMetadataFrame().getTupleWriter();
+            int slotSize = ctx.getMetadataFrame().getSlotSize();
 
             // Check if there's space for the new metadata entry
-            FrameOpSpaceStatus spaceStatus = ctx.getMetadataFrame().hasSpaceInsert(metadataTuple);
+            // Check if directory page has space
+            int spaceNeeded = metadataFrameTupleWriter.bytesRequired(metadataTuple) + slotSize;
+            int spaceAvailable = ctx.getMetadataFrame().getTotalFreeSpace();
 
-            if (spaceStatus == FrameOpSpaceStatus.SUFFICIENT_CONTIGUOUS_SPACE
-                    || spaceStatus == FrameOpSpaceStatus.SUFFICIENT_SPACE) {
-                // Sufficient space - insert directly
-                ctx.getMetadataFrame().insert(metadataTuple, ctx.getMetadataFrame().getTupleCount());
-            } else {
+            if (spaceNeeded > spaceAvailable) {
                 // Insufficient space - need to split metadata page
                 handleMetadataPageOverflow(metadataPageId, metadataTuple, ctx);
+            } else {
+                ctx.getMetadataFrame().insert(metadataTuple, ctx.getMetadataFrame().getTupleCount());
             }
 
         } finally {
@@ -1165,244 +1182,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 getLeafFrameFactory(), queryVector, distanceFunction);
     }
 
-    /**
-     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
-     * interior and leaf frames.
-     */
-    public List<ClusterSearchResult> findCloseLeafClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx,
-            IVectorDistanceFunction distanceFunction, double ep) throws HyracksDataException {
-
-        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
-
-        // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findCloseLeafCentroids(bufferCache, getFileId(), rootPage,
-                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
-    }
-
-    /**
-     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
-     * interior and leaf frames.
-     */
-    public List<ClusterSearchResult> findCloseCentroidsFrontierFromRoot(double[] queryVector,
-            VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
-            throws HyracksDataException {
-
-        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
-
-        // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findCloseCentroidsFrontier(bufferCache, getFileId(), rootPage,
-                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
-    }
-
-    /**
-     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
-     * interior and leaf frames.
-     */
-    public List<ClusterSearchResult> findCloseCentroidsLevelWiseFromRoot(double[] queryVector,
-            VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
-            throws HyracksDataException {
-
-        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
-
-        // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findCloseCentroidsLevelWise(bufferCache, getFileId(), rootPage,
-                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
-    }
-
-    /**
-     * Find the closest centroid in a leaf cluster, handling overflow pages.
-     */
-    private ClusterSearchResult findClosestCentroidInLeafCluster(int startPageId, double[] queryVector,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        int currentPageId = startPageId;
-        ClusterSearchResult bestResult = null;
-        double bestDistance = Double.MAX_VALUE;
-        int bestPageId = -1;
-        int bestClusterIndex = -1;
-        int bestCentroidId = -1;
-        long bestDirectoryPageId = -1;
-        double[] bestCentroid = null;
-
-        // Traverse all pages in the leaf cluster
-        while (currentPageId != -1) {
-            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), currentPageId));
-
-            try {
-                page.acquireReadLatch();
-                ctx.getLeafFrame().setPage(page);
-
-                int tupleCount = ctx.getLeafFrame().getTupleCount();
-                LOGGER.debug("Leaf page {} has {} tuples", currentPageId, tupleCount);
-
-                // Search all centroids in this page
-                for (int i = 0; i < tupleCount; i++) {
-                    ITreeIndexTupleReference frameTuple = ctx.getLeafFrame().createTupleReference();
-                    frameTuple.resetByTupleIndex(ctx.getLeafFrame(), i);
-                    double[] centroid = extractCentroidFromLeafTuple(frameTuple);
-                    int centroidID = ctx.getLeafFrame().getCentroidId(i);
-
-                    // Check vector dimensionality before distance calculation
-                    if (centroid.length != queryVector.length) {
-                        LOGGER.debug("Skipping leaf centroid with different dimensionality: centroid={}, query={}",
-                                centroid.length, queryVector.length);
-                        continue;
-                    }
-
-                    double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-                    LOGGER.debug("Leaf page {} tuple {} centroid={}, distance={}", currentPageId, i,
-                            Arrays.toString(centroid), distance);
-
-                    if (distance < bestDistance) {
-                        bestDistance = distance;
-                        bestPageId = currentPageId;
-                        bestClusterIndex = i;
-                        bestCentroid = centroid.clone();
-                        bestCentroidId = centroidID;
-                        bestDirectoryPageId = ctx.getLeafFrame().getMetadataPagePointer(i);
-                        LOGGER.debug("New best cluster: pageId={}, index={}, distance={}", currentPageId, i, distance);
-                    }
-                }
-                // Check for overflow page
-                boolean hasOverflow = ctx.getLeafFrame().getOverflowFlagBit();
-                if (hasOverflow) {
-                    currentPageId = ctx.getLeafFrame().getNextLeaf();
-                    LOGGER.debug("Leaf page has overflow, moving to next page: {}", currentPageId);
-                } else {
-                    currentPageId = -1; // No more pages in this cluster
-                }
-
-            } finally {
-                page.releaseReadLatch();
-                bufferCache.unpin(page);
-            }
-        }
-
-        if (bestPageId != -1 && bestClusterIndex != -1) {
-            bestResult = new ClusterSearchResult(bestPageId, bestClusterIndex, bestCentroid, bestDistance,
-                    bestCentroidId, bestDirectoryPageId);
-            LOGGER.debug("Found best leaf result: pageId={}, clusterIndex={}, distance={}", bestPageId,
-                    bestClusterIndex, bestDistance);
-        }
-
-        return bestResult;
-    }
-
-    /**
-     * Find the closest centroid in an interior cluster, handling overflow pages. Returns the child page ID to descend
-     * to.
-     */
-    private int findClosestCentroidInInteriorCluster(int startPageId, double[] queryVector,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        int currentPageId = startPageId;
-        double bestDistance = Double.MAX_VALUE;
-        int bestChildPageId = -1;
-
-        // Traverse all pages in the interior cluster
-        while (currentPageId != -1) {
-            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), currentPageId));
-
-            try {
-                page.acquireReadLatch();
-                ctx.getInteriorFrame().setPage(page);
-
-                int tupleCount = ctx.getInteriorFrame().getTupleCount();
-                LOGGER.debug("Interior page {} has {} tuples", currentPageId, tupleCount);
-
-                // Search all centroids in this page
-                for (int i = 0; i < tupleCount; i++) {
-                    ITreeIndexTupleReference frameTuple = ctx.getInteriorFrame().createTupleReference();
-                    frameTuple.resetByTupleIndex(ctx.getInteriorFrame(), i);
-                    double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-
-                    // Check vector dimensionality before distance calculation
-                    if (centroid.length != queryVector.length) {
-                        LOGGER.debug("Skipping interior centroid with different dimensionality: centroid={}, query={}",
-                                centroid.length, queryVector.length);
-                        continue;
-                    }
-
-                    double distance = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-                    LOGGER.debug("Interior page {} tuple {} centroid={}, distance={}", currentPageId, i,
-                            Arrays.toString(centroid), distance);
-
-                    if (distance < bestDistance) {
-                        bestDistance = distance;
-                        bestChildPageId = ctx.getInteriorFrame().getChildPageId(i);
-                        LOGGER.debug("New best interior centroid: pageId={}, index={}, distance={}, childPageId={}",
-                                currentPageId, i, distance, bestChildPageId);
-                    }
-                }
-
-                // Check for overflow page
-                boolean hasOverflow = ctx.getInteriorFrame().getOverflowFlagBit();
-                if (hasOverflow) {
-                    currentPageId = ctx.getInteriorFrame().getNextPage();
-                    LOGGER.debug("Interior page has overflow, moving to next page: {}", currentPageId);
-                } else {
-                    currentPageId = -1; // No more pages in this cluster
-                }
-
-            } finally {
-                page.releaseReadLatch();
-                bufferCache.unpin(page);
-            }
-        }
-        return bestChildPageId;
-    }
-
-    /**
-     * Extract centroid from a leaf frame tuple (format: <cid, centroid, metadata_ptr>).
-     */
-    private double[] extractCentroidFromLeafTuple(ITreeIndexTupleReference tuple) {
-        // Centroid is the second field in leaf frame tuples
-        try {
-            // Create field serializers array - specify only the centroid field we need
-            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
-            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
-            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
-
-            // Deserialize the tuple using the proper TupleUtils method
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-
-            // Extract the centroid from the deserialized fields
-            double[] doubleCentroid = (double[]) fieldValues[1];
-
-            return doubleCentroid;
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
-        }
-    }
-
-    /**
-     * Extract centroid from an interior frame tuple (format: <cid, centroid, child_ptr>).
-     */
-    private double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
-        // Centroid is the second field in interior frame tuples
-        try {
-            // Create field serializers array - specify only the centroid field we need
-            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
-            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
-            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
-
-            // Deserialize the tuple using the proper TupleUtils method
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-
-            // Extract the centroid from the deserialized fields
-            double[] doubleCentroid = (double[]) fieldValues[1];
-
-            return doubleCentroid;
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
-        }
-    }
 
     public int getVectorDimensions() {
         return vectorDimensions;
@@ -1414,6 +1193,72 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     public void setStaticStructureInitialized() {
         isStaticStructureInitialized = true;
+    }
+
+    public boolean isInitialized() {
+        return initialized;
+    }
+
+    public void setInitialized() {
+        initialized = true;
+    }
+
+
+    public void setStaticStructure(VectorClusteringTreeAccessor staticAccessor) throws HyracksDataException {
+        VectorClusteringTree staticStructure =  staticAccessor.getIndex();
+        ITreeIndexMetadataFrame metaFrame = staticAccessor.getOpContext().getMetaFrame();
+        int maxPageId = staticStructure.getPageManager().getMaxPageId(metaFrame);
+
+        // copy all pages in static structure
+
+        for (int pageId = 1; pageId <= maxPageId; pageId++) {
+            ICachedPage sourcePage = staticAccessor.getCachedPage(pageId);
+            copyPage(sourcePage);
+            staticAccessor.releasePage(sourcePage);
+        }
+
+        MutableArrayValueReference key = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+        LongPointable value = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key, value);
+        int numLeafCentroid = value.intValue();
+        ITreeIndexFrame directoryFrame = metadataFrameFactory.createFrame();
+
+        for (int leafCentroidId = 0; leafCentroidId < numLeafCentroid; leafCentroidId++) {
+            // For metadata pages, use freePageManager.takePage() normally
+            int metadataPageId = freePageManager.takePage(metaFrame) - 1;
+
+            ICachedPage targetPage =
+                    bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), metadataPageId), NEW);
+
+            directoryFrame.setPage(targetPage);
+            directoryFrame.initBuffer((byte) 0);
+
+            bufferCache.unpin(targetPage);
+
+            LOGGER.debug("Created directory page {} for leaf centroid {}", metadataPageId, leafCentroidId);
+        }
+
+        // TODO: a very hacky way
+        ICachedPage targetPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), maxPageId + numLeafCentroid + 1), NEW);
+        bufferCache.unpin(targetPage);
+
+
+        initialized = true;
+    }
+
+    private void copyPage(ICachedPage sourcePage) throws HyracksDataException {
+        // Copy page from source to target
+        ITreeIndexMetadataFrame metaFrame = freePageManager.createMetadataFrame();
+        int targetPageId = freePageManager.takePage(metaFrame) - 1;
+        ICachedPage targetPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), targetPageId), NEW);
+        // Copy entire page content
+        System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
+                sourcePage.getBuffer().capacity());
+        bufferCache.unpin(targetPage);
+
+        LOGGER.debug("Copied page {} ", targetPage);
     }
 
     public void setRootPageId(int rootPageId) {
@@ -1565,17 +1410,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         @Override
         public IIndexCursor createSearchCursor(boolean exclusive) throws HyracksDataException {
-            return createSearchCursor(exclusive, false);
-        }
-
-        /**
-         * Create a search cursor with explicit full-scan mode control.
-         *
-         * @param exclusive Whether to create an exclusive cursor
-         * @param fullScanMode true for full-scan (merge) mode, false for query mode
-         * @return Configured search cursor
-         */
-        public IIndexCursor createSearchCursor(boolean exclusive, boolean fullScanMode) throws HyracksDataException {
             VectorClusteringSearchCursor cursor = new VectorClusteringSearchCursor();
 
             // Configure cursor with tree navigation capabilities
@@ -1584,9 +1418,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             cursor.setRootPageId(tree.rootPage);
             cursor.setFrameFactories(tree.interiorFrameFactory, tree.leafFrameFactory, tree.metadataFrameFactory,
                     tree.dataFrameFactory);
-
-            // Set full-scan mode if requested (for merge operations)
-            cursor.setFullScanMode(fullScanMode);
 
             return cursor;
         }
@@ -1705,105 +1536,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Delegate to the tree's implementation
             return tree.findClosestClusterFromRoot(queryVector, ctx, distanceFunction);
-        }
-
-        /**
-         * Find the closest leaf centroid for a given query vector.
-         * This method delegates to the tree's findClosestClusterFromRoot implementation.
-         *
-         * @param queryVector The query vector to find the closest centroid for
-         * @param distanceFunction The distance function to use for centroid finding
-         * @return ClusterSearchResult containing information about the closest leaf centroid
-         * @throws HyracksDataException if any error occurs during the search
-         */
-        public List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector,
-                IVectorDistanceFunction distanceFunction, double epi) throws HyracksDataException {
-            if (destroyed) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
-            }
-
-            if (queryVector == null) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
-            }
-
-            if (queryVector.length != tree.vectorDimensions) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
-                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
-            }
-
-            // Ensure the tree is initialized
-            if (!tree.isStaticStructureInitialized()) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
-            }
-
-            // Delegate to the tree's implementation
-            return tree.findCloseLeafClusterFromRoot(queryVector, ctx, distanceFunction, epi);
-        }
-
-        /**
-         * Find the closest leaf centroid for a given query vector.
-         * This method delegates to the tree's findClosestClusterFromRoot implementation.
-         *
-         * @param queryVector The query vector to find the closest centroid for
-         * @param distanceFunction The distance function to use for centroid finding
-         * @return ClusterSearchResult containing information about the closest leaf centroid
-         * @throws HyracksDataException if any error occurs during the search
-         */
-        public List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector,
-                IVectorDistanceFunction distanceFunction, double epi) throws HyracksDataException {
-            if (destroyed) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
-            }
-
-            if (queryVector == null) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
-            }
-
-            if (queryVector.length != tree.vectorDimensions) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
-                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
-            }
-
-            // Ensure the tree is initialized
-            if (!tree.isStaticStructureInitialized()) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
-            }
-
-            // Delegate to the tree's implementation
-            return tree.findCloseCentroidsFrontierFromRoot(queryVector, ctx, distanceFunction, epi);
-        }
-
-        /**
-         * Find the closest leaf centroid for a given query vector.
-         * This method delegates to the tree's findClosestClusterFromRoot implementation.
-         *
-         * @param queryVector The query vector to find the closest centroid for
-         * @param distanceFunction The distance function to use for centroid finding
-         * @return ClusterSearchResult containing information about the closest leaf centroid
-         * @throws HyracksDataException if any error occurs during the search
-         */
-        public List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector,
-                IVectorDistanceFunction distanceFunction, double epi) throws HyracksDataException {
-            if (destroyed) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
-            }
-
-            if (queryVector == null) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
-            }
-
-            if (queryVector.length != tree.vectorDimensions) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
-                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
-            }
-
-            // Ensure the tree is initialized
-            if (!tree.isStaticStructureInitialized()) {
-                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
-            }
-
-            // Delegate to the tree's implementation
-            return tree.findCloseCentroidsLevelWiseFromRoot(queryVector, ctx, distanceFunction, epi);
         }
 
         @Override

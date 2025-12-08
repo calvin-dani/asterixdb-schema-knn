@@ -575,7 +575,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     /**
-     * Create a data tuple with given parameters for VectorClusteringTree compatibility.
+     * Create a data tuple for VectorClusteringTree.
      * 
      * @param vector Vector array
      * @param distance Distance as double
@@ -586,44 +586,34 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
      */
     public ITupleReference createDataTuple(double[] vector, double distance, double cosineSim,
             ITupleReference originalTuple) throws HyracksDataException {
-        // Extract primary key from original tuple (assume last field)
+        // TEMPORARY FORMAT: <distance: ADOUBLE, AINTEGER, primaryKey: AINT64>
+        // Original tuple format: <vector: AORDEREDLIST, primaryKey: AINT64>
         try {
-            // Step 1: Create tuple builder for the new computed fields (distance, cosine)
-            ArrayTupleBuilder computedFieldsBuilder = new ArrayTupleBuilder(2);
-            DataOutput dos = computedFieldsBuilder.getDataOutput();
+            ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(3);
+            DataOutput dos = dataTupleBuilder.getDataOutput();
 
-            // Add distance field
-            DoubleSerializerDeserializer.INSTANCE.serialize(distance, dos);
-            computedFieldsBuilder.addFieldEndOffset();
+            // Field 0: distance as ADOUBLE (type tag + 8-byte double)
+            dos.writeByte(0x2B); // ADOUBLE type tag
+            dos.writeDouble(distance);
+            dataTupleBuilder.addFieldEndOffset();
 
-            // Add cosine similarity field
-            DoubleSerializerDeserializer.INSTANCE.serialize(cosineSim, dos);
-            computedFieldsBuilder.addFieldEndOffset();
+            // Field 1: placeholder AINTEGER (type tag + 4-byte int)
+            dos.writeByte(0x1A); // AINT32 type tag
+            dos.writeInt(0); // placeholder value
+            dataTupleBuilder.addFieldEndOffset();
 
-            // Step 2: Create tuple builder for original fields (vector, primary key)
-            ArrayTupleBuilder originalFieldsBuilder = new ArrayTupleBuilder(originalTuple.getFieldCount());
+            // Field 2: primaryKey - copy directly from originalTuple field 1 (already in AINT64 format)
+            dataTupleBuilder.addField(originalTuple.getFieldData(1), originalTuple.getFieldStart(1),
+                    originalTuple.getFieldLength(1));
 
-            // Copy all fields from original tuple
-            for (int i = 0; i < originalTuple.getFieldCount(); i++) {
-                originalFieldsBuilder.addField(originalTuple.getFieldData(i), originalTuple.getFieldStart(i),
-                        originalTuple.getFieldLength(i));
-            }
-
-            // Step 3: Create final data tuple builder and use addFields to combine
-            ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(4); // 2 computed + 2 original
-
-            // CRITICAL: Use TupleUtils.addFields to properly combine tuple builders
-            TupleUtils.addFields(computedFieldsBuilder, dataTupleBuilder); // Add distance, cosine
-            TupleUtils.addFields(originalFieldsBuilder, dataTupleBuilder); // Add vector, primary_key
-
-            // Step 4: Create the final tuple reference
+            // Create the final tuple reference
             ArrayTupleReference datatupleRef = new ArrayTupleReference();
             datatupleRef.reset(dataTupleBuilder.getFieldEndOffsets(), dataTupleBuilder.getByteArray());
 
             return datatupleRef;
 
         } catch (Exception e) {
-            throw new HyracksDataException("Failed to create data tuple using TupleUtils.addFields", e);
+            throw new HyracksDataException("Failed to create data tuple with temporary format", e);
         }
     }
 

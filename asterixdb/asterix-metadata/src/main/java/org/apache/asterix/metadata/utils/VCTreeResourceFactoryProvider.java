@@ -37,6 +37,7 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
@@ -138,11 +139,15 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         if (dataset.getDatasetType() == DatasetType.INTERNAL) {
             AsterixVirtualBufferCacheProvider vbcProvider =
                     new AsterixVirtualBufferCacheProvider(dataset.getDatasetId());
+            // Create vector accessor factory for extracting vectors from ADM ordered lists
+            AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
+                    new AOrderedListVectorBinaryAccessorFactory();
             return new LSMVCTreeLocalResourceFactory(storageManager, typeTraits, cmpFactories, filterTypeTraits,
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
-                    typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, dataset.isAtomic());
+                    typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, dataset.isAtomic(),
+                    vectorAccessorFactory);
         } else {
             return null;
         }

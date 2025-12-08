@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.asterix.om.base.ADouble;
 import org.apache.asterix.om.base.AInt32;
 import org.apache.hyracks.api.comm.IFrameWriter;
@@ -252,15 +253,19 @@ public class VCTreeSortedDataBulkLoaderOperatorDescriptor extends AbstractSingle
                     }
                 }
 
+                // Create vector accessor factory for extracting vectors from ADM ordered lists
+                AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
+                        new AOrderedListVectorBinaryAccessorFactory();
+
                 // Create LSMVCTree using LSMVCTreeUtils (full version like in tests)
                 System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
                         + "] VCTreeSortedDataBulkLoader: About to call LSMVCTreeUtils.createLSMTree()");
                 lsmvcTree = LSMVCTreeUtils.createLSMTree(ncConfig, ioManager, virtualBufferCaches, file,
-                        diskBufferCache, typeTraits, cmpFactories, -1, new NoMergePolicy(), new ThreadCountingTracker(),
+                        diskBufferCache, typeTraits, cmpFactories, 0.0, new NoMergePolicy(), new ThreadCountingTracker(),
                         SynchronousSchedulerProvider.INSTANCE.getIoScheduler(null),
                         NoOpIOOperationCallbackFactory.INSTANCE, NoOpPageWriteCallbackFactory.INSTANCE, false,
                         vectorDimensions, vectorFields, filterFields, null, null, null, durable,
-                        AppendOnlyLinkedMetadataPageManagerFactory.INSTANCE, false, inputRecDesc);
+                        AppendOnlyLinkedMetadataPageManagerFactory.INSTANCE, false, inputRecDesc, vectorAccessorFactory);
 
                 System.err.println("✅ LSMVCTree initialized successfully");
 

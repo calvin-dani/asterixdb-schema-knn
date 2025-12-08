@@ -1328,6 +1328,11 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
                         primaryKeys, secondaryKeys, additionalNonKeyFields, filterFactory, prevFilterFactory,
                         inputRecordDesc, context, spec, indexOp, bulkload, operationVar, prevSecondaryKeys,
                         prevAdditionalFilteringKeys);
+            case VECTOR:
+                return getVectorIndexModificationRuntime(database, dataverseName, datasetName, indexName,
+                        propagatedSchema, primaryKeys, secondaryKeys, additionalNonKeyFields, filterFactory,
+                        prevFilterFactory, inputRecordDesc, context, spec, indexOp, bulkload, operationVar,
+                        prevSecondaryKeys, prevAdditionalFilteringKeys);
             case SINGLE_PARTITION_WORD_INVIX:
             case SINGLE_PARTITION_NGRAM_INVIX:
             case LENGTH_PARTITIONED_WORD_INVIX:
@@ -1610,6 +1615,88 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
                     partitioningProperties.getComputeStorageMap());
         }
         return new Pair<>(op, partitioningProperties.getConstraints());
+    }
+
+    private Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> getVectorIndexModificationRuntime(String database,
+            DataverseName dataverseName, String datasetName, String indexName, IOperatorSchema propagatedSchema,
+            List<LogicalVariable> primaryKeys, List<LogicalVariable> secondaryKeys,
+            List<LogicalVariable> additionalNonKeyFields, AsterixTupleFilterFactory filterFactory,
+            AsterixTupleFilterFactory prevFilterFactory, RecordDescriptor inputRecordDesc, JobGenContext context,
+            JobSpecification spec, IndexOperation indexOp, boolean bulkload, LogicalVariable operationVar,
+            List<LogicalVariable> prevSecondaryKeys, List<LogicalVariable> prevAdditionalFilteringKeys)
+            throws AlgebricksException {
+
+        // Currently only support INSERT operations for vector indexes
+        if (indexOp != IndexOperation.INSERT) {
+            throw new AlgebricksException(
+                    indexOp.name() + " operation not yet implemented for vector indexes. Only INSERT is supported.");
+        }
+
+        Dataset dataset = MetadataManagerUtil.findExistingDataset(mdTxnCtx, database, dataverseName, datasetName);
+        int numKeys = primaryKeys.size() + secondaryKeys.size();
+        int numFilterFields = DatasetUtil.getFilterField(dataset) == null ? 0 : 1;
+
+        // Generate field permutations
+        // Vector index tuple format: <vector_field, include_fields..., primary_keys..., filter_field?>
+        int[] fieldPermutation = new int[numKeys + numFilterFields];
+        int[] modificationCallbackPrimaryKeyFields = new int[primaryKeys.size()];
+        int[] pkFields = new int[primaryKeys.size()];
+        int i = 0;
+        int j = 0;
+
+        // First: secondary keys (vector field + include fields)
+        for (LogicalVariable varKey : secondaryKeys) {
+            int idx = propagatedSchema.findVariable(varKey);
+            fieldPermutation[i] = idx;
+            i++;
+        }
+
+        // Second: primary keys
+        for (LogicalVariable varKey : primaryKeys) {
+            int idx = propagatedSchema.findVariable(varKey);
+            fieldPermutation[i] = idx;
+            pkFields[j] = idx;
+            modificationCallbackPrimaryKeyFields[j] = i;
+            i++;
+            j++;
+        }
+
+        // Third: filter field (if any)
+        if (numFilterFields > 0) {
+            int idx = propagatedSchema.findVariable(additionalNonKeyFields.get(0));
+            fieldPermutation[numKeys] = idx;
+        }
+
+        try {
+            // Get vector index metadata
+            Index secondaryIndex = MetadataManager.INSTANCE.getIndex(mdTxnCtx, dataset.getDatabaseName(),
+                    dataset.getDataverseName(), dataset.getDatasetName(), indexName);
+
+            PartitioningProperties partitioningProperties =
+                    getPartitioningProperties(dataset, secondaryIndex.getIndexName());
+
+            // Prepare modification callback
+            IModificationOperationCallbackFactory modificationCallbackFactory = dataset.getModificationCallbackFactory(
+                    storageComponentProvider, secondaryIndex, indexOp, modificationCallbackPrimaryKeyFields);
+
+            // Get index dataflow helper factory
+            IIndexDataflowHelperFactory idfh = new IndexDataflowHelperFactory(
+                    storageComponentProvider.getStorageManager(), partitioningProperties.getSplitsProvider());
+
+            // Create tuple partitioner factory for distributing records across partitions
+            IBinaryHashFunctionFactory[] pkHashFunFactories = dataset.getPrimaryHashFunctionFactories(this);
+            ITuplePartitionerFactory partitionerFactory = new FieldHashPartitionerFactory(pkFields, pkHashFunFactories,
+                    partitioningProperties.getNumberOfPartitions());
+
+            // Create operator descriptor for INSERT operation
+            IOperatorDescriptor op = new LSMTreeInsertDeleteOperatorDescriptor(spec, inputRecordDesc, fieldPermutation,
+                    indexOp, idfh, filterFactory, false, modificationCallbackFactory, partitionerFactory,
+                    partitioningProperties.getComputeStorageMap());
+
+            return new Pair<>(op, partitioningProperties.getConstraints());
+        } catch (Exception e) {
+            throw new AlgebricksException(e);
+        }
     }
 
     private Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> getInvertedIndexModificationRuntime(

@@ -248,11 +248,11 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
      * @throws HyracksDataException
      *         if tuple creation fails
      */
-    public ITupleReference createMetadataTuple(float maxDistance, int dataPageId) throws HyracksDataException {
+    public ITupleReference createMetadataTuple(double maxDistance, int dataPageId) throws HyracksDataException {
         // Use TupleUtils for consistent tuple creation
         return TupleUtils.createTuple(
                 new org.apache.hyracks.api.dataflow.value.ISerializerDeserializer[] {
-                        org.apache.hyracks.dataflow.common.data.marshalling.FloatSerializerDeserializer.INSTANCE,
+                        org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer.INSTANCE,
                         org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer.INSTANCE },
                 maxDistance, dataPageId);
     }
