@@ -20,7 +20,7 @@
 package org.apache.hyracks.storage.am.vector.frames;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.primitive.FloatPointable;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
@@ -75,7 +75,7 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
         // Binary search for the appropriate metadata entry
         for (int i = 0; i < tupleCount; i++) {
             frameTuple.resetByTupleIndex(this, i);
-            float maxDistance = getMaxDistance(i);
+            double maxDistance = getMaxDistance(i);
 
             if (distance <= maxDistance) {
                 return getDataPagePointer(i);
@@ -91,10 +91,10 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
     }
 
     @Override
-    public float getMaxDistance(int tupleIndex) throws HyracksDataException {
+    public double getMaxDistance(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
         // Max distance is the first field in metadata entries
-        return FloatPointable.getFloat(frameTuple.getFieldData(0), frameTuple.getFieldStart(0));
+        return DoublePointable.getDouble(frameTuple.getFieldData(0), frameTuple.getFieldStart(0));
     }
 
     @Override
@@ -155,16 +155,16 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
     /**
      * Updates the max distance for an existing metadata entry.
      */
-    public void updateMaxDistance(int tupleIndex, float newMaxDistance) throws HyracksDataException {
+    public void updateMaxDistance(int tupleIndex, double newMaxDistance) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
         // Max distance is the first field
-        FloatPointable.setFloat(frameTuple.getFieldData(0), frameTuple.getFieldStart(0), newMaxDistance);
+        DoublePointable.setDouble(frameTuple.getFieldData(0), frameTuple.getFieldStart(0), newMaxDistance);
     }
 
     /**
      * Find the appropriate insertion position for a new metadata entry. Maintains sorted order by max distance.
      */
-    public int findInsertPosition(float maxDistance) throws HyracksDataException {
+    public int findInsertPosition(double maxDistance) throws HyracksDataException {
         int tupleCount = getTupleCount();
 
         // Binary search for insertion position
@@ -173,7 +173,7 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
 
         while (left < right) {
             int mid = (left + right) / 2;
-            float midMaxDistance = getMaxDistance(mid);
+            double midMaxDistance = getMaxDistance(mid);
 
             if (midMaxDistance < maxDistance) {
                 left = mid + 1;
@@ -207,7 +207,7 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
         }
 
         // Insert new tuple into appropriate frame
-        float newMaxDistance = extractMaxDistanceFromTuple(tuple);
+        double newMaxDistance = extractMaxDistanceFromTuple(tuple);
         if (getTupleCount() == 0 || newMaxDistance <= getMaxDistance(getTupleCount() - 1)) {
             int insertIndex = findInsertPosition(newMaxDistance);
             insert(tuple, insertIndex);
@@ -221,10 +221,10 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
     /**
      * Extract max distance from tuple (first field).
      */
-    private float extractMaxDistanceFromTuple(ITupleReference tuple) {
+    private double extractMaxDistanceFromTuple(ITupleReference tuple) {
         byte[] data = tuple.getFieldData(0);
         int offset = tuple.getFieldStart(0);
-        return FloatPointable.getFloat(data, offset);
+        return DoublePointable.getDouble(data, offset);
     }
 
     /**

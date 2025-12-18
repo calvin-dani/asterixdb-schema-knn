@@ -52,6 +52,7 @@ import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponentFactory;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeFileManager;
 import org.apache.hyracks.storage.am.lsm.vector.impls.VectorClusteringTreeFactory;
+import org.apache.hyracks.storage.am.lsm.vector.tuples.LSMVCTreeDataTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
@@ -144,8 +145,13 @@ public class LSMVCTreeUtils {
                 new VectorClusteringLeafTupleWriterFactory(clusterTypeTraits, nullTypeTraits, nullIntrospector);
         VectorClusteringMetadataTupleWriterFactory metadataTupleWriterFactory =
                 new VectorClusteringMetadataTupleWriterFactory(metadataTypeTraits, nullTypeTraits, nullIntrospector);
-        VectorClusteringDataTupleWriterFactory dataTupleWriterFactory =
-                new VectorClusteringDataTupleWriterFactory(dataTypeTraits, nullTypeTraits, nullIntrospector);
+        // Create separate tuple writer factories for INSERT and DELETE operations (LSMBTree pattern)
+        // Insert operations use matter tuples (isAntimatter=false)
+        LSMVCTreeDataTupleWriterFactory insertDataTupleWriterFactory =
+                new LSMVCTreeDataTupleWriterFactory(dataTypeTraits, false, nullTypeTraits, nullIntrospector);
+        // Delete operations use antimatter tuples (isAntimatter=true)
+        LSMVCTreeDataTupleWriterFactory deleteDataTupleWriterFactory =
+                new LSMVCTreeDataTupleWriterFactory(dataTypeTraits, true, nullTypeTraits, nullIntrospector);
 
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: Tuple writer factories created");
@@ -161,14 +167,19 @@ public class LSMVCTreeUtils {
                 new VectorClusteringLeafFrameFactory(leafTupleWriter, vectorDimensions);
         ITreeIndexFrameFactory metadataFrameFactory =
                 new VectorClusteringMetadataFrameFactory(metadataTupleWriter, vectorDimensions);
-        ITreeIndexFrameFactory dataFrameFactory =
-                new VectorClusteringDataFrameFactory(dataTupleWriterFactory, vectorDimensions);
+        // Create two data frame factories following LSMBTree pattern
+        ITreeIndexFrameFactory insertDataFrameFactory =
+                new VectorClusteringDataFrameFactory(insertDataTupleWriterFactory, vectorDimensions);
+        ITreeIndexFrameFactory deleteDataFrameFactory =
+                new VectorClusteringDataFrameFactory(deleteDataTupleWriterFactory, vectorDimensions);
 
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: Frame factories created");
+        // VectorClusteringTreeFactory is used for disk components, which are immutable
+        // Disk components always use insertDataFrameFactory (no in-place deletes)
         VectorClusteringTreeFactory vctreeFactory = new VectorClusteringTreeFactory(ioManager, diskBufferCache,
                 metadataPageManagerFactory, interiorFrameFactory, leafFrameFactory, metadataFrameFactory,
-                dataFrameFactory, cmpFactories, 4, vectorDimensions, vectorAccessorFactory);
+                insertDataFrameFactory, cmpFactories, 4, vectorDimensions, vectorAccessorFactory);
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: VectorClusteringTreeFactory created");
         // Create file manager for LSM components
@@ -181,15 +192,15 @@ public class LSMVCTreeUtils {
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTreeDiskComponentFactory created");
 
-        // Create the LSMVCTree instance
+        // Create the LSMVCTree instance with both insert and delete data frame factories
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: About to create LSMVCTree instance");
         LSMVCTree result = new LSMVCTree(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory,
-                leafFrameFactory, metadataFrameFactory, dataFrameFactory, diskBufferCache, fileManager,
-                componentFactory, componentFactory, filterHelper, filterFrameFactory, filterManager,
-                bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
-                pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields, durable,
-                atomic, vectorAccessorFactory);
+                leafFrameFactory, metadataFrameFactory, insertDataFrameFactory, deleteDataFrameFactory,
+                diskBufferCache, fileManager, componentFactory, componentFactory, filterHelper, filterFrameFactory,
+                filterManager, bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler,
+                ioOpCallbackFactory, pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields,
+                filterFields, durable, atomic, vectorAccessorFactory);
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTree instance created successfully");
         return result;

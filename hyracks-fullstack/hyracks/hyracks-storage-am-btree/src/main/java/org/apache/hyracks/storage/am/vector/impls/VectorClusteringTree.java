@@ -35,7 +35,6 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
@@ -309,7 +308,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         // Search through metadata entries to find appropriate data page
         for (int i = 0; i < tupleCount; i++) {
-            float maxDistance = metadataFrame.getMaxDistance(i);
+            double maxDistance = metadataFrame.getMaxDistance(i);
             long dataPageId = metadataFrame.getDataPagePointer(i);
 
             System.out.println(
@@ -347,7 +346,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ctx.getDataFrame().setPage(dataPage);
 
             // Create data tuple: <distance, vector, PK>
-            ITupleReference dataTuple = ctx.getDataFrame().createDataTuple(vector, distance, cosineSim, originalTuple);
+            // Pass context so createDataTuple can check operation type and set antimatter bit if DELETE
+            ITupleReference dataTuple = ctx.getDataFrame().createDataTuple(vector, distance, cosineSim, originalTuple, ctx);
 
             // Check if there's space for the tuple
             FrameOpSpaceStatus spaceStatus = ctx.getDataFrame().hasSpaceInsert(dataTuple);
@@ -370,6 +370,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                     // Update page LSN
                     ctx.getDataFrame().setPageLsn(ctx.getDataFrame().getPageLsn() + 1);
+
+                    // Update metadata maxDistance if this is the new maximum for this data page
+                    updateMetadataMaxDistanceIfNeeded(ctx.getMetadataPageId(), dataPageId, distance, ctx);
 
                     System.err.println("DEBUG: Successfully inserted tuple at index " + insertIndex + " in data page "
                             + dataPageId);
@@ -414,7 +417,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         try {
             newDataPage.acquireWriteLatch();
-            VectorClusteringDataFrame newFrame = (VectorClusteringDataFrame) dataFrameFactory.createFrame();
+            VectorClusteringDataFrame newFrame = (VectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
             newFrame.setPage(newDataPage);
             newFrame.initBuffer((byte) 0);
 
@@ -442,6 +445,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     /**
      * Update metadata page after data page split.
+     * FIX Bug #5: Updates BOTH original page's maxDistance and adds new page's entry.
      */
     private void updateMetadataAfterDataSplit(long originalDataPageId, int newDataPageId, VectorClusteringOpContext ctx)
             throws HyracksDataException {
@@ -456,34 +460,60 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             return; // Could not find the metadata page
         }
 
+        // FIX Bug #5: Get max distance from ORIGINAL data page after split
+        ICachedPage originalDataPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) originalDataPageId));
+        double originalPageMaxDistance = 0.0;
+
+        try {
+            originalDataPage.acquireReadLatch();
+            IVectorClusteringDataFrame originalDataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
+            originalDataFrame.setPage(originalDataPage);
+
+            int originalTupleCount = originalDataFrame.getTupleCount();
+            if (originalTupleCount > 0) {
+                originalPageMaxDistance = originalDataFrame.getDistanceToCentroid(originalTupleCount - 1);
+            }
+
+            System.err.println("DEBUG: After split, original data page " + originalDataPageId + " has maxDistance="
+                    + originalPageMaxDistance + ", tupleCount=" + originalTupleCount);
+
+        } finally {
+            originalDataPage.releaseReadLatch();
+            bufferCache.unpin(originalDataPage);
+        }
+
         // Get max distance from new data page
         ICachedPage newDataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), newDataPageId));
+        double newPageMaxDistance = 0.0;
 
         try {
             newDataPage.acquireReadLatch();
-            IVectorClusteringDataFrame newDataFrame = (IVectorClusteringDataFrame) dataFrameFactory.createFrame();
+            IVectorClusteringDataFrame newDataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
             newDataFrame.setPage(newDataPage);
 
-            double maxDistance = 0.0f;
-            int tupleCount = newDataFrame.getTupleCount();
-
-            if (tupleCount > 0) {
-                maxDistance = newDataFrame.getDistanceToCentroid(tupleCount - 1);
+            int newTupleCount = newDataFrame.getTupleCount();
+            if (newTupleCount > 0) {
+                newPageMaxDistance = newDataFrame.getDistanceToCentroid(newTupleCount - 1);
             }
 
-            System.out.println("DEBUG: New data page " + newDataPageId + " has maxDistance=" + maxDistance
-                    + ", tupleCount=" + tupleCount);
-
-            // Use the existing helper method to update metadata with the new data page
-            updateMetadataWithNewDataPage(targetMetadataPageId, newDataPageId, maxDistance, ctx);
-
-            System.out.println("DEBUG: Successfully updated metadata page " + targetMetadataPageId
-                    + " with new data page " + newDataPageId);
+            System.err.println("DEBUG: New data page " + newDataPageId + " has maxDistance=" + newPageMaxDistance
+                    + ", tupleCount=" + newTupleCount);
 
         } finally {
             newDataPage.releaseReadLatch();
             bufferCache.unpin(newDataPage);
         }
+
+        // FIX Bug #5: Update ORIGINAL page's maxDistance in metadata (decreased after split)
+        forceUpdateMetadataMaxDistance(targetMetadataPageId, originalDataPageId, originalPageMaxDistance, ctx);
+
+        // Add NEW page's metadata entry
+        updateMetadataWithNewDataPage(targetMetadataPageId, newDataPageId, newPageMaxDistance, ctx);
+
+        System.err.println("DEBUG: Successfully updated metadata page " + targetMetadataPageId
+                + " - updated original page " + originalDataPageId + " maxDistance=" + originalPageMaxDistance
+                + ", added new page " + newDataPageId + " maxDistance=" + newPageMaxDistance);
     }
 
     /**
@@ -885,7 +915,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
         try {
             dataPage.acquireWriteLatch(); // Write latch for potential update
-            IVectorClusteringDataFrame dataFrame = (IVectorClusteringDataFrame) dataFrameFactory.createFrame();
+            IVectorClusteringDataFrame dataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
             dataFrame.setPage(dataPage);
 
             int tupleCount = dataFrame.getTupleCount();
@@ -997,7 +1027,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             dataFrame.initBuffer((byte) 0);
 
             // Create data tuple for the new vector
-            ITupleReference dataTuple = dataFrame.createDataTuple(vector, distance, cosineSim, originalTuple);
+            ITupleReference dataTuple = dataFrame.createDataTuple(vector, distance, cosineSim, originalTuple, ctx);
 
             // Insert the tuple into the new page
             dataFrame.insert(dataTuple, 0);
@@ -1008,6 +1038,83 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         } finally {
             newPage.releaseWriteLatch(true);
             bufferCache.unpin(newPage);
+        }
+    }
+
+    /**
+     * Update metadata maxDistance if the new distance exceeds the current maxDistance.
+     * This is needed when inserting into the last data page with a distance greater than
+     * the current maxDistance - the last page acts as a catch-all that dynamically expands.
+     */
+    private void updateMetadataMaxDistanceIfNeeded(long metadataPageId, long dataPageId, double newDistance,
+            VectorClusteringOpContext ctx) throws HyracksDataException {
+
+        ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
+
+        try {
+            metadataPage.acquireWriteLatch();
+            VectorClusteringMetadataFrame metadataFrame = (VectorClusteringMetadataFrame) ctx.getMetadataFrame();
+            metadataFrame.setPage(metadataPage);
+
+            // Find the metadata entry for this data page
+            int tupleCount = metadataFrame.getTupleCount();
+            for (int i = 0; i < tupleCount; i++) {
+                long pagePtr = metadataFrame.getDataPagePointer(i);
+
+                if (pagePtr == dataPageId) {
+                    double currentMaxDistance = metadataFrame.getMaxDistance(i);
+
+                    // Only update if new distance is larger
+                    if (newDistance > currentMaxDistance) {
+                        metadataFrame.updateMaxDistance(i, newDistance);
+
+                        System.err.println("DEBUG: Updated metadata entry " + i + " for data page " + dataPageId
+                                + ": maxDistance " + currentMaxDistance + " → " + newDistance);
+                    }
+                    break;
+                }
+            }
+
+        } finally {
+            metadataPage.releaseWriteLatch(true);
+            bufferCache.unpin(metadataPage);
+        }
+    }
+
+    /**
+     * Force update metadata maxDistance to a specific value (regardless of increase/decrease).
+     * This is needed after data page splits where the original page's maxDistance decreases.
+     */
+    private void forceUpdateMetadataMaxDistance(long metadataPageId, long dataPageId, double newMaxDistance,
+            VectorClusteringOpContext ctx) throws HyracksDataException {
+
+        ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
+
+        try {
+            metadataPage.acquireWriteLatch();
+            VectorClusteringMetadataFrame metadataFrame = (VectorClusteringMetadataFrame) ctx.getMetadataFrame();
+            metadataFrame.setPage(metadataPage);
+
+            // Find the metadata entry for this data page
+            int tupleCount = metadataFrame.getTupleCount();
+            for (int i = 0; i < tupleCount; i++) {
+                long pagePtr = metadataFrame.getDataPagePointer(i);
+
+                if (pagePtr == dataPageId) {
+                    double currentMaxDistance = metadataFrame.getMaxDistance(i);
+
+                    // ALWAYS update (even if decreasing)
+                    metadataFrame.updateMaxDistance(i, newMaxDistance);
+
+                    System.err.println("DEBUG: Force updated metadata entry " + i + " for data page " + dataPageId
+                            + ": maxDistance " + currentMaxDistance + " → " + newMaxDistance);
+                    break;
+                }
+            }
+
+        } finally {
+            metadataPage.releaseWriteLatch(true);
+            bufferCache.unpin(metadataPage);
         }
     }
 
@@ -1399,7 +1506,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         @Override
         public void delete(ITupleReference tuple) throws HyracksDataException {
             ctx.setOperation(IndexOperation.DELETE);
-            deleteVector(tuple, ctx);
+            insertVector(tuple, ctx);
         }
 
         @Override

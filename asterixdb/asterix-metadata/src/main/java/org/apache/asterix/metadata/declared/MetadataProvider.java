@@ -1626,10 +1626,11 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             List<LogicalVariable> prevSecondaryKeys, List<LogicalVariable> prevAdditionalFilteringKeys)
             throws AlgebricksException {
 
-        // Currently only support INSERT operations for vector indexes
-        if (indexOp != IndexOperation.INSERT) {
-            throw new AlgebricksException(
-                    indexOp.name() + " operation not yet implemented for vector indexes. Only INSERT is supported.");
+        // Vector indexes support INSERT and DELETE operations
+        // UPDATE and UPSERT are not yet supported
+        if (indexOp != IndexOperation.INSERT && indexOp != IndexOperation.DELETE) {
+            throw new AlgebricksException(indexOp.name()
+                    + " operation not yet implemented for vector indexes. Only INSERT and DELETE are supported.");
         }
 
         Dataset dataset = MetadataManagerUtil.findExistingDataset(mdTxnCtx, database, dataverseName, datasetName);

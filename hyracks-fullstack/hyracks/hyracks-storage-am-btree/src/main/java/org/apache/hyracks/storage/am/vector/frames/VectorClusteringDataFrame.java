@@ -41,8 +41,11 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleMode;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleNoExactMatchPolicy;
+import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
+import org.apache.hyracks.storage.am.common.util.BitOperationUtils;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 
 /**
@@ -575,18 +578,21 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     /**
-     * Create a data tuple for VectorClusteringTree.
-     * 
+     * Create a data tuple for VectorClusteringTree. For DELETE operations, sets the antimatter bit.
+     *
      * @param vector Vector array
      * @param distance Distance as double
-     * @param cosineSim Cosine similarity as double  
+     * @param cosineSim Cosine similarity as double
      * @param originalTuple Original tuple containing primary key
-     * @return ITupleReference representing the data tuple
+     * @param ctx Operation context to check if this is a DELETE operation
+     * @return ITupleReference representing the data tuple (with antimatter bit if DELETE)
      * @throws HyracksDataException if tuple creation fails
      */
     public ITupleReference createDataTuple(double[] vector, double distance, double cosineSim,
-            ITupleReference originalTuple) throws HyracksDataException {
+            ITupleReference originalTuple, VectorClusteringOpContext ctx)
+            throws HyracksDataException {
         // TEMPORARY FORMAT: <distance: ADOUBLE, AINTEGER, primaryKey: AINT64>
+        // For DELETE: prepend null flags byte with antimatter bit (bit 7) set
         // Original tuple format: <vector: AORDEREDLIST, primaryKey: AINT64>
         try {
             ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(3);
@@ -606,14 +612,15 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             dataTupleBuilder.addField(originalTuple.getFieldData(1), originalTuple.getFieldStart(1),
                     originalTuple.getFieldLength(1));
 
-            // Create the final tuple reference
+            // Return tuple reference directly - let the tuple writer handle null flags byte
+            // The tuple writer will add the null flags byte and set the antimatter bit if needed
             ArrayTupleReference datatupleRef = new ArrayTupleReference();
             datatupleRef.reset(dataTupleBuilder.getFieldEndOffsets(), dataTupleBuilder.getByteArray());
 
             return datatupleRef;
 
         } catch (Exception e) {
-            throw new HyracksDataException("Failed to create data tuple with temporary format", e);
+            throw new HyracksDataException("Failed to create data tuple", e);
         }
     }
 

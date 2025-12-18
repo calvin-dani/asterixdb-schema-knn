@@ -22,6 +22,7 @@ package org.apache.hyracks.storage.am.vector.api;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 
 /**
  * Interface for vector clustering data frames.
@@ -74,15 +75,16 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
 
     /**
      * Creates a data tuple with the given parameters.
-     * 
-     * @param vector Vector array
-     * @param distance Distance as double
-     * @param cosineSim Cosine similarity as double  
+     *
+     * @param vector        Vector array
+     * @param distance      Distance as double
+     * @param cosineSim     Cosine similarity as double
      * @param originalTuple Original tuple containing primary key
+     * @param ctx
      * @return ITupleReference representing the data tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    ITupleReference createDataTuple(double[] vector, double distance, double cosineSim, ITupleReference originalTuple)
+    ITupleReference createDataTuple(double[] vector, double distance, double cosineSim, ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException;
 
     /**

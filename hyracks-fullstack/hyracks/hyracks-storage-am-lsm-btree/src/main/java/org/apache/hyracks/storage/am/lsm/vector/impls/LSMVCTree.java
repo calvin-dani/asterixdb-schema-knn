@@ -19,6 +19,7 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
+import java.io.DataOutput;
 import java.util.List;
 import java.util.Map;
 
@@ -63,8 +64,16 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkL
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
+import org.apache.hyracks.storage.am.common.util.BitOperationUtils;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
+import org.apache.hyracks.storage.am.lsm.vector.tuples.LSMVCTreeDataTupleReference;
+import org.apache.hyracks.storage.am.lsm.vector.tuples.LSMVCTreeDataTupleWriter;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -93,7 +102,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     protected final ITreeIndexFrameFactory interiorFrameFactory;
     protected final ITreeIndexFrameFactory leafFrameFactory;
     protected final ITreeIndexFrameFactory metadataFrameFactory;
-    protected final ITreeIndexFrameFactory dataFrameFactory;
+    protected final ITreeIndexFrameFactory insertDataFrameFactory;
+    protected final ITreeIndexFrameFactory deleteDataFrameFactory;
 
     // Vector clustering specific parameters
     protected final IBinaryComparatorFactory[] cmpFactories;
@@ -105,8 +115,9 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     public LSMVCTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
-            ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
-            IBufferCache diskBufferCache, ILSMIndexFileManager fileManager, ILSMDiskComponentFactory componentFactory,
+            ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory insertDataFrameFactory,
+            ITreeIndexFrameFactory deleteDataFrameFactory, IBufferCache diskBufferCache,
+            ILSMIndexFileManager fileManager, ILSMDiskComponentFactory componentFactory,
             ILSMDiskComponentFactory bulkLoadComponentFactory, IComponentFilterHelper filterHelper,
             ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
             double bloomFilterFalsePositiveRate, IBinaryComparatorFactory[] cmpFactories, ILSMMergePolicy mergePolicy,
@@ -120,50 +131,30 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
                 bulkLoadComponentFactory, filterFrameFactory, filterManager, filterFields, durable, filterHelper,
                 vectorFields, ITracer.NONE, atomic);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTree constructor: Started, super() call completed");
-
         this.interiorFrameFactory = interiorFrameFactory;
         this.leafFrameFactory = leafFrameFactory;
         this.metadataFrameFactory = metadataFrameFactory;
-        this.dataFrameFactory = dataFrameFactory;
+        this.insertDataFrameFactory = insertDataFrameFactory;
+        this.deleteDataFrameFactory = deleteDataFrameFactory;
         this.cmpFactories = cmpFactories;
         this.vectorDimensions = vectorDimensions;
         this.needKeyDupCheck = needKeyDupCheck;
         this.vectorAccessorFactory = vectorAccessorFactory;
 
-        // Create in-memory components using VectorClusteringTree
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTree constructor: About to create memory components, count=" + virtualBufferCaches.size());
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: Memory component loop iteration " + i);
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: About to create VectorClusteringTree");
             String baseDirPath = fileManager.getBaseDir() + "_virtual_" + i;
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: About to resolve path: " + baseDirPath);
             FileReference virtualFileRef = ioManager.resolve(baseDirPath);
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: Path resolved successfully");
+            // Memory components use insertDataFrameFactory for normal inserts
             VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
                     new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
-                    metadataFrameFactory, dataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef,
+                    metadataFrameFactory, insertDataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef,
                     vectorAccessorFactory);
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: VectorClusteringTree created");
             LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
                     filterHelper == null ? null : filterHelper.createFilter());
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: LSMVCTreeMemoryComponent created");
             memoryComponents.add(mutableComponent);
-//            System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                    + "] LSMVCTree constructor: Memory component added to list");
             ++i;
         }
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTree constructor: All memory components created, constructor completed");
     }
 
     public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
@@ -268,6 +259,11 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     @Override
     public void modify(IIndexOperationContext ictx, ITupleReference tuple) throws HyracksDataException {
         LSMVCTreeOpContext ctx = (LSMVCTreeOpContext) ictx;
+
+        // Debug logging
+        System.err.println("[LSMVCTree.modify] Operation: " + ctx.getOperation() +
+                          ", Thread: " + Thread.currentThread().getId());
+
         ITupleReference indexTuple;
         if (ctx.getIndexTuple() != null) {
             ctx.getIndexTuple().reset(tuple);
@@ -278,12 +274,19 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
         switch (ctx.getOperation()) {
             case PHYSICALDELETE:
+                System.err.println("[LSMVCTree.modify] Executing PHYSICALDELETE");
                 ctx.getCurrentMutableVCTreeAccessor().delete(indexTuple);
                 break;
             case INSERT:
+                System.err.println("[LSMVCTree.modify] Executing INSERT");
                 insert(indexTuple, ctx);
                 break;
+            case DELETE:
+                System.err.println("[LSMVCTree.modify] Executing DELETE");
+                delete(indexTuple, ctx);
+                break;
             default:
+                System.err.println("[LSMVCTree.modify] Executing default (UPSERT)");
                 ctx.getCurrentMutableVCTreeAccessor().upsert(indexTuple);
                 break;
         }
@@ -302,6 +305,42 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         }
 
         memoryComponentAccessor.insert(tuple);
+
+        return true;
+    }
+
+    /**
+     * Handles delete operation for vector index.
+     *
+     * Delete flow:
+     * 1. Call delete() on VectorClusteringTreeAccessor with the original input tuple
+     * 2. VectorClusteringTreeAccessor.delete() sets operation to DELETE and calls insertVector()
+     * 3. insertVector() navigates, calculates distance, and constructs data tuple
+     * 4. Based on operation type (DELETE), creates antimatter tuple with bit 7 set
+     * 5. Antimatter tuple is inserted into data pages
+     *
+     * This approach reuses all existing insertVector() logic and only differs in
+     * the antimatter bit being set when the operation type is DELETE.
+     */
+    private boolean delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
+        // Get the current mutable VectorClusteringTree accessor
+        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) (ctx.getCurrentMutableVCTreeAccessor());
+        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
+                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
+                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+
+        // Ensure static structure is initialized (same pattern as insert)
+        if (!memoryComponentAccessor.getIndex().isInitialized()) {
+            memoryComponentAccessor.getIndex().setStaticStructure(staticAccessor);
+        }
+
+        System.err.println("[LSMVCTree.delete] Calling VectorClusteringTreeAccessor.delete(), Thread="
+                + Thread.currentThread().getId());
+
+        // Call delete() which will set operation to DELETE and delegate to insertVector()
+        // insertVector() will create an antimatter tuple based on the DELETE operation
+        memoryComponentAccessor.delete(tuple);
 
         return true;
     }
@@ -377,7 +416,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     @Override
     public LSMVCTreeOpContext createOpContext(IIndexAccessParameters iap) {
-        return new LSMVCTreeOpContext(this, getTreeFields(), getFilterFields(), getFilterCmpFactories(),
+        return new LSMVCTreeOpContext(this, memoryComponents, getTreeFields(), getFilterFields(), getFilterCmpFactories(),
                 (IExtendedModificationOperationCallback) iap.getModificationCallback(),
                 iap.getSearchOperationCallback(), tracer, iap);
     }
@@ -402,8 +441,12 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         return metadataFrameFactory;
     }
 
-    public ITreeIndexFrameFactory getDataFrameFactory() {
-        return dataFrameFactory;
+    public ITreeIndexFrameFactory getInsertDataFrameFactory() {
+        return insertDataFrameFactory;
+    }
+
+    public ITreeIndexFrameFactory getDeleteDataFrameFactory() {
+        return deleteDataFrameFactory;
     }
 
     @Override

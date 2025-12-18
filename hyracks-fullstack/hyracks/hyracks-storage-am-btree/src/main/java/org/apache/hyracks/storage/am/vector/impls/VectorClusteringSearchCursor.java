@@ -860,6 +860,63 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     /**
+     * Advance to the next closest cluster.
+     * This method is called by the LSM layer when it needs more data.
+     *
+     * @return true if successfully moved to next cluster, false if no more clusters available
+     */
+    public boolean advanceToNextCluster() throws HyracksDataException {
+        System.err.println("[VectorClusteringSearchCursor.advanceToNextCluster] Looking for next cluster...");
+
+        // Loop to skip empty clusters
+        while (true) {
+            ClusterSearchResult nextCluster =
+                    VCTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
+
+            if (nextCluster == null) {
+                exhaustedAllClusters = true;
+                System.err.println(
+                        "[VectorClusteringSearchCursor.advanceToNextCluster] No more clusters, marking exhausted");
+                return false; // No more clusters available
+            }
+
+            // Open next cluster
+            openCluster(nextCluster);
+            boolean hasData = currentTupleIndex < tupleCount;
+            System.err.println(String.format(
+                    "[VectorClusteringSearchCursor.advanceToNextCluster] Opened cluster %d (centroidId=%d, distance=%.4f), hasData=%s, tupleCount=%d",
+                    clustersProbed, nextCluster.centroidId, nextCluster.distance, hasData, tupleCount));
+
+            if (hasData) {
+                return true; // Found cluster with data
+            }
+
+            // Empty cluster, continue to next one
+            System.err.println(
+                    "[VectorClusteringSearchCursor.advanceToNextCluster] Cluster is empty, skipping to next");
+        }
+    }
+
+    /**
+     * Check if this cursor has more clusters to scan.
+     *
+     * @return true if more clusters are available, false if all clusters exhausted
+     */
+    public boolean hasMoreClusters() {
+        return !exhaustedAllClusters;
+    }
+
+    /**
+     * Get the number of records collected so far.
+     * Used by LSM layer to track progress.
+     *
+     * @return number of records returned by this cursor
+     */
+    public int getRecordsCollected() {
+        return recordsCollected;
+    }
+
+    /**
      * Get the first data page ID from the target metadata page.
      */
     private long getFirstDataPageFromMetadata() throws HyracksDataException {
