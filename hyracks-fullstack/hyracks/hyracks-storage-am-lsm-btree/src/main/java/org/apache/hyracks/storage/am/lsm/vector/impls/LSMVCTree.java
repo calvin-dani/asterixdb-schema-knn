@@ -38,6 +38,7 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
+import org.apache.hyracks.storage.am.common.impls.NoOpOperationCallback;
 import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
@@ -78,10 +79,13 @@ import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
+import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
+import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.util.trace.ITracer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -324,8 +328,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      */
     private boolean delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
         // Get the current mutable VectorClusteringTree accessor
-        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) (ctx.getCurrentMutableVCTreeAccessor());
+        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor = (ctx.getCurrentMutableVCTreeAccessor());
         VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
                         .createAccessor(NoOpIndexAccessParameters.INSTANCE);
@@ -404,7 +407,75 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     @Override
     public ILSMDiskComponent doMerge(ILSMIOOperation operation) throws HyracksDataException {
-        throw new UnsupportedOperationException("Disk component merging not supported for vector clustering trees");
+        LSMVCTreeMergeOperation mergeOp = (LSMVCTreeMergeOperation) operation;
+        IIndexCursor cursor = mergeOp.getCursor();
+        ILSMDiskComponent mergedComponent = null;
+        ILSMDiskComponentBulkLoader componentBulkLoader = null;
+
+        try {
+            try {
+                RangePredicate rangePred = new RangePredicate(null, null, true, true, null, null);
+
+                // Search all merging components (cursor already configured for full-scan mode)
+                search(mergeOp.getAccessor().getOpContext(), cursor, rangePred);
+
+                try {
+                    // Create merged disk component
+                    List<ILSMComponent> mergedComponents = mergeOp.getMergingComponents();
+                    long numElements = getNumberOfElements(mergedComponents);
+                    mergedComponent = createDiskComponent(componentFactory, mergeOp.getTarget(), null, null, true);
+
+                    // Set parameters for merge operation (including static structure reference)
+                    Map<String, Object> parameters = new java.util.HashMap<>();
+                    parameters.put("static_structure_component", getStaticStructure());
+                    mergeOp.getAccessor().getOpContext().setParameters(parameters);
+
+                    // Create bulk loader (delegates to VCTreeBulkLoader)
+                    IPageWriteCallback pageWriteCallback = pageWriteCallbackFactory.createPageWriteCallback();
+                    componentBulkLoader = mergedComponent.createBulkLoader(storageConfig, operation, 1.0f, false,
+                            numElements, false, false, false, pageWriteCallback);
+
+                    // Iterate cursor and add tuples
+                    // Cursor delivers tuples cluster-by-cluster, already reconciled
+                    while (cursor.hasNext()) {
+                        cursor.next();
+                        ITupleReference frameTuple = cursor.getTuple();
+                        componentBulkLoader.add(frameTuple);
+                    }
+                } finally {
+                    cursor.close();
+                }
+            } finally {
+                cursor.destroy();
+            }
+
+            componentBulkLoader.end();
+        } catch (Throwable e) { // NOSONAR.. As per the contract, we should either abort or end
+            try {
+                if (componentBulkLoader != null) {
+                    componentBulkLoader.abort();
+                }
+            } catch (Throwable th) { // NOSONAR Don't lose the root failure
+                e.addSuppressed(th);
+            }
+            throw e;
+        }
+
+        return mergedComponent;
+    }
+
+    /**
+     * Get number of elements in merging components.
+     * Used to estimate bulk loader size.
+     */
+    private long getNumberOfElements(List<ILSMComponent> mergedComponents) throws HyracksDataException {
+        long numElements = 0L;
+        for (ILSMComponent comp : mergedComponents) {
+            LSMVCTreeDiskComponent diskComp = (LSMVCTreeDiskComponent) comp;
+            // Get component size if available, otherwise use default estimate
+            numElements += diskComp.getComponentSize();
+        }
+        return numElements;
     }
 
     @Override
@@ -487,16 +558,46 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     @Override
     protected LSMComponentFileReferences getMergeFileReferences(ILSMDiskComponent firstComponent,
             ILSMDiskComponent lastComponent) throws HyracksDataException {
-        return fileManager.getRelMergeFileReference(firstComponent.getId().toString(),
-                lastComponent.getId().toString());
+        // Extract file names from components (e.g., "0_0" from file "0_0_vct")
+        LSMVCTreeDiskComponent first = (LSMVCTreeDiskComponent) firstComponent;
+        LSMVCTreeDiskComponent last = (LSMVCTreeDiskComponent) lastComponent;
+
+        String firstName = first.getIndex().getFileReference().getFile().getName();
+        String lastName = last.getIndex().getFileReference().getFile().getName();
+
+        return fileManager.getRelMergeFileReference(firstName, lastName);
     }
 
     @Override
     protected ILSMIOOperation createMergeOperation(AbstractLSMIndexOperationContext opCtx,
             LSMComponentFileReferences mergeFileRefs, ILSMIOOperationCallback callback) throws HyracksDataException {
-        IIndexCursor cursor = createAccessor(opCtx).createSearchCursor(false);
-        return new LSMVCTreeMergeOperation(createAccessor(opCtx), cursor, null,
-                mergeFileRefs.getInsertIndexFileReference(), callback, getIndexIdentifier());
+
+        // Determine if deleted tuples should be preserved
+        List<ILSMComponent> mergingComponents = opCtx.getComponentHolder();
+        boolean returnDeletedTuples = true;
+
+        // If merging oldest component, anti-matter tuples can be discarded
+        // Check if the last component in mergingComponents is the oldest disk component
+        if (!diskComponents.isEmpty() && mergingComponents.size() > 0) {
+            ILSMComponent lastMergingComponent = mergingComponents.get(mergingComponents.size() - 1);
+            ILSMComponent oldestDiskComponent = diskComponents.get(diskComponents.size() - 1);
+
+            if (lastMergingComponent == oldestDiskComponent) {
+                returnDeletedTuples = false; // Anti-matter can be discarded
+            }
+        }
+
+        // Create cursor with full-scan mode enabled for merge
+        IIndexCursorStats stats = NoOpIndexCursorStats.INSTANCE;
+        ILSMIndexAccessor accessor = createAccessor(opCtx);
+
+        // Create LSMVCTreeSearchCursor with fullScanMode=true for merge
+        boolean fullScanMode = true; // Merge requires sequential cluster iteration
+        IIndexCursor cursor = new LSMVCTreeSearchCursor((ILSMIndexOperationContext) opCtx, returnDeletedTuples,
+                fullScanMode, stats);
+
+        return new LSMVCTreeMergeOperation(accessor, cursor, stats, mergeFileRefs.getInsertIndexFileReference(),
+                callback, getIndexIdentifier());
     }
 
     protected ICursorFactory getCursorFactory() {

@@ -77,13 +77,22 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     private int antimatterTuplesDetected; // Antimatter tuples detected
     private int cancellationsMade; // Matter tuples cancelled by antimatter
 
+    // Full-scan mode flag (for merge operations)
+    private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
+
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
-        this(opCtx, false, NoOpIndexCursorStats.INSTANCE);
+        this(opCtx, false, false, NoOpIndexCursorStats.INSTANCE);
     }
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples,
             IIndexCursorStats stats) {
+        this(opCtx, returnDeletedTuples, false, stats);
+    }
+
+    public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples, boolean fullScanMode,
+            IIndexCursorStats stats) {
         super(opCtx, returnDeletedTuples, stats);
+        this.fullScanMode = fullScanMode;
     }
 
     @Override
@@ -243,10 +252,11 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     /**
      * Create cursor for a VCTree component.
+     * Passes fullScanMode to enable sequential cluster iteration for merge operations.
      */
     protected IIndexCursor createCursor(LSMComponentType type, VectorClusteringTreeAccessor accessor)
             throws HyracksDataException {
-        return accessor.createSearchCursor(false);
+        return accessor.createSearchCursor(false, fullScanMode);
     }
 
     @Override
@@ -606,8 +616,14 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     @Override
     protected boolean isDeleted(PriorityQueueElement element) throws HyracksDataException {
         // Check if tuple has antimatter bit set (indicates deleted record)
-        // Tuples are now LSMVCTreeDataTupleReference which implements ILSMTreeTupleReference
-        return ((ILSMTreeTupleReference) element.getTuple()).isAntimatter();
+        // During merge with full-scan mode, tuples may be rebuilt as ArrayTupleReference
+        // which doesn't have antimatter bit - treat those as matter tuples
+        ITupleReference tuple = element.getTuple();
+        if (tuple instanceof ILSMTreeTupleReference) {
+            return ((ILSMTreeTupleReference) tuple).isAntimatter();
+        }
+        // Not an LSM tuple - must be a rebuilt tuple during merge, treat as matter
+        return false;
     }
 
     /**

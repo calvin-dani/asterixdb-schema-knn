@@ -146,7 +146,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
-                    typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, dataset.isAtomic(),
+                    typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
                     vectorAccessorFactory);
         } else {
             return null;

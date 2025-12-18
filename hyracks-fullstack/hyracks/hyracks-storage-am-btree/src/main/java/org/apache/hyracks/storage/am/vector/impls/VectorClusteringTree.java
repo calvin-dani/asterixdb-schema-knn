@@ -1517,6 +1517,17 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         @Override
         public IIndexCursor createSearchCursor(boolean exclusive) throws HyracksDataException {
+            return createSearchCursor(exclusive, false);
+        }
+
+        /**
+         * Create a search cursor with explicit full-scan mode control.
+         *
+         * @param exclusive Whether to create an exclusive cursor
+         * @param fullScanMode true for full-scan (merge) mode, false for query mode
+         * @return Configured search cursor
+         */
+        public IIndexCursor createSearchCursor(boolean exclusive, boolean fullScanMode) throws HyracksDataException {
             VectorClusteringSearchCursor cursor = new VectorClusteringSearchCursor();
 
             // Configure cursor with tree navigation capabilities
@@ -1525,6 +1536,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             cursor.setRootPageId(tree.rootPage);
             cursor.setFrameFactories(tree.interiorFrameFactory, tree.leafFrameFactory, tree.metadataFrameFactory,
                     tree.dataFrameFactory);
+
+            // Set full-scan mode if requested (for merge operations)
+            cursor.setFullScanMode(fullScanMode);
 
             return cursor;
         }
