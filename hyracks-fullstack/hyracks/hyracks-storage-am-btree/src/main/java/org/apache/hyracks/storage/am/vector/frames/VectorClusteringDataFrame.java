@@ -19,38 +19,28 @@
 
 package org.apache.hyracks.storage.am.vector.frames;
 
-import java.io.ByteArrayOutputStream;
 import java.io.DataOutput;
-import java.io.DataOutputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.primitive.FloatPointable;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.btree.frames.OrderedSlotManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleMode;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleNoExactMatchPolicy;
-import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
-import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
-import org.apache.hyracks.storage.am.common.util.BitOperationUtils;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 
 /**
  * Vector clustering data frame implementation.
- * Contains vector records: <distance_to_centroid, cos(θ), quantized_vector, include_fields, PK>
+ * Contains vector records: <distance_to_centroid, centroid_id, PK, included_fields>
  * Records are sorted by distance_to_centroid in ascending order.
  */
 public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implements IVectorClusteringDataFrame {
@@ -102,12 +92,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         return distance;
     }
 
-    @Override
-    public double getCosineValue(int tupleIndex) throws HyracksDataException {
-        frameTuple.resetByTupleIndex(this, tupleIndex);
-        // Cosine value is the second field in data records - stored as float
-        return FloatPointable.getFloat(frameTuple.getFieldData(1), frameTuple.getFieldStart(1));
-    }
 
     @Override
     public void insert(ITupleReference tuple, int tupleIndex) {
@@ -169,81 +153,16 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         return FrameOpSpaceStatus.INSUFFICIENT_SPACE;
     }
 
-    /**
-     * Searches for vectors within a specific distance range.
-     * @param targetDistance the target distance to search around
-     * @param tolerance the tolerance for distance matching
-     * @return array of tuple indices that match the criteria
-     * @throws HyracksDataException if an error occurs
-     */
-    public int[] searchByDistance(double targetDistance, double tolerance) throws HyracksDataException {
-        double minDistance = targetDistance - tolerance;
-        double maxDistance = targetDistance + tolerance;
-
-        int[] range = findDistanceRange(minDistance, maxDistance);
-        if (range[0] == -1) {
-            return new int[0]; // Empty result
-        }
-
-        int resultSize = range[1] - range[0] + 1;
-        int[] results = new int[resultSize];
-        for (int i = 0; i < resultSize; i++) {
-            results[i] = range[0] + i;
-        }
-
-        return results;
-    }
-
-    /**
-     * Gets the closest vectors to a target distance.
-     * @param targetDistance the target distance
-     * @param k the number of closest vectors to return
-     * @return array of tuple indices of the k closest vectors
-     * @throws HyracksDataException if an error occurs
-     */
-    public int[] getClosestVectors(double targetDistance, int k) throws HyracksDataException {
-        int tupleCount = getTupleCount();
-        if (tupleCount == 0 || k <= 0) {
-            return new int[0];
-        }
-
-        // Simple implementation: find the k closest by scanning all
-        // In practice, you might want a more efficient implementation
-        double[] distances = new double[tupleCount];
-        for (int i = 0; i < tupleCount; i++) {
-            distances[i] = Math.abs(getDistanceToCentroid(i) - targetDistance);
-        }
-
-        // Find k smallest distances (simple selection)
-        int actualK = Math.min(k, tupleCount);
-        int[] results = new int[actualK];
-        boolean[] used = new boolean[tupleCount];
-
-        for (int j = 0; j < actualK; j++) {
-            int minIndex = -1;
-            double minDiff = Double.MAX_VALUE;
-
-            for (int i = 0; i < tupleCount; i++) {
-                if (!used[i] && distances[i] < minDiff) {
-                    minDiff = distances[i];
-                    minIndex = i;
-                }
-            }
-
-            results[j] = minIndex;
-            used[minIndex] = true;
-        }
-
-        return results;
-    }
 
     /**
      * Find the insertion position for a tuple based on distance to maintain sorted order.
+     * Uses RIGHT boundary search: inserts AFTER all existing tuples with the same distance.
+     * This preserves temporal ordering (FIFO) for tuples with equal distances.
      */
-    public int findInsertPosition(float distance) throws HyracksDataException {
+    public int findInsertPosition(double distance) throws HyracksDataException {
         int tupleCount = getTupleCount();
 
-        // Binary search for insertion position
+        // Binary search for RIGHT boundary (first tuple with distance > target)
         int left = 0;
         int right = tupleCount;
 
@@ -251,9 +170,11 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             int mid = (left + right) / 2;
             double midDistance = getDistanceToCentroid(mid);
 
-            if (midDistance < distance) {
+            if (midDistance <= distance) {
+                // Include equal distances: move past them
                 left = mid + 1;
             } else {
+                // midDistance > distance
                 right = mid;
             }
         }
@@ -288,87 +209,16 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     /**
-     * Range search within this data frame.
-     */
-    public List<Integer> rangeSearch(double minDistance, double maxDistance) throws HyracksDataException {
-        List<Integer> results = new ArrayList<>();
-        int tupleCount = getTupleCount();
-
-        // Find start position using binary search
-        int startIndex = findFirstTupleInRange(minDistance);
-
-        // Collect all tuples within range
-        for (int i = startIndex; i < tupleCount; i++) {
-            double distance = getDistanceToCentroid(i);
-            if (distance > maxDistance) {
-                break; // Since sorted, no more matches
-            }
-            if (distance >= minDistance) {
-                results.add(i);
-            }
-        }
-
-        return results;
-    }
-
-    /**
-     * Find k nearest neighbors within this data frame.
-     */
-    public List<Integer> kNearestNeighbors(int k) throws HyracksDataException {
-        List<Integer> results = new ArrayList<>();
-        int tupleCount = getTupleCount();
-        int limit = Math.min(k, tupleCount);
-
-        // Since tuples are sorted by distance, just take first k
-        for (int i = 0; i < limit; i++) {
-            results.add(i);
-        }
-
-        return results;
-    }
-
-    /**
-     * Find first tuple with distance >= minDistance.
-     */
-    private int findFirstTupleInRange(double minDistance) throws HyracksDataException {
-        int tupleCount = getTupleCount();
-        int left = 0;
-        int right = tupleCount;
-
-        while (left < right) {
-            int mid = (left + right) / 2;
-            double midDistance = getDistanceToCentroid(mid);
-
-            if (midDistance < minDistance) {
-                left = mid + 1;
-            } else {
-                right = mid;
-            }
-        }
-
-        return left;
-    }
-
-    /**
      * Split this data frame using BTree-style approach.
      * Follows the exact pattern from BTreeNSMLeafFrame.split().
      */
     public void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
             throws HyracksDataException {
-
         int tupleCount = getTupleCount();
 
-        // Determine split point and target frame
+        // Determine split point
         int tuplesToLeft = tupleCount / 2;
         int tuplesToRight = tupleCount - tuplesToLeft;
-
-        // Determine which frame gets the new tuple
-        VectorClusteringDataFrame targetFrame;
-        if (insertIndex < tuplesToLeft) {
-            targetFrame = this; // Insert into left (original) frame
-        } else {
-            targetFrame = rightFrame; // Insert into right (new) frame
-        }
 
         // STEP 1: Copy entire page buffer (BTree approach)
         ByteBuffer rightBuffer = rightFrame.getBuffer();
@@ -390,78 +240,38 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         rightFrame.compact();
         this.compact();
 
-        // STEP 5: Insert the new tuple into appropriate frame
-        int targetTupleIndex;
-        if (insertIndex < tuplesToLeft) {
-            // Insert into left frame
-            targetTupleIndex = insertIndex;
-            this.insert(tuple, targetTupleIndex);
+        // STEP 5: Determine target frame by comparing new tuple with split point
+        // Extract distance from the new tuple
+        double newTupleDistance = extractDistanceFromTuple(tuple);
+
+        // Get distance of the last tuple in left frame (the split point)
+        VectorClusteringDataFrame targetFrame;
+        if (tuplesToLeft > 0) {
+            double splitPointDistance = getDistanceToCentroid(tuplesToLeft - 1);
+
+            if (newTupleDistance <= splitPointDistance) {
+                targetFrame = this; // Insert into left frame
+            } else {
+                targetFrame = rightFrame; // Insert into right frame
+            }
         } else {
-            // Insert into right frame
-            targetTupleIndex = insertIndex - tuplesToLeft;
-            rightFrame.insert(tuple, targetTupleIndex);
-        }
-    }
-
-    /**
-     * Split data frame when it becomes full, maintaining distance-based ordering.
-     */
-    public void split(IVectorClusteringDataFrame rightFrame, ITupleReference tuple) throws HyracksDataException {
-        int tupleCount = getTupleCount();
-        int splitIndex = tupleCount / 2;
-
-        // Move second half of tuples to right frame
-        for (int i = splitIndex; i < tupleCount; i++) {
-            frameTuple.resetByTupleIndex(this, i);
-            SimpleTupleReference tupleCopy = new SimpleTupleReference();
-            copyTuple(frameTuple, tupleCopy);
-            rightFrame.insert(tupleCopy, rightFrame.getTupleCount());
+            // Edge case: left frame is empty
+            targetFrame = rightFrame;
         }
 
-        // Remove moved tuples from left frame
-        for (int i = tupleCount - 1; i >= splitIndex; i--) {
-            frameTuple.resetByTupleIndex(this, i);
-            delete(frameTuple, i);
-        }
-
-        // Insert new tuple into appropriate frame
-        float newDistance = extractDistanceFromTuple(tuple);
-        if (getTupleCount() == 0 || newDistance <= getDistanceToCentroid(getTupleCount() - 1)) {
-            int insertIndex = findInsertPosition(newDistance);
-            insert(tuple, insertIndex);
-        } else {
-            // Use the findInsertPosition method instead of interface method
-            int insertIndex = ((VectorClusteringDataFrame) rightFrame).findInsertPosition(newDistance);
-            rightFrame.insert(tuple, insertIndex);
-        }
-
-        // Update page links - can't access getPageId from interface, so skip this for now
-        int originalNextPage = getNextPage();
-        setNextPage(-1); // Set to invalid page ID, will be updated by caller
-        rightFrame.setNextPage(originalNextPage);
+        // STEP 6: Recalculate insertion position in target frame
+        // This ensures correct positioning with RIGHT boundary semantics
+        int targetTupleIndex = targetFrame.findInsertPosition(newTupleDistance);
+        targetFrame.insert(tuple, targetTupleIndex);
     }
 
     /**
      * Extract distance from tuple (first field).
      */
-    private float extractDistanceFromTuple(ITupleReference tuple) {
+    private double extractDistanceFromTuple(ITupleReference tuple) {
         byte[] data = tuple.getFieldData(0);
         int offset = tuple.getFieldStart(0);
-        return FloatPointable.getFloat(data, offset);
-    }
-
-    /**
-     * Get vector embedding from tuple (third field).
-     */
-    public double[] getVectorEmbedding(int tupleIndex) throws HyracksDataException {
-        frameTuple.resetByTupleIndex(this, tupleIndex);
-
-        // Vector embedding is the third field (index 2)
-        byte[] data = frameTuple.getFieldData(2);
-        int offset = frameTuple.getFieldStart(2);
-        int length = frameTuple.getFieldLength(2);
-
-        return VectorUtils.bytesToDoubleArray(Arrays.copyOfRange(data, offset, offset + length));
+        return DoublePointable.getDouble(data, offset);
     }
 
     /**
@@ -480,120 +290,20 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     /**
-     * Update distance and cosine similarity for a tuple.
-     */
-    public void updateDistanceAndCosine(int tupleIndex, float newDistance, float newCosine)
-            throws HyracksDataException {
-        frameTuple.resetByTupleIndex(this, tupleIndex);
-
-        // Extract existing data
-        double[] vector = getVectorEmbedding(tupleIndex);
-        byte[] primaryKey = getPrimaryKey(tupleIndex);
-
-        // Create updated tuple
-        SimpleTupleReference updatedTuple = createDataTuple(vector, newDistance, newCosine, primaryKey);
-
-        // Replace the tuple
-        frameTuple.resetByTupleIndex(this, tupleIndex);
-        delete(frameTuple, tupleIndex);
-        int insertIndex = findInsertPosition(newDistance);
-        insert(updatedTuple, insertIndex);
-    }
-
-    /**
-     * Create a data tuple with given parameters.
-     */
-    private SimpleTupleReference createDataTuple(double[] vector, double distance, double cosine, byte[] primaryKey)
-            throws HyracksDataException {
-        try {
-            // Serialize fields using DataOutput
-            ByteArrayOutputStream distanceStream = new ByteArrayOutputStream();
-            DataOutputStream distanceOut = new DataOutputStream(distanceStream);
-            DoubleSerializerDeserializer.write(distance, distanceOut);
-            byte[] distanceBytes = distanceStream.toByteArray();
-
-            ByteArrayOutputStream cosineStream = new ByteArrayOutputStream();
-            DataOutputStream cosineOut = new DataOutputStream(cosineStream);
-            DoubleSerializerDeserializer.write(cosine, cosineOut);
-            byte[] cosineBytes = cosineStream.toByteArray();
-
-            ByteArrayOutputStream vectorStream = new ByteArrayOutputStream();
-            DataOutputStream vectorOut = new DataOutputStream(vectorStream);
-            DoubleArraySerializerDeserializer.write(vector, vectorOut);
-            byte[] vectorBytes = vectorStream.toByteArray();
-
-            // Create raw tuple data manually using SimpleTupleWriter format
-            int totalSize =
-                    4 + 4 * 4 + distanceBytes.length + cosineBytes.length + vectorBytes.length + primaryKey.length;
-            byte[] tupleData = new byte[totalSize];
-
-            // Write null flags (4 bytes for 4 fields)
-            int offset = 0;
-            for (int i = 0; i < 4; i++) {
-                tupleData[offset++] = 0; // no nulls
-            }
-
-            // Write field slot offsets (4 bytes each)
-            int fieldOffset = 4 + 4 * 4; // after null flags and slot array
-            tupleData[offset++] = (byte) (fieldOffset & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 8) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 16) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 24) & 0xFF);
-
-            fieldOffset += distanceBytes.length;
-            tupleData[offset++] = (byte) (fieldOffset & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 8) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 16) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 24) & 0xFF);
-
-            fieldOffset += cosineBytes.length;
-            tupleData[offset++] = (byte) (fieldOffset & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 8) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 16) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 24) & 0xFF);
-
-            fieldOffset += vectorBytes.length;
-            tupleData[offset++] = (byte) (fieldOffset & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 8) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 16) & 0xFF);
-            tupleData[offset++] = (byte) ((fieldOffset >> 24) & 0xFF);
-
-            // Write field data
-            System.arraycopy(distanceBytes, 0, tupleData, offset, distanceBytes.length);
-            offset += distanceBytes.length;
-            System.arraycopy(cosineBytes, 0, tupleData, offset, cosineBytes.length);
-            offset += cosineBytes.length;
-            System.arraycopy(vectorBytes, 0, tupleData, offset, vectorBytes.length);
-            offset += vectorBytes.length;
-            System.arraycopy(primaryKey, 0, tupleData, offset, primaryKey.length);
-
-            SimpleTupleReference dataTuple = new SimpleTupleReference();
-            dataTuple.resetByTupleOffset(tupleData, 0);
-            dataTuple.setFieldCount(4);
-
-            return dataTuple;
-        } catch (IOException e) {
-            throw HyracksDataException.create(e);
-        }
-    }
-
-    /**
      * Create a data tuple for VectorClusteringTree. For DELETE operations, sets the antimatter bit.
      *
      * @param vector Vector array
      * @param distance Distance as double
-     * @param cosineSim Cosine similarity as double
+     * @param centroidId Leaf cluster centoid Id
      * @param originalTuple Original tuple containing primary key
      * @param ctx Operation context to check if this is a DELETE operation
      * @return ITupleReference representing the data tuple (with antimatter bit if DELETE)
      * @throws HyracksDataException if tuple creation fails
      */
-    public ITupleReference createDataTuple(double[] vector, double distance, double cosineSim,
+    public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException {
         // TEMPORARY FORMAT: <distance: ADOUBLE, AINTEGER, primaryKey: AINT64>
-        // For DELETE: prepend null flags byte with antimatter bit (bit 7) set
-        // Original tuple format: <vector: AORDEREDLIST, primaryKey: AINT64>
         try {
             ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(3);
             DataOutput dos = dataTupleBuilder.getDataOutput();
@@ -605,7 +315,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
 
             // Field 1: placeholder AINTEGER (type tag + 4-byte int)
             dos.writeByte(0x1A); // AINT32 type tag
-            dos.writeInt(0); // placeholder value
+            dos.writeInt(centroidId); // placeholder value
             dataTupleBuilder.addFieldEndOffset();
 
             // Field 2: primaryKey - copy directly from originalTuple field 1 (already in AINT64 format)
@@ -624,129 +334,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         }
     }
 
-    /**
-     * Create updated data tuple preserving vector embedding, distance, cosine, and primary key.
-     * Only included fields (if any) from the update tuple are applied.
-     * This method enforces the rule that vector embeddings and primary keys are immutable in updates.
-     *
-     * Update tuple format: <vector, included_field1, included_field2, ..., primary_key>
-     * Data tuple format:   <distance, cosine, vector, primary_key, included_field1, included_field2, ...>
-     *
-     * @param currentVector The current vector embedding (preserved)
-     * @param currentDistance The current distance to centroid (preserved)
-     * @param currentCosine The current cosine similarity (preserved)
-     * @param currentPK The current primary key (preserved)
-     * @param updateTuple The tuple containing the included field updates
-     * @return Updated data tuple with preserved vector/PK and updated included fields
-     * @throws HyracksDataException if tuple creation fails
-     */
-    public ITupleReference createUpdatedDataTupleWithIncludedFields(double[] currentVector, double currentDistance,
-            double currentCosine, byte[] currentPK, ITupleReference updateTuple) throws HyracksDataException {
-
-        try {
-            System.out.println("DEBUG: Creating updated data tuple");
-            System.out.println(
-                    "DEBUG: Current vector length: " + (currentVector != null ? currentVector.length : "null"));
-            System.out.println("DEBUG: Current distance: " + currentDistance);
-            System.out.println("DEBUG: Current cosine: " + currentCosine);
-            System.out.println("DEBUG: Current PK length: " + (currentPK != null ? currentPK.length : "null"));
-            System.out.println("DEBUG: Update tuple field count: " + updateTuple.getFieldCount());
-
-            // Determine the number of included fields in the update tuple
-            // Update tuple format: <vector, included_field1, included_field2, ..., primary_key>
-            // So included fields are from index 1 to (fieldCount - 2)
-            int numIncludedFields = Math.max(0, updateTuple.getFieldCount() - 2);
-
-            // Data tuple format: <distance, cosine, vector, primary_key, included_field1, included_field2, ...>
-            int totalFields = 4 + numIncludedFields; // distance, cosine, vector, PK + included fields
-
-            // Use existing createDataTuple method and then append included fields
-            SimpleTupleReference baseTuple = createDataTuple(currentVector, currentDistance, currentCosine, currentPK);
-
-            if (numIncludedFields == 0) {
-                // No included fields to add, return base tuple
-                return baseTuple;
-            }
-
-            // Create tuple with included fields using manual byte manipulation (similar to original method)
-            ByteArrayOutputStream tupleStream = new ByteArrayOutputStream();
-            DataOutputStream tupleOut = new DataOutputStream(tupleStream);
-
-            // Copy base tuple data (distance, cosine, vector, PK)
-            for (int i = 0; i < 4; i++) {
-                byte[] fieldData = baseTuple.getFieldData(i);
-                tupleOut.write(fieldData, baseTuple.getFieldStart(i), baseTuple.getFieldLength(i));
-            }
-
-            // Add included fields from update tuple
-            for (int i = 1; i < updateTuple.getFieldCount() - 1; i++) {
-                byte[] fieldData = updateTuple.getFieldData(i);
-                int fieldLength = updateTuple.getFieldLength(i);
-                if (fieldData != null && fieldLength > 0) {
-                    tupleOut.write(fieldData, updateTuple.getFieldStart(i), fieldLength);
-                    System.out.println("DEBUG: Added included field " + (i - 1) + " with length: " + fieldLength);
-                } else {
-                    // Handle empty/null included field
-                    System.out.println("DEBUG: Added empty included field " + (i - 1));
-                }
-            }
-
-            // Create SimpleTupleReference with the combined data
-            SimpleTupleReference result = new SimpleTupleReference();
-            byte[] tupleData = tupleStream.toByteArray();
-            result.resetByTupleOffset(tupleData, 0);
-            result.setFieldCount(totalFields);
-
-            System.out.println("DEBUG: Created updated tuple with " + result.getFieldCount() + " fields");
-            return result;
-
-        } catch (IOException e) {
-            throw HyracksDataException.create(e);
-        }
-    }
-
-    /**
-     * Copy tuple data to a new SimpleTupleReference.
-     */
-    private void copyTuple(ITupleReference source, SimpleTupleReference target) throws HyracksDataException {
-        try {
-            // Calculate total size needed
-            int totalSize = 4 + source.getFieldCount() * 4; // null flags + field offsets
-            for (int i = 0; i < source.getFieldCount(); i++) {
-                totalSize += source.getFieldLength(i);
-            }
-
-            byte[] tupleData = new byte[totalSize];
-            int offset = 0;
-
-            // Write null flags
-            for (int i = 0; i < 4; i++) {
-                tupleData[offset++] = 0; // no nulls
-            }
-
-            // Write field slot offsets
-            int fieldOffset = 4 + source.getFieldCount() * 4; // after null flags and slot array
-            for (int i = 0; i < source.getFieldCount(); i++) {
-                tupleData[offset++] = (byte) (fieldOffset & 0xFF);
-                tupleData[offset++] = (byte) ((fieldOffset >> 8) & 0xFF);
-                tupleData[offset++] = (byte) ((fieldOffset >> 16) & 0xFF);
-                tupleData[offset++] = (byte) ((fieldOffset >> 24) & 0xFF);
-                fieldOffset += source.getFieldLength(i);
-            }
-
-            // Copy field data
-            for (int i = 0; i < source.getFieldCount(); i++) {
-                System.arraycopy(source.getFieldData(i), source.getFieldStart(i), tupleData, offset,
-                        source.getFieldLength(i));
-                offset += source.getFieldLength(i);
-            }
-
-            target.setFieldCount(source.getFieldCount());
-            target.resetByTupleOffset(tupleData, 0);
-        } catch (Exception e) {
-            throw HyracksDataException.create(e);
-        }
-    }
 
     public int getFreeSpaceOff() {
         return buf.getInt(Constants.FREE_SPACE_OFFSET);

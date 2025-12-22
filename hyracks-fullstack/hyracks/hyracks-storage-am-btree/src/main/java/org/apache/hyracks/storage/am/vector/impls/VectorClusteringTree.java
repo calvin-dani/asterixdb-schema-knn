@@ -69,16 +69,19 @@ import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
  * Vector Clustering Tree implementation for multi-level k-means vector index.
  *
- * This tree supports hierarchical vector clustering with specialized frame types: - Interior frames: Store cluster
- * centroids and child page pointers - Leaf frames: Store cluster centroids and metadata page pointers - Metadata
- * frames: Store max distances and data page pointers - Data frames: Store vector data with distances, cosine
- * similarity, and primary keys
+ * This tree supports hierarchical vector clustering with specialized frame types:
+ * - Interior frames: Store cluster
+ * centroids and child page pointers
+ * - Leaf frames: Store cluster centroids and metadata page pointers
+ * - Metadata frames: Store max distances and data page pointers
+ * - Data frames: Store distances, primary keys
  */
 public class VectorClusteringTree extends AbstractTreeIndex {
 
@@ -86,13 +89,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private final int vectorDimensions;
     private final ITreeIndexFrameFactory metadataFrameFactory;
     private final ITreeIndexFrameFactory dataFrameFactory;
-    private final org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory;
+    private final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     // Add missing frameTuple declaration
     private ITreeIndexTupleReference frameTuple;
-
-    private VectorClusteringTreeStaticInitializer staticInitializer;
-
     // TODO: leave only one flag
     private boolean isStaticStructureInitialized = true;
 
@@ -104,15 +104,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file,
             org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] VectorClusteringTree constructor: Started, super() call completed");
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
         this.vectorAccessorFactory = vectorAccessorFactory;
-        staticInitializer = null;
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] VectorClusteringTree constructor: Constructor completed");
     }
 
     /**
@@ -150,11 +145,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     @Override
     public int getNumOfFilterFields() {
         return 0;
-    }
-
-    public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
-            ITreeIndexAccessor static_accessor) throws HyracksDataException {
-        return createComponentBulkLoader(instance, static_accessor, null);
     }
 
     public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
@@ -217,12 +207,13 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // Extract vector for distance calculations
             double[] vector = extractVectorFromTuple(tuple);
 
-            // Calculate distance and cosine similarity to cluster centroid
+            // Calculate distance to cluster centroid and get centroid ID
             double[] centroidDouble = accessResult.clusterResult.centroid;
             double distance = VectorUtils.calculateEuclideanDistance(vector, centroidDouble);
+            int centroidId = accessResult.clusterResult.centroidId;
 
             // Insert into appropriate data page based on distance
-            insertIntoDataPages(accessResult.metadataPageId, vector, distance, 0, tuple, ctx);
+            insertIntoDataPages(accessResult.metadataPageId, vector, distance, centroidId, tuple, ctx);
 
         } finally {
             accessResult.leafPage.releaseWriteLatch(true);
@@ -234,7 +225,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Insert vector data into data pages via metadata pages. This method traverses through all linked metadata pages to
      * find the appropriate data page.
      */
-    private void insertIntoDataPages(long metadataPageId, double[] vector, double distance, double cosineSim,
+    private void insertIntoDataPages(long metadataPageId, double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         // Traverse through all linked metadata pages to find the appropriate data page
@@ -248,19 +239,19 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 metadataPage.acquireWriteLatch();
                 ctx.getMetadataFrame().setPage(metadataPage);
 
-                System.err.println(
-                        "DEBUG: Searching metadata page " + currentMetadataPageId + " for distance " + distance);
+                LOGGER.log(Level.DEBUG, "Searching metadata page {} for distance {}", currentMetadataPageId,
+                        metadataPage);
 
                 // Try to find appropriate data page in current metadata page based on distance
-                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), (float) distance);
+                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), distance);
 
                 if (targetDataPageId != -1) {
                     // Found appropriate data page - try to insert
-                    System.err.println("DEBUG: Found target data page " + targetDataPageId + " in metadata page "
-                            + currentMetadataPageId);
+                    LOGGER.log(Level.DEBUG, "Found target data page {} in metadata page {}",
+                            targetDataPageId,  currentMetadataPageId);
 
                     boolean inserted =
-                            tryInsertIntoDataPage(targetDataPageId, vector, distance, cosineSim, originalTuple, ctx);
+                            tryInsertIntoDataPage(targetDataPageId, vector, distance, centroidId, originalTuple, ctx);
 
                     if (inserted) {
                         System.err.println("DEBUG: Successfully inserted into data page " + targetDataPageId);
@@ -269,7 +260,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                     // If insert failed due to space, we need to handle overflow
                     System.err.println("DEBUG: Data page " + targetDataPageId + " is full, handling overflow");
-                    handleDataPageOverflow(currentMetadataPageId, vector, distance, cosineSim, originalTuple, ctx);
+                    handleDataPageOverflow(currentMetadataPageId, vector, distance, centroidId, originalTuple, ctx);
                     return;
                 }
 
@@ -282,7 +273,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 if (nextMetadataPageId == 0 || nextMetadataPageId == -1) {
                     // Reached end of metadata chain - need to create new data page
                     System.err.println("DEBUG: Reached end of metadata chain, creating new data page");
-                    handleDataPageOverflow(currentMetadataPageId, vector, distance, cosineSim, originalTuple, ctx);
+                    handleDataPageOverflow(currentMetadataPageId, vector, distance, centroidId, originalTuple, ctx);
                     return;
                 }
 
@@ -299,7 +290,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Find the appropriate data page in a specific metadata page based on distance. This searches for a data page that
      * can accommodate the given distance.
      */
-    private long findDataPageInMetadataPage(IVectorClusteringMetadataFrame metadataFrame, float distance)
+    private long findDataPageInMetadataPage(IVectorClusteringMetadataFrame metadataFrame, double distance)
             throws HyracksDataException {
 
         int tupleCount = metadataFrame.getTupleCount();
@@ -336,7 +327,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Try to insert into a specific data page. Returns true if successful, false if page is full.
      */
-    private boolean tryInsertIntoDataPage(long dataPageId, double[] vector, double distance, double cosineSim,
+    private boolean tryInsertIntoDataPage(long dataPageId, double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
@@ -345,9 +336,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             dataPage.acquireWriteLatch();
             ctx.getDataFrame().setPage(dataPage);
 
-            // Create data tuple: <distance, vector, PK>
+            // Create data tuple: <distance, centroidId, vector, PK>
             // Pass context so createDataTuple can check operation type and set antimatter bit if DELETE
-            ITupleReference dataTuple = ctx.getDataFrame().createDataTuple(vector, distance, cosineSim, originalTuple, ctx);
+            ITupleReference dataTuple = ctx.getDataFrame().createDataTuple(vector, distance, centroidId, originalTuple, ctx);
 
             // Check if there's space for the tuple
             FrameOpSpaceStatus spaceStatus = ctx.getDataFrame().hasSpaceInsert(dataTuple);
@@ -362,7 +353,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 case SUFFICIENT_SPACE:
                     // Find correct insertion position to maintain sorted order by distance
                     int insertIndex =
-                            ((VectorClusteringDataFrame) ctx.getDataFrame()).findInsertPosition((float) distance);
+                            ((VectorClusteringDataFrame) ctx.getDataFrame()).findInsertPosition(distance);
 
                     // Insert the tuple
                     ctx.getDataFrame().insert(dataTuple, insertIndex);
@@ -385,7 +376,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                     // Find correct insertion position to maintain sorted order by distance
                     int splitInsertIndex =
-                            ((VectorClusteringDataFrame) ctx.getDataFrame()).findInsertPosition((float) distance);
+                            ((VectorClusteringDataFrame) ctx.getDataFrame()).findInsertPosition(distance);
 
                     // Split the data page while maintaining distance-based ordering
                     splitDataPageMaintainOrder(dataPageId, dataTuple, splitInsertIndex, ctx);
@@ -445,7 +436,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     /**
      * Update metadata page after data page split.
-     * FIX Bug #5: Updates BOTH original page's maxDistance and adds new page's entry.
+     * Updates BOTH original page's maxDistance and adds new page's entry.
      */
     private void updateMetadataAfterDataSplit(long originalDataPageId, int newDataPageId, VectorClusteringOpContext ctx)
             throws HyracksDataException {
@@ -460,7 +451,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             return; // Could not find the metadata page
         }
 
-        // FIX Bug #5: Get max distance from ORIGINAL data page after split
+        // Get max distance from ORIGINAL data page after split
         ICachedPage originalDataPage =
                 bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) originalDataPageId));
         double originalPageMaxDistance = 0.0;
@@ -505,7 +496,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             bufferCache.unpin(newDataPage);
         }
 
-        // FIX Bug #5: Update ORIGINAL page's maxDistance in metadata (decreased after split)
+        // Update ORIGINAL page's maxDistance in metadata (decreased after split)
         forceUpdateMetadataMaxDistance(targetMetadataPageId, originalDataPageId, originalPageMaxDistance, ctx);
 
         // Add NEW page's metadata entry
@@ -514,46 +505,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         System.err.println("DEBUG: Successfully updated metadata page " + targetMetadataPageId
                 + " - updated original page " + originalDataPageId + " maxDistance=" + originalPageMaxDistance
                 + ", added new page " + newDataPageId + " maxDistance=" + newPageMaxDistance);
-    }
-
-    /**
-     * Search through a metadata page chain to find the page containing the target data page.
-     */
-    private long searchMetadataChainForDataPage(long startMetadataPageId, long targetDataPageId,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        long currentMetadataPageId = startMetadataPageId;
-
-        while (currentMetadataPageId != -1) {
-            ICachedPage metadataPage =
-                    bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) currentMetadataPageId));
-
-            try {
-                metadataPage.acquireReadLatch();
-                ctx.getMetadataFrame().setPage(metadataPage);
-
-                int tupleCount = ctx.getMetadataFrame().getTupleCount();
-
-                // Check each data page pointer in this metadata page
-                for (int i = 0; i < tupleCount; i++) {
-                    long dataPagePointer = ctx.getMetadataFrame().getDataPagePointer(i);
-                    if (dataPagePointer == targetDataPageId) {
-                        System.out.println("DEBUG: Found target data page " + targetDataPageId + " in metadata page "
-                                + currentMetadataPageId);
-                        return currentMetadataPageId;
-                    }
-                }
-
-                // Move to next metadata page in the chain
-                currentMetadataPageId = ctx.getMetadataFrame().getNextPage();
-
-            } finally {
-                metadataPage.releaseReadLatch();
-                bufferCache.unpin(metadataPage);
-            }
-        }
-
-        return -1; // Data page not found in this metadata chain
     }
 
     /**
@@ -741,263 +692,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return accessor.getVector();
     }
 
-    // Missing method implementations
-    private void updateVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-        // Use unified cluster search and access pattern
-        ClusterAccessResult accessResult = findClusterAndPrepareAccess(tuple, ctx, false);
-
-        try {
-            // Extract vector for debugging
-            double[] vector = extractVectorFromTuple(tuple);
-
-            // Search for the tuple in data pages of the target cluster and update
-            boolean updated = updateInDataPagesWithVectorCheck(accessResult.metadataPageId, vector, tuple, ctx);
-
-            if (!updated) {
-                // Unlike delete, update should throw an exception if tuple not found
-                throw HyracksDataException.create(ErrorCode.UPDATE_OR_DELETE_NON_EXISTENT_KEY);
-            }
-
-        } finally {
-            accessResult.leafPage.releaseReadLatch();
-            bufferCache.unpin(accessResult.leafPage);
-        }
-    }
-
-    /**
-     * Update tuple in data pages with vector similarity and primary key matching. If not found in the target cluster,
-     * search all clusters.
-     *
-     * @param metadataPageId
-     *         The metadata page ID to search
-     * @param targetVector
-     *         The vector used for tree traversal
-     * @param updateTuple
-     *         The tuple containing the included field updates
-     * @return true if tuple was found and updated, false otherwise
-     */
-    private boolean updateInDataPagesWithVectorCheck(long metadataPageId, double[] targetVector,
-            ITupleReference updateTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        // First try the closest cluster
-        boolean updated = searchMetadataPageForUpdate(metadataPageId, targetVector, updateTuple, ctx);
-
-        if (updated) {
-            return true;
-        }
-
-        // If not found in closest cluster, search all clusters
-        // This handles cases where the vector has changed significantly or test data is distributed differently
-        System.out.println("DEBUG: Tuple not found in closest cluster, searching all clusters");
-        return searchAllClustersForUpdate(targetVector, updateTuple, ctx);
-    }
-
-    /**
-     * Search a specific metadata page for the tuple to update.
-     */
-    private boolean searchMetadataPageForUpdate(long metadataPageId, double[] targetVector, ITupleReference updateTuple,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
-        try {
-            metadataPage.acquireReadLatch();
-            IVectorClusteringMetadataFrame metadataFrame =
-                    (IVectorClusteringMetadataFrame) metadataFrameFactory.createFrame();
-            metadataFrame.setPage(metadataPage);
-
-            int tupleCount = metadataFrame.getTupleCount();
-
-            // Search each data page referenced in the metadata
-            for (int i = 0; i < tupleCount; i++) {
-                long dataPageId = metadataFrame.getDataPagePointer(i);
-                boolean updated = updateInDataPageWithVectorCheck(dataPageId, targetVector, updateTuple, ctx);
-                if (updated) {
-                    return true; // Found and updated the tuple
-                }
-            }
-
-            return false; // Tuple not found in any data page
-
-        } finally {
-            metadataPage.releaseReadLatch();
-            bufferCache.unpin(metadataPage);
-        }
-    }
-
-    /**
-     * Search all clusters for the tuple to update (fallback when not found in closest cluster).
-     */
-    private boolean searchAllClustersForUpdate(double[] targetVector, ITupleReference updateTuple,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        System.out.println("DEBUG: Starting comprehensive search across all clusters");
-
-        // Get primary key for matching
-        byte[] targetPK = extractPrimaryKeyFromTuple(updateTuple);
-        if (targetPK == null) {
-            System.out.println("DEBUG: No primary key found in update tuple");
-            return false;
-        }
-
-        // Traverse all leaf pages to find all clusters
-        return searchAllLeafPagesForUpdate(targetPK, updateTuple, ctx, rootPage, 0);
-    }
-
-    /**
-     * Recursively search all leaf pages for the tuple to update.
-     */
-    private boolean searchAllLeafPagesForUpdate(byte[] targetPK, ITupleReference updateTuple,
-            VectorClusteringOpContext ctx, int pageId, int depth) throws HyracksDataException {
-
-        if (depth > 10) { // Safety check
-            return false;
-        }
-
-        ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), pageId));
-        try {
-            page.acquireReadLatch();
-
-            // Check if this is a leaf page
-            ctx.getLeafFrame().setPage(page);
-            boolean isLeaf = ctx.getLeafFrame().isLeaf();
-
-            if (isLeaf) {
-                // Search all clusters in this leaf page
-                int tupleCount = ctx.getLeafFrame().getTupleCount();
-                System.out.println("DEBUG: Searching leaf page " + pageId + " with " + tupleCount + " clusters");
-
-                for (int i = 0; i < tupleCount; i++) {
-                    long metadataPageId = ctx.getLeafFrame().getMetadataPagePointer(i);
-                    boolean updated = searchMetadataPageForUpdate(metadataPageId, null, updateTuple, ctx);
-                    if (updated) {
-                        System.out
-                                .println("DEBUG: Found and updated tuple in cluster " + i + " of leaf page " + pageId);
-                        return true;
-                    }
-                }
-            } else {
-                // Interior page - recurse to children
-                ctx.getInteriorFrame().setPage(page);
-                int tupleCount = ctx.getInteriorFrame().getTupleCount();
-
-                for (int i = 0; i < tupleCount; i++) {
-                    int childPageId = ctx.getInteriorFrame().getChildPageId(i);
-                    boolean updated = searchAllLeafPagesForUpdate(targetPK, updateTuple, ctx, childPageId, depth + 1);
-                    if (updated) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-
-        } finally {
-            page.releaseReadLatch();
-            bufferCache.unpin(page);
-        }
-    }
-
-    /**
-     * Update tuple in a specific data page with enhanced vector similarity and primary key matching. This implements
-     * the key enhancement for exact tuple identification.
-     *
-     * @param dataPageId
-     *         The data page to search
-     * @param targetVector
-     *         The vector used for tree traversal and similarity matching
-     * @param updateTuple
-     *         The tuple containing the included field updates
-     * @return true if tuple was found and updated, false otherwise
-     */
-    private boolean updateInDataPageWithVectorCheck(long dataPageId, double[] targetVector, ITupleReference updateTuple,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
-
-        ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
-        try {
-            dataPage.acquireWriteLatch(); // Write latch for potential update
-            IVectorClusteringDataFrame dataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
-            dataFrame.setPage(dataPage);
-
-            int tupleCount = dataFrame.getTupleCount();
-
-            // Debug logging
-            System.out.println(
-                    "DEBUG: updateInDataPageWithVectorCheck - dataPageId=" + dataPageId + ", tupleCount=" + tupleCount);
-            System.out.println("DEBUG: updateTuple fields=" + updateTuple.getFieldCount());
-
-            byte[] targetPK = extractPrimaryKeyFromTuple(updateTuple);
-            System.out.println("DEBUG: targetPK=" + (targetPK != null ? Arrays.toString(targetPK) : "null"));
-
-            // Search through tuples in the data page
-            for (int i = 0; i < tupleCount; i++) {
-                ITreeIndexTupleReference currentTuple = dataFrame.createTupleReference();
-                currentTuple.resetByTupleIndex(dataFrame, i);
-
-                // Debug current tuple
-                System.out.println("DEBUG: Checking tuple " + i + ", fields=" + currentTuple.getFieldCount());
-
-                // Extract primary key first for exact matching
-                byte[] currentPK = extractPrimaryKeyFromTuple(currentTuple);
-                System.out.println("DEBUG: currentPK=" + (currentPK != null ? Arrays.toString(currentPK) : "null"));
-
-                // Check primary key match first - this is the authoritative identifier
-                if (currentPK != null && targetPK != null && Arrays.equals(currentPK, targetPK)) {
-                    System.out.println("DEBUG: Found matching tuple by primary key! Performing update.");
-
-                    // Extract vector from current tuple to preserve it
-                    double[] currentVector = extractVectorFromTuple(currentTuple);
-                    if (currentVector == null) {
-                        System.out.println("DEBUG: currentVector is null for tuple " + i);
-                        continue;
-                    }
-
-                    // Verify that vector embedding is not being changed
-                    double[] updateVector = extractVectorFromTuple(updateTuple);
-                    if (updateVector != null && !Arrays.equals(currentVector, updateVector)) {
-                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
-                                "Update operation cannot modify vector embedding - vector field is immutable");
-                    }
-
-                    // Perform the actual update using the frame's update method
-                    try {
-                        // Create a new data tuple with updated included fields 
-                        // while preserving vector, distance, cosine, and primary key
-                        ITupleReference updatedDataTuple = dataFrame.createUpdatedDataTupleWithIncludedFields(
-                                currentVector, dataFrame.getDistanceToCentroid(i), dataFrame.getCosineValue(i),
-                                currentPK, updateTuple);
-
-                        // Check if we have enough space for in-place update
-                        FrameOpSpaceStatus spaceStatus = dataFrame.hasSpaceUpdate(updatedDataTuple, i);
-                        boolean inPlace = (spaceStatus == FrameOpSpaceStatus.SUFFICIENT_INPLACE_SPACE);
-
-                        // Perform the update
-                        dataFrame.update(updatedDataTuple, i, inPlace);
-
-                        // Call modification callback
-                        ctx.getModificationCallback().found(currentTuple, updatedDataTuple);
-
-                        // Update page LSN to reflect the change
-                        long currentLsn = dataFrame.getPageLsn();
-                        dataFrame.setPageLsn(currentLsn + 1);
-
-                        System.out.println("DEBUG: Update completed successfully");
-                        return true;
-
-                    } catch (Exception e) {
-                        System.out.println("DEBUG: Update failed: " + e.getMessage());
-                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
-                                "Update operation failed: " + e.getMessage());
-                    }
-                }
-            }
-
-            return false;
-
-        } finally {
-            dataPage.releaseWriteLatch(false); // Release without marking dirty initially
-            bufferCache.unpin(dataPage);
-        }
-    }
 
     private void upsertVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
         // Implement vector upsert using accessor and frame factories
@@ -1010,7 +704,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
     }
 
-    private void handleDataPageOverflow(long metadataPageId, double[] vector, double distance, double cosineSim,
+    private void handleDataPageOverflow(long metadataPageId, double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
         // Use the frame factories and page manager to handle overflow
         IVectorClusteringDataFrame dataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
@@ -1027,7 +721,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             dataFrame.initBuffer((byte) 0);
 
             // Create data tuple for the new vector
-            ITupleReference dataTuple = dataFrame.createDataTuple(vector, distance, cosineSim, originalTuple, ctx);
+            ITupleReference dataTuple = dataFrame.createDataTuple(vector, distance, centroidId, originalTuple, ctx);
 
             // Insert the tuple into the new page
             dataFrame.insert(dataTuple, 0);
@@ -1350,7 +1044,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), maxPageId + numLeafCentroid + 1), NEW);
         bufferCache.unpin(targetPage);
 
-
         initialized = true;
     }
 
@@ -1500,7 +1193,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         @Override
         public void update(ITupleReference tuple) throws HyracksDataException {
             ctx.setOperation(IndexOperation.UPDATE);
-            updateVector(tuple, ctx);
+            throw new UnsupportedOperationException();
         }
 
         @Override

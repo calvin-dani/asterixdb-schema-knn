@@ -26,7 +26,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 
 /**
  * Interface for vector clustering data frames.
- * Data frames contain vector records: <distance_to_centroid, cos(θ), quantized_vector, include_fields, PK>
+ * Data frames contain vector records: <distance_to_centroid, centroid_id, PK, include_fields>
  */
 public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
 
@@ -58,13 +58,6 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      */
     double getDistanceToCentroid(int tupleIndex) throws HyracksDataException;
 
-    /**
-     * Gets the cosine value for a vector record.
-     * @param tupleIndex the index of the vector record
-     * @return the cosine value
-     * @throws HyracksDataException if an error occurs
-     */
-    double getCosineValue(int tupleIndex) throws HyracksDataException;
 
     /**
      * Inserts a vector record at the specified index, maintaining distance ordering.
@@ -78,28 +71,14 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      *
      * @param vector        Vector array
      * @param distance      Distance as double
-     * @param cosineSim     Cosine similarity as double
+     * @param centroidId     Centroid Id as integer
      * @param originalTuple Original tuple containing primary key
      * @param ctx
      * @return ITupleReference representing the data tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    ITupleReference createDataTuple(double[] vector, double distance, double cosineSim, ITupleReference originalTuple, VectorClusteringOpContext ctx)
+    ITupleReference createDataTuple(double[] vector, double distance, int centroidId, ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException;
-
-    /**
-     * Creates an updated data tuple with included fields while preserving vector embedding, distance, cosine, and primary key.
-     * 
-     * @param currentVector The current vector embedding (preserved)
-     * @param currentDistance The current distance to centroid (preserved)
-     * @param currentCosine The current cosine similarity (preserved)
-     * @param currentPK The current primary key (preserved)
-     * @param updateTuple The tuple containing the included field updates
-     * @return Updated data tuple with preserved vector/PK and updated included fields
-     * @throws HyracksDataException if tuple creation fails
-     */
-    ITupleReference createUpdatedDataTupleWithIncludedFields(double[] currentVector, double currentDistance,
-            double currentCosine, byte[] currentPK, ITupleReference updateTuple) throws HyracksDataException;
 
     /**
      * Finds the range of tuples within a distance range.
@@ -110,6 +89,6 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      */
     int[] findDistanceRange(double minDistance, double maxDistance) throws HyracksDataException;
 
-    public void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
+    void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
             throws HyracksDataException;
 }

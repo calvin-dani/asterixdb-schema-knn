@@ -29,6 +29,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent.LSMComponentTy
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexSearchCursor;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
 import org.apache.hyracks.storage.common.ICursorInitialState;
@@ -204,8 +205,34 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         }
 
         // Populate priority queue with first element from each cursor
+        // If a cursor has no data (empty cluster), mark it as exhausted
         for (int i = 0; i < rangeCursors.length; i++) {
-            pushIntoQueueFromCursorAndReplaceThisElement(pqes[i]);
+            if (rangeCursors[i].hasNext()) {
+                rangeCursors[i].next();
+                pqes[i].reset(rangeCursors[i].getTuple());
+                outputPriorityQueue.offer(pqes[i]);
+            } else {
+                // Cursor has no data in initial cluster - mark as exhausted
+                clusterExhausted[i] = true;
+                System.err.println(String.format(
+                        "[LSMVCTreeSearchCursor] Component %d has empty initial cluster (marked exhausted)",
+                        i));
+            }
+        }
+
+        // Check if ALL components started with empty clusters
+        // If so, advance all to next cluster
+        boolean allInitiallyExhausted = true;
+        for (int i = 0; i < clusterExhausted.length; i++) {
+            if (!clusterExhausted[i]) {
+                allInitiallyExhausted = false;
+                break;
+            }
+        }
+
+        if (allInitiallyExhausted) {
+            System.err.println("[LSMVCTreeSearchCursor] ALL components have empty initial cluster, advancing to next");
+            advanceAllComponentsToNextCluster();
         }
     }
 
@@ -718,7 +745,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         for (int i = 0; i < rangeCursors.length; i++) {
             IIndexCursor cursor = rangeCursors[i];
 
-            if (!(cursor instanceof org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor)) {
+            if (!(cursor instanceof VectorClusteringSearchCursor)) {
                 // Not a VectorClusteringSearchCursor - mark as exhausted
                 clusterExhausted[i] = true;
                 System.err.println(String.format(
@@ -727,8 +754,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                 continue;
             }
 
-            org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor vcCursor =
-                    (org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor) cursor;
+            VectorClusteringSearchCursor vcCursor =
+                    (VectorClusteringSearchCursor) cursor;
 
             if (!vcCursor.hasMoreClusters()) {
                 // No more clusters for this component - mark as exhausted
@@ -753,22 +780,63 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             // Increment cluster index for this component
             currentClusterIndex[i]++;
 
-            // Add first tuple from new cluster to priority queue
+            // Check if this cluster has data
             if (vcCursor.hasNext()) {
+                // Cluster has data - add to queue
                 vcCursor.next();
                 PriorityQueueElement pqe = pqes[i];
                 pqe.reset(vcCursor.getTuple());
                 outputPriorityQueue.offer(pqe);
                 System.err.println(String.format(
-                        "[LSMVCTreeSearchCursor] Component %d advanced to cluster %d",
+                        "[LSMVCTreeSearchCursor] Component %d advanced to cluster %d (has data)",
                         i, currentClusterIndex[i]));
             } else {
-                // New cluster is empty - mark as exhausted
+                // Cluster is empty - mark as exhausted for this cluster
+                // Component will wait at this cluster until all components finish
                 clusterExhausted[i] = true;
                 System.err.println(String.format(
-                        "[LSMVCTreeSearchCursor] Component %d advanced to cluster %d but it's empty",
+                        "[LSMVCTreeSearchCursor] Component %d cluster %d is empty (will wait for other components)",
                         i, currentClusterIndex[i]));
             }
+        }
+
+        // Check if ALL components found the cluster empty (all exhausted again)
+        boolean allStillExhausted = true;
+        boolean anyHasMoreClusters = false;
+
+        for (int i = 0; i < clusterExhausted.length; i++) {
+            if (!clusterExhausted[i]) {
+                allStillExhausted = false;
+            }
+
+            // Check if this component can advance further
+            IIndexCursor cursor = rangeCursors[i];
+            if (cursor instanceof VectorClusteringSearchCursor) {
+                VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
+                if (vcCursor.hasMoreClusters()) {
+                    anyHasMoreClusters = true;
+                }
+            }
+        }
+
+        if (allStillExhausted && anyHasMoreClusters) {
+            // All components found this cluster empty BUT at least one has more clusters
+            // Skip to next cluster
+            System.err.println(String.format(
+                    "[LSMVCTreeSearchCursor] ALL components found cluster %d empty, skipping to next cluster",
+                    currentClusterIndex[0]));
+
+            // Check if we've reached K or should stop advancing
+            if (stopAdvancing || reconciledOutputCount >= K) {
+                System.err.println("[LSMVCTreeSearchCursor] Reached K or stop flag, halting advancement");
+                return;
+            }
+
+            // Recursively advance to next cluster (skip empty clusters)
+            advanceAllComponentsToNextCluster();
+        } else if (allStillExhausted && !anyHasMoreClusters) {
+            // All components exhausted AND no more clusters - stop here
+            System.err.println("[LSMVCTreeSearchCursor] All components exhausted, no more clusters to scan");
         }
     }
 }

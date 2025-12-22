@@ -87,7 +87,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private int totalLeafClusters; // Total number of leaf clusters
     private long firstDirectoryPageId; // First directory page ID (cluster 0)
     private List<Long> allDirectoryPageIds; // All directory page IDs collected from all leaf pages
-    private List<Integer> allCentroidIds; // All centroid IDs collected from all leaf pages
+    // Removed allCentroidIds - now using sequential IDs starting from 0
 
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
@@ -273,61 +273,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     @Override
     public ITupleReference getTuple() {
-        // In full-scan mode, rebuild tuple with correct centroid_id for bulk loader
-        if (fullScanMode && currentTuple != null && allCentroidIds != null) {
-            int centroidId = allCentroidIds.get(currentSequentialClusterIndex);
-            try {
-                return rebuildTupleWithCentroidId(currentTuple, centroidId);
-            } catch (IOException e) {
-                throw new IllegalStateException("Failed to rebuild tuple with centroid_id", e);
-            }
-        }
         return currentTuple;
     }
 
-    /**
-     * Rebuilds a tuple with the correct centroid_id in field 1.
-     * Used during merge operations to ensure bulk loader receives correct centroid_id.
-     *
-     * Tuple format: [DOUBLE_TAG][DOUBLE][AINT32_TAG][INTEGER][AINT64_TAG][LONG][...]
-     *                Field 0: distance    Field 1: centroid_id    Field 2: primaryKey
-     *
-     * @param originalTuple The original tuple from data page
-     * @param centroidId The correct centroid_id to inject
-     * @return A new tuple reference with the centroid_id in field 1
-     */
-    private ITupleReference rebuildTupleWithCentroidId(ITupleReference originalTuple, int centroidId)
-            throws IOException {
-        // TODO: This method manually creates tuples using ArrayTupleBuilder, which doesn't preserve
-        // the LSM antimatter bit. This means if the original tuple is an antimatter tuple (deletion),
-        // the rebuilt tuple will be treated as a matter tuple. Need to:
-        // 1. Check if originalTuple has antimatter bit set (if it's ILSMTreeTupleReference)
-        // 2. Use LSMVCTreeDataTupleWriter to write the tuple with proper antimatter bit
-        // 3. Wrap in LSMVCTreeDataTupleReference instead of ArrayTupleReference
-        // For now, workaround in LSMVCTreeSearchCursor.isDeleted() treats non-LSM tuples as matter.
-
-        // Create new builder (following pattern from VectorClusteringDataFrame.createDataTuple)
-        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
-        DataOutput dos = tupleBuilder.getDataOutput();
-
-        // Field 0: distance (copy from original)
-        tupleBuilder.addField(originalTuple.getFieldData(0), originalTuple.getFieldStart(0),
-                originalTuple.getFieldLength(0));
-
-        // Field 1: centroid_id (write new value)
-        dos.writeByte(0x1A); // AINT32 type tag
-        dos.writeInt(centroidId);
-        tupleBuilder.addFieldEndOffset();
-
-        // Field 2: primaryKey (copy from original)
-        tupleBuilder.addField(originalTuple.getFieldData(2), originalTuple.getFieldStart(2),
-                originalTuple.getFieldLength(2));
-
-        // Create and return tuple reference
-        ArrayTupleReference tupleReference = new ArrayTupleReference();
-        tupleReference.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
-        return tupleReference;
-    }
 
     /**
      * Get the query vector used for this search.
@@ -372,9 +320,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
         }
 
-        // Step 2: Scan ALL leaf pages and collect ALL directory page IDs and centroid IDs
+        // Step 2: Scan ALL leaf pages and collect ALL directory page IDs
         this.allDirectoryPageIds = new ArrayList<>();
-        this.allCentroidIds = new ArrayList<>();
         int leafPageId = currentPageId;
         int totalClusters = 0;
 
@@ -396,13 +343,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                         "[VectorClusteringSearchCursor.navigateToFirstCluster] Leaf page %d: tuples=%d, nextLeaf=%d",
                         leafPageId, tupleCount, nextLeafPageId));
 
-                // Collect directory page IDs and centroid IDs from THIS leaf page
+                // Collect directory page IDs from THIS leaf page
                 for (int i = 0; i < tupleCount; i++) {
                     long dirPageId = leafFrame.getMetadataPagePointer(i);
-                    int centroidId = leafFrame.getCentroidId(i);
-
                     allDirectoryPageIds.add(dirPageId);
-                    allCentroidIds.add(centroidId);
                     totalClusters++;
                 }
 

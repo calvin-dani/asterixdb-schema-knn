@@ -20,6 +20,7 @@
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
 import java.io.DataOutput;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -409,7 +410,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public ILSMDiskComponent doMerge(ILSMIOOperation operation) throws HyracksDataException {
         LSMVCTreeMergeOperation mergeOp = (LSMVCTreeMergeOperation) operation;
         IIndexCursor cursor = mergeOp.getCursor();
-        ILSMDiskComponent mergedComponent = null;
+        ILSMDiskComponent mergedComponent;
         ILSMDiskComponentBulkLoader componentBulkLoader = null;
 
         try {
@@ -426,7 +427,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                     mergedComponent = createDiskComponent(componentFactory, mergeOp.getTarget(), null, null, true);
 
                     // Set parameters for merge operation (including static structure reference)
-                    Map<String, Object> parameters = new java.util.HashMap<>();
+                    Map<String, Object> parameters = new HashMap<>();
                     parameters.put("static_structure_component", getStaticStructure());
                     mergeOp.getAccessor().getOpContext().setParameters(parameters);
 
