@@ -1626,16 +1626,14 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             List<LogicalVariable> prevSecondaryKeys, List<LogicalVariable> prevAdditionalFilteringKeys)
             throws AlgebricksException {
 
-        // Vector indexes support INSERT and DELETE operations
-        // UPDATE and UPSERT are not yet supported
-        if (indexOp != IndexOperation.INSERT && indexOp != IndexOperation.DELETE) {
-            throw new AlgebricksException(indexOp.name()
-                    + " operation not yet implemented for vector indexes. Only INSERT and DELETE are supported.");
-        }
-
         Dataset dataset = MetadataManagerUtil.findExistingDataset(mdTxnCtx, database, dataverseName, datasetName);
         int numKeys = primaryKeys.size() + secondaryKeys.size();
         int numFilterFields = DatasetUtil.getFilterField(dataset) == null ? 0 : 1;
+
+        // Vector indexes don't have the concept of filtering
+        // Set both filter factories to null to prevent incorrect filter application
+        filterFactory = null;
+        prevFilterFactory = null;
 
         // Generate field permutations
         // Vector index tuple format: <vector_field, include_fields..., primary_keys..., filter_field?>
@@ -1668,6 +1666,39 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             fieldPermutation[numKeys] = idx;
         }
 
+        // Generate previous field permutations for UPSERT operations
+        int[] prevFieldPermutation = null;
+        if (indexOp == IndexOperation.UPSERT) {
+            prevFieldPermutation = new int[numKeys + numFilterFields];
+            int k = 0;
+
+            // DEBUG: Log prevSecondaryKeys variables
+            System.out.println("DEBUG [MetadataProvider.getVectorIndexModificationRuntime]: prevSecondaryKeys.size()=" +
+                               (prevSecondaryKeys != null ? prevSecondaryKeys.size() : "null"));
+
+            // Previous vector field + include fields
+            for (LogicalVariable varKey : prevSecondaryKeys) {
+                int idx = propagatedSchema.findVariable(varKey);
+                System.out.println("DEBUG [MetadataProvider]: prevSecondaryKey variable=" + varKey +
+                                   " -> field index=" + idx);
+                prevFieldPermutation[k] = idx;
+                k++;
+            }
+
+            // Primary keys (same as new tuple)
+            for (LogicalVariable varKey : primaryKeys) {
+                int idx = propagatedSchema.findVariable(varKey);
+                prevFieldPermutation[k] = idx;
+                k++;
+            }
+
+            // Filter field (if any)
+            if (numFilterFields > 0) {
+                int idx = propagatedSchema.findVariable(prevAdditionalFilteringKeys.get(0));
+                prevFieldPermutation[numKeys] = idx;
+            }
+        }
+
         try {
             // Get vector index metadata
             Index secondaryIndex = MetadataManager.INSTANCE.getIndex(mdTxnCtx, dataset.getDatabaseName(),
@@ -1689,10 +1720,19 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             ITuplePartitionerFactory partitionerFactory = new FieldHashPartitionerFactory(pkFields, pkHashFunFactories,
                     partitioningProperties.getNumberOfPartitions());
 
-            // Create operator descriptor for INSERT operation
-            IOperatorDescriptor op = new LSMTreeInsertDeleteOperatorDescriptor(spec, inputRecordDesc, fieldPermutation,
-                    indexOp, idfh, filterFactory, false, modificationCallbackFactory, partitionerFactory,
-                    partitioningProperties.getComputeStorageMap());
+            // Create operator descriptor based on operation type
+            IOperatorDescriptor op;
+            if (indexOp == IndexOperation.UPSERT) {
+                int operationFieldIndex = propagatedSchema.findVariable(operationVar);
+                op = new LSMSecondaryUpsertOperatorDescriptor(spec, inputRecordDesc, fieldPermutation,
+                        idfh, filterFactory, prevFilterFactory, modificationCallbackFactory,
+                        operationFieldIndex, BinaryIntegerInspector.FACTORY, prevFieldPermutation, partitionerFactory,
+                        partitioningProperties.getComputeStorageMap());
+            } else {
+                op = new LSMTreeInsertDeleteOperatorDescriptor(spec, inputRecordDesc, fieldPermutation,
+                        indexOp, idfh, filterFactory, false, modificationCallbackFactory, partitionerFactory,
+                        partitioningProperties.getComputeStorageMap());
+            }
 
             return new Pair<>(op, partitioningProperties.getConstraints());
         } catch (Exception e) {

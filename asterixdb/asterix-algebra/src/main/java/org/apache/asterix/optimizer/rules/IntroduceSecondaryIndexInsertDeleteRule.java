@@ -854,6 +854,9 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                     skTypes = new ArrayList<>();
                     List<String> vectorFieldName = skNames.get(0);
                     IAType vectorFieldType = recType.getSubFieldType(vectorFieldName);
+                    System.out.println("DEBUG [injectFieldAccessesForIndexes]: VECTOR index, vectorFieldName=" +
+                                       vectorFieldName + ", vectorFieldType=" + vectorFieldType +
+                                       ", afterOp=" + afterOp);
                     if (vectorFieldType == null) {
                         // Open field - use ANY type to allow runtime type inference
                         vectorFieldType = BuiltinType.ANY;
