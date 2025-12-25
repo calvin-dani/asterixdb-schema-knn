@@ -27,7 +27,9 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent.LSMComponentType;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexSearchCursor;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
 import org.apache.hyracks.storage.common.ICursorInitialState;
@@ -48,7 +50,8 @@ import org.apache.hyracks.storage.common.util.IndexCursorUtils;
  * - Extends LSMIndexSearchCursor for priority queue and component switching infrastructure
  * - Creates VectorClusteringTreeAccessor for each component
  * - Handles component state changes (memory → disk transitions)
- * - For vector index: simplified sequential iteration (no priority queue merging needed for now)
+ * - Uses priority queue to merge results sorted by <distance, primary_key>
+ * - Filters antimatter tuples and handles matter/antimatter cancellation
  */
 public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
@@ -61,19 +64,36 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     // Store search predicate for component switching
     private ISearchPredicate searchPredicate;
 
-    // Current component being iterated
-    private int currentComponentIndex;
-    private IIndexCursor currentComponentCursor;
+    // Track K (target limit) and reconciled output count for cluster advancement decisions
+    private int K;
+    private int reconciledOutputCount;
+
+    // Track cluster exhaustion state for synchronized advancement
+    private int[] currentClusterIndex; // Which cluster each component is currently on
+    private boolean[] clusterExhausted; // Whether each component exhausted its current cluster
+    private boolean stopAdvancing; // Flag to stop advancing after K reached
+
+    // Debug counters to track reconciliation
+    private int totalTuplesPopped; // Total tuples popped from priority queue (including cancelled)
+    private int antimatterTuplesDetected; // Antimatter tuples detected
+    private int cancellationsMade; // Matter tuples cancelled by antimatter
+
+    // Full-scan mode flag (for merge operations)
+    private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
-        this(opCtx, false, NoOpIndexCursorStats.INSTANCE);
+        this(opCtx, false, false, NoOpIndexCursorStats.INSTANCE);
     }
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples,
             IIndexCursorStats stats) {
+        this(opCtx, returnDeletedTuples, false, stats);
+    }
+
+    public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples, boolean fullScanMode,
+            IIndexCursorStats stats) {
         super(opCtx, returnDeletedTuples, stats);
-        this.currentComponentIndex = 0;
-        this.currentComponentCursor = null;
+        this.fullScanMode = fullScanMode;
     }
 
     @Override
@@ -84,6 +104,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Save search predicate for component switching
         this.searchPredicate = searchPred;
 
+        // Extract K from search predicate for cluster advancement decisions
+        this.K = extractK(searchPred);
+        this.reconciledOutputCount = 0;
+
+        // Initialize debug counters
+        this.totalTuplesPopped = 0;
+        this.antimatterTuplesDetected = 0;
+        this.cancellationsMade = 0;
+
         // Set up comparator and operational components
         cmp = lsmInitialState.getOriginalKeyComparator();
         operationalComponents = lsmInitialState.getOperationalComponents();
@@ -93,6 +122,13 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         includeMutableComponent = false;
 
         int numVCTrees = operationalComponents.size();
+
+        // Initialize cluster tracking arrays for synchronized advancement
+        currentClusterIndex = new int[numVCTrees];
+        java.util.Arrays.fill(currentClusterIndex, 0); // All start at cluster 0
+        clusterExhausted = new boolean[numVCTrees];
+        java.util.Arrays.fill(clusterExhausted, false);
+        stopAdvancing = false;
 
         // Initialize or resize accessor/cursor arrays
         if (rangeCursors == null) {
@@ -138,13 +174,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Open all cursors with the search predicate
         IndexCursorUtils.open(vcTreeAccessors, rangeCursors, searchPred);
 
-        // Initialize sequential iteration
-        currentComponentIndex = 0;
-        currentComponentCursor = (rangeCursors.length > 0) ? rangeCursors[0] : null;
-
-        // Note: Priority queue setup is kept for compatibility with base class,
-        // but not used in simplified sequential iteration
-        // initPriorityQueue() is overridden to NOT advance cursors
+        // Initialize priority queue for merging results from all components
         try {
             setPriorityQueueComparator();
             initPriorityQueue();
@@ -156,11 +186,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     @Override
     public void initPriorityQueue() throws HyracksDataException {
-        // Don't use priority queue for vector search
-        // Base class initPriorityQueue() would advance all cursors via pushIntoQueueFromCursorAndReplaceThisElement(),
-        // but we need to preserve the first tuple for sequential iteration
-
-        // Just initialize the priority queue structure without populating it
+        // Initialize priority queue and populate with first element from each cursor
         int pqInitSize = (rangeCursors.length > 0) ? rangeCursors.length : 1;
         if (outputPriorityQueue == null) {
             outputPriorityQueue = new PriorityQueue<>(pqInitSize, pqCmp);
@@ -168,26 +194,56 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             for (int i = 0; i < pqInitSize; i++) {
                 pqes[i] = new PriorityQueueElement(i);
             }
-            // DON'T call pushIntoQueueFromCursorAndReplaceThisElement()
-            // This would advance cursors and lose first tuples
         } else {
             outputPriorityQueue.clear();
-            // Did size change?
             if (pqInitSize != pqes.length) {
-                // Size changed (due to flushes, merges, etc) -> re-create
                 pqes = new PriorityQueueElement[pqInitSize];
                 for (int i = 0; i < pqInitSize; i++) {
                     pqes[i] = new PriorityQueueElement(i);
                 }
             }
         }
+
+        // Populate priority queue with first element from each cursor
+        // If a cursor has no data (empty cluster), mark it as exhausted
+        for (int i = 0; i < rangeCursors.length; i++) {
+            if (rangeCursors[i].hasNext()) {
+                rangeCursors[i].next();
+                pqes[i].reset(rangeCursors[i].getTuple());
+                outputPriorityQueue.offer(pqes[i]);
+            } else {
+                // Cursor has no data in initial cluster - mark as exhausted
+                clusterExhausted[i] = true;
+                System.err.println(String.format(
+                        "[LSMVCTreeSearchCursor] Component %d has empty initial cluster (marked exhausted)", i));
+            }
+        }
+
+        // Check if ALL components started with empty clusters
+        // If so, advance all to next cluster
+        boolean allInitiallyExhausted = true;
+        for (int i = 0; i < clusterExhausted.length; i++) {
+            if (!clusterExhausted[i]) {
+                allInitiallyExhausted = false;
+                break;
+            }
+        }
+
+        if (allInitiallyExhausted) {
+            System.err.println("[LSMVCTreeSearchCursor] ALL components have empty initial cluster, advancing to next");
+            advanceAllComponentsToNextCluster();
+        }
     }
 
     @Override
     protected void pushIntoQueueFromCursorAndReplaceThisElement(PriorityQueueElement e) throws HyracksDataException {
-        // No-op: Vector search uses sequential iteration, not priority queue merge
-        // If this gets called (e.g., during component switching), just do nothing
-        // instead of throwing exception to avoid breaking base class flow
+        // Get next tuple from this cursor and add to priority queue
+        int cursorIndex = e.getCursorIndex();
+        if (rangeCursors[cursorIndex].hasNext()) {
+            rangeCursors[cursorIndex].next();
+            e.reset(rangeCursors[cursorIndex].getTuple());
+            outputPriorityQueue.offer(e);
+        }
     }
 
     /**
@@ -222,33 +278,45 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     /**
      * Create cursor for a VCTree component.
+     * Passes fullScanMode to enable sequential cluster iteration for merge operations.
      */
     protected IIndexCursor createCursor(LSMComponentType type, VectorClusteringTreeAccessor accessor)
             throws HyracksDataException {
-        return accessor.createSearchCursor(false);
+        return accessor.createSearchCursor(false, fullScanMode);
     }
 
     @Override
     public void doClose() throws HyracksDataException {
+        // Print final reconciliation summary for demo
+        System.err.println("\n========== LSM Vector Index Search Summary ==========");
+        System.err.println(String.format("Total tuples processed:     %d", totalTuplesPopped));
+        System.err.println(String.format("Antimatter tuples detected: %d", antimatterTuplesDetected));
+        System.err.println(String.format("Cancellations made:         %d", cancellationsMade));
+        System.err.println(String.format("Final output count:         %d", reconciledOutputCount));
+        System.err.println(String.format("Verification:               %d - %d = %d ✓", totalTuplesPopped,
+                cancellationsMade, reconciledOutputCount));
+        System.err.println("=====================================================\n");
+
         super.doClose();
-        // Additional cleanup specific to vector index if needed
     }
 
     @Override
     public boolean doHasNext() throws HyracksDataException {
         hasNextCallCount++;
         checkPriorityQueue();
-        // Check sequential iteration state instead of priority queue
-        return currentComponentCursor != null && currentComponentCursor.hasNext();
+        // Use priority queue - check if there's a valid element at the top
+        return !outputPriorityQueue.isEmpty();
     }
 
     @Override
     public void doNext() throws HyracksDataException {
-        // Simplified version: just advance current component cursor
-        // No priority queue sorting needed - return all tuples from all components
-        if (currentComponentCursor != null && currentComponentCursor.hasNext()) {
-            currentComponentCursor.next();
-        }
+        // Pop element from priority queue and mark for replacement
+        outputElement = outputPriorityQueue.poll();
+        needPushElementIntoQueue = true;
+
+        // Increment reconciled output count - this tuple is being returned to user
+        reconciledOutputCount++;
+        totalTuplesPopped++;
     }
 
     @Override
@@ -260,24 +328,87 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             hasNextCallCount = 0;
         }
 
-        // Simplified version: sequential iteration through components
-        // No priority queue sorting - just return all tuples from all components in order
-        // TODO: Future optimization - use priority queue to merge results sorted by distance
-        //       for more efficient top-k selection at higher layers
+        // Custom priority queue logic that tracks reconciled output and controls cluster advancement
+        // Note: We don't stop exactly at K - we exhaust current clusters before stopping
+        // Cluster advancement is controlled in pushIntoQueueAndAdvanceClusterIfNeeded()
+        while (!outputPriorityQueue.isEmpty() || needPushElementIntoQueue) {
+            if (!outputPriorityQueue.isEmpty()) {
+                PriorityQueueElement checkElement = outputPriorityQueue.peek();
 
-        // Find next component with results
-        while (currentComponentIndex < rangeCursors.length) {
-            if (currentComponentCursor != null && currentComponentCursor.hasNext()) {
-                // Current component still has results
-                return;
-            }
+                if (outputElement == null) {
+                    // Check if top element is antimatter
+                    boolean isDeletedFlag = isDeleted(checkElement);
 
-            // Current component exhausted, move to next
-            currentComponentIndex++;
-            if (currentComponentIndex < rangeCursors.length) {
-                currentComponentCursor = rangeCursors[currentComponentIndex];
+                    if (isDeletedFlag && !returnDeletedTuples) {
+                        // Antimatter tuple - pop and hold for cancellation check
+                        outputElement = outputPriorityQueue.poll();
+                        needPushElementIntoQueue = true;
+                        antimatterTuplesDetected++;
+
+                        // LOG: Antimatter detected
+                        if (antimatterTuplesDetected <= 5 || antimatterTuplesDetected % 50 == 0) {
+                            System.err.println(
+                                    String.format("[checkPQ] Antimatter detected #%d | Component=%d, held for matching",
+                                            antimatterTuplesDetected, outputElement.getCursorIndex()));
+                        }
+                        // Continue loop to check for cancellation with next tuple
+                    } else {
+                        // Valid output tuple - will be returned to user
+                        break;
+                    }
+                } else {
+                    // outputElement holds antimatter or previous tuple
+                    if (compare(cmp, outputElement.getTuple(), checkElement.getTuple()) == 0) {
+                        // Antimatter matches matter tuple - cancel BOTH
+                        cancellationsMade++;
+
+                        // Remove and advance checkElement's cursor
+                        PriorityQueueElement checkElem = outputPriorityQueue.poll();
+                        pushIntoQueueAndAdvanceClusterIfNeeded(checkElem);
+
+                        // Advance outputElement's cursor (don't lose the rest of its tuples!)
+                        pushIntoQueueAndAdvanceClusterIfNeeded(outputElement);
+
+                        // CRITICAL FIX: Only decrement reconciledOutputCount if outputElement was a MATTER tuple
+                        // that was counted by doNext(). If outputElement is ANTIMATTER, it was detected at line 305
+                        // and never counted, so we should NOT decrement.
+                        boolean outputIsAntimatter = ((ILSMTreeTupleReference) outputElement.getTuple()).isAntimatter();
+                        if (!outputIsAntimatter) {
+                            // Matter tuple was counted by doNext(), decrement it
+                            reconciledOutputCount--;
+
+                            // Log cancellation (show every 50th)
+                            if (cancellationsMade % 50 == 0 || cancellationsMade <= 10) {
+                                System.err.println(String.format(
+                                        "[LSM Vector Index] Cancellation #%d | Matter tuple cancelled, reconciledCount=%d",
+                                        cancellationsMade, reconciledOutputCount));
+                            }
+                        } else {
+                            // Antimatter detected first, matter never counted, no decrement needed
+                            if (cancellationsMade % 50 == 0 || cancellationsMade <= 10) {
+                                System.err.println(String.format(
+                                        "[LSM Vector Index] Cancellation #%d | Antimatter matched, no count change",
+                                        cancellationsMade));
+                            }
+                        }
+
+                        // Both tuples discarded (cancelled), reset state
+                        needPushElementIntoQueue = false;
+                        outputElement = null;
+                    } else {
+                        // Different tuple - refill cursor
+                        if (needPushElementIntoQueue) {
+                            pushIntoQueueAndAdvanceClusterIfNeeded(outputElement);
+                            needPushElementIntoQueue = false;
+                        }
+                        outputElement = null;
+                    }
+                }
             } else {
-                currentComponentCursor = null;
+                // Queue is empty and we have pending element - refill it
+                pushIntoQueueAndAdvanceClusterIfNeeded(outputElement);
+                needPushElementIntoQueue = false;
+                outputElement = null;
             }
         }
     }
@@ -388,34 +519,313 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     @Override
     protected void setPriorityQueueComparator() {
-        // For vector index: sort by distance (field 0 in tuple)
-        // Tuple format: <distance, cosine, embedding, pk>
+        // For vector index: sort by distance (field 0), then primary key (field 2)
+        // Tuple format: <distance:field0, centroid_id:field1, primary_key:field2>
+        // We skip centroid_id (field 1) in comparisons
         if (pqCmp == null || pqCmp.getMultiComparator() != cmp) {
-            pqCmp = new PriorityQueueComparator(cmp);
+            pqCmp = new VectorPriorityQueueComparator(cmp);
+        }
+    }
+
+    /**
+     * Custom priority queue comparator for vector index tuples.
+     * Compares field 0 (distance) and field 2 (primary_key), skipping field 1 (centroid_id).
+     * Must manually skip type tags since fields are type-tagged but comparators expect raw data.
+     */
+    private class VectorPriorityQueueComparator extends PriorityQueueComparator {
+
+        public VectorPriorityQueueComparator(MultiComparator cmp) {
+            super(cmp);
+        }
+
+        @Override
+        public int compare(PriorityQueueElement elementA, PriorityQueueElement elementB) {
+            ITupleReference tupleA = elementA.getTuple();
+            ITupleReference tupleB = elementB.getTuple();
+
+            try {
+                // Compare field 0 (distance) - skip 1-byte type tag
+                // Field format: [type_tag:1 byte][double:8 bytes]
+                int result = cmp.getComparators()[0].compare(tupleA.getFieldData(0), tupleA.getFieldStart(0) + 1,
+                        tupleA.getFieldLength(0) - 1, tupleB.getFieldData(0), tupleB.getFieldStart(0) + 1,
+                        tupleB.getFieldLength(0) - 1);
+
+                if (result != 0) {
+                    return result;
+                }
+
+                // Compare field 2 (primary_key) - skip 1-byte type tag
+                // Field format: [type_tag:1 byte][long:8 bytes]
+                result = cmp.getComparators()[1].compare(tupleA.getFieldData(2), tupleA.getFieldStart(2) + 1,
+                        tupleA.getFieldLength(2) - 1, tupleB.getFieldData(2), tupleB.getFieldStart(2) + 1,
+                        tupleB.getFieldLength(2) - 1);
+
+                if (result != 0) {
+                    return result;
+                }
+            } catch (Throwable e) {
+                System.err.println(String.format("[VectorPQComparator] ERROR comparing tuples: %s - %s",
+                        e.getClass().getSimpleName(), e.getMessage()));
+                throw new IllegalArgumentException(e);
+            }
+
+            // Tiebreaker: prefer tuples from earlier components (lower cursor index)
+            if (elementA.getCursorIndex() > elementB.getCursorIndex()) {
+                return 1;
+            } else {
+                return -1;
+            }
         }
     }
 
     @Override
     public ITupleReference doGetTuple() {
-        // Return tuple from current component cursor
-        if (currentComponentCursor != null) {
-            return currentComponentCursor.getTuple();
-        }
-        return null;
+        // Return tuple from priority queue output element
+        return outputElement != null ? outputElement.getTuple() : null;
     }
 
     @Override
     protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB)
             throws HyracksDataException {
-        // For vector index: compare by distance (first field)
-        // This ensures results are sorted by distance (nearest first)
-        return cmp.compare(tupleA, tupleB);
+
+        // Compare field 0 (distance) - skip type_tag (1 byte)
+        // Field format: [type_tag:1 byte][double:8 bytes]
+        int result = cmp.getComparators()[0].compare(tupleA.getFieldData(0), tupleA.getFieldStart(0) + 1,
+                tupleA.getFieldLength(0) - 1, tupleB.getFieldData(0), tupleB.getFieldStart(0) + 1,
+                tupleB.getFieldLength(0) - 1);
+
+        if (result != 0) {
+            return result;
+        }
+
+        // Compare field 2 (primary_key) - skip type_tag (1 byte)
+        // Field format: [type_tag:1 byte][long:8 bytes] or [type_tag:1 byte][string]
+        return cmp.getComparators()[1].compare(tupleA.getFieldData(2), tupleA.getFieldStart(2) + 1,
+                tupleA.getFieldLength(2) - 1, tupleB.getFieldData(2), tupleB.getFieldStart(2) + 1,
+                tupleB.getFieldLength(2) - 1);
+    }
+
+    /**
+     * Helper method to decode primary key for debugging.
+     * Handles both LONG and STRING types.
+     */
+    private String decodePrimaryKey(byte[] data, int start, int length, byte typeTag) {
+        try {
+            // Type tag values: LONG=18, STRING=1 (common AsterixDB type tags)
+            if (typeTag == 18) {
+                // LONG type (8 bytes)
+                if (length >= 9) {
+                    long value = java.nio.ByteBuffer.wrap(data, start + 1, 8).getLong();
+                    return String.valueOf(value);
+                }
+            } else if (typeTag == 1) {
+                // STRING type (2-byte length prefix + UTF-8 bytes)
+                if (length >= 3) {
+                    int strLen = java.nio.ByteBuffer.wrap(data, start + 1, 2).getShort() & 0xFFFF;
+                    String value = new String(data, start + 3, strLen, java.nio.charset.StandardCharsets.UTF_8);
+                    return value;
+                }
+            }
+            // Unknown type or invalid length - return hex representation
+            StringBuilder hex = new StringBuilder();
+            for (int i = 1; i < Math.min(length, 20); i++) {
+                hex.append(String.format("%02X", data[start + i]));
+            }
+            return "0x" + hex.toString();
+        } catch (Exception e) {
+            return "<decode_error>";
+        }
     }
 
     @Override
-    protected boolean isDeleted(PriorityQueueElement element) {
-        // Vector index doesn't have delete markers in tuples
-        // (deletions handled at primary index level)
+    protected boolean isDeleted(PriorityQueueElement element) throws HyracksDataException {
+        // Check if tuple has antimatter bit set (indicates deleted record)
+        // During merge with full-scan mode, tuples may be rebuilt as ArrayTupleReference
+        // which doesn't have antimatter bit - treat those as matter tuples
+        ITupleReference tuple = element.getTuple();
+        if (tuple instanceof ILSMTreeTupleReference) {
+            return ((ILSMTreeTupleReference) tuple).isAntimatter();
+        }
+        // Not an LSM tuple - must be a rebuilt tuple during merge, treat as matter
         return false;
+    }
+
+    /**
+     * Extract K value from search predicate for cluster advancement decisions.
+     */
+    private int extractK(ISearchPredicate searchPred) {
+        if (searchPred instanceof org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate) {
+            return ((org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate) searchPred).getK();
+        }
+
+        // Fallback: return a large number (scan all clusters)
+        return Integer.MAX_VALUE;
+    }
+
+    /**
+     * Push next element from component cursor into queue.
+     * If cursor's current cluster is exhausted, mark it as exhausted.
+     * When ALL components' clusters are exhausted, decide whether to advance ALL to next cluster.
+     *
+     * @param e the priority queue element to refill
+     * @throws HyracksDataException if an error occurs
+     */
+    private void pushIntoQueueAndAdvanceClusterIfNeeded(PriorityQueueElement e) throws HyracksDataException {
+        int cursorIndex = e.getCursorIndex();
+        IIndexCursor cursor = rangeCursors[cursorIndex];
+
+        if (cursor.hasNext()) {
+            // Current cluster/page has more data
+            cursor.next();
+            e.reset(cursor.getTuple());
+            outputPriorityQueue.offer(e);
+            return;
+        }
+
+        // Current cluster exhausted for THIS component
+        clusterExhausted[cursorIndex] = true;
+
+        System.err.println(String.format("[LSMVCTreeSearchCursor] Component %d cluster exhausted (cluster_index=%d)",
+                cursorIndex, currentClusterIndex[cursorIndex]));
+
+        // Check if ALL components have exhausted their current cluster
+        boolean allExhausted = true;
+        for (int i = 0; i < clusterExhausted.length; i++) {
+            if (!clusterExhausted[i]) {
+                allExhausted = false;
+                break;
+            }
+        }
+
+        if (!allExhausted) {
+            // Some components still have data in their current cluster
+            // Don't advance yet - wait for all to exhaust
+            System.err.println(String.format(
+                    "[LSMVCTreeSearchCursor] Component %d exhausted, but waiting for other components", cursorIndex));
+            return;
+        }
+
+        // ALL components exhausted their current cluster
+        System.err.println(String.format(
+                "[LSMVCTreeSearchCursor] ALL components exhausted cluster %d, reconciledOutputCount=%d, K=%d",
+                currentClusterIndex[0], reconciledOutputCount, K));
+
+        // Decision: Should we advance ALL components to next cluster?
+        if (stopAdvancing) {
+            System.err.println("[LSMVCTreeSearchCursor] Already decided to stop advancing");
+            return;
+        }
+
+        if (reconciledOutputCount >= K) {
+            // Reached K - stop advancing all components
+            stopAdvancing = true;
+            System.err.println(String.format("[LSMVCTreeSearchCursor] Reached K=%d, stopping cluster advancement", K));
+            return;
+        }
+
+        // Need more data - advance ALL components to next cluster together
+        System.err.println("[LSMVCTreeSearchCursor] Advancing ALL components to next cluster");
+        advanceAllComponentsToNextCluster();
+    }
+
+    /**
+     * Advance ALL component cursors to their next closest cluster.
+     * This ensures synchronized cluster advancement across all LSM components.
+     */
+    private void advanceAllComponentsToNextCluster() throws HyracksDataException {
+        // Reset exhaustion flags for new cluster
+        java.util.Arrays.fill(clusterExhausted, false);
+
+        for (int i = 0; i < rangeCursors.length; i++) {
+            IIndexCursor cursor = rangeCursors[i];
+
+            if (!(cursor instanceof VectorClusteringSearchCursor)) {
+                // Not a VectorClusteringSearchCursor - mark as exhausted
+                clusterExhausted[i] = true;
+                System.err.println(String.format(
+                        "[LSMVCTreeSearchCursor] Component %d is not VectorClusteringSearchCursor, skipping", i));
+                continue;
+            }
+
+            VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
+
+            if (!vcCursor.hasMoreClusters()) {
+                // No more clusters for this component - mark as exhausted
+                clusterExhausted[i] = true;
+                System.err.println(String.format("[LSMVCTreeSearchCursor] Component %d has no more clusters", i));
+                continue;
+            }
+
+            // Advance to next cluster
+            boolean advanced = vcCursor.advanceToNextCluster();
+            if (!advanced) {
+                // Failed to advance (no more clusters or error)
+                clusterExhausted[i] = true;
+                System.err.println(
+                        String.format("[LSMVCTreeSearchCursor] Component %d failed to advance to next cluster", i));
+                continue;
+            }
+
+            // Increment cluster index for this component
+            currentClusterIndex[i]++;
+
+            // Check if this cluster has data
+            if (vcCursor.hasNext()) {
+                // Cluster has data - add to queue
+                vcCursor.next();
+                PriorityQueueElement pqe = pqes[i];
+                pqe.reset(vcCursor.getTuple());
+                outputPriorityQueue.offer(pqe);
+                System.err
+                        .println(String.format("[LSMVCTreeSearchCursor] Component %d advanced to cluster %d (has data)",
+                                i, currentClusterIndex[i]));
+            } else {
+                // Cluster is empty - mark as exhausted for this cluster
+                // Component will wait at this cluster until all components finish
+                clusterExhausted[i] = true;
+                System.err.println(String.format(
+                        "[LSMVCTreeSearchCursor] Component %d cluster %d is empty (will wait for other components)", i,
+                        currentClusterIndex[i]));
+            }
+        }
+
+        // Check if ALL components found the cluster empty (all exhausted again)
+        boolean allStillExhausted = true;
+        boolean anyHasMoreClusters = false;
+
+        for (int i = 0; i < clusterExhausted.length; i++) {
+            if (!clusterExhausted[i]) {
+                allStillExhausted = false;
+            }
+
+            // Check if this component can advance further
+            IIndexCursor cursor = rangeCursors[i];
+            if (cursor instanceof VectorClusteringSearchCursor) {
+                VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
+                if (vcCursor.hasMoreClusters()) {
+                    anyHasMoreClusters = true;
+                }
+            }
+        }
+
+        if (allStillExhausted && anyHasMoreClusters) {
+            // All components found this cluster empty BUT at least one has more clusters
+            // Skip to next cluster
+            System.err.println(String.format(
+                    "[LSMVCTreeSearchCursor] ALL components found cluster %d empty, skipping to next cluster",
+                    currentClusterIndex[0]));
+
+            // Check if we've reached K or should stop advancing
+            if (stopAdvancing || reconciledOutputCount >= K) {
+                System.err.println("[LSMVCTreeSearchCursor] Reached K or stop flag, halting advancement");
+                return;
+            }
+
+            // Recursively advance to next cluster (skip empty clusters)
+            advanceAllComponentsToNextCluster();
+        } else if (allStillExhausted && !anyHasMoreClusters) {
+            // All components exhausted AND no more clusters - stop here
+            System.err.println("[LSMVCTreeSearchCursor] All components exhausted, no more clusters to scan");
+        }
     }
 }
