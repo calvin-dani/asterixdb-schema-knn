@@ -77,6 +77,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     private int totalTuplesPopped; // Total tuples popped from priority queue (including cancelled)
     private int antimatterTuplesDetected; // Antimatter tuples detected
     private int cancellationsMade; // Matter tuples cancelled by antimatter
+    private int getTupleCallCount; // Track how many times doGetTuple() is called
 
     // Full-scan mode flag (for merge operations)
     private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
@@ -112,6 +113,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         this.totalTuplesPopped = 0;
         this.antimatterTuplesDetected = 0;
         this.cancellationsMade = 0;
+        this.getTupleCallCount = 0;
 
         // Set up comparator and operational components
         cmp = lsmInitialState.getOriginalKeyComparator();
@@ -294,8 +296,13 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         System.err.println(String.format("Antimatter tuples detected: %d", antimatterTuplesDetected));
         System.err.println(String.format("Cancellations made:         %d", cancellationsMade));
         System.err.println(String.format("Final output count:         %d", reconciledOutputCount));
+        System.err.println(String.format("doNext() was called:        %d times", reconciledOutputCount));
+        System.err.println(String.format("doGetTuple() was called:    %d times", getTupleCallCount));
         System.err.println(String.format("Verification:               %d - %d = %d ✓",
                 totalTuplesPopped, cancellationsMade, reconciledOutputCount));
+        System.err.println("=====================================================");
+        System.err.println("CRITICAL: If doGetTuple() < doNext(), query executor stopped early!");
+        System.err.println("          If doGetTuple() == doNext(), tuples lost during serialization!");
         System.err.println("=====================================================\n");
 
         super.doClose();
@@ -318,6 +325,12 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Increment reconciled output count - this tuple is being returned to user
         reconciledOutputCount++;
         totalTuplesPopped++;
+
+        // DEBUG: Log every output
+        if (reconciledOutputCount <= 100 || reconciledOutputCount % 10 == 0) {
+            System.err.println("[doNext] Outputting tuple #" + reconciledOutputCount +
+                " from component " + outputElement.getCursorIndex());
+        }
     }
 
     @Override
@@ -583,6 +596,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     @Override
     public ITupleReference doGetTuple() {
+        // Track how many times this method is called
+        getTupleCallCount++;
+
+        // DEBUG: Log every call
+        if (getTupleCallCount <= 100 || getTupleCallCount % 10 == 0) {
+            System.err.println("[doGetTuple] Called #" + getTupleCallCount +
+                " (outputElement " + (outputElement != null ? "exists" : "is null") + ")");
+        }
+
         // Return tuple from priority queue output element
         return outputElement != null ? outputElement.getTuple() : null;
     }

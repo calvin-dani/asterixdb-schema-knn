@@ -91,4 +91,6 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
 
     void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
             throws HyracksDataException;
+
+    int findInsertPosition(double distance) throws HyracksDataException;
 }

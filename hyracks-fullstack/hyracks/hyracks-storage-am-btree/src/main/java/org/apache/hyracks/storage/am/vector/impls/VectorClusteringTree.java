@@ -294,34 +294,21 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             throws HyracksDataException {
 
         int tupleCount = metadataFrame.getTupleCount();
-        System.out.println(
-                "DEBUG: findDataPageInMetadataPage - tupleCount=" + tupleCount + ", searchDistance=" + distance);
 
         // Search through metadata entries to find appropriate data page
         for (int i = 0; i < tupleCount; i++) {
             double maxDistance = metadataFrame.getMaxDistance(i);
             long dataPageId = metadataFrame.getDataPagePointer(i);
 
-            System.out.println(
-                    "DEBUG: Metadata entry " + i + " - maxDistance=" + maxDistance + ", dataPageId=" + dataPageId);
-
             // If our distance is within this data page's range, return it
             if (distance <= maxDistance) {
-                System.out.println("DEBUG: Found suitable data page " + dataPageId + " (distance " + distance
-                        + " <= maxDistance " + maxDistance + ")");
                 return dataPageId;
             }
         }
 
-        // If no exact match found, try the last data page (highest distance range)
-        if (tupleCount > 0) {
-            long lastDataPageId = metadataFrame.getDataPagePointer(tupleCount - 1);
-            System.out.println("DEBUG: No exact match, using last data page " + lastDataPageId);
-            return lastDataPageId;
-        }
-
-        System.out.println("DEBUG: No data pages found in this metadata page");
-        return -1; // No data pages in this metadata page
+        // If distance exceeds all max_distance values, return -1 to signal
+        // that we should continue to the next metadata page
+        return -1;
     }
 
     /**
@@ -507,163 +494,156 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 + ", added new page " + newDataPageId + " maxDistance=" + newPageMaxDistance);
     }
 
-    /**
-     * Delete a vector from the clustering tree.
-     *
-     * Strategy: 1. Use vector embedding to traverse tree from root to leaf level by computing distances to centroids 2.
-     * At each level, find the closest centroid and descend to corresponding child 3. At leaf level, get the closest
-     * cluster's data pages 4. Search data pages using both vector similarity and primary key matching
-     */
-    private void deleteVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-        // Extract primary key for tuple identification
-        byte[] primaryKey = extractPrimaryKeyFromTuple(tuple);
 
-        // Use unified cluster search and access pattern
-        ClusterAccessResult accessResult = findClusterAndPrepareAccess(tuple, ctx, false);
+    /**
+     * In-place deletion with three-scenario handling (follows LSMBTree pattern):
+     * 1. Tuple not found → Insert antimatter (delegates to insertIntoDataPages)
+     * 2. Tuple found (matter only) → Physical DELETE
+     * 3. Tuple found (after antimatter was replaced by matter during reinsertion) → Physical DELETE
+     */
+    private boolean deleteVector(ITupleReference tuple, VectorClusteringOpContext ctx)
+            throws HyracksDataException {
+
+        // Extract vector and primary key
+        double[] vector = extractVectorFromTuple(tuple);
+        byte[] primaryKey = extractPrimaryKeyFromTuple(tuple);
+        long pkValue = extractLongFromPrimaryKey(primaryKey);
+
+        // Find cluster and access data pages
+        ClusterAccessResult accessResult = findClusterAndPrepareAccess(tuple, ctx, true);
 
         try {
-            // Extract vector for debugging and verification
-            double[] vector = extractVectorFromTuple(tuple);
-            System.out.println("DEBUG: Starting deleteVector with vector length=" + vector.length);
-            System.out.println("DEBUG: Found target cluster at leafPageId=" + accessResult.clusterResult.leafPageId
-                    + ", clusterIndex=" + accessResult.clusterResult.clusterIndex);
-            System.out.println("DEBUG: Searching in metadataPageId=" + accessResult.metadataPageId);
+            // Calculate distance to centroid
+            double[] centroid = accessResult.clusterResult.centroid;
+            double distance = VectorUtils.calculateEuclideanDistance(vector, centroid);
+            int centroidId = accessResult.clusterResult.centroidId;
 
-            // Search through data pages in the cluster to find and delete the tuple
-            // This will use primary key matching to ensure we delete the exact record
-            boolean deleted = deleteFromDataPagesWithVectorCheck(accessResult.metadataPageId, vector, primaryKey, ctx);
+            // Try to find and physically delete tuple from data pages (Scenarios 2 & 3)
+            boolean foundAndDeleted = tryPhysicalDelete(
+                accessResult.metadataPageId,
+                distance,
+                primaryKey,
+                centroidId,
+                tuple,
+                ctx,
+                pkValue
+            );
 
-            if (!deleted) {
-                System.out.println("WARNING: Tuple not found for deletion");
-                // Could optionally throw exception if strict deletion semantics required
+            if (foundAndDeleted) {
+                // Scenarios 2 & 3: Successfully deleted from memory
+                return true;
             }
 
+            // Scenario 1: Tuple not found in memory → Insert antimatter
+            // CRITICAL FIX: Use insertIntoDataPages() which handles:
+            // - Empty metadata pages (creates new data page)
+            // - Page splits (if data page is full)
+            // - Metadata max distance updates
+            System.err.println("DELETE PK=" + pkValue + " → Tuple not found in memory, inserting antimatter");
+            insertIntoDataPages(accessResult.metadataPageId, vector, distance, centroidId, tuple, ctx);
+            System.err.println("DELETE PK=" + pkValue + " → ANTIMATTER inserted (disk tuple) in cluster=" + centroidId + ", distance=" + distance);
+            return true;
+
         } finally {
-            accessResult.leafPage.releaseReadLatch();
+            // Release leaf page
+            accessResult.leafPage.releaseWriteLatch(true);
             bufferCache.unpin(accessResult.leafPage);
         }
     }
 
     /**
-     * Delete tuple from data pages using both vector similarity and primary key lookup. This ensures we find the
-     * correct tuple by first using vector distance then confirming with primary key.
+     * Try to physically delete a tuple from data pages. Searches through metadata
+     * pages to find the tuple and delete it. Returns true if found and deleted,
+     * false if not found (caller should insert antimatter).
      */
-    private boolean deleteFromDataPagesWithVectorCheck(long metadataPageId, double[] targetVector, byte[] primaryKey,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
+    private boolean tryPhysicalDelete(
+            long metadataPageId,
+            double distance,
+            byte[] primaryKey,
+            int centroidId,
+            ITupleReference originalTuple,
+            VectorClusteringOpContext ctx,
+            long pkValue) throws HyracksDataException {
 
-        ICachedPage metadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) metadataPageId));
+        // Traverse through all linked metadata pages
+        long currentMetadataPageId = metadataPageId;
 
-        try {
-            metadataPage.acquireReadLatch();
-            ctx.getMetadataFrame().setPage(metadataPage);
+        while (currentMetadataPageId != -1) {
+            ICachedPage metadataPage =
+                    bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) currentMetadataPageId));
 
-            int metadataTupleCount = ctx.getMetadataFrame().getTupleCount();
-            System.out.println("DEBUG: Metadata page has " + metadataTupleCount + " data page references");
+            try {
+                metadataPage.acquireReadLatch();
+                ctx.getMetadataFrame().setPage(metadataPage);
 
-            // Search through all data pages referenced by this metadata page
-            for (int i = 0; i < metadataTupleCount; i++) {
-                long dataPageId = ctx.getMetadataFrame().getDataPagePointer(i);
+                // Find appropriate data page based on distance
+                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), distance);
 
-                if (deleteFromDataPageWithVectorCheck(dataPageId, targetVector, primaryKey, ctx)) {
-                    System.out.println("DEBUG: Successfully deleted tuple from dataPageId=" + dataPageId);
-                    return true; // Found and deleted the tuple
-                }
-            }
+                if (targetDataPageId != -1) {
+                    // Try physical deletion in this data page
+                    ICachedPage dataPage = bufferCache.pin(
+                        BufferedFileHandle.getDiskPageId(getFileId(), (int) targetDataPageId)
+                    );
 
-            System.out.println("DEBUG: Tuple not found in any data page under this metadata page");
-            return false; // Tuple not found
+                    try {
+                        dataPage.acquireWriteLatch();
+                        ctx.getDataFrame().setPage(dataPage);
 
-        } finally {
-            metadataPage.releaseReadLatch();
-            bufferCache.unpin(metadataPage);
-        }
-    }
+                        // Search for tuple by distance + PK
+                        int tupleIndex = ((VectorClusteringDataFrame) ctx.getDataFrame())
+                            .findTupleByDistanceAndPrimaryKey(distance, primaryKey, pkValue);
 
-    /**
-     * Delete tuple from a specific data page using both vector similarity and primary key matching. This method
-     * provides enhanced accuracy by first checking vector similarity then confirming with primary key.
-     *
-     * @param dataPageId
-     *         The ID of the data page to search
-     * @param targetVector
-     *         The vector embedding of the tuple to delete
-     * @param primaryKey
-     *         The primary key of the tuple to delete
-     * @param ctx
-     *         The operation context
-     * @return true if tuple was found and deleted, false otherwise
-     */
-    private boolean deleteFromDataPageWithVectorCheck(long dataPageId, double[] targetVector, byte[] primaryKey,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
+                        if (tupleIndex >= 0) {
+                            // Found! Physically delete it
+                            VectorClusteringDataFrame dataFrame = (VectorClusteringDataFrame) ctx.getDataFrame();
 
-        ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) dataPageId));
+                            int tupleCountBefore = dataFrame.getTupleCount();
+                            System.err.println("BEFORE DELETE PK=" + pkValue + " | Page has " + tupleCountBefore +
+                                " tuples, deleting at index=" + tupleIndex);
 
-        try {
-            dataPage.acquireWriteLatch();
-            ctx.getDataFrame().setPage(dataPage);
+                            byte[] pkAtIndex = dataFrame.getPrimaryKey(tupleIndex);
+                            long pkAtIndexValue = extractLongFromPrimaryKey(pkAtIndex);
 
-            int tupleCount = ctx.getDataFrame().getTupleCount();
-            System.out.println("DEBUG: Searching data page " + dataPageId + " with " + tupleCount + " tuples");
+                            // Safety check
+                            if (pkAtIndexValue != pkValue) {
+                                System.err.println("ERROR: DELETE PK=" + pkValue + " → Found WRONG tuple at index " +
+                                    tupleIndex + " with PK=" + pkAtIndexValue + " (BUG!)");
+                                return false;
+                            }
 
-            if (frameTuple == null) {
-                frameTuple = ctx.getDataFrame().createTupleReference();
-            }
+                            // Physical delete
+                            ctx.getDataFrame().delete(originalTuple, tupleIndex);
 
-            // Search for tuple using both vector similarity and primary key matching
-            for (int i = 0; i < tupleCount; i++) {
-                frameTuple.resetByTupleIndex(ctx.getDataFrame(), i);
+                            int tupleCountAfter = dataFrame.getTupleCount();
+                            System.err.println("AFTER DELETE PK=" + pkValue + " | Page now has " + tupleCountAfter +
+                                " tuples (deleted 1)");
+                            System.err.println("DELETE PK=" + pkValue + " → PHYSICAL delete at index=" + tupleIndex +
+                                " in cluster=" + centroidId + ", distance=" + distance + " (verified PK match)");
 
-                // First, extract and compare primary key (last field)
-                int pkFieldIndex = frameTuple.getFieldCount() - 1;
-                byte[] tuplePK = frameTuple.getFieldData(pkFieldIndex);
-                int tuplePKOffset = frameTuple.getFieldStart(pkFieldIndex);
-                int tuplePKLength = frameTuple.getFieldLength(pkFieldIndex);
+                            return true; // Successfully deleted
+                        }
 
-                if (Arrays.equals(primaryKey,
-                        Arrays.copyOfRange(tuplePK, tuplePKOffset, tuplePKOffset + tuplePKLength))) {
-
-                    System.out.println("DEBUG: Found tuple with matching primary key at index " + i);
-
-                    // Primary key matches - now verify vector similarity for additional safety
-                    // Extract vector from tuple (assuming it's in field 2 - after distance and cosine fields)
-                    int vectorFieldIndex = 2; // Tuple format: <distance, cosine, vector, PK>
-                    byte[] tupleVectorData = frameTuple.getFieldData(vectorFieldIndex);
-                    int tupleVectorOffset = frameTuple.getFieldStart(vectorFieldIndex);
-                    int tupleVectorLength = frameTuple.getFieldLength(vectorFieldIndex);
-
-                    double[] tupleVector = VectorUtils.bytesToDoubleArray(Arrays.copyOfRange(tupleVectorData,
-                            tupleVectorOffset, tupleVectorOffset + tupleVectorLength));
-
-                    // Calculate similarity between target vector and tuple vector
-                    double similarity = VectorUtils.calculateCosineSimilarity(targetVector, tupleVector);
-                    System.out.println("DEBUG: Vector similarity = " + similarity);
-
-                    // Use a reasonable similarity threshold - vectors should be very similar (> 0.99) or identical (1.0)
-                    if (similarity > 0.99) {
-                        System.out.println("DEBUG: Vector similarity confirmed, deleting tuple");
-
-                        // Both primary key and vector similarity match - delete the tuple
-                        ctx.getDataFrame().delete(frameTuple, i);
-                        ctx.getModificationCallback().found(frameTuple, null);
-
-                        // Update page LSN
-                        ctx.getDataFrame().setPageLsn(ctx.getDataFrame().getPageLsn() + 1);
-
-                        return true;
-                    } else {
-                        System.out.println("WARNING: Primary key matches but vector similarity is low (" + similarity
-                                + "), skipping deletion for safety");
+                        // Not found in this data page
+                    } finally {
+                        dataPage.releaseWriteLatch(true);
+                        bufferCache.unpin(dataPage);
                     }
                 }
+
+                // Check next metadata page
+                int nextMetadataPageId = ctx.getMetadataFrame().getNextPage();
+                if (nextMetadataPageId == 0 || nextMetadataPageId == -1) {
+                    break; // End of chain
+                }
+                currentMetadataPageId = nextMetadataPageId;
+
+            } finally {
+                metadataPage.releaseReadLatch();
+                bufferCache.unpin(metadataPage);
             }
-
-            System.out.println("DEBUG: Tuple not found in data page " + dataPageId);
-            return false; // Tuple not found
-
-        } finally {
-            dataPage.releaseWriteLatch(true);
-            bufferCache.unpin(dataPage);
         }
+
+        return false; // Not found in any data page
     }
 
     /**
@@ -671,6 +651,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      */
     private byte[] extractPrimaryKeyFromTuple(ITupleReference tuple) {
         return VectorClusteringTupleUtils.extractPrimaryKeyFromTuple(tuple);
+    }
+
+    /**
+     * Extract long value from primary key bytes (format: [type_tag][8-byte long]).
+     */
+    private long extractLongFromPrimaryKey(byte[] primaryKey) {
+        // Skip type tag (first byte at offset 0), read 8-byte long value starting at offset 1
+        return LongPointable.getLong(primaryKey, 1);
     }
 
     /**
@@ -1199,7 +1187,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         @Override
         public void delete(ITupleReference tuple) throws HyracksDataException {
             ctx.setOperation(IndexOperation.DELETE);
-            insertVector(tuple, ctx);
+            // Use in-place deletion instead of always inserting antimatter
+            tree.deleteVector(tuple, ctx);
         }
 
         @Override

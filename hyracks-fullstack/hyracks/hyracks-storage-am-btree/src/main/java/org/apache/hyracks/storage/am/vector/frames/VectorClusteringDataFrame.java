@@ -85,9 +85,9 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     @Override
     public double getDistanceToCentroid(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
-        // Distance to centroid is the first field in data records - stored as float
+        // Distance to centroid is the first field in data records - stored as double
         int distanceOff = frameTuple.getFieldStart(0) + 1;
-        // Distance to centroid is the first field in data records - stored as float
+        // Distance to centroid is the first field in data records - stored as double
         double distance = buf.getDouble(distanceOff);
         return distance;
     }
@@ -180,6 +180,50 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         }
 
         return left;
+    }
+
+    /**
+     * Extract long value from primary key bytes (format: [type_tag][8-byte long]).
+     */
+    private long extractLongFromPrimaryKey(byte[] primaryKey) {
+        // Skip type tag (first byte at offset 0), read 8-byte long value starting at offset 1
+        return org.apache.hyracks.data.std.primitive.LongPointable.getLong(primaryKey, 1);
+    }
+
+    /**
+     * Find tuple matching both distance and primary key using RIGHT BOUND search.
+     * Returns the rightmost (most recently inserted) tuple if multiple matches exist.
+     * This is critical for finding matter tuples after antimatter during deletion.
+     *
+     * @param distance Target distance to centroid
+     * @param primaryKey Primary key bytes to match
+     * @param pkValue Primary key value for logging
+     * @return Tuple index if found, -1 if not found
+     */
+    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey, long pkValue)
+            throws HyracksDataException {
+
+        // Step 1: Use RIGHT BOUND search to find upper boundary
+        int upperBound = findInsertPosition(distance);
+
+        // Step 2: Search BACKWARD from upperBound-1 to find matching PK
+        // This ensures we find the RIGHTMOST (last inserted) tuple with this distance+PK
+        for (int i = upperBound - 1; i >= 0; i--) {
+            double dist = getDistanceToCentroid(i);
+
+            // Stop when we reach a different distance zone
+            if (dist < distance) {
+                break;
+            }
+
+            // Check primary key match
+            byte[] pk = getPrimaryKey(i);
+            if (Arrays.equals(pk, primaryKey)) {
+                return i; // Found the rightmost matching tuple
+            }
+        }
+
+        return -1; // Not found
     }
 
     /**

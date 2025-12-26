@@ -597,16 +597,39 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             return false;
         }
 
-        // Get the next page ID from the current data frame's linked list pointer
-        int nextDataPageId = dataFrame.getNextPage();
-        if (nextDataPageId == -1) {
-            return false; // No more data pages in the linked list
-        }
+        // CRITICAL FIX: After deletion, data pages can become empty but there might
+        // be more non-empty pages later in the chain. We must skip empty pages instead
+        // of stopping at the first empty page.
 
-        // Move to the next data page
-        this.currentDataPageId = nextDataPageId;
-        openDataPage(nextDataPageId);
-        return this.tupleCount > 0; // Return true if new page has tuples
+        while (true) {
+            // Get the next page ID from the current data frame's linked list pointer
+            int nextDataPageId = dataFrame.getNextPage();
+            if (nextDataPageId == -1) {
+                System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] " +
+                    "Reached end of data page chain, no more pages");
+                return false; // Reached end of chain
+            }
+
+            // Move to the next data page
+            this.currentDataPageId = nextDataPageId;
+            openDataPage(nextDataPageId);
+
+            // Check if this page has tuples
+            if (this.tupleCount > 0) {
+                System.err.println(String.format(
+                    "[VectorClusteringSearchCursor.moveToNextDataPage] " +
+                    "Found non-empty data page %d with %d tuples",
+                    nextDataPageId, this.tupleCount));
+                return true; // Found non-empty page
+            }
+
+            // Page is empty after deletion - continue to next page
+            System.err.println(String.format(
+                "[VectorClusteringSearchCursor.moveToNextDataPage] " +
+                "Data page %d is empty (after deletion), skipping to next page",
+                nextDataPageId));
+            // Loop continues to next page
+        }
     }
 
     /**
