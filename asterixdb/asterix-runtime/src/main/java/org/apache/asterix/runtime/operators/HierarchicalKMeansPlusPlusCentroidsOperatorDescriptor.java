@@ -316,7 +316,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             this.levelCentroids.put(level, parentLevel);
             this.parentChildRelations.put(level, parentChildMap);
 
-//            System.err.println("Initialized parent level " + level + " with " + parentCount + " empty centroids");
+            //            System.err.println("Initialized parent level " + level + " with " + parentCount + " empty centroids");
         }
 
         /**
@@ -366,7 +366,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
          */
         public void outputHierarchicalStructure(FrameTupleAppender appender, IFrameWriter writer,
                 IHyracksTaskContext ctx) throws HyracksDataException {
-//            System.err.println("=== OUTPUTTING HIERARCHICAL STRUCTURE (BFS) ===");
+            //            System.err.println("=== OUTPUTTING HIERARCHICAL STRUCTURE (BFS) ===");
 
             // Find the root level (highest level number)
             int maxLevel = -1;
@@ -375,7 +375,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             }
 
             if (maxLevel == -1) {
-//                System.err.println("No levels found to output");
+                //                System.err.println("No levels found to output");
                 return;
             }
 
@@ -391,7 +391,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 if (levelInfo == null)
                     continue;
 
-//                System.err.println("Processing level " + currentLevel + " with " + levelInfo.size() + " centroids");
+                //                System.err.println("Processing level " + currentLevel + " with " + levelInfo.size() + " centroids");
 
                 // Output all centroids in current level
                 for (CentroidInfo centroid : levelInfo) {
@@ -415,7 +415,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
          * Uses BFS traversal to assign global IDs matching outputHierarchicalStructure().
          */
         public void logAllCentroids() {
-//            System.err.println("=== LOGGING ALL HIERARCHICAL CENTROIDS ===");
+            //            System.err.println("=== LOGGING ALL HIERARCHICAL CENTROIDS ===");
 
             // Find the root level (highest level number)
             int maxLevel = -1;
@@ -424,7 +424,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             }
 
             if (maxLevel == -1) {
-//                System.err.println("No levels found to log");
+                //                System.err.println("No levels found to log");
                 return;
             }
 
@@ -461,7 +461,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     json.append("}");
-                   LOGGER.info(json.toString());
+                    LOGGER.info(json.toString());
                     globalCentroidId++;
                 }
 
@@ -522,10 +522,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             tupleBuilder.getSize());
                 }
 
-//                LOGGER.info("Output: <{}, {}, {}, embedding[{}]>", treeLevel, centroidId, parentClusterId, clippedEmbedding.length);
+                //                LOGGER.info("Output: <{}, {}, {}, embedding[{}]>", treeLevel, centroidId, parentClusterId, clippedEmbedding.length);
 
             } catch (Exception e) {
-//                System.err.println("ERROR: Hierarchical tuple creation failed: " + e.getMessage());
+                //                System.err.println("ERROR: Hierarchical tuple creation failed: " + e.getMessage());
                 throw HyracksDataException.create(e);
             }
         }
@@ -938,7 +938,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 (TupleCountState) ctx.getStateObject(new PartitionedUUID(tupleCountUUID, partition));
                         int totalTupleCount = tupleCountState != null ? tupleCountState.getTotalTupleCount() : 0;
 
-//                        System.err.println("Retrieved total tuple count: " + totalTupleCount);
+                        //                        System.err.println("Retrieved total tuple count: " + totalTupleCount);
 
                         // Perform memory-efficient hierarchical K-means clustering
                         HierarchicalClusterStructure clusterStructure =
@@ -946,12 +946,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         listAccessorConstant, KMeansUtils, vSizeFrame, partition, totalTupleCount);
 
                         if (clusterStructure.getNumLevels() == 0) {
-//                            System.err.println("No clustering structure generated");
+                            //                            System.err.println("No clustering structure generated");
                             return;
                         }
 
                         // Log all centroids from all levels as JSON
-//                        clusterStructure.logAllCentroids();
+                        //                        clusterStructure.logAllCentroids();
 
                         // Output hierarchical structure with parent-child relationships
                         // Manual buffer management handles flushing when needed
@@ -999,9 +999,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return new ClusteringResult(new ArrayList<>(), new int[0]);
                     }
 
-//                    System.err.println("performKMeansParallel: starting   k-means|| with " + totalTupleCount
-//                            + " total tuples, target k = " + k + ", rounds = " + numRounds + ", oversampling factor = "
-//                            + oversamplingFactor);
+                    //                    System.err.println("performKMeansParallel: starting   k-means|| with " + totalTupleCount
+                    //                            + " total tuples, target k = " + k + ", rounds = " + numRounds + ", oversampling factor = "
+                    //                            + oversamplingFactor);
 
                     int[] assignments = new int[totalTupleCount];
 
@@ -1022,7 +1022,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     // Step 2: Multiple rounds of probabilistic sampling (k-means||)
                     for (int round = 0; round < numRounds; round++) {
-//                        System.err.println("Round " + (round + 1) + "/" + numRounds + ": Sampling candidates...");
+                        //                        System.err.println("Round " + (round + 1) + "/" + numRounds + ": Sampling candidates...");
 
                         // PASS 1: Compute S = Σ_x D(x) by streaming (NO DISTANCE STORAGE)
                         double totalDistance = 0.0;
@@ -1065,7 +1065,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
 
                         if (totalDistance <= 0) {
-//                            System.err.println("Total distance is 0, skipping round " + (round + 1));
+                            //                            System.err.println("Total distance is 0, skipping round " + (round + 1));
                             break;
                         }
 
@@ -1116,8 +1116,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             }
                         }
 
-//                        System.err.println("Round " + (round + 1) + ": Sampled " + sampledCount + " candidates (total: "
-//                                + candidates.size() + ")");
+                        //                        System.err.println("Round " + (round + 1) + ": Sampled " + sampledCount + " candidates (total: "
+                        //                                + candidates.size() + ")");
 
                         // Update current centers: add all candidates from this round for next round's distance computation
                         if (sampledCount > 0) {
@@ -1128,8 +1128,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                     }
 
-//                    System.err.println(
-//                            "Sampling complete: " + candidates.size() + " total candidates (target k = " + k + ")");
+                    //                    System.err.println(
+                    //                            "Sampling complete: " + candidates.size() + " total candidates (target k = " + k + ")");
 
                     // Step 3: Weight candidates - count how many original points are nearest to each candidate
                     int[] candidateWeights = new int[candidates.size()];
@@ -1688,7 +1688,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         KMeansUtils kMeansUtils, VSizeFrame vSizeFrame, int partition, int totalTupleCount)
                         throws HyracksDataException, IOException {
 
-//                    System.err.println("=== PERFORMING MEMORY-EFFICIENT HIERARCHICAL K-MEANS ===");
+                    //                    System.err.println("=== PERFORMING MEMORY-EFFICIENT HIERARCHICAL K-MEANS ===");
 
                     HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
 
@@ -1700,22 +1700,22 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     kMeansUtils, K, rand, maxKMeansIterations, totalTupleCount, partition);
 
                     if (initialResult.centroids.isEmpty()) {
-//                        System.err.println("No initial centroids generated, cannot perform hierarchical clustering");
+                        //                        System.err.println("No initial centroids generated, cannot perform hierarchical clustering");
                         return structure;
                     }
 
                     // Extract embedding dimension and frame size for frame fit calculations
                     int embeddingDimension = initialResult.centroids.get(0).length;
                     if (embeddingDimension <= 0) {
-//                        System.err.println("Invalid embedding dimension: " + embeddingDimension);
+                        //                        System.err.println("Invalid embedding dimension: " + embeddingDimension);
                         return structure;
                     }
                     int frameSize = ctx.getInitialFrameSize();
-//                    System.err.println(
-//                            "Embedding dimension: " + embeddingDimension + ", Frame size: " + frameSize + " bytes");
+                    //                    System.err.println(
+                    //                            "Embedding dimension: " + embeddingDimension + ", Frame size: " + frameSize + " bytes");
 
-//                    System.err.println("Generated " + initialResult.centroids.size()
-//                            + " initial centroids from all data, starting hierarchical clustering");
+                    //                    System.err.println("Generated " + initialResult.centroids.size()
+                    //                            + " initial centroids from all data, starting hierarchical clustering");
 
                     // Add Level 0 (initial centroids) - these are the leaf nodes
                     List<HierarchicalClusterStructure.CentroidInfo> level0Info = new ArrayList<>();
@@ -1731,15 +1731,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     int currentK =
                             Math.min(K, Math.max(1, (int) Math.floor(Math.sqrt(initialResult.centroids.size()))));
                     int maxIterations = 20;
-                    int maxLevels = 5;
-                    int currentLevel = 1;
+                    int maxLevels = 2;
+                    int currentLevel = 0;
 
                     // Build subsequent levels
                     while (currentCentroids.size() > 1 && currentK > 1 && currentLevel < maxLevels) {
-//                        System.err.println("Level " + currentLevel + ": Clustering " + currentCentroids.size()
-//                                + " centroids into " + currentK + " clusters");
-//                        System.err.println("Checking frame fit: target " + currentK + " centroids, frame size: "
-//                                + frameSize + " bytes");
+                        //                        System.err.println("Level " + currentLevel + ": Clustering " + currentCentroids.size()
+                        //                                + " centroids into " + currentK + " clusters");
+                        //                        System.err.println("Checking frame fit: target " + currentK + " centroids, frame size: "
+                        //                                + frameSize + " bytes");
 
                         // Initialize parent level with empty centroids
                         structure.initializeParentLevel(currentLevel, currentK);
@@ -1749,7 +1749,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 currentK, rand, maxIterations);
 
                         if (levelResult.centroids.isEmpty()) {
-//                            System.err.println("K-means++ produced no centroids, stopping clustering");
+                            //                            System.err.println("K-means++ produced no centroids, stopping clustering");
                             break;
                         }
 
@@ -1761,9 +1761,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             long totalDataSize = (long) levelResult.centroids.size() * tupleSize;
                             long frameOverhead = 9L + (4L * levelResult.centroids.size());
                             long totalSize = totalDataSize + frameOverhead;
-//                            System.err.println("Level " + currentLevel + " with " + levelResult.centroids.size()
-//                                    + " centroids fits in frame (estimated size: " + totalSize + " bytes, frame size: "
-//                                    + frameSize + " bytes), stopping here as root level");
+                            //                            System.err.println("Level " + currentLevel + " with " + levelResult.centroids.size()
+                            //                                    + " centroids fits in frame (estimated size: " + totalSize + " bytes, frame size: "
+                            //                                    + frameSize + " bytes), stopping here as root level");
                             // Build this level before breaking (so it's stored in structure)
                             structure.buildLevelFromAssignments(currentCentroids, levelResult.centroids,
                                     levelResult.assignments, currentLevel, currentLevel - 1);
@@ -1781,8 +1781,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         currentLevel++;
                     }
 
-//                    System.err
-//                            .println("Hierarchical clustering completed with " + structure.getNumLevels() + " levels");
+                    //                    System.err
+                    //                            .println("Hierarchical clustering completed with " + structure.getNumLevels() + " levels");
                     return structure;
                 }
 
@@ -1838,8 +1838,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     // Gap-filling: If we have fewer than k centroids, fill gaps
                     if (resultCentroids.size() < k && !centroids.isEmpty()) {
                         int remaining = k - resultCentroids.size();
-//                        System.err.println("Filling gap: have " + resultCentroids.size() + " centroids, need " + k
-//                                + " (input had " + centroids.size() + ")");
+                        //                        System.err.println("Filling gap: have " + resultCentroids.size() + " centroids, need " + k
+                        //                                + " (input had " + centroids.size() + ")");
 
                         for (int gap = 0; gap < remaining; gap++) {
                             double maxMinDist = -1.0;
@@ -1882,12 +1882,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 int randomIdx = rand.nextInt(centroids.size());
                                 resultCentroids
                                         .add(Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
-//                                System.err.println(
-//                                        "Warning: All candidates were duplicates, selected random centroid for gap-filling");
+                                //                                System.err.println(
+                                //                                        "Warning: All candidates were duplicates, selected random centroid for gap-filling");
                             }
                         }
 
-//                        System.err.println("Gap-filling complete: now have " + resultCentroids.size() + " centroids");
+                        //                        System.err.println("Gap-filling complete: now have " + resultCentroids.size() + " centroids");
                     }
 
                     // 3. Lloyd's algorithm for refinement
@@ -1938,13 +1938,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     int randomIdx = rand.nextInt(centroids.size());
                                     resultCentroids.set(i,
                                             Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
-//                                    System.err.println(
-//                                            "Reinitialized empty cluster " + i + " with random centroid from input");
+                                    //                                    System.err.println(
+                                    //                                            "Reinitialized empty cluster " + i + " with random centroid from input");
                                     converged = false; // Force continuation since we changed a centroid
                                 } else {
                                     // Edge case: no input centroids (shouldn't happen, but defensive)
-//                                    System.err.println("Warning: Cannot reinitialize empty cluster " + i
-//                                            + " - no input centroids available");
+                                    //                                    System.err.println("Warning: Cannot reinitialize empty cluster " + i
+                                    //                                            + " - no input centroids available");
                                 }
                             }
                         }

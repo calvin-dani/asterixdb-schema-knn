@@ -311,7 +311,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
 
         // Skip if already at target cluster
         if (currentLeafClusterIndex == targetClusterIndex) {
-//            LOGGER.debug("Already at target cluster {}, skipping", targetClusterIndex);
+            //            LOGGER.debug("Already at target cluster {}, skipping", targetClusterIndex);
             return;
         }
 
@@ -326,10 +326,10 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         }
 
         // Log gap if skipping clusters
-//        if (targetClusterIndex > currentLeafClusterIndex + 1) {
-////            LOGGER.info("Skipping empty clusters from {} to {} (gap detected)", currentLeafClusterIndex + 1,
-////                    targetClusterIndex - 1);
-//        }
+        //        if (targetClusterIndex > currentLeafClusterIndex + 1) {
+        ////            LOGGER.info("Skipping empty clusters from {} to {} (gap detected)", currentLeafClusterIndex + 1,
+        ////                    targetClusterIndex - 1);
+        //        }
 
         // Move to target leaf cluster
         currentLeafClusterIndex = targetClusterIndex;

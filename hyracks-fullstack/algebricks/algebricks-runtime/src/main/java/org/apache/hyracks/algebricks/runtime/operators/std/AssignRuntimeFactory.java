@@ -133,22 +133,22 @@ public class AssignRuntimeFactory extends AbstractOneInputOneOutputRuntimeFactor
         @Override
         public void open() throws HyracksDataException {
             if (first) {
-//                System.err.println("=== ASSIGN OPERATOR OPENING ===");
-//                System.err.println("Number of eval factories: " + evalFactories.length);
-//                for (int i = 0; i < evalFactories.length; i++) {
-//                    System.err.println("Eval factory " + i + ": " + evalFactories[i]);
-//                }
-//                System.err.println("Out columns: " + java.util.Arrays.toString(outColumns));
-//                System.err.println("Projection list: " + java.util.Arrays.toString(projectionList));
+                //                System.err.println("=== ASSIGN OPERATOR OPENING ===");
+                //                System.err.println("Number of eval factories: " + evalFactories.length);
+                //                for (int i = 0; i < evalFactories.length; i++) {
+                //                    System.err.println("Eval factory " + i + ": " + evalFactories[i]);
+                //                }
+                //                System.err.println("Out columns: " + java.util.Arrays.toString(outColumns));
+                //                System.err.println("Projection list: " + java.util.Arrays.toString(projectionList));
 
                 initAccessAppendRef(ctx);
                 first = false;
                 int n = evalFactories.length;
                 for (int i = 0; i < n; i++) {
                     eval[i] = evalFactories[i].createScalarEvaluator(evalCtx);
-//                    System.err.println("Created evaluator " + i + ": " + eval[i]);
+                    //                    System.err.println("Created evaluator " + i + ": " + eval[i]);
                 }
-//                System.err.println("=== ASSIGN OPERATOR OPENED ===");
+                //                System.err.println("=== ASSIGN OPERATOR OPENED ===");
             }
             super.open();
         }

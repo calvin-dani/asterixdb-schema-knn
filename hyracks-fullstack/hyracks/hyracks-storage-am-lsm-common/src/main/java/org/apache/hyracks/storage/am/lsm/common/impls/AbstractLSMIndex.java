@@ -130,8 +130,8 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
             ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
             int[] filterFields, boolean durable, IComponentFilterHelper filterHelper, int[] treeFields, ITracer tracer,
             boolean atomic) throws HyracksDataException {
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: Started");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: Started");
         this.ioManager = ioManager;
         this.virtualBufferCaches = virtualBufferCaches;
         this.diskBufferCache = diskBufferCache;
@@ -156,24 +156,24 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
         this.ioScheduler = ioScheduler;
         this.storageConfig = storageConfig;
 
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: All field assignments completed");
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: About to call ioOpCallback.getLastValidSequence()");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: All field assignments completed");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: About to call ioOpCallback.getLastValidSequence()");
         long lastValidSeq = ioOpCallback.getLastValidSequence();
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: ioOpCallback.getLastValidSequence() returned: " + lastValidSeq);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: About to call fileManager.initLastUsedSeq()");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: ioOpCallback.getLastValidSequence() returned: " + lastValidSeq);
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: About to call fileManager.initLastUsedSeq()");
         fileManager.initLastUsedSeq(lastValidSeq);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: fileManager.initLastUsedSeq() completed");
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: About to create LSMHarness");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: fileManager.initLastUsedSeq() completed");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: About to create LSMHarness");
         lsmHarness = new LSMHarness(this, ioScheduler, mergePolicy, opTracker, diskBufferCache.isReplicationEnabled(),
                 tracer);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: LSMHarness created");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: LSMHarness created");
         isActive = false;
         diskComponents = new ArrayList<>();
         memoryComponents = new ArrayList<>();
@@ -182,8 +182,8 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
         for (int i = 0; i < virtualBufferCaches.size(); i++) {
             flushRequests[i] = new AtomicBoolean();
         }
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] AbstractLSMIndex constructor: Constructor completed");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] AbstractLSMIndex constructor: Constructor completed");
     }
 
     public AbstractLSMIndex(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,

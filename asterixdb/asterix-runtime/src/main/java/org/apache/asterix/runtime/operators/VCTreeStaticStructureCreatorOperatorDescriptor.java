@@ -716,6 +716,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     protected class CreateStructureActivity extends AbstractActivityNode {
         private static final long serialVersionUID = 1L;
         private static final Logger LOGGER = LogManager.getLogger();
+
         protected CreateStructureActivity(ActivityId id) {
             super(id);
         }
@@ -766,10 +767,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-//                    System.err.println("=== CreateStructureActivity nextFrame ===");
+                    //                    System.err.println("=== CreateStructureActivity nextFrame ===");
                     fta.reset(buffer);
                     int frameTupleCount = fta.getTupleCount();
-//                    System.err.println("Processing " + frameTupleCount + " tuples in this frame");
+                    //                    System.err.println("Processing " + frameTupleCount + " tuples in this frame");
 
                     // Accumulate frames for batch processing
                     frameAccumulator.add(buffer.duplicate());
@@ -781,9 +782,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     }
 
                     // Log progress every 1000 tuples to reduce noise
-//                    if (tupleCount % 1000 == 0 && tupleCount > 0) {
-//                        System.err.println("PROGRESS: Processed " + tupleCount + " tuples for hierarchical clustering");
-//                    }
+                    //                    if (tupleCount % 1000 == 0 && tupleCount > 0) {
+                    //                        System.err.println("PROGRESS: Processed " + tupleCount + " tuples for hierarchical clustering");
+                    //                    }
 
                     // Store frame in materialized data
                     // materializedData.appendFrame(buffer);
@@ -889,27 +890,27 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void close() throws HyracksDataException {
-//                    System.err.println("=== CreateStructureActivity CLOSING ===");
-//                    System.err.println("Total tuples collected: " + tupleCount);
-//                    System.err.println("Frames accumulated: " + frameAccumulator.size());
+                    //                    System.err.println("=== CreateStructureActivity CLOSING ===");
+                    //                    System.err.println("Total tuples collected: " + tupleCount);
+                    //                    System.err.println("Frames accumulated: " + frameAccumulator.size());
 
                     // Note: Partitioning is now handled by VCTreeBulkLoaderAndGroupingOperatorDescriptor
-//                    System.err.println("=== PARTITIONING HANDLED BY BULK LOADER OPERATOR ===");
+                    //                    System.err.println("=== PARTITIONING HANDLED BY BULK LOADER OPERATOR ===");
 
                     // Process all accumulated tuples and create static structure
-//                    System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
-//                    System.err.println("Analyzing " + tupleCount + " tuples to determine structure...");
+                    //                    System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
+                    //                    System.err.println("Analyzing " + tupleCount + " tuples to determine structure...");
                     try {
                         createStaticStructure();
-//                        System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
+                        //                        System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
                     } finally {
                         // Ensure indexHelper is closed even if createStaticStructure() throws
                         if (indexHelper != null) {
                             try {
                                 indexHelper.close();
-//                                System.err.println("IndexHelper closed successfully");
+                                //                                System.err.println("IndexHelper closed successfully");
                             } catch (Exception e) {
-//                                System.err.println("ERROR: Failed to close index helper: " + e.getMessage());
+                                //                                System.err.println("ERROR: Failed to close index helper: " + e.getMessage());
                                 // Don't throw - cleanup failures shouldn't mask original exceptions
                             }
                         }
@@ -998,9 +999,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 }
 
                 private void createStaticStructure() throws HyracksDataException {
-//                    System.err.println("=== CREATING STATIC STRUCTURE USING LSM PATTERN ===");
-//                    System.err.println("Processing " + frameAccumulator.size() + " accumulated frames");
-//                    System.err.println("Total tuples to process: " + tupleCount);
+                    //                    System.err.println("=== CREATING STATIC STRUCTURE USING LSM PATTERN ===");
+                    //                    System.err.println("Processing " + frameAccumulator.size() + " accumulated frames");
+                    //                    System.err.println("Total tuples to process: " + tupleCount);
 
                     try {
                         // Analyze collected data to determine structure
@@ -1022,8 +1023,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                         // Get index instance and check type
                         IIndex indexInstance = indexHelper.getIndexInstance();
-//                        System.err.println("Index instance type: "
-//                                + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
+                        //                        System.err.println("Index instance type: "
+                        //                                + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
 
                         // Get LSMVCTree instance
                         if (!(indexInstance instanceof ILSMIndex)) {
@@ -1037,14 +1038,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                     + this.lsmIndex.getClass().getName() + ", LocalResource type: "
                                     + (resource != null ? resource.getResource().getClass().getName() : "null"));
                         }
-//                        System.err.println("LSMVCTree instance obtained successfully");
+                        //                        System.err.println("LSMVCTree instance obtained successfully");
 
                         // Reduce maxEntriesPerPage for large-dimensional vectors to fit in frame
                         int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10);
-//                        System.err.println(
-//                                "Creating static structure bulk loader with " + clustersPerLevel.size() + " levels...");
-//                        System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
-//                                + adjustedMaxEntriesPerPage + " for large-dimensional vectors");
+                        //                        System.err.println(
+                        //                                "Creating static structure bulk loader with " + clustersPerLevel.size() + " levels...");
+                        //                        System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
+                        //                                + adjustedMaxEntriesPerPage + " for large-dimensional vectors");
 
                         // Build parameters map for static structure creation
                         Map<String, Object> parameters = new HashMap<>();
@@ -1058,26 +1059,26 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         // Use LSM bulk loader infrastructure to create static structure
                         bulkLoader = this.lsmIndex.createBulkLoader(fillFactor, false, 0L, false, parameters);
 
-//                        System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
+                        //                        System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
                         // Process all accumulated tuples
                         int totalTuplesProcessed = 0;
                         for (ByteBuffer frameBuffer : frameAccumulator) {
                             FrameTupleAccessor frameFta = new FrameTupleAccessor(outRecDescs[0]);
                             frameFta.reset(frameBuffer);
 
-//                            System.err.println("Frame has " + frameFta.getTupleCount() + " tuples");
+                            //                            System.err.println("Frame has " + frameFta.getTupleCount() + " tuples");
 
                             for (int i = 0; i < frameFta.getTupleCount(); i++) {
                                 tuple.reset(frameFta, i);
 
                                 // Debug the tuple being processed
-//                                System.err.println(
-//                                        "=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
-//                                System.err.println("Input tuple field count: " + tuple.getFieldCount());
+                                //                                System.err.println(
+                                //                                        "=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
+                                //                                System.err.println("Input tuple field count: " + tuple.getFieldCount());
 
                                 // Convert 4-field tuple to 2-field tuple for static structure builder
                                 ITupleReference convertedTuple = convertToVCTreeBuilderFormat(tuple);
-//                                System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
+                                //                                System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
 
                                 bulkLoader.add(convertedTuple);
                                 totalTuplesProcessed++;
@@ -1086,7 +1087,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             // Process all tuples for static structure creation
                         }
 
-//                        System.err.println("Finalizing static structure...");
+                        //                        System.err.println("Finalizing static structure...");
                         // Finalize the structure - LSM bulk loader handles component registration
                         bulkLoader.end();
                         LOGGER.info("STATIC STRUCTURE FINALIZED SUCCESSFULLY");
@@ -1107,13 +1108,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                             .getComponent();
                             printStaticStructureBFS(component, null);
                         } catch (Exception e) {
-//                            System.err.println("WARNING: Failed to print static structure BFS: " + e.getMessage());
+                            //                            System.err.println("WARNING: Failed to print static structure BFS: " + e.getMessage());
                             // Don't fail structure creation if logging fails
                         }
 
                     } catch (Exception e) {
-//                        System.err.println("ERROR: Failed to create static structure: " + e.getMessage());
-//                        e.printStackTrace();
+                        //                        System.err.println("ERROR: Failed to create static structure: " + e.getMessage());
+                        //                        e.printStackTrace();
                         throw HyracksDataException.create(e);
                     }
                 }
@@ -1184,11 +1185,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         String centroidStr = formatCentroid(centroid, printLimit);
                                         String distStr = computeDistanceString(queryVector, centroid);
 
-                                        LOGGER.info("tuple={} | cid={} | centroidId={} | centroid={} | dist={} | metadata={}", i, cid, centroidId, centroidStr, distStr, metadataPtr);
+                                        LOGGER.info(
+                                                "tuple={} | cid={} | centroidId={} | centroid={} | dist={} | metadata={}",
+                                                i, cid, centroidId, centroidStr, distStr, metadataPtr);
                                         processedTuples++;
                                     } catch (Exception e) {
-//                                        System.err.println("ERROR processing leaf tuple " + i + " on page "
-//                                                + currentPageId + ": " + e.getMessage());
+                                        //                                        System.err.println("ERROR processing leaf tuple " + i + " on page "
+                                        //                                                + currentPageId + ": " + e.getMessage());
                                     }
                                 }
 
@@ -1225,15 +1228,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         String centroidStr = formatCentroid(centroid, printLimit);
                                         String distStr = computeDistanceString(queryVector, centroid);
 
-                                        LOGGER.info("tuple={} | cid={} | centroid={} | dist={} | child={}", i, cid, centroidStr, distStr, childPageId);
+                                        LOGGER.info("tuple={} | cid={} | centroid={} | dist={} | child={}", i, cid,
+                                                centroidStr, distStr, childPageId);
                                         processedTuples++;
 
                                         if (childPageId != -1 && visited.add(childPageId)) {
                                             queue.add(new int[] { childPageId, level + 1 });
                                         }
                                     } catch (Exception e) {
-//                                        System.err.println("ERROR processing interior tuple " + i + " on page "
-//                                                + currentPageId + ": " + e.getMessage());
+                                        //                                        System.err.println("ERROR processing interior tuple " + i + " on page "
+                                        //                                                + currentPageId + ": " + e.getMessage());
                                     }
                                 }
 
@@ -1347,14 +1351,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void initialize() throws HyracksDataException {
-//                    System.err.println("=== PassThroughActivity INITIALIZING ===");
+                    //                    System.err.println("=== PassThroughActivity INITIALIZING ===");
                     try {
 
-//                        System.err.println("✅ PassThroughActivity initialized successfully");
+                        //                        System.err.println("✅ PassThroughActivity initialized successfully");
 
                     } catch (Exception e) {
-//                        System.err.println("ERROR: Failed to initialize PassThroughActivity: " + e.getMessage());
-//                        e.printStackTrace();
+                        //                        System.err.println("ERROR: Failed to initialize PassThroughActivity: " + e.getMessage());
+                        //                        e.printStackTrace();
                         throw HyracksDataException.create(e);
                     }
                 }
@@ -1390,7 +1394,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void deinitialize() throws HyracksDataException {
-//                    System.err.println("=== PassThroughActivity DEINITIALIZING ===");
+                    //                    System.err.println("=== PassThroughActivity DEINITIALIZING ===");
                     try {
                         if (lsmBulkLoader != null) {
                             lsmBulkLoader.end();
@@ -1401,7 +1405,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to deinitialize PassThroughActivity: " + e.getMessage());
                     }
-//                    System.err.println("=== PassThroughActivity COMPLETE ===");
+                    //                    System.err.println("=== PassThroughActivity COMPLETE ===");
                 }
             };
         }

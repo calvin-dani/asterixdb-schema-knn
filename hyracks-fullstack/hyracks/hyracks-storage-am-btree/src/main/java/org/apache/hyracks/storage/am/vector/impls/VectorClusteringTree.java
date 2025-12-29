@@ -1166,6 +1166,50 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     }
 
     /**
+     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
+     * interior and leaf frames.
+     */
+    public List<ClusterSearchResult> findCloseLeafClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx,
+            IVectorDistanceFunction distanceFunction, double ep) throws HyracksDataException {
+
+        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
+
+        // Use the common navigation logic from VCTreeNavigationUtils
+        return VCTreeNavigationUtils.findCloseLeafCentroids(bufferCache, getFileId(), rootPage,
+                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
+    }
+
+    /**
+     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
+     * interior and leaf frames.
+     */
+    public List<ClusterSearchResult> findCloseCentroidsFrontierFromRoot(double[] queryVector,
+            VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
+            throws HyracksDataException {
+
+        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
+
+        // Use the common navigation logic from VCTreeNavigationUtils
+        return VCTreeNavigationUtils.findCloseCentroidsFrontier(bufferCache, getFileId(), rootPage,
+                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
+    }
+
+    /**
+     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
+     * interior and leaf frames.
+     */
+    public List<ClusterSearchResult> findCloseCentroidsLevelWiseFromRoot(double[] queryVector,
+            VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
+            throws HyracksDataException {
+
+        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
+
+        // Use the common navigation logic from VCTreeNavigationUtils
+        return VCTreeNavigationUtils.findCloseCentroidsLevelWise(bufferCache, getFileId(), rootPage,
+                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
+    }
+
+    /**
      * Find the closest centroid in a leaf cluster, handling overflow pages.
      */
     private ClusterSearchResult findClosestCentroidInLeafCluster(int startPageId, double[] queryVector,
@@ -1659,6 +1703,105 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Delegate to the tree's implementation
             return tree.findClosestClusterFromRoot(queryVector, ctx, distanceFunction);
+        }
+
+        /**
+         * Find the closest leaf centroid for a given query vector.
+         * This method delegates to the tree's findClosestClusterFromRoot implementation.
+         *
+         * @param queryVector The query vector to find the closest centroid for
+         * @param distanceFunction The distance function to use for centroid finding
+         * @return ClusterSearchResult containing information about the closest leaf centroid
+         * @throws HyracksDataException if any error occurs during the search
+         */
+        public List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector,
+                IVectorDistanceFunction distanceFunction, double epi) throws HyracksDataException {
+            if (destroyed) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
+            }
+
+            if (queryVector == null) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
+            }
+
+            if (queryVector.length != tree.vectorDimensions) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
+                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
+            }
+
+            // Ensure the tree is initialized
+            if (!tree.isStaticStructureInitialized()) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
+            }
+
+            // Delegate to the tree's implementation
+            return tree.findCloseLeafClusterFromRoot(queryVector, ctx, distanceFunction, epi);
+        }
+
+        /**
+         * Find the closest leaf centroid for a given query vector.
+         * This method delegates to the tree's findClosestClusterFromRoot implementation.
+         *
+         * @param queryVector The query vector to find the closest centroid for
+         * @param distanceFunction The distance function to use for centroid finding
+         * @return ClusterSearchResult containing information about the closest leaf centroid
+         * @throws HyracksDataException if any error occurs during the search
+         */
+        public List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector,
+                IVectorDistanceFunction distanceFunction, double epi) throws HyracksDataException {
+            if (destroyed) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
+            }
+
+            if (queryVector == null) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
+            }
+
+            if (queryVector.length != tree.vectorDimensions) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
+                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
+            }
+
+            // Ensure the tree is initialized
+            if (!tree.isStaticStructureInitialized()) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
+            }
+
+            // Delegate to the tree's implementation
+            return tree.findCloseCentroidsFrontierFromRoot(queryVector, ctx, distanceFunction, epi);
+        }
+
+        /**
+         * Find the closest leaf centroid for a given query vector.
+         * This method delegates to the tree's findClosestClusterFromRoot implementation.
+         *
+         * @param queryVector The query vector to find the closest centroid for
+         * @param distanceFunction The distance function to use for centroid finding
+         * @return ClusterSearchResult containing information about the closest leaf centroid
+         * @throws HyracksDataException if any error occurs during the search
+         */
+        public List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector,
+                IVectorDistanceFunction distanceFunction, double epi) throws HyracksDataException {
+            if (destroyed) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
+            }
+
+            if (queryVector == null) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
+            }
+
+            if (queryVector.length != tree.vectorDimensions) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
+                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
+            }
+
+            // Ensure the tree is initialized
+            if (!tree.isStaticStructureInitialized()) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
+            }
+
+            // Delegate to the tree's implementation
+            return tree.findCloseCentroidsLevelWiseFromRoot(queryVector, ctx, distanceFunction, epi);
         }
 
         @Override

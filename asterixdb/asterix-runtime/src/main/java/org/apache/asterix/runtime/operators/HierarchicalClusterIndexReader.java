@@ -25,9 +25,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Utility class for reading and managing hierarchical cluster index files.
@@ -38,6 +39,7 @@ public class HierarchicalClusterIndexReader {
     private final ObjectMapper objectMapper;
     private Map<String, Object> indexData;
     private static final Logger LOGGER = LogManager.getLogger();
+
     public HierarchicalClusterIndexReader() {
         this.objectMapper = new ObjectMapper();
     }
