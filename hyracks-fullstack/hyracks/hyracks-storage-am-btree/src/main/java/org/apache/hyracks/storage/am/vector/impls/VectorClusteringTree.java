@@ -289,6 +289,19 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     /**
      * Find the appropriate data page in a specific metadata page based on distance. This searches for a data page that
      * can accommodate the given distance.
+     *
+     * CRITICAL: Returns last data page as catch-all when distance > all max_distance values.
+     * This is needed for BOTH insertion and deletion:
+     * - Matter insertion: Vectors with distance > all max values go into last page (catch-all)
+     * - Antimatter insertion: Same as matter insertion - uses last page as catch-all
+     * - Physical deletion: To find those vectors, we must check the last page (same catch-all)
+     *
+     * The last page dynamically expands and metadata max_distance is updated automatically
+     * via updateMetadataMaxDistanceIfNeeded() in the insertion path.
+     *
+     * @param metadataFrame The metadata frame to search
+     * @param distance The distance to search for
+     * @return Data page ID, or -1 if metadata is empty
      */
     private long findDataPageInMetadataPage(IVectorClusteringMetadataFrame metadataFrame, double distance)
             throws HyracksDataException {
@@ -306,9 +319,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             }
         }
 
-        // If distance exceeds all max_distance values, return -1 to signal
-        // that we should continue to the next metadata page
-        return -1;
+        // No exact match: use last data page as catch-all (for ALL operations)
+        if (tupleCount > 0) {
+            return metadataFrame.getDataPagePointer(tupleCount - 1);
+        }
+
+        return -1; // Metadata is empty
     }
 
     /**

@@ -19,6 +19,7 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
+import java.util.Arrays;
 import java.util.PriorityQueue;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -64,9 +65,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     // Store search predicate for component switching
     private ISearchPredicate searchPredicate;
 
-    // Track K (target limit) and reconciled output count for cluster advancement decisions
+    // Track K (target limit) for cluster advancement decisions
     private int K;
-    private int reconciledOutputCount;
 
     // Track cluster exhaustion state for synchronized advancement
     private int[] currentClusterIndex; // Which cluster each component is currently on
@@ -81,6 +81,12 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     // Full-scan mode flag (for merge operations)
     private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
+
+    // Track specific PKs for debugging
+    private static final java.util.Set<Long> DEBUG_PKS = new java.util.HashSet<>(java.util.Arrays.asList(
+        202L, 213L, 216L, 219L, 220L, 221L, 228L, 232L, 237L, 238L, 239L, 242L, 245L, 257L,
+        271L, 272L, 274L, 276L, 278L, 279L, 280L, 284L, 285L, 286L, 287L, 288L, 293L, 294L
+    ));
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
         this(opCtx, false, false, NoOpIndexCursorStats.INSTANCE);
@@ -107,7 +113,6 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
-        this.reconciledOutputCount = 0;
 
         // Initialize debug counters
         this.totalTuplesPopped = 0;
@@ -290,19 +295,12 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     @Override
     public void doClose() throws HyracksDataException {
-        // Print final reconciliation summary for demo
+        // Print final reconciliation summary
         System.err.println("\n========== LSM Vector Index Search Summary ==========");
         System.err.println(String.format("Total tuples processed:     %d", totalTuplesPopped));
         System.err.println(String.format("Antimatter tuples detected: %d", antimatterTuplesDetected));
         System.err.println(String.format("Cancellations made:         %d", cancellationsMade));
-        System.err.println(String.format("Final output count:         %d", reconciledOutputCount));
-        System.err.println(String.format("doNext() was called:        %d times", reconciledOutputCount));
         System.err.println(String.format("doGetTuple() was called:    %d times", getTupleCallCount));
-        System.err.println(String.format("Verification:               %d - %d = %d ✓",
-                totalTuplesPopped, cancellationsMade, reconciledOutputCount));
-        System.err.println("=====================================================");
-        System.err.println("CRITICAL: If doGetTuple() < doNext(), query executor stopped early!");
-        System.err.println("          If doGetTuple() == doNext(), tuples lost during serialization!");
         System.err.println("=====================================================\n");
 
         super.doClose();
@@ -322,15 +320,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         outputElement = outputPriorityQueue.poll();
         needPushElementIntoQueue = true;
 
-        // Increment reconciled output count - this tuple is being returned to user
-        reconciledOutputCount++;
+        // Track total tuples popped (including those that may be cancelled)
         totalTuplesPopped++;
-
-        // DEBUG: Log every output
-        if (reconciledOutputCount <= 100 || reconciledOutputCount % 10 == 0) {
-            System.err.println("[doNext] Outputting tuple #" + reconciledOutputCount +
-                " from component " + outputElement.getCursorIndex());
-        }
     }
 
     @Override
@@ -359,12 +350,6 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                         needPushElementIntoQueue = true;
                         antimatterTuplesDetected++;
 
-                        // LOG: Antimatter detected
-                        if (antimatterTuplesDetected <= 5 || antimatterTuplesDetected % 50 == 0) {
-                            System.err.println(String.format(
-                                    "[checkPQ] Antimatter detected #%d | Component=%d, held for matching",
-                                    antimatterTuplesDetected, outputElement.getCursorIndex()));
-                        }
                         // Continue loop to check for cancellation with next tuple
                     } else {
                         // Valid output tuple - will be returned to user
@@ -382,29 +367,6 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
                         // Advance outputElement's cursor (don't lose the rest of its tuples!)
                         pushIntoQueueAndAdvanceClusterIfNeeded(outputElement);
-
-                        // CRITICAL FIX: Only decrement reconciledOutputCount if outputElement was a MATTER tuple
-                        // that was counted by doNext(). If outputElement is ANTIMATTER, it was detected at line 305
-                        // and never counted, so we should NOT decrement.
-                        boolean outputIsAntimatter = ((ILSMTreeTupleReference) outputElement.getTuple()).isAntimatter();
-                        if (!outputIsAntimatter) {
-                            // Matter tuple was counted by doNext(), decrement it
-                            reconciledOutputCount--;
-
-                            // Log cancellation (show every 50th)
-                            if (cancellationsMade % 50 == 0 || cancellationsMade <= 10) {
-                                System.err.println(String.format(
-                                        "[LSM Vector Index] Cancellation #%d | Matter tuple cancelled, reconciledCount=%d",
-                                        cancellationsMade, reconciledOutputCount));
-                            }
-                        } else {
-                            // Antimatter detected first, matter never counted, no decrement needed
-                            if (cancellationsMade % 50 == 0 || cancellationsMade <= 10) {
-                                System.err.println(String.format(
-                                        "[LSM Vector Index] Cancellation #%d | Antimatter matched, no count change",
-                                        cancellationsMade));
-                            }
-                        }
 
                         // Both tuples discarded (cancelled), reset state
                         needPushElementIntoQueue = false;
@@ -585,7 +547,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                 throw new IllegalArgumentException(e);
             }
 
-            // Tiebreaker: prefer tuples from earlier components (lower cursor index)
+            // Tiebreaker: prefer tuples from earlier components
             if (elementA.getCursorIndex() > elementB.getCursorIndex()) {
                 return 1;
             } else {
@@ -598,12 +560,6 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     public ITupleReference doGetTuple() {
         // Track how many times this method is called
         getTupleCallCount++;
-
-        // DEBUG: Log every call
-        if (getTupleCallCount <= 100 || getTupleCallCount % 10 == 0) {
-            System.err.println("[doGetTuple] Called #" + getTupleCallCount +
-                " (outputElement " + (outputElement != null ? "exists" : "is null") + ")");
-        }
 
         // Return tuple from priority queue output element
         return outputElement != null ? outputElement.getTuple() : null;
@@ -628,38 +584,6 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         return cmp.getComparators()[1].compare(
             tupleA.getFieldData(2), tupleA.getFieldStart(2) + 1, tupleA.getFieldLength(2) - 1,
             tupleB.getFieldData(2), tupleB.getFieldStart(2) + 1, tupleB.getFieldLength(2) - 1);
-    }
-
-    /**
-     * Helper method to decode primary key for debugging.
-     * Handles both LONG and STRING types.
-     */
-    private String decodePrimaryKey(byte[] data, int start, int length, byte typeTag) {
-        try {
-            // Type tag values: LONG=18, STRING=1 (common AsterixDB type tags)
-            if (typeTag == 18) {
-                // LONG type (8 bytes)
-                if (length >= 9) {
-                    long value = java.nio.ByteBuffer.wrap(data, start + 1, 8).getLong();
-                    return String.valueOf(value);
-                }
-            } else if (typeTag == 1) {
-                // STRING type (2-byte length prefix + UTF-8 bytes)
-                if (length >= 3) {
-                    int strLen = java.nio.ByteBuffer.wrap(data, start + 1, 2).getShort() & 0xFFFF;
-                    String value = new String(data, start + 3, strLen, java.nio.charset.StandardCharsets.UTF_8);
-                    return value;
-                }
-            }
-            // Unknown type or invalid length - return hex representation
-            StringBuilder hex = new StringBuilder();
-            for (int i = 1; i < Math.min(length, 20); i++) {
-                hex.append(String.format("%02X", data[start + i]));
-            }
-            return "0x" + hex.toString();
-        } catch (Exception e) {
-            return "<decode_error>";
-        }
     }
 
     @Override
@@ -734,8 +658,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // ALL components exhausted their current cluster
         System.err.println(String.format(
-                "[LSMVCTreeSearchCursor] ALL components exhausted cluster %d, reconciledOutputCount=%d, K=%d",
-                currentClusterIndex[0], reconciledOutputCount, K));
+                "[LSMVCTreeSearchCursor] ALL components exhausted cluster %d, K=%d",
+                currentClusterIndex[0], K));
 
         // Decision: Should we advance ALL components to next cluster?
         if (stopAdvancing) {
@@ -743,15 +667,11 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return;
         }
 
-        if (reconciledOutputCount >= K) {
-            // Reached K - stop advancing all components
-            stopAdvancing = true;
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Reached K=%d, stopping cluster advancement", K));
-            return;
-        }
+        // Note: Cluster advancement continues until all clusters exhausted
+        // K-based stopping is disabled since we removed reconciledOutputCount
+        // TODO: Implement accurate output counting for K-based early termination
 
-        // Need more data - advance ALL components to next cluster together
+        // Advance ALL components to next cluster together
         System.err.println("[LSMVCTreeSearchCursor] Advancing ALL components to next cluster");
         advanceAllComponentsToNextCluster();
     }
@@ -762,7 +682,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
      */
     private void advanceAllComponentsToNextCluster() throws HyracksDataException {
         // Reset exhaustion flags for new cluster
-        java.util.Arrays.fill(clusterExhausted, false);
+        Arrays.fill(clusterExhausted, false);
 
         for (int i = 0; i < rangeCursors.length; i++) {
             IIndexCursor cursor = rangeCursors[i];
@@ -848,9 +768,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                     "[LSMVCTreeSearchCursor] ALL components found cluster %d empty, skipping to next cluster",
                     currentClusterIndex[0]));
 
-            // Check if we've reached K or should stop advancing
-            if (stopAdvancing || reconciledOutputCount >= K) {
-                System.err.println("[LSMVCTreeSearchCursor] Reached K or stop flag, halting advancement");
+            // Check if we've decided to stop advancing
+            if (stopAdvancing) {
+                System.err.println("[LSMVCTreeSearchCursor] Reached stop flag, halting advancement");
                 return;
             }
 

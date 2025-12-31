@@ -60,7 +60,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private ITreeIndexFrameFactory dataFrameFactory;
 
     // Cursor state fields
+    /* Metadata page for current cluster */
     private long targetMetadataPageId;
+    /* Currently opened data page */
     private long currentDataPageId;
     private double[] queryVector;
     private boolean isOpen;
@@ -68,26 +70,37 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private ICachedPage currentPage;
     private IVectorClusteringDataFrame dataFrame;
     private ITreeIndexTupleReference frameTuple;
+    /* Position in current data page (0-based, next tuple to read) */
     private int currentTupleIndex;
+    /* Total tuples in current data page */
     private int tupleCount;
     private IIndexAccessor accessor;
     private IVectorDistanceFunction distanceFunction;
 
     // Multi-cluster support fields
-    private int K; // Target number of records
-    private int recordsCollected; // Count of records returned so far
-    private ClusterSearchResult currentClusterResult; // Current cluster being scanned
-    private boolean exhaustedAllClusters; // Flag to stop searching for more clusters
-    private VCTreeNavigationUtils.NavigationState iteratorState; // DFS navigation state
-    private int clustersProbed; // Count of clusters scanned during this search
+    /* Total records returned to user */
+    private int recordsCollected;
+    /* Current cluster being scanned */
+    private ClusterSearchResult currentClusterResult;
+    /* Flag when no more clusters available */
+    private boolean exhaustedAllClusters;
+    /* DFS navigation state for query mode */
+    private VCTreeNavigationUtils.NavigationState iteratorState;
+    /* Count of clusters scanned */
+    private int clustersProbed;
 
-    // Full-scan mode fields (for merge operations)
-    private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
-    private int currentSequentialClusterIndex; // For full-scan: 0, 1, 2, ...
-    private int totalLeafClusters; // Total number of leaf clusters
-    private long firstDirectoryPageId; // First directory page ID (cluster 0)
-    private List<Long> allDirectoryPageIds; // All directory page IDs collected from all leaf pages
-    // Removed allCentroidIds - now using sequential IDs starting from 0
+    // Two modes:
+    // - fullScanMode = false: Query mode - distance-based cluster iteration (closest clusters first)
+    // - fullScanMode = true: Merge mode - sequential cluster iteration (0→1→2→...)
+    private boolean fullScanMode;
+    /* For full-scan: which cluster index we're at (0, 1, 2, ...) */
+    private int currentSequentialClusterIndex;
+    /* Total number of leaf clusters */
+    private int totalLeafClusters;
+    /* First directory page ID (cluster 0) */
+    private long firstDirectoryPageId;
+    /* All directory page IDs collected from all leaf pages */
+    private List<Long> allDirectoryPageIds;
 
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
@@ -129,22 +142,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.fullScanMode = fullScanMode;
     }
 
-    /**
-     * Extract K value from search predicate.
-     * VectorPointPredicate now contains the k value for top-K ANN search.
-     */
-    private int extractK(ISearchPredicate searchPred) {
-        if (searchPred instanceof VectorPointPredicate) {
-            return ((VectorPointPredicate) searchPred).getK();
-        }
-
-        if (searchPred instanceof VectorAnnPredicate) {
-            return ((VectorAnnPredicate) searchPred).getK();
-        }
-
-        // Fallback: return a large number (scan all clusters)
-        return Integer.MAX_VALUE;
-    }
 
     @Override
     public void open(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
@@ -178,9 +175,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 this.distanceFunction = VectorUtils::calculateEuclideanDistance;
             }
         }
-
-        // Extract K from predicate or parameters
-        this.K = extractK(searchPred);
 
         if (fullScanMode) {
             // Full-scan mode: Navigate to cluster 0 and iterate sequentially
@@ -245,8 +239,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         }
 
         System.err.println(String.format(
-                "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsCollected=%d, K=%d, exhaustedAllClusters=%s",
-                recordsCollected, K, exhaustedAllClusters));
+                "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsCollected=%d, exhaustedAllClusters=%s",
+                recordsCollected, exhaustedAllClusters));
 
         // Current cluster exhausted - return false
         // Let the LSM layer decide whether to advance to next cluster
@@ -492,33 +486,28 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         } else {
             // Query mode: Distance-based iteration using DFS
-            // Loop to skip empty clusters
-            while (true) {
-                ClusterSearchResult nextCluster =
-                        VCTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
+            // Open next cluster and return immediately (even if empty)
+            // Let LSMVCTreeSearchCursor handle cluster synchronization
+            ClusterSearchResult nextCluster =
+                    VCTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
 
-                if (nextCluster == null) {
-                    exhaustedAllClusters = true;
-                    System.err.println(
-                            "[VectorClusteringSearchCursor.advanceToNextCluster] No more clusters, marking exhausted");
-                    return false; // No more clusters available
-                }
-
-                // Open next cluster
-                openCluster(nextCluster);
-                boolean hasData = currentTupleIndex < tupleCount;
-                System.err.println(String.format(
-                        "[VectorClusteringSearchCursor.advanceToNextCluster] Opened cluster %d (centroidId=%d, distance=%.4f), hasData=%s, tupleCount=%d",
-                        clustersProbed, nextCluster.centroidId, nextCluster.distance, hasData, tupleCount));
-
-                if (hasData) {
-                    return true; // Found cluster with data
-                }
-
-                // Empty cluster, continue to next one
+            if (nextCluster == null) {
+                exhaustedAllClusters = true;
                 System.err.println(
-                        "[VectorClusteringSearchCursor.advanceToNextCluster] Cluster is empty, skipping to next");
+                        "[VectorClusteringSearchCursor.advanceToNextCluster] No more clusters, marking exhausted");
+                return false; // No more clusters available
             }
+
+            // Open next cluster (even if it might be empty)
+            openCluster(nextCluster);
+            boolean hasData = currentTupleIndex < tupleCount;
+            System.err.println(String.format(
+                    "[VectorClusteringSearchCursor.advanceToNextCluster] Opened cluster %d (centroidId=%d, distance=%.4f), hasData=%s, tupleCount=%d",
+                    clustersProbed, nextCluster.centroidId, nextCluster.distance, hasData, tupleCount));
+
+            // Return true even if cluster is empty - let LSMVCTreeSearchCursor handle it
+            // This ensures cluster synchronization across all LSM components
+            return true;
         }
     }
 
@@ -531,17 +520,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         return !exhaustedAllClusters;
     }
 
-    /**
-     * Get the number of records collected so far.
-     * Used by LSM layer to track progress.
-     *
-     * @return number of records returned by this cursor
-     */
-    public int getRecordsCollected() {
-        return recordsCollected;
-    }
-
-    /**
+     /**
      * Get the first data page ID from the target metadata page.
      */
     private long getFirstDataPageFromMetadata() throws HyracksDataException {
@@ -674,8 +653,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Log cluster probing
         System.err.println(String.format(
-                "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records collected so far: %d | Target K: %d",
-                clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsCollected, K));
+                "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records collected so far: %d",
+                clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsCollected));
     }
 
     /**
@@ -738,8 +717,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Log final statistics
             System.err.println(String.format(
-                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records returned: %d | Target K: %d | Exhausted all clusters: %s",
-                    clustersProbed, recordsCollected, K, exhaustedAllClusters));
+                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records returned: %d | Exhausted all clusters: %s",
+                    clustersProbed, recordsCollected, exhaustedAllClusters));
         }
         this.isOpen = false;
         this.currentTuple = null;
