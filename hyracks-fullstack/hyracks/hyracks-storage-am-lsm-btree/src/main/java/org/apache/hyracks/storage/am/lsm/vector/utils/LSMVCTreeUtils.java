@@ -131,12 +131,10 @@ public class LSMVCTreeUtils {
         metadataTypeTraits[0] = DoublePointable.TYPE_TRAITS; // max distance (double) - Fixed 8 bytes
         metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer (int) - Fixed 4 bytes
 
-        // Data frames need 4-field data tuples: <distance, cosine_similarity, vector, primary_key>
-        ITypeTraits[] dataTypeTraits = new ITypeTraits[3];
-        dataTypeTraits[0] = new FixedLengthTypeTrait(9); // distance (double) - Fixed 8 bytes
-        dataTypeTraits[1] = new FixedLengthTypeTrait(5); // cosine similarity (double) - Fixed 8 bytes
-        //        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
-        dataTypeTraits[2] = new FixedLengthTypeTrait(9);
+        // Data frames: Use the typeTraits parameter (passed from VCTreeResourceFactoryProvider)
+        // Format: [distance: DOUBLE, centroidId: INT32, primary_keys..., include_fields...]
+        // The typeTraits parameter contains the correct ADM-tagged type traits for all fields
+        ITypeTraits[] dataTypeTraits = typeTraits;
 
         // Create individual tuple writer factories with correct type traits for each frame type
         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =

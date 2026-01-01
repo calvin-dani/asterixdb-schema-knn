@@ -31,7 +31,11 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleWriter;
 /**
  * Tuple writer for LSM Vector Clustering Tree data frames.
  *
- * Handles data tuples with format: <distance, centroid_id, primary_key>
+ * Handles data tuples with dynamic format: <distance, centroid_id, primary_keys..., include_fields...>
+ *
+ * The number of fields is determined by typeTraits.length (passed in constructor):
+ * - Minimum: 3 fields (distance, centroid_id, 1 primary key)
+ * - With includes: 2 + numPrimaryKeys + numIncludeFields
  *
  * Anti-matter tuples (deletion markers) have the same fields as matter tuples,
  * but with bit 7 (ANTIMATTER_BIT) set in the null flags byte.
@@ -42,9 +46,6 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleWriter;
 public class LSMVCTreeDataTupleWriter extends TypeAwareTupleWriter implements ILSMTreeTupleWriter {
 
     private boolean isAntimatter;
-
-    // All 3 fields are "key fields" - no separate value fields in vector index
-    private final int numKeyFields = 3;
 
     public LSMVCTreeDataTupleWriter(ITypeTraits[] typeTraits, ITypeTraits nullTypeTraits,
             INullIntrospector nullIntrospector) {

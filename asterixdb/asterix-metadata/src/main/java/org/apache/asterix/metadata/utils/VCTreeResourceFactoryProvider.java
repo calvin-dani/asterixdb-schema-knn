@@ -157,45 +157,60 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
             ARecordType recordType, ARecordType metaType) throws AlgebricksException {
         ITypeTraitProvider ttProvider = metadataProvider.getStorageComponentProvider().getTypeTraitProvider();
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
-        List<List<String>> keyFieldNames = vectorIndexDetails.getKeyFieldNames();
-        int numKeyFields = keyFieldNames.size();
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
         ITypeTraits[] primaryTypeTraits = dataset.getPrimaryTypeTraits(metadataProvider, recordType, metaType);
 
-        if (numKeyFields != 1) {
-            throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_INDEX_NUM_OF_FIELD, numKeyFields,
-                    index.getIndexType(), 1);
-        }
+        // Get INCLUDE fields (optional)
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
 
-        // Get vector field type
-        List<String> vectorFieldNames = keyFieldNames.get(0);
+        // Data frame tuple format: [distance, centroidId, primary_keys..., include_fields...]
+        // This matches what VCTreeBulkLoaderAndGroupingOperatorDescriptor creates
+        int totalFields = 2 + numPrimaryKeys + numIncludeFields;
+        ITypeTraits[] typeTraits = new ITypeTraits[totalFields];
 
-        // Try to get the actual field type from the schema first (for closed fields)
-        IAType vectorFieldType = null;
-        try {
-            vectorFieldType = recordType.getSubFieldType(vectorFieldNames);
-        } catch (AlgebricksException e) {
-            // Field not found in schema, will use default for open fields
-            vectorFieldType = null;
-        }
+        // Field 0: distance (DOUBLE with ADM type tag)
+        typeTraits[0] = ttProvider.getTypeTrait(BuiltinType.ADOUBLE);
 
-        // If field type is not found in schema (open field), provide default type
-        if (vectorFieldType == null) {
-            vectorFieldType = DefaultOpenFieldType.getDefaultOpenFieldType(ATypeTag.ARRAY);
-        }
+        // Field 1: centroidId (INT32 with ADM type tag)
+        typeTraits[1] = ttProvider.getTypeTrait(BuiltinType.AINT32);
 
-        Pair<IAType, Boolean> vectorTypePair =
-                Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldNames, recordType);
-        IAType vectorType = vectorTypePair.first;
-        if (vectorType == null) {
-            throw new CompilationException(ErrorCode.COMPILATION_FIELD_NOT_FOUND, vectorFieldNames.toString());
-        }
-
-        // Create type traits for vector field + primary keys
-        ITypeTraits[] typeTraits = new ITypeTraits[numKeyFields + numPrimaryKeys];
-        typeTraits[0] = ttProvider.getTypeTrait(vectorType); // Vector field
+        // Fields 2+: Primary keys
         for (int i = 0; i < numPrimaryKeys; i++) {
-            typeTraits[numKeyFields + i] = primaryTypeTraits[i];
+            typeTraits[2 + i] = primaryTypeTraits[i];
+        }
+
+        // Fields after primary keys: INCLUDE fields (if any)
+        if (numIncludeFields > 0) {
+            List<IAType> includeFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
+            List<Integer> includeSourceIndicators = vectorIndexDetails.getIncludeFieldSourceIndicators();
+
+            for (int i = 0; i < numIncludeFields; i++) {
+                IAType includeFieldType = null;
+
+                // Get field type from index details
+                if (includeFieldTypes != null && i < includeFieldTypes.size()) {
+                    includeFieldType = includeFieldTypes.get(i);
+                } else {
+                    // Fallback: try to get from record type
+                    List<String> includeFieldName = includeFieldNames.get(i);
+                    ARecordType sourceType = (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0)
+                            ? recordType : metaType;
+                    try {
+                        includeFieldType = sourceType.getSubFieldType(includeFieldName);
+                    } catch (AlgebricksException e) {
+                        // Use default for open fields
+                        includeFieldType = DefaultOpenFieldType.getDefaultOpenFieldType(ATypeTag.ANY);
+                    }
+                }
+
+                if (includeFieldType == null) {
+                    throw new CompilationException(ErrorCode.COMPILATION_FIELD_NOT_FOUND,
+                            includeFieldNames.get(i).toString());
+                }
+
+                typeTraits[2 + numPrimaryKeys + i] = ttProvider.getTypeTrait(includeFieldType);
+            }
         }
 
         return typeTraits;
@@ -206,48 +221,61 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         IBinaryComparatorFactoryProvider cmpFactoryProvider =
                 metadataProvider.getStorageComponentProvider().getComparatorFactoryProvider();
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
-        List<List<String>> keyFieldNames = vectorIndexDetails.getKeyFieldNames();
-        int numKeyFields = keyFieldNames.size();
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
 
-        if (numKeyFields != 1) {
-            throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_INDEX_NUM_OF_FIELD, numKeyFields,
-                    index.getIndexType(), 1);
-        }
+        // Get INCLUDE fields (optional)
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
 
-        // Get vector field type
-        List<String> vectorFieldNames = keyFieldNames.get(0);
+        // Data frame comparators: [distance, centroidId, primary_keys..., include_fields...]
+        // We need comparators for fields used in comparisons (typically distance and primary keys)
+        int totalFields = 2 + numPrimaryKeys + numIncludeFields;
+        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[totalFields];
 
-        // Try to get the actual field type from the schema first (for closed fields)
-        IAType vectorFieldType = null;
-        try {
-            vectorFieldType = recordType.getSubFieldType(vectorFieldNames);
-        } catch (AlgebricksException e) {
-            // Field not found in schema, will use default for open fields
-            vectorFieldType = null;
-        }
+        // Comparator 0: distance (DOUBLE)
+        cmpFactories[0] = cmpFactoryProvider.getBinaryComparatorFactory(BuiltinType.ADOUBLE, true);
 
-        // If field type is not found in schema (open field), provide default type
-        if (vectorFieldType == null) {
-            vectorFieldType = DefaultOpenFieldType.getDefaultOpenFieldType(ATypeTag.ARRAY);
-        }
+        // Comparator 1: centroidId (INT32)
+        cmpFactories[1] = cmpFactoryProvider.getBinaryComparatorFactory(BuiltinType.AINT32, true);
 
-        Pair<IAType, Boolean> vectorTypePair =
-                Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldNames, recordType);
-        IAType vectorType = vectorTypePair.first;
-        if (vectorType == null) {
-            throw new CompilationException(ErrorCode.COMPILATION_FIELD_NOT_FOUND, vectorFieldNames.toString());
-        }
-
-        // Create comparator factories for vector field + primary keys
-        IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[numKeyFields + numPrimaryKeys];
-        cmpFactories[0] = cmpFactoryProvider.getBinaryComparatorFactory(vectorType, true); // Vector field
-
-        // Add primary key comparator factories
+        // Comparators 2+: Primary keys
         IBinaryComparatorFactory[] primaryComparatorFactories =
                 dataset.getPrimaryComparatorFactories(metadataProvider, recordType, metaType);
         for (int i = 0; i < numPrimaryKeys; i++) {
-            cmpFactories[numKeyFields + i] = primaryComparatorFactories[i];
+            cmpFactories[2 + i] = primaryComparatorFactories[i];
+        }
+
+        // Comparators after primary keys: INCLUDE fields (if any)
+        if (numIncludeFields > 0) {
+            List<IAType> includeFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
+            List<Integer> includeSourceIndicators = vectorIndexDetails.getIncludeFieldSourceIndicators();
+
+            for (int i = 0; i < numIncludeFields; i++) {
+                IAType includeFieldType = null;
+
+                // Get field type from index details
+                if (includeFieldTypes != null && i < includeFieldTypes.size()) {
+                    includeFieldType = includeFieldTypes.get(i);
+                } else {
+                    // Fallback: try to get from record type
+                    List<String> includeFieldName = includeFieldNames.get(i);
+                    ARecordType sourceType = (includeSourceIndicators == null || includeSourceIndicators.get(i) == 0)
+                            ? recordType : metaType;
+                    try {
+                        includeFieldType = sourceType.getSubFieldType(includeFieldName);
+                    } catch (AlgebricksException e) {
+                        // Use default for open fields
+                        includeFieldType = DefaultOpenFieldType.getDefaultOpenFieldType(ATypeTag.ANY);
+                    }
+                }
+
+                if (includeFieldType == null) {
+                    throw new CompilationException(ErrorCode.COMPILATION_FIELD_NOT_FOUND,
+                            includeFieldNames.get(i).toString());
+                }
+
+                cmpFactories[2 + numPrimaryKeys + i] = cmpFactoryProvider.getBinaryComparatorFactory(includeFieldType, true);
+            }
         }
 
         return cmpFactories;

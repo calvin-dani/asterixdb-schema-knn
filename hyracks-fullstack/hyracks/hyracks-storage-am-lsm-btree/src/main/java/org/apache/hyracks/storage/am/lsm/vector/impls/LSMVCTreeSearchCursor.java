@@ -82,19 +82,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     // Full-scan mode flag (for merge operations)
     private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
 
-    // Track specific PKs for debugging
-    private static final java.util.Set<Long> DEBUG_PKS = new java.util.HashSet<>(java.util.Arrays.asList(
-        202L, 213L, 216L, 219L, 220L, 221L, 228L, 232L, 237L, 238L, 239L, 242L, 245L, 257L,
-        271L, 272L, 274L, 276L, 278L, 279L, 280L, 284L, 285L, 286L, 287L, 288L, 293L, 294L
-    ));
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
         this(opCtx, false, false, NoOpIndexCursorStats.INSTANCE);
-    }
-
-    public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples,
-            IIndexCursorStats stats) {
-        this(opCtx, returnDeletedTuples, false, stats);
     }
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx, boolean returnDeletedTuples, boolean fullScanMode,
@@ -132,9 +122,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // Initialize cluster tracking arrays for synchronized advancement
         currentClusterIndex = new int[numVCTrees];
-        java.util.Arrays.fill(currentClusterIndex, 0); // All start at cluster 0
+        Arrays.fill(currentClusterIndex, 0); // All start at cluster 0
         clusterExhausted = new boolean[numVCTrees];
-        java.util.Arrays.fill(clusterExhausted, false);
+        Arrays.fill(clusterExhausted, false);
         stopAdvancing = false;
 
         // Initialize or resize accessor/cursor arrays
@@ -520,30 +510,40 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             ITupleReference tupleB = elementB.getTuple();
 
             try {
-                // Compare field 0 (distance) - skip 1-byte type tag
-                // Field format: [type_tag:1 byte][double:8 bytes]
+                // Tuple format: [distance, centroidId, primary_keys..., include_fields...]
+                // Compare order: distance first, then all remaining fields (PKs + includes)
+
+                // We skip centroidId since tuples from different clusters can coexist
+
+                // Compare field 0 (distance) using ADM-aware comparator 0
                 int result = cmp.getComparators()[0].compare(
-                    tupleA.getFieldData(0), tupleA.getFieldStart(0) + 1, tupleA.getFieldLength(0) - 1,
-                    tupleB.getFieldData(0), tupleB.getFieldStart(0) + 1, tupleB.getFieldLength(0) - 1);
+                    tupleA.getFieldData(0), tupleA.getFieldStart(0), tupleA.getFieldLength(0),
+                    tupleB.getFieldData(0), tupleB.getFieldStart(0), tupleB.getFieldLength(0));
 
                 if (result != 0) {
                     return result;
                 }
 
-                // Compare field 2 (primary_key) - skip 1-byte type tag
-                // Field format: [type_tag:1 byte][long:8 bytes]
-                result = cmp.getComparators()[1].compare(
-                    tupleA.getFieldData(2), tupleA.getFieldStart(2) + 1, tupleA.getFieldLength(2) - 1,
-                    tupleB.getFieldData(2), tupleB.getFieldStart(2) + 1, tupleB.getFieldLength(2) - 1);
+                // Compare remaining fields starting at field 2 (include fields + primary keys)
+                // We compare all fields for total ordering in the priority queue
+                int numRemainingFields = cmp.getComparators().length - 2;  // All fields after distance and centroidId
+                for (int i = 0; i < numRemainingFields; i++) {
+                    int fieldIdx = 2 + i;
+                    int cmpIdx = 2 + i;
 
-                if (result != 0) {
-                    return result;
+                    // Check if field exists in tuple before comparing
+                    if (fieldIdx >= tupleA.getFieldCount() || fieldIdx >= tupleB.getFieldCount()) {
+                        break;  // One tuple has fewer fields, skip remaining comparisons
+                    }
+
+                    result = cmp.getComparators()[cmpIdx].compare(
+                        tupleA.getFieldData(fieldIdx), tupleA.getFieldStart(fieldIdx), tupleA.getFieldLength(fieldIdx),
+                        tupleB.getFieldData(fieldIdx), tupleB.getFieldStart(fieldIdx), tupleB.getFieldLength(fieldIdx));
+                    if (result != 0) {
+                        return result;
+                    }
                 }
             } catch (Throwable e) {
-                System.err.println(String.format(
-                    "[VectorPQComparator] ERROR comparing tuples: %s - %s",
-                    e.getClass().getSimpleName(),
-                    e.getMessage()));
                 throw new IllegalArgumentException(e);
             }
 
@@ -569,21 +569,57 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB)
             throws HyracksDataException {
 
-        // Compare field 0 (distance) - skip type_tag (1 byte)
-        // Field format: [type_tag:1 byte][double:8 bytes]
+        // Tuple format: [distance, centroidId, primary_keys..., include_fields...]
+        // Compare order: distance first, then primary keys (skip centroidId)
+        // TODO: In the future, we may implement filtered search based on INCLUDE fields
+        //       to support predicates like "WHERE movie_year > 2000" during vector search
+
+        // Compare field 0 (distance) using ADM-aware comparator 0
         int result = cmp.getComparators()[0].compare(
-            tupleA.getFieldData(0), tupleA.getFieldStart(0) + 1, tupleA.getFieldLength(0) - 1,
-            tupleB.getFieldData(0), tupleB.getFieldStart(0) + 1, tupleB.getFieldLength(0) - 1);
+            tupleA.getFieldData(0), tupleA.getFieldStart(0), tupleA.getFieldLength(0),
+            tupleB.getFieldData(0), tupleB.getFieldStart(0), tupleB.getFieldLength(0));
 
         if (result != 0) {
             return result;
         }
 
-        // Compare field 2 (primary_key) - skip type_tag (1 byte)
-        // Field format: [type_tag:1 byte][long:8 bytes] or [type_tag:1 byte][string]
-        return cmp.getComparators()[1].compare(
-            tupleA.getFieldData(2), tupleA.getFieldStart(2) + 1, tupleA.getFieldLength(2) - 1,
-            tupleB.getFieldData(2), tupleB.getFieldStart(2) + 1, tupleB.getFieldLength(2) - 1);
+        // Compare remaining fields starting at field 2 (include fields + primary keys)
+        // Comparators array: [0=distance, 1=centroidId, 2+=include/PK fields]
+        // We skip comparator 1 (centroidId) since tuples from different clusters can coexist
+        // We compare all remaining fields for total ordering
+        int numRemainingFields = cmp.getComparators().length - 2;
+        for (int i = 0; i < numRemainingFields; i++) {
+            int fieldIdx = 2 + i;
+            int cmpIdx = 2 + i;
+
+            // Check if field exists in tuple before comparing
+            if (fieldIdx >= tupleA.getFieldCount() || fieldIdx >= tupleB.getFieldCount()) {
+                break;  // One tuple has fewer fields, skip remaining comparisons
+            }
+
+            result = cmp.getComparators()[cmpIdx].compare(
+                tupleA.getFieldData(fieldIdx), tupleA.getFieldStart(fieldIdx), tupleA.getFieldLength(fieldIdx),
+                tupleB.getFieldData(fieldIdx), tupleB.getFieldStart(fieldIdx), tupleB.getFieldLength(fieldIdx));
+            if (result != 0) {
+                return result;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Determine number of include fields from tuple field count.
+     * Tuple format: [distance, centroidId, primary_keys..., include_fields...]
+     *
+     * TODO: Currently returns 0 (no includes handled in comparison).
+     *       In the future, this will be passed from index metadata to support
+     *       filtered vector search based on INCLUDE field predicates.
+     */
+    private int getNumIncludeFields(ITupleReference tuple) {
+        // Total fields = 2 (distance, centroidId) + numPKs + numIncludes
+        // For now, assume no includes (they're not used in comparison anyway)
+        return 0;
     }
 
     @Override

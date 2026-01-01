@@ -521,6 +521,10 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         return deleteDataFrameFactory;
     }
 
+    public IBinaryComparatorFactory[] getCmpFactories() {
+        return cmpFactories;
+    }
+
     @Override
     public int getFieldCount() {
         LSMVCTreeMemoryComponent mutableComponent =

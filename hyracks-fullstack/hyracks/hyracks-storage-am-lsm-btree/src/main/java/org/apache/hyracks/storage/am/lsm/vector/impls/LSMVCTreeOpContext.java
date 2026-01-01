@@ -82,10 +82,13 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
         this.insertDataFrameFactory = lsmTree.getInsertDataFrameFactory();
         this.deleteDataFrameFactory = lsmTree.getDeleteDataFrameFactory();
 
-        // Create MultiComparator for LSM cursor priority queue
-        IBinaryComparator[] comparators = new IBinaryComparator[2];
-        comparators[0] = DoubleBinaryComparatorFactory.INSTANCE.createBinaryComparator(); // distance
-        comparators[1] = LongBinaryComparatorFactory.INSTANCE.createBinaryComparator();   // primary_key
+        // Create MultiComparator using ADM-aware comparators from LSMVCTree
+        // These comparators handle the 1-byte type tag prefix for ADM-tagged types (ADOUBLE, AINT32, etc.)
+        IBinaryComparatorFactory[] cmpFactories = lsmTree.getCmpFactories();
+        IBinaryComparator[] comparators = new IBinaryComparator[cmpFactories.length];
+        for (int i = 0; i < comparators.length; i++) {
+            comparators[i] = cmpFactories[i].createBinaryComparator();
+        }
         this.cmp = new MultiComparator(comparators);
 
         // Pre-create data frames for insert and delete operations (LSMBTree pattern)
