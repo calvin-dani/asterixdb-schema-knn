@@ -1221,6 +1221,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         int bestPageId = -1;
         int bestClusterIndex = -1;
         int bestCentroidId = -1;
+        long bestDirectoryPageId = -1;
         double[] bestCentroid = null;
 
         // Traverse all pages in the leaf cluster
@@ -1258,6 +1259,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                         bestClusterIndex = i;
                         bestCentroid = centroid.clone();
                         bestCentroidId = centroidID;
+                        bestDirectoryPageId = ctx.getLeafFrame().getMetadataPagePointer(i);
                         LOGGER.debug("New best cluster: pageId={}, index={}, distance={}", currentPageId, i, distance);
                     }
                 }
@@ -1277,8 +1279,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
 
         if (bestPageId != -1 && bestClusterIndex != -1) {
-            bestResult =
-                    new ClusterSearchResult(bestPageId, bestClusterIndex, bestCentroid, bestDistance, bestCentroidId);
+            bestResult = new ClusterSearchResult(bestPageId, bestClusterIndex, bestCentroid, bestDistance,
+                    bestCentroidId, bestDirectoryPageId);
             LOGGER.debug("Found best leaf result: pageId={}, clusterIndex={}, distance={}", bestPageId,
                     bestClusterIndex, bestDistance);
         }

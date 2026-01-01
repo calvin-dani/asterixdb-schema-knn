@@ -235,7 +235,8 @@ public class VCTreeNavigationUtils {
                     for (LeafCentroid centroid : stats.centroids) {
                         if (centroid.distance <= threshold) {
                             results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
-                                    centroid.centroid, centroid.distance, centroid.centroidId));
+                                    centroid.centroid, centroid.distance, centroid.centroidId,
+                                    centroid.directoryPageId));
                         } else {
                             break;
                         }
@@ -540,7 +541,8 @@ public class VCTreeNavigationUtils {
                         for (LeafCentroid centroid : stats.centroids) {
                             if (centroid.distance <= localThreshold) {
                                 results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
-                                        centroid.centroid, centroid.distance, centroid.centroidId));
+                                        centroid.centroid, centroid.distance, centroid.centroidId,
+                                        centroid.directoryPageId));
                                 resultsAdded++;
                             } else {
                                 break; // Centroids are sorted, no more qualify
@@ -740,7 +742,7 @@ public class VCTreeNavigationUtils {
         for (LeafCentroid centroid : stats.centroids) {
             if (centroid.distance <= threshold) {
                 results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex, centroid.centroid,
-                        centroid.distance, centroid.centroidId));
+                        centroid.distance, centroid.centroidId, centroid.directoryPageId));
                 added++;
             } else {
                 break;
@@ -934,6 +936,7 @@ public class VCTreeNavigationUtils {
         int bestPageId = -1;
         double[] bestCentroid = null;
         int bestCentroidId = -1;
+        long bestDirectoryPageId = -1;
         int candidatesProcessed = 0;
         int pagesProcessed = 0;
 
@@ -1003,6 +1006,7 @@ public class VCTreeNavigationUtils {
                             bestPageId = currentPageId;
                             bestCentroid = centroid.clone();
                             bestCentroidId = centroidID;
+                            bestDirectoryPageId = currentFrame.getMetadataPagePointer(i);
                         }
                     } catch (Exception e) {
                         System.err.println(
@@ -1035,7 +1039,8 @@ public class VCTreeNavigationUtils {
             //                        searchSelectFields.put("pagesProcessed", pagesProcessed);
             //                        logTraversalEvent("leaf_search_select", searchSelectFields);
 
-            return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId);
+            return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId,
+                    bestDirectoryPageId);
         }
         // TODO : SOME RETURN EMPTY
         return null;
@@ -1084,6 +1089,7 @@ public class VCTreeNavigationUtils {
                         frameTuple.resetByTupleIndex(currentFrame, i);
                         double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
                         int centroidId = currentFrame.getCentroidId(i);
+                        long directoryPageId = currentFrame.getMetadataPagePointer(i);
 
                         if (centroid.length != queryVector.length) {
                             continue;
@@ -1100,7 +1106,8 @@ public class VCTreeNavigationUtils {
                         //                        candidateFields.put("distance", distance);
                         //                        logTraversalEvent("leaf_candidate", candidateFields);
 
-                        centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid.clone()));
+                        centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid.clone(),
+                                directoryPageId));
                     } catch (Exception e) {
                         System.err.println(
                                 "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
@@ -1436,13 +1443,16 @@ public class VCTreeNavigationUtils {
         public final int tupleIndex;
         public final int pageId;
         public final double[] centroid;
+        public final long directoryPageId;  // Direct pointer to cluster's directory page
 
-        public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid) {
+        public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid,
+                long directoryPageId) {
             this.centroidId = centroidId;
             this.distance = distance;
             this.tupleIndex = tupleIndex;
             this.pageId = pageId;
             this.centroid = centroid;
+            this.directoryPageId = directoryPageId;
         }
     }
 
@@ -1541,6 +1551,7 @@ public class VCTreeNavigationUtils {
     /**
      * State for iterative DFS navigation through the tree.
      * Maintains the navigation stack for finding clusters in distance order.
+     * Also tracks visited centroids to avoid duplicates when using level-wise + DFS fallback.
      */
     public static class NavigationState {
         public final IBufferCache bufferCache;
@@ -1552,9 +1563,22 @@ public class VCTreeNavigationUtils {
         public final Deque<NavigationFrame> stack;
         public boolean initialized;
 
+        // Visited centroid tracking (can be shared across LSM components)
+        private Set<Integer> visitedCentroidIds;
+
         public NavigationState(IBufferCache bufferCache, int fileId, int rootPageId,
                 ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
                 double[] queryVector) {
+            this(bufferCache, fileId, rootPageId, interiorFrameFactory, leafFrameFactory, queryVector, new HashSet<>());
+        }
+
+        /**
+         * Constructor with shared visited set.
+         * Use this when sharing visited tracking across multiple LSM components.
+         */
+        public NavigationState(IBufferCache bufferCache, int fileId, int rootPageId,
+                ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+                double[] queryVector, Set<Integer> sharedVisitedSet) {
             this.bufferCache = bufferCache;
             this.fileId = fileId;
             this.rootPageId = rootPageId;
@@ -1563,6 +1587,42 @@ public class VCTreeNavigationUtils {
             this.queryVector = queryVector;
             this.stack = new ArrayDeque<>();
             this.initialized = false;
+            this.visitedCentroidIds = sharedVisitedSet != null ? sharedVisitedSet : new HashSet<>();
+        }
+
+        /**
+         * Check if a centroid has already been visited.
+         */
+        public boolean isVisited(int centroidId) {
+            return visitedCentroidIds.contains(centroidId);
+        }
+
+        /**
+         * Mark a centroid as visited.
+         */
+        public void markVisited(int centroidId) {
+            visitedCentroidIds.add(centroidId);
+        }
+
+        /**
+         * Set the visited set (for sharing with other components).
+         */
+        public void setVisitedSet(Set<Integer> visitedSet) {
+            this.visitedCentroidIds = visitedSet;
+        }
+
+        /**
+         * Get the visited set.
+         */
+        public Set<Integer> getVisitedSet() {
+            return visitedCentroidIds;
+        }
+
+        /**
+         * Get the count of visited centroids.
+         */
+        public int getVisitedCount() {
+            return visitedCentroidIds.size();
         }
     }
 
@@ -1616,7 +1676,7 @@ public class VCTreeNavigationUtils {
                             + first.distance + " " + first.centroidId + " next="
                             + formatNextSortedEntries(leafFrame_nav, 5));
                     return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid, first.distance,
-                            first.centroidId);
+                            first.centroidId, first.directoryPageId);
 
                 } else {
                     // Interior level: collect and sort children
@@ -1694,13 +1754,14 @@ public class VCTreeNavigationUtils {
 
     /**
      * Find the next closest cluster using DFS with backtracking.
+     * Skips centroids that have already been visited (e.g., by level-wise exploration).
      *
      * Algorithm:
-     * 1. Try next centroid on current leaf page
+     * 1. Try next centroid on current leaf page (skip if visited)
      * 2. If leaf exhausted, pop stack (backtrack to parent)
      * 3. Try next child from parent
      * 4. Descend to new leaf
-     * 5. Return next centroid
+     * 5. Return next unvisited centroid
      *
      * @param state Navigation state with stack
      * @return Next closest cluster, or null if all clusters exhausted
@@ -1717,23 +1778,33 @@ public class VCTreeNavigationUtils {
             NavigationFrame topFrame = state.stack.peek();
 
             if (topFrame.isLeaf) {
-                // At leaf level: try next centroid in current page
-                if (topFrame.hasNext()) {
+                // At leaf level: try next centroid in current page, skipping visited ones
+                while (topFrame.hasNext()) {
                     LeafCentroid next = topFrame.nextCentroid();
+
+                    // Skip if already visited (e.g., by level-wise exploration)
+                    if (state.isVisited(next.centroidId)) {
+                        System.err.println(String.format("[DFS] Skipping visited centroid: cid=%d, distance=%.4f",
+                                next.centroidId, next.distance));
+                        continue;
+                    }
+
+                    // Mark as visited and return
+                    state.markVisited(next.centroidId);
                     System.err.println(String.format(
-                            "[DFS] Leaf frame pageId=%d has next centroid: cid=%d, distance=%.4f, nextIndex=%d/%d",
+                            "[DFS] Leaf frame pageId=%d returning centroid: cid=%d, distance=%.4f, nextIndex=%d/%d",
                             topFrame.pageId, next.centroidId, next.distance, topFrame.nextIndex,
                             topFrame.sortedCentroids.size()));
                     return ClusterSearchResult.create(next.pageId, next.tupleIndex, next.centroid, next.distance,
-                            next.centroidId);
-                } else {
-                    // Current leaf exhausted, backtrack
-                    System.err.println(String.format(
-                            "[DFS] Leaf frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
-                            topFrame.pageId, topFrame.nextIndex, topFrame.sortedCentroids.size(), state.stack.size()));
-                    state.stack.pop();
-                    continue;
+                            next.centroidId, next.directoryPageId);
                 }
+
+                // All centroids in this leaf exhausted or visited, backtrack
+                System.err.println(String.format(
+                        "[DFS] Leaf frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
+                        topFrame.pageId, topFrame.nextIndex, topFrame.sortedCentroids.size(), state.stack.size()));
+                state.stack.pop();
+                continue;
 
             } else {
                 // At interior level: try next child
@@ -1749,7 +1820,7 @@ public class VCTreeNavigationUtils {
                     if (result != null) {
                         return result;
                     }
-                    // If descend failed, continue with next child
+                    // If descend failed (all visited), continue with next child
                     System.err.println(
                             String.format("[DFS] descendToLeaf returned null for childPageId=%d, trying next child",
                                     nextChild.childPageId));
@@ -1774,10 +1845,11 @@ public class VCTreeNavigationUtils {
     /**
      * Descend from given page to leaf level, building stack along the way.
      * Always picks closest child at each interior level.
+     * Skips visited centroids when returning from leaf.
      *
      * @param state Navigation state
      * @param startPageId Page to start descent from
-     * @return First centroid at leaf level, or null if no valid path
+     * @return First unvisited centroid at leaf level, or null if no valid path or all visited
      * @throws HyracksDataException if any error occurs
      */
     private static ClusterSearchResult descendToLeaf(NavigationState state, int startPageId,
@@ -1809,10 +1881,20 @@ public class VCTreeNavigationUtils {
                     NavigationFrame leafFrame_nav = new NavigationFrame(currentPageId, sortedCentroids, true);
                     state.stack.push(leafFrame_nav);
 
-                    // Return first centroid
-                    LeafCentroid first = leafFrame_nav.nextCentroid();
-                    return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid, first.distance,
-                            first.centroidId);
+                    // Find first unvisited centroid
+                    while (leafFrame_nav.hasNext()) {
+                        LeafCentroid first = leafFrame_nav.nextCentroid();
+                        if (!state.isVisited(first.centroidId)) {
+                            state.markVisited(first.centroidId);
+                            return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid,
+                                    first.distance, first.centroidId, first.directoryPageId);
+                        }
+                        // Skip visited centroid
+                        System.err.println(String.format("[DFS descendToLeaf] Skipping visited centroid: cid=%d",
+                                first.centroidId));
+                    }
+                    // All centroids in this leaf are visited
+                    return null;
 
                 } else {
                     // Interior: collect and sort children
@@ -1955,7 +2037,8 @@ public class VCTreeNavigationUtils {
                 if (centroid.length == state.queryVector.length) {
                     double distance = distanceFunction.apply(state.queryVector, centroid);
                     int centroidId = initialFrame.getCentroidId(i);
-                    centroids.add(new LeafCentroid(centroidId, distance, i, startPageId, centroid));
+                    long directoryPageId = initialFrame.getMetadataPagePointer(i);
+                    centroids.add(new LeafCentroid(centroidId, distance, i, startPageId, centroid, directoryPageId));
                 }
             } catch (Exception e) {
                 // Skip malformed tuples
@@ -1997,7 +2080,9 @@ public class VCTreeNavigationUtils {
                         if (centroid.length == state.queryVector.length) {
                             double distance = distanceFunction.apply(state.queryVector, centroid);
                             int centroidId = frame.getCentroidId(i);
-                            centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid));
+                            long directoryPageId = frame.getMetadataPagePointer(i);
+                            centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid,
+                                    directoryPageId));
                         }
                     } catch (Exception e) {
                         // Skip malformed tuples

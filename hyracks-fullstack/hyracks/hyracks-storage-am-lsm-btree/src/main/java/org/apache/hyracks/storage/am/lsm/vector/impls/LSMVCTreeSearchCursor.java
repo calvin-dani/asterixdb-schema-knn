@@ -19,9 +19,15 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
@@ -29,9 +35,13 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent.LSMComponentTy
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexSearchCursor;
+import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
+import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
@@ -54,6 +64,8 @@ import org.apache.hyracks.storage.common.util.IndexCursorUtils;
  * - Filters antimatter tuples and handles matter/antimatter cancellation
  */
 public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Accessor array for each component's VCTree
     private VectorClusteringTreeAccessor[] vcTreeAccessors;
@@ -81,6 +93,16 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     // Full-scan mode flag (for merge operations)
     private boolean fullScanMode; // true = merge mode (sequential), false = query mode (distance-based)
 
+    // Level-wise + nprobe support fields (global coordination)
+    private Set<Integer> sharedVisitedCentroidIds; // Shared visited tracking across all components
+    private int nprobe; // Minimum clusters to probe
+    private double epsilon; // Distance threshold for level-wise
+    private List<ClusterSearchResult> globalLevelWiseClusters; // Pre-computed clusters from first component
+    private int globalClusterIndex; // Current position in globalLevelWiseClusters
+    private boolean levelWisePhaseComplete; // Whether level-wise exploration is done
+    private double[] queryVector; // Cached query vector
+    private IVectorDistanceFunction distanceFunction; // Distance function for DFS
+
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
         this(opCtx, false, false, NoOpIndexCursorStats.INSTANCE);
     }
@@ -107,6 +129,19 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
         this.reconciledOutputCount = 0;
+        this.nprobe = 5;
+        this.epsilon = 0.15;
+        // Extract nprobe and epsilon from search predicate
+
+        // Initialize shared visited tracking set
+        this.sharedVisitedCentroidIds = new HashSet<>();
+
+        // Initialize global level-wise tracking
+        this.globalLevelWiseClusters = null;
+        this.globalClusterIndex = 0;
+        this.levelWisePhaseComplete = false;
+        this.queryVector = null;
+        this.distanceFunction = null;
 
         // Initialize debug counters
         this.totalTuplesPopped = 0;
@@ -171,8 +206,38 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             isMemoryComponent[i] = type == LSMComponentType.MEMORY;
         }
 
+        // Pass shared visited set to each component cursor
+        for (int i = 0; i < numVCTrees; i++) {
+            if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
+                VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) rangeCursors[i];
+                vcCursor.setSharedVisitedSet(sharedVisitedCentroidIds);
+            }
+        }
+
         // Open all cursors with the search predicate
         IndexCursorUtils.open(vcTreeAccessors, rangeCursors, searchPred);
+
+        // After cursors are open, extract query vector and compute global level-wise clusters
+        if (!fullScanMode && numVCTrees > 0) {
+            VectorClusteringSearchCursor firstCursor = (VectorClusteringSearchCursor) rangeCursors[0];
+            this.queryVector = firstCursor.getQueryVector();
+            this.distanceFunction = firstCursor.getDistanceFunction();
+
+            // Compute global level-wise clusters if epsilon > 0
+            if (this.queryVector != null && this.epsilon > 0.0) {
+                globalLevelWiseClusters = computeGlobalLevelWiseClusters();
+                if (globalLevelWiseClusters != null && !globalLevelWiseClusters.isEmpty()) {
+                    // Mark first cluster as visited (it was already opened by each cursor's initial DFS)
+                    ClusterSearchResult firstCluster = globalLevelWiseClusters.get(0);
+                    sharedVisitedCentroidIds.add(firstCluster.centroidId);
+                    globalClusterIndex = 1; // Start from second cluster
+                }
+                LOGGER.log(Level.INFO,
+                        "[Thread:{}] [LSMVCTreeSearchCursor.doOpen] Computed {} global level-wise clusters with epsilon={}",
+                        Thread.currentThread().getName(),
+                        globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon);
+            }
+        }
 
         // Initialize priority queue for merging results from all components
         try {
@@ -181,6 +246,29 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         } catch (Throwable th) { // NOSONAR Must catch all
             IndexCursorUtils.close(rangeCursors, th);
             throw HyracksDataException.create(th);
+        }
+    }
+
+    /**
+     * Compute global level-wise clusters using first component's tree.
+     * Since all components have identical tree structure, we compute once and share.
+     */
+    private List<ClusterSearchResult> computeGlobalLevelWiseClusters() throws HyracksDataException {
+        if (operationalComponents.isEmpty() || queryVector == null || distanceFunction == null) {
+            return null;
+        }
+
+        ILSMComponent firstComponent = operationalComponents.get(0);
+        VectorClusteringTree vcTree = (VectorClusteringTree) firstComponent.getIndex();
+
+        try {
+            return VCTreeNavigationUtils.findCloseCentroidsLevelWise(vcTree.getBufferCache(), vcTree.getFileId(),
+                    vcTree.getRootPageId(), vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(), queryVector,
+                    distanceFunction, epsilon);
+        } catch (Exception e) {
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Failed to compute level-wise clusters: {}",
+                    Thread.currentThread().getName(), e.getMessage());
+            return null;
         }
     }
 
@@ -214,8 +302,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             } else {
                 // Cursor has no data in initial cluster - mark as exhausted
                 clusterExhausted[i] = true;
-                System.err.println(String.format(
-                        "[LSMVCTreeSearchCursor] Component %d has empty initial cluster (marked exhausted)", i));
+                LOGGER.log(Level.INFO,
+                        "[Thread:{}] [LSMVCTreeSearchCursor] Component {} has empty initial cluster (marked exhausted)",
+                        Thread.currentThread().getName(), i);
             }
         }
 
@@ -230,7 +319,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         }
 
         if (allInitiallyExhausted) {
-            System.err.println("[LSMVCTreeSearchCursor] ALL components have empty initial cluster, advancing to next");
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] ALL components have empty initial cluster, advancing to next",
+                    Thread.currentThread().getName());
             advanceAllComponentsToNextCluster();
         }
     }
@@ -288,14 +379,20 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     @Override
     public void doClose() throws HyracksDataException {
         // Print final reconciliation summary for demo
-        System.err.println("\n========== LSM Vector Index Search Summary ==========");
-        System.err.println(String.format("Total tuples processed:     %d", totalTuplesPopped));
-        System.err.println(String.format("Antimatter tuples detected: %d", antimatterTuplesDetected));
-        System.err.println(String.format("Cancellations made:         %d", cancellationsMade));
-        System.err.println(String.format("Final output count:         %d", reconciledOutputCount));
-        System.err.println(String.format("Verification:               %d - %d = %d ✓", totalTuplesPopped,
-                cancellationsMade, reconciledOutputCount));
-        System.err.println("=====================================================\n");
+        LOGGER.log(Level.INFO, "[Thread:{}] ========== LSM Vector Index Search Summary ==========",
+                Thread.currentThread().getName());
+        LOGGER.log(Level.INFO, "[Thread:{}] Total tuples processed:     {}",
+                Thread.currentThread().getName(), totalTuplesPopped);
+        LOGGER.log(Level.INFO, "[Thread:{}] Antimatter tuples detected: {}",
+                Thread.currentThread().getName(), antimatterTuplesDetected);
+        LOGGER.log(Level.INFO, "[Thread:{}] Cancellations made:         {}",
+                Thread.currentThread().getName(), cancellationsMade);
+        LOGGER.log(Level.INFO, "[Thread:{}] Final output count:         {}",
+                Thread.currentThread().getName(), reconciledOutputCount);
+        LOGGER.log(Level.INFO, "[Thread:{}] Verification:               {} - {} = {} ✓",
+                Thread.currentThread().getName(), totalTuplesPopped, cancellationsMade, reconciledOutputCount);
+        LOGGER.log(Level.INFO, "[Thread:{}] =====================================================",
+                Thread.currentThread().getName());
 
         super.doClose();
     }
@@ -347,9 +444,10 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
                         // LOG: Antimatter detected
                         if (antimatterTuplesDetected <= 5 || antimatterTuplesDetected % 50 == 0) {
-                            System.err.println(
-                                    String.format("[checkPQ] Antimatter detected #%d | Component=%d, held for matching",
-                                            antimatterTuplesDetected, outputElement.getCursorIndex()));
+                            LOGGER.log(Level.INFO,
+                                    "[Thread:{}] [checkPQ] Antimatter detected #{} | Component={}, held for matching",
+                                    Thread.currentThread().getName(), antimatterTuplesDetected,
+                                    outputElement.getCursorIndex());
                         }
                         // Continue loop to check for cancellation with next tuple
                     } else {
@@ -379,16 +477,16 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
                             // Log cancellation (show every 50th)
                             if (cancellationsMade % 50 == 0 || cancellationsMade <= 10) {
-                                System.err.println(String.format(
-                                        "[LSM Vector Index] Cancellation #%d | Matter tuple cancelled, reconciledCount=%d",
-                                        cancellationsMade, reconciledOutputCount));
+                                LOGGER.log(Level.INFO,
+                                        "[Thread:{}] [LSM Vector Index] Cancellation #{} | Matter tuple cancelled, reconciledCount={}",
+                                        Thread.currentThread().getName(), cancellationsMade, reconciledOutputCount);
                             }
                         } else {
                             // Antimatter detected first, matter never counted, no decrement needed
                             if (cancellationsMade % 50 == 0 || cancellationsMade <= 10) {
-                                System.err.println(String.format(
-                                        "[LSM Vector Index] Cancellation #%d | Antimatter matched, no count change",
-                                        cancellationsMade));
+                                LOGGER.log(Level.INFO,
+                                        "[Thread:{}] [LSM Vector Index] Cancellation #{} | Antimatter matched, no count change",
+                                        Thread.currentThread().getName(), cancellationsMade);
                             }
                         }
 
@@ -564,8 +662,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                     return result;
                 }
             } catch (Throwable e) {
-                System.err.println(String.format("[VectorPQComparator] ERROR comparing tuples: %s - %s",
-                        e.getClass().getSimpleName(), e.getMessage()));
+                LOGGER.log(Level.INFO, "[Thread:{}] [VectorPQComparator] ERROR comparing tuples: {} - {}",
+                        Thread.currentThread().getName(), e.getClass().getSimpleName(), e.getMessage());
                 throw new IllegalArgumentException(e);
             }
 
@@ -685,8 +783,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Current cluster exhausted for THIS component
         clusterExhausted[cursorIndex] = true;
 
-        System.err.println(String.format("[LSMVCTreeSearchCursor] Component %d cluster exhausted (cluster_index=%d)",
-                cursorIndex, currentClusterIndex[cursorIndex]));
+        LOGGER.log(Level.INFO,
+                "[Thread:{}] [LSMVCTreeSearchCursor] Component {} cluster exhausted (cluster_index={})",
+                Thread.currentThread().getName(), cursorIndex, currentClusterIndex[cursorIndex]);
 
         // Check if ALL components have exhausted their current cluster
         boolean allExhausted = true;
@@ -700,132 +799,263 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         if (!allExhausted) {
             // Some components still have data in their current cluster
             // Don't advance yet - wait for all to exhaust
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Component %d exhausted, but waiting for other components", cursorIndex));
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} exhausted, but waiting for other components",
+                    Thread.currentThread().getName(), cursorIndex);
             return;
         }
 
         // ALL components exhausted their current cluster
-        System.err.println(String.format(
-                "[LSMVCTreeSearchCursor] ALL components exhausted cluster %d, reconciledOutputCount=%d, K=%d",
-                currentClusterIndex[0], reconciledOutputCount, K));
+        // Calculate the minimum clusters explored across all components
+        int minClustersExplored = getMinClustersExplored();
+
+        LOGGER.log(Level.INFO,
+                "[Thread:{}] [LSMVCTreeSearchCursor] ALL components exhausted cluster {}, reconciledOutputCount={}, K={}, minClustersExplored={}, nprobe={}",
+                Thread.currentThread().getName(), currentClusterIndex[0], reconciledOutputCount, K, minClustersExplored,
+                nprobe);
 
         // Decision: Should we advance ALL components to next cluster?
         if (stopAdvancing) {
-            System.err.println("[LSMVCTreeSearchCursor] Already decided to stop advancing");
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Already decided to stop advancing",
+                    Thread.currentThread().getName());
             return;
         }
 
-        if (reconciledOutputCount >= K) {
-            // Reached K - stop advancing all components
+        // NPROBE LOGIC:
+        // 1. If minClustersExplored < nprobe, always continue (haven't reached minimum probe count)
+        // 2. If minClustersExplored >= nprobe AND reconciledOutputCount >= K, stop
+        // 3. If minClustersExplored >= nprobe AND reconciledOutputCount < K, continue (need more results)
+        if (minClustersExplored >= nprobe && reconciledOutputCount >= K) {
+            // Reached both nprobe and K - stop advancing
             stopAdvancing = true;
-            System.err.println(String.format("[LSMVCTreeSearchCursor] Reached K=%d, stopping cluster advancement", K));
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] Reached nprobe={} and K={}, stopping cluster advancement",
+                    Thread.currentThread().getName(), nprobe, K);
             return;
+        }
+
+        if (minClustersExplored < nprobe) {
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] minClustersExplored={} < nprobe={}, must continue exploring",
+                    Thread.currentThread().getName(), minClustersExplored, nprobe);
+        } else {
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] reconciledOutputCount={} < K={}, need more results, continuing",
+                    Thread.currentThread().getName(), reconciledOutputCount, K);
         }
 
         // Need more data - advance ALL components to next cluster together
-        System.err.println("[LSMVCTreeSearchCursor] Advancing ALL components to next cluster");
+        LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Advancing ALL components to next cluster",
+                Thread.currentThread().getName());
         advanceAllComponentsToNextCluster();
     }
 
     /**
-     * Advance ALL component cursors to their next closest cluster.
-     * This ensures synchronized cluster advancement across all LSM components.
+     * Advance ALL component cursors to the SAME next cluster.
+     * Uses global level-wise list first, then falls back to DFS.
+     * This ensures all components always explore the same cluster simultaneously.
      */
     private void advanceAllComponentsToNextCluster() throws HyracksDataException {
         // Reset exhaustion flags for new cluster
         java.util.Arrays.fill(clusterExhausted, false);
 
+        // Determine which cluster ALL components should advance to
+        ClusterSearchResult nextCluster = getNextGlobalCluster();
+
+        if (nextCluster == null) {
+            // No more clusters available
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] No more clusters available globally",
+                    Thread.currentThread().getName());
+            for (int i = 0; i < clusterExhausted.length; i++) {
+                clusterExhausted[i] = true;
+            }
+            return;
+        }
+
+        // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
         for (int i = 0; i < rangeCursors.length; i++) {
-            IIndexCursor cursor = rangeCursors[i];
+            advanceComponentToCluster(i, nextCluster);
+        }
 
-            if (!(cursor instanceof VectorClusteringSearchCursor)) {
-                // Not a VectorClusteringSearchCursor - mark as exhausted
-                clusterExhausted[i] = true;
-                System.err.println(String.format(
-                        "[LSMVCTreeSearchCursor] Component %d is not VectorClusteringSearchCursor, skipping", i));
-                continue;
+        // Check if all components found empty cluster and recursively skip
+        checkAndSkipEmptyCluster();
+    }
+
+    /**
+     * Get the next cluster that ALL components should advance to.
+     * Uses global level-wise list first, then falls back to DFS.
+     * Returns ClusterSearchResult with directoryPageId for O(1) access.
+     */
+    private ClusterSearchResult getNextGlobalCluster() throws HyracksDataException {
+        // Phase 1: Try global level-wise clusters (already have directoryPageId)
+        if (!levelWisePhaseComplete && globalLevelWiseClusters != null
+                && globalClusterIndex < globalLevelWiseClusters.size()) {
+
+            ClusterSearchResult nextCluster = globalLevelWiseClusters.get(globalClusterIndex);
+            globalClusterIndex++;
+
+            // Mark visited for DFS fallback
+            sharedVisitedCentroidIds.add(nextCluster.centroidId);
+
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] Level-wise: next global cluster {}/{} (cid={}, distance={}, dirPage={})",
+                    Thread.currentThread().getName(), globalClusterIndex, globalLevelWiseClusters.size(),
+                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId);
+
+            if (globalClusterIndex >= globalLevelWiseClusters.size()) {
+                levelWisePhaseComplete = true;
+                LOGGER.log(Level.INFO,
+                        "[Thread:{}] [LSMVCTreeSearchCursor] Level-wise phase complete, will use DFS next",
+                        Thread.currentThread().getName());
             }
 
-            VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
+            return nextCluster;
+        }
 
-            if (!vcCursor.hasMoreClusters()) {
-                // No more clusters for this component - mark as exhausted
-                clusterExhausted[i] = true;
-                System.err.println(String.format("[LSMVCTreeSearchCursor] Component %d has no more clusters", i));
-                continue;
-            }
+        // Phase 2: DFS fallback - get next from first component's DFS
+        levelWisePhaseComplete = true;
+        return getNextClusterFromDFS();
+    }
 
-            // Advance to next cluster
-            boolean advanced = vcCursor.advanceToNextCluster();
-            if (!advanced) {
-                // Failed to advance (no more clusters or error)
-                clusterExhausted[i] = true;
-                System.err.println(
-                        String.format("[LSMVCTreeSearchCursor] Component %d failed to advance to next cluster", i));
-                continue;
-            }
+    /**
+     * Get next cluster from DFS (using first component).
+     * Returns ClusterSearchResult with directoryPageId for O(1) access.
+     * Skips already visited clusters.
+     */
+    private ClusterSearchResult getNextClusterFromDFS() throws HyracksDataException {
+        if (rangeCursors.length == 0) {
+            return null;
+        }
 
-            // Increment cluster index for this component
-            currentClusterIndex[i]++;
+        VectorClusteringSearchCursor firstCursor = (VectorClusteringSearchCursor) rangeCursors[0];
+        ClusterSearchResult next = firstCursor.findNextClusterDFS();
 
-            // Check if this cluster has data
-            if (vcCursor.hasNext()) {
-                // Cluster has data - add to queue
-                vcCursor.next();
-                PriorityQueueElement pqe = pqes[i];
-                pqe.reset(vcCursor.getTuple());
-                outputPriorityQueue.offer(pqe);
-                System.err
-                        .println(String.format("[LSMVCTreeSearchCursor] Component %d advanced to cluster %d (has data)",
-                                i, currentClusterIndex[i]));
-            } else {
-                // Cluster is empty - mark as exhausted for this cluster
-                // Component will wait at this cluster until all components finish
-                clusterExhausted[i] = true;
-                System.err.println(String.format(
-                        "[LSMVCTreeSearchCursor] Component %d cluster %d is empty (will wait for other components)", i,
-                        currentClusterIndex[i]));
+        if (next == null) {
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] DFS exhausted, no more clusters",
+                    Thread.currentThread().getName());
+            return null;
+        }
+
+        LOGGER.log(Level.INFO,
+                "[Thread:{}] [LSMVCTreeSearchCursor] DFS fallback: next global cluster cid={}, distance={}, dirPage={}",
+                Thread.currentThread().getName(), next.centroidId, next.distance, next.directoryPageId);
+
+        // Note: The DFS already marks visited in NavigationState, so we don't add to sharedVisitedCentroidIds here
+        return next;
+    }
+
+    /**
+     * Advance a single component to a specific cluster using ClusterSearchResult.
+     * Uses O(1) directoryPageId access when available.
+     */
+    private void advanceComponentToCluster(int componentIndex, ClusterSearchResult cluster)
+            throws HyracksDataException {
+        IIndexCursor cursor = rangeCursors[componentIndex];
+
+        if (!(cursor instanceof VectorClusteringSearchCursor)) {
+            clusterExhausted[componentIndex] = true;
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} is not VectorClusteringSearchCursor, skipping",
+                    Thread.currentThread().getName(), componentIndex);
+            return;
+        }
+
+        VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
+
+        // Open specific cluster using ClusterSearchResult (O(1) access via directoryPageId)
+        boolean hasData = vcCursor.openClusterByResult(cluster);
+
+        // Increment cluster index
+        currentClusterIndex[componentIndex]++;
+
+        // Check if cluster has data
+        if (hasData && vcCursor.hasNext()) {
+            vcCursor.next();
+            PriorityQueueElement pqe = pqes[componentIndex];
+            pqe.reset(vcCursor.getTuple());
+            outputPriorityQueue.offer(pqe);
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} opened cluster cid={} (has data, O(1) access)",
+                    Thread.currentThread().getName(), componentIndex, cluster.centroidId);
+        } else {
+            clusterExhausted[componentIndex] = true;
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Component {} cluster cid={} is empty",
+                    Thread.currentThread().getName(), componentIndex, cluster.centroidId);
+        }
+    }
+
+    /**
+     * Check if all components found empty cluster and recursively skip.
+     */
+    private void checkAndSkipEmptyCluster() throws HyracksDataException {
+        boolean allExhausted = true;
+        for (int i = 0; i < clusterExhausted.length; i++) {
+            if (!clusterExhausted[i]) {
+                allExhausted = false;
+                break;
             }
         }
 
-        // Check if ALL components found the cluster empty (all exhausted again)
-        boolean allStillExhausted = true;
-        boolean anyHasMoreClusters = false;
+        if (!allExhausted) {
+            return; // At least one component has data
+        }
 
-        for (int i = 0; i < clusterExhausted.length; i++) {
-            if (!clusterExhausted[i]) {
-                allStillExhausted = false;
-            }
+        // All components found empty cluster - check if we should skip to next
+        boolean hasMoreClusters = hasMoreGlobalClusters();
+        int minClustersExplored = getMinClustersExplored();
 
-            // Check if this component can advance further
+        // Continue if: haven't reached nprobe OR haven't found K results
+        boolean shouldContinue = minClustersExplored < nprobe || reconciledOutputCount < K;
+
+        if (hasMoreClusters && !stopAdvancing && shouldContinue) {
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] All components empty, skipping to next global cluster (minClusters={}, nprobe={}, results={}, K={})",
+                    Thread.currentThread().getName(), minClustersExplored, nprobe, reconciledOutputCount, K);
+            advanceAllComponentsToNextCluster();
+        } else if (!hasMoreClusters) {
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [LSMVCTreeSearchCursor] All components exhausted, no more global clusters",
+                    Thread.currentThread().getName());
+        }
+    }
+
+    /**
+     * Check if there are more global clusters to explore.
+     */
+    private boolean hasMoreGlobalClusters() {
+        // Check level-wise first
+        if (!levelWisePhaseComplete && globalLevelWiseClusters != null
+                && globalClusterIndex < globalLevelWiseClusters.size()) {
+            return true;
+        }
+
+        // Check DFS via first cursor
+        if (rangeCursors.length > 0 && rangeCursors[0] instanceof VectorClusteringSearchCursor) {
+            VectorClusteringSearchCursor firstCursor = (VectorClusteringSearchCursor) rangeCursors[0];
+            return firstCursor.hasMoreClusters();
+        }
+
+        return false;
+    }
+
+    /**
+     * Get the minimum number of clusters explored across all components.
+     * This ensures all components have explored at least nprobe clusters before stopping.
+     */
+    private int getMinClustersExplored() {
+        int minClusters = Integer.MAX_VALUE;
+
+        for (int i = 0; i < rangeCursors.length; i++) {
             IIndexCursor cursor = rangeCursors[i];
             if (cursor instanceof VectorClusteringSearchCursor) {
                 VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
-                if (vcCursor.hasMoreClusters()) {
-                    anyHasMoreClusters = true;
+                int clustersProbed = vcCursor.getClustersProbed();
+                if (clustersProbed < minClusters) {
+                    minClusters = clustersProbed;
                 }
             }
         }
 
-        if (allStillExhausted && anyHasMoreClusters) {
-            // All components found this cluster empty BUT at least one has more clusters
-            // Skip to next cluster
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] ALL components found cluster %d empty, skipping to next cluster",
-                    currentClusterIndex[0]));
-
-            // Check if we've reached K or should stop advancing
-            if (stopAdvancing || reconciledOutputCount >= K) {
-                System.err.println("[LSMVCTreeSearchCursor] Reached K or stop flag, halting advancement");
-                return;
-            }
-
-            // Recursively advance to next cluster (skip empty clusters)
-            advanceAllComponentsToNextCluster();
-        } else if (allStillExhausted && !anyHasMoreClusters) {
-            // All components exhausted AND no more clusters - stop here
-            System.err.println("[LSMVCTreeSearchCursor] All components exhausted, no more clusters to scan");
-        }
+        return minClusters == Integer.MAX_VALUE ? 0 : minClusters;
     }
 }
