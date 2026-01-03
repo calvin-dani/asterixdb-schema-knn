@@ -18,13 +18,8 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -53,7 +48,8 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private int numLeafCentroid; // Total number of leaf centroids
 
     // Bulk loading state for leaf clusters
-    private final List<ICachedPage> directoryPages; // Directory pages for each leaf cluster
+    // Note: First directory page IDs are consecutive (allocated by freePageManager)
+    // Cluster N's first directory page ID = firstDirectoryPageId + N
     private int currentLeafClusterIndex; // Current leaf cluster being loaded (0-based)
     private ICachedPage currentDirectoryPage; // Current directory page for the cluster
     private ICachedPage currentDataPage; // Current data page being filled
@@ -74,10 +70,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             ISerializerDeserializer[] dataFrameSerds, ITreeIndexAccessor staticAccessor) throws HyracksDataException {
         super(0, callback, vectorTree, leafFrame, writeContext);
-        //        this.numLeafCentroid = numLeafCentroid;
-        //        this.firstLeafCentroidId = firstLeafCentroidId;
 
-        this.directoryPages = new ArrayList<>();
         // Initialize frames
         this.interiorFrame = vectorTree.getInteriorFrameFactory().createFrame();
         this.leafFrame = vectorTree.getLeafFrameFactory().createFrame();
@@ -110,57 +103,10 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
             copyPage(sourcePage);
             vcTreeAccessor.releasePage(sourcePage);
         }
-    }
 
-    /**
-     * Copy static structure from existing file into this bulk loader.
-     * 
-     * @param staticStructureFileName Name of the static structure file (relative to index file directory)
-     * @throws HyracksDataException if file doesn't exist or copying fails
-     */
-    private void copyStaticStructure(String staticStructureFileName) throws HyracksDataException {
-        try {
-            // Derive static structure file path from index file
-
-            FileReference indexFileRef = treeIndex.getFileReference();
-            FileReference staticStructureFileRef = indexFileRef.getParent().getChild(staticStructureFileName);
-
-            // Check if file exists
-            File staticStructureFile = new File(staticStructureFileRef.getAbsolutePath());
-            if (!staticStructureFile.exists()) {
-                throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.FILE_DOES_NOT_EXIST,
-                        "Static structure file does not exist: " + staticStructureFileRef.getAbsolutePath());
-            }
-
-            LOGGER.debug("Copying static structure from: {}", staticStructureFileRef.getAbsolutePath());
-
-            // Open static structure file
-            int staticStructureFileId = bufferCache.openFile(staticStructureFileRef);
-
-            try {
-                // Copy pages 1-8 in level order
-                // TODO : CALVIN DANI
-                for (int pageId = 1; pageId <= 8; pageId++) {
-                    ICachedPage sourcePage =
-                            bufferCache.pin(BufferedFileHandle.getDiskPageId(staticStructureFileId, pageId));
-                    try {
-                        copyPage(sourcePage);
-                    } finally {
-                        bufferCache.unpin(sourcePage);
-                    }
-                }
-
-                LOGGER.debug("Successfully copied static structure pages 1-8");
-            } finally {
-                // Close static structure file
-                bufferCache.closeFile(staticStructureFileId);
-            }
-
-        } catch (HyracksDataException e) {
-            throw e;
-        } catch (Exception e) {
-            throw HyracksDataException.create(e);
-        }
+        // Allocate directory page IDs consecutively upfront (but don't confiscate yet)
+        // This ensures consecutive page IDs while avoiding buffer cache exhaustion
+        allocateDirectoryPageIds();
     }
 
     public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
@@ -178,65 +124,45 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     }
 
     /**
-     * Create metadata pages for leaf clusters.
+     * Allocate directory page IDs consecutively for all leaf clusters.
+     * Called once during initialization. Pages are not confiscated yet to avoid buffer exhaustion.
      */
-    private void createFirstDirectoryPages() throws HyracksDataException {
-        for (int leafCentroidId = 0; leafCentroidId < numLeafCentroid; leafCentroidId++) {
-            // For metadata pages, use freePageManager.takePage() normally
-            int metadataPageId = freePageManager.takePage(metaFrame);
-            if (leafCentroidId == 0) {
-                // set the first directory page ID
-                firstDirectoryPageId = metadataPageId;
+    private void allocateDirectoryPageIds() throws HyracksDataException {
+        // Allocate page IDs consecutively by calling takePage() in a loop
+        for (int i = 0; i < numLeafCentroid; i++) {
+            int pageId = freePageManager.takePage(metaFrame);
+            if (i == 0) {
+                firstDirectoryPageId = pageId;
             }
-            long dpid = BufferedFileHandle.getDiskPageId(fileId, metadataPageId);
-            ICachedPage directoryPage = bufferCache.confiscatePage(dpid);
-
-            // Initialize the directory page
-            currentDirectoryFrame.setPage(directoryPage);
-            currentDirectoryFrame.initBuffer((byte) 0);
-            directoryPages.add(directoryPage);
-
-            LOGGER.debug("Created directory page {} for leaf centroid {}", metadataPageId, leafCentroidId);
+            // Page IDs are now: firstDirectoryPageId, firstDirectoryPageId+1, firstDirectoryPageId+2, ...
         }
+        LOGGER.debug("Allocated {} consecutive directory page IDs starting from {}", numLeafCentroid,
+                firstDirectoryPageId);
+    }
 
-        // Initialize bulk loading state - start with first leaf cluster
-        if (!directoryPages.isEmpty()) {
-            entriesInCurrentDirectoryPage = 0;
-            // Initialize data page state
-            entriesInCurrentDataPage = 0;
-            currentDirectoryPage = directoryPages.getFirst();
-            currentDirectoryFrame.setPage(currentDirectoryPage);
-            LOGGER.debug("Initialized bulk loading with {} directory pages", directoryPages.size());
-        }
+    /**
+     * Create and confiscate directory page for a specific leaf cluster on-demand.
+     * Directory page IDs are consecutive: cluster N's page ID = firstDirectoryPageId + N
+     */
+    private void createDirectoryPageForCluster(int clusterIndex) throws HyracksDataException {
+        // Calculate directory page ID from cluster index (consecutive allocation)
+        int metadataPageId = firstDirectoryPageId + clusterIndex;
+
+        long dpid = BufferedFileHandle.getDiskPageId(fileId, metadataPageId);
+        currentDirectoryPage = bufferCache.confiscatePage(dpid);
+
+        // Initialize the directory page
+        currentDirectoryFrame.setPage(currentDirectoryPage);
+        currentDirectoryFrame.initBuffer((byte) 0);
+        entriesInCurrentDirectoryPage = 0;
+
+        LOGGER.debug("Confiscated directory page {} for cluster {} (firstDirectoryPageId={}, offset={})",
+                metadataPageId, clusterIndex, firstDirectoryPageId, clusterIndex);
     }
 
     /**
      * ========= Clustering records to leaf centroids =======
      */
-
-    //    public ClusterSearchResult findCluster(ITupleReference tuple) throws HyracksDataException {
-    //        /*  use static structure to find the closest leaf centroid for the given tuple
-    //            return the leaf centroid ID and the distance
-    //        */
-    //        VectorClusteringTree.VectorClusteringTreeAccessor accessor =
-    //                (VectorClusteringTree.VectorClusteringTreeAccessor) vcTreeIndex
-    //                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-    //
-    //        double[] vectorEmbedding = extractVector(tuple);
-    //        return accessor.findClosestLeafCentroid(vectorEmbedding); // Placeholder
-    //    }
-
-    private double extractDistance(ITupleReference tuple) throws HyracksDataException {
-        // Assuming the distance is stored in the first field of the tuple
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
-        return (Double) fieldValues[0];
-    }
-
-    private double[] extractVector(ITupleReference tuple) throws HyracksDataException {
-        // Assuming the vector is stored in the second field of the tuple
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataFrameSerds);
-        return (double[]) fieldValues[2];
-    }
 
     private int extractCentroidId(ITupleReference tuple) throws HyracksDataException {
         return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1) + 1);
@@ -249,9 +175,12 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     public void add(ITupleReference tuple) throws HyracksDataException {
         int tupleCentroidId = extractCentroidId(tuple); // just to verify tuple format
         if (currentCentroidId == -1) {
-            // First tuple being added
+            // First tuple being added - initialize for first cluster
             LOGGER.debug("Starting bulk load with first centroid cluster: {}", tupleCentroidId);
             currentCentroidId = tupleCentroidId;
+            int targetClusterIndex = tupleCentroidId - firstLeafCentroidId;
+            createDirectoryPageForCluster(targetClusterIndex);
+            createNewDataPage();
         } else if (currentCentroidId != tupleCentroidId) {
             // Moved to a new centroid cluster
             LOGGER.debug("Switching from centroid {} to centroid {}", currentCentroidId, tupleCentroidId);
@@ -259,10 +188,6 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
             // Calculate target cluster index from centroid ID (handle gaps in centroid IDs)
             int targetClusterIndex = tupleCentroidId - firstLeafCentroidId;
             loadToNextLeafCluster(targetClusterIndex);
-        }
-        if (directoryPages.isEmpty()) {
-            createFirstDirectoryPages();
-            createNewDataPage();
         }
         try {
             // Calculate space needed for this tuple - following BTreeNSMBulkLoader pattern
@@ -303,15 +228,14 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      */
     public void loadToNextLeafCluster(int targetClusterIndex) throws HyracksDataException {
         // Validate target cluster index
-        if (targetClusterIndex < 0 || targetClusterIndex >= directoryPages.size()) {
+        if (targetClusterIndex < 0 || targetClusterIndex >= numLeafCentroid) {
             throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
                     "Target cluster index out of bounds: " + targetClusterIndex + " (valid range: 0-"
-                            + (directoryPages.size() - 1) + ")");
+                            + (numLeafCentroid - 1) + ")");
         }
 
         // Skip if already at target cluster
         if (currentLeafClusterIndex == targetClusterIndex) {
-            //            LOGGER.debug("Already at target cluster {}, skipping", targetClusterIndex);
             return;
         }
 
@@ -325,25 +249,15 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
             write(currentDirectoryPage);
         }
 
-        // Log gap if skipping clusters
-        //        if (targetClusterIndex > currentLeafClusterIndex + 1) {
-        ////            LOGGER.info("Skipping empty clusters from {} to {} (gap detected)", currentLeafClusterIndex + 1,
-        ////                    targetClusterIndex - 1);
-        //        }
-
         // Move to target leaf cluster
         currentLeafClusterIndex = targetClusterIndex;
 
-        // Set current directory page to the target cluster's directory page
-        currentDirectoryPage = directoryPages.get(currentLeafClusterIndex);
-
-        // Initialize directory frame for the new cluster
-        currentDirectoryFrame.setPage(currentDirectoryPage);
-        currentDirectoryFrame.initBuffer((byte) 0);
-        entriesInCurrentDirectoryPage = 0;
+        // Create directory page for target cluster on-demand
+        createDirectoryPageForCluster(targetClusterIndex);
 
         // Reset data page state for new cluster
         entriesInCurrentDataPage = 0;
+        createNewDataPage();
 
         LOGGER.debug("Moved to leaf cluster {} (centroid ID: {})", currentLeafClusterIndex,
                 firstLeafCentroidId + currentLeafClusterIndex);
