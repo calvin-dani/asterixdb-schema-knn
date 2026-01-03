@@ -42,6 +42,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCacheProvider;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResource;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
+import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IStorageManager;
 
@@ -56,6 +57,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
     protected final int[] vectorFields;
     protected final int[] filterFields;
     protected final boolean atomic;
+    protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -65,7 +67,8 @@ public class LSMVCTreeLocalResource extends LsmResource {
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
-            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic) {
+            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
+            IVectorBinaryAccessorFactory vectorAccessorFactory) {
         super(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -74,15 +77,18 @@ public class LSMVCTreeLocalResource extends LsmResource {
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
+        this.vectorAccessorFactory = vectorAccessorFactory;
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-            int[] vectorFields, int[] filterFields, boolean atomic) throws HyracksDataException {
+            int[] vectorFields, int[] filterFields, boolean atomic, IVectorBinaryAccessorFactory vectorAccessorFactory)
+            throws HyracksDataException {
         super(registry, json);
         this.vectorDimensions = vectorDimensions;
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
+        this.vectorAccessorFactory = vectorAccessorFactory;
     }
 
     @Override
@@ -93,6 +99,19 @@ public class LSMVCTreeLocalResource extends LsmResource {
         List<IVirtualBufferCache> virtualBufferCaches = vbcProvider.getVirtualBufferCaches(ncServiceCtx, fileRef);
         ioOpCallbackFactory.initialize(ncServiceCtx, this);
         pageWriteCallbackFactory.initialize(ncServiceCtx, this);
+
+        // Create vector accessor factory if not provided (e.g., when loaded from JSON)
+        IVectorBinaryAccessorFactory accessorFactory = vectorAccessorFactory;
+        if (accessorFactory == null) {
+            // Use reflection to create AOrderedListVectorBinaryAccessorFactory to avoid compile-time dependency
+            try {
+                Class<?> factoryClass = Class.forName("org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory");
+                accessorFactory = (IVectorBinaryAccessorFactory) factoryClass.getDeclaredConstructor().newInstance();
+            } catch (Exception e) {
+                throw new HyracksDataException("Failed to create vector accessor factory", e);
+            }
+        }
+
         return LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, fileRef,
                 storageManager.getBufferCache(ncServiceCtx), typeTraits, cmpFactories, 0.01, // bloomFilterFalsePositiveRate
                 mergePolicyFactory.createMergePolicy(mergePolicyProperties, ncServiceCtx),
@@ -101,7 +120,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
                 vectorDimensions, vectorFields, filterFields, null, // filterFrameFactory
                 null, // filterManager
                 null, // filterHelper
-                durable, metadataPageManagerFactory, atomic, null);
+                durable, metadataPageManagerFactory, atomic, null, accessorFactory);
     }
 
     @Override
@@ -127,6 +146,6 @@ public class LSMVCTreeLocalResource extends LsmResource {
         //        int[] vectorFields = OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class);
         //        int[] filterFields = OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class);
         //        boolean atomic = json.get("atomic").asBoolean();
-        return new LSMVCTreeLocalResource(registry, json, 784, null, null, false);
+        return new LSMVCTreeLocalResource(registry, json, 784, null, null, false, null);
     }
 }

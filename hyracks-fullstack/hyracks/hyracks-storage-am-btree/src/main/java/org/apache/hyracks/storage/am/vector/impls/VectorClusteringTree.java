@@ -30,6 +30,7 @@ import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
@@ -38,9 +39,12 @@ import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
@@ -82,27 +86,25 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private final int vectorDimensions;
     private final ITreeIndexFrameFactory metadataFrameFactory;
     private final ITreeIndexFrameFactory dataFrameFactory;
+    private final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     // Add missing frameTuple declaration
     private ITreeIndexTupleReference frameTuple;
-
-    private VectorClusteringTreeStaticInitializer staticInitializer;
-
+    // TODO: leave only one flag
     private boolean isStaticStructureInitialized = true;
+
+    private boolean initialized = false;
 
     public VectorClusteringTree(IBufferCache bufferCache, IPageManager freePageManager,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
-            IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file) {
+            IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file,
+            org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
-        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-        //                + "] VectorClusteringTree constructor: Started, super() call completed");
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
-        staticInitializer = null;
-        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-        //                + "] VectorClusteringTree constructor: Constructor completed");
+        this.vectorAccessorFactory = vectorAccessorFactory;
     }
 
     /**
@@ -201,14 +203,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * [additional_fields]>
      */
     private void insertVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-        // Use unified cluster search and access pattern
-        if (!isStaticStructureInitialized()) {
-            staticInitializer = new VectorClusteringTreeStaticInitializer(this);
-            /* TODO: FOR TESTING ONLY */
-            staticInitializer.initializeThreeLevelStructure();
-            setStaticStructureInitialized();
-        }
-
         ClusterAccessResult accessResult = findClusterAndPrepareAccess(tuple, ctx, true);
 
         try {
@@ -1412,6 +1406,71 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     public void setStaticStructureInitialized() {
         isStaticStructureInitialized = true;
+    }
+
+    public boolean isInitialized() {
+        return initialized;
+    }
+
+    public void setInitialized() {
+        initialized = true;
+    }
+
+
+    public void setStaticStructure(VectorClusteringTreeAccessor staticAccessor) throws HyracksDataException {
+        VectorClusteringTree staticStructure =  staticAccessor.getIndex();
+        ITreeIndexMetadataFrame metaFrame = staticAccessor.getOpContext().getMetaFrame();
+        int maxPageId = staticStructure.getPageManager().getMaxPageId(metaFrame);
+
+        // copy all pages in static structure
+
+        for (int pageId = 1; pageId <= maxPageId; pageId++) {
+            ICachedPage sourcePage = staticAccessor.getCachedPage(pageId);
+            copyPage(sourcePage);
+            staticAccessor.releasePage(sourcePage);
+        }
+
+        MutableArrayValueReference key = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+        LongPointable value = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key, value);
+        int numLeafCentroid = value.intValue();
+        ITreeIndexFrame directoryFrame = metadataFrameFactory.createFrame();
+
+        for (int leafCentroidId = 0; leafCentroidId < numLeafCentroid; leafCentroidId++) {
+            // For metadata pages, use freePageManager.takePage() normally
+            int metadataPageId = freePageManager.takePage(metaFrame) - 1;
+
+            ICachedPage targetPage =
+                    bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), metadataPageId), NEW);
+
+            directoryFrame.setPage(targetPage);
+            directoryFrame.initBuffer((byte) 0);
+
+            bufferCache.unpin(targetPage);
+
+            LOGGER.debug("Created directory page {} for leaf centroid {}", metadataPageId, leafCentroidId);
+        }
+
+        // TODO: a very hacky way
+        ICachedPage targetPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), maxPageId + numLeafCentroid + 1), NEW);
+        bufferCache.unpin(targetPage);
+
+        initialized = true;
+    }
+
+    private void copyPage(ICachedPage sourcePage) throws HyracksDataException {
+        // Copy page from source to target
+        ITreeIndexMetadataFrame metaFrame = freePageManager.createMetadataFrame();
+        int targetPageId = freePageManager.takePage(metaFrame) - 1;
+        ICachedPage targetPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), targetPageId), NEW);
+        // Copy entire page content
+        System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
+                sourcePage.getBuffer().capacity());
+        bufferCache.unpin(targetPage);
+
+        LOGGER.debug("Copied page {} ", targetPage);
     }
 
     public void setRootPageId(int rootPageId) {

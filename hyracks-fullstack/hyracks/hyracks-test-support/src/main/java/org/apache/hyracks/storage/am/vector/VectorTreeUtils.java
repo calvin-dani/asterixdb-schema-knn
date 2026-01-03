@@ -119,7 +119,7 @@ public class VectorTreeUtils {
                 new VectorClusteringDataFrameFactory(dataTupleWriterFactory, vectorDimensions);
 
         return new VectorClusteringTree(bufferCache, pageManager, interiorFrameFactory, leafFrameFactory,
-                metadataFrameFactory, dataFrameFactory, cmpFactories, 4, vectorDimensions, file);
+                metadataFrameFactory, dataFrameFactory, cmpFactories, 4, vectorDimensions, file, null);
     }
 
     /**
