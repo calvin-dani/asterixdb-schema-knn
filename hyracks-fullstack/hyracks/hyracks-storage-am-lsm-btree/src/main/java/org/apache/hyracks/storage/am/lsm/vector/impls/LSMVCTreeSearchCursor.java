@@ -667,12 +667,21 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return;
         }
 
-        // Note: Cluster advancement continues until all clusters exhausted
-        // K-based stopping is disabled since we removed reconciledOutputCount
-        // TODO: Implement accurate output counting for K-based early termination
+        // K-based early termination: Check if we've already returned K tuples
+        // getTupleCallCount tracks actual outputs returned to user (incremented in doGetTuple)
+        if (getTupleCallCount >= K) {
+            // We have enough results - set flag to stop advancing
+            stopAdvancing = true;
+            System.err.println(String.format(
+                    "[LSMVCTreeSearchCursor] K-based early termination: returned %d tuples (K=%d), stopping cluster advancement",
+                    getTupleCallCount, K));
+            return;
+        }
 
-        // Advance ALL components to next cluster together
-        System.err.println("[LSMVCTreeSearchCursor] Advancing ALL components to next cluster");
+        // Not enough results yet - advance ALL components to next cluster together
+        System.err.println(String.format(
+                "[LSMVCTreeSearchCursor] Need more results (%d < K=%d), advancing to next cluster",
+                getTupleCallCount, K));
         advanceAllComponentsToNextCluster();
     }
 
