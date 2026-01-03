@@ -821,7 +821,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return;
         }
 
-        // NPROBE LOGIC:
+        // MERGE MODE: Always continue until all clusters exhausted (no early termination)
+        if (fullScanMode) {
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Merge mode: advancing to next cluster",
+                    Thread.currentThread().getName());
+            advanceAllComponentsToNextCluster();
+            return;
+        }
+
+        // QUERY MODE: Apply nprobe logic
         // 1. If minClustersExplored < nprobe, always continue (haven't reached minimum probe count)
         // 2. If minClustersExplored >= nprobe AND reconciledOutputCount >= K, stop
         // 3. If minClustersExplored >= nprobe AND reconciledOutputCount < K, continue (need more results)
