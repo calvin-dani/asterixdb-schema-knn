@@ -36,8 +36,7 @@ import org.junit.Test;
 public abstract class VectorIndexTestDriver {
 
     // Define the 24 leaf centroids (c10 ~ c33) - shared between methods
-    // Protected for subclass access (e.g., insert tests that need to generate records near centroids)
-    protected static final double[][] LEAF_CENTROIDS = {
+    private static final double[][] LEAF_CENTROIDS = {
             // Cluster 2.1: c10, c11, c12
             { 20.0, 30.0, 20.0 }, { 20.0, 20.0, 30.0 }, { 35.0, 25.0, 25.0 },
             // Cluster 2.2: c13, c14, c15
@@ -128,7 +127,8 @@ public abstract class VectorIndexTestDriver {
         // Generate 100 records for each leaf centroid (c10 ~ c33)
         List<List<ITupleReference>> dataRecords = generateDataRecords();
 
-        runTest(centroidSerdes, dataRecordSerdes, centroids, numClustersPerLevel, centroidsPerCluster, 3, dataRecords);
+        runTest(centroidSerdes, dataRecordSerdes, centroids, numClustersPerLevel, centroidsPerCluster, 3,
+                dataRecords);
     }
 
     /**
@@ -207,22 +207,24 @@ public abstract class VectorIndexTestDriver {
     /**
      * Helper method to create a bulk load record tuple.
      * Format: <distance_to_centroid, centroid_id, primary_key>
-     * Note: distance and centroid_id use raw types (no ADM type tags).
+     * Note: All fields except primary_key have type tags.
      */
     private ITupleReference createBulkLoadRecordTuple(double distance, int centroidId, String primaryKey)
             throws Exception {
         ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
         ArrayTupleReference tupleRef = new ArrayTupleReference();
 
-        // Field 0: distance_to_centroid (raw double - 8 bytes, no type tag)
+        // Field 0: distance_to_centroid (ADOUBLE - type tag + 8-byte double)
+        tupleBuilder.getDataOutput().writeByte(0x2B); // ADOUBLE type tag
         tupleBuilder.getDataOutput().writeDouble(distance);
         tupleBuilder.addFieldEndOffset();
 
-        // Field 1: centroid_id (raw int - 4 bytes, no type tag)
+        // Field 1: centroid_id (AINT32 - type tag + 4-byte int)
+        tupleBuilder.getDataOutput().writeByte(0x01); // AINT32 type tag
         tupleBuilder.getDataOutput().writeInt(centroidId);
         tupleBuilder.addFieldEndOffset();
 
-        // Field 2: primary_key (UTF8 string)
+        // Field 2: primary_key (no type tag - dynamic field)
         new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
         tupleBuilder.addFieldEndOffset();
 
