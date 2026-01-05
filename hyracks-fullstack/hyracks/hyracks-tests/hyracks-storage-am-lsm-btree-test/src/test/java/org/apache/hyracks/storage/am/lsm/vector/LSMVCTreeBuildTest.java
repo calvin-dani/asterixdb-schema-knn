@@ -63,10 +63,11 @@ public class LSMVCTreeBuildTest extends VectorIndexTestDriver {
         return harness.getRandom();
     }
 
-    public void runTest(ISerializerDeserializer[] fieldSerdes, List<ITupleReference> centroids,
-            List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster, int vectorDimensions,
-            List<List<ITupleReference>> dataRecords) throws Exception {
-        AbstractVectorTreeTestContext ctx = createTestContext(fieldSerdes, vectorDimensions);
+    @Override
+    protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
+            List<ITupleReference> centroids, List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster,
+            int vectorDimensions, List<List<ITupleReference>> dataRecords) throws Exception {
+        AbstractVectorTreeTestContext ctx = createTestContext(dataRecordSerdes, vectorDimensions);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
         ctx.setStaticStructureCentroids(centroids);

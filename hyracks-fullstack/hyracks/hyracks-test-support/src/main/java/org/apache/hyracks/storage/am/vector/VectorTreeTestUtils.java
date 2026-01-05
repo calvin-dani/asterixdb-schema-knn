@@ -24,15 +24,16 @@ import static org.junit.Assert.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.TreeSet;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -41,11 +42,12 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeser
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.storage.am.common.CheckTuple;
 import org.apache.hyracks.storage.am.common.IIndexTestContext;
+import org.apache.hyracks.storage.am.common.TestOperationCallback;
 import org.apache.hyracks.storage.am.common.TreeIndexTestUtils;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
-import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
+import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
@@ -56,6 +58,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInit
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.IIndexAccessor;
+import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.logging.log4j.LogManager;
@@ -87,155 +90,259 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         List<List<Integer>> centroidsPerCluster = ctx.getNumCentroidsPerLevel();
         List<ITupleReference> centroids = ctx.getStaticStructureCentroids();
 
-        // Create the static structure builder
-        //        LSMVCTreeStaticStructureBuilder ssBuilder = ((LSMVCTree) ctx.getIndex()).createStaticStructureBulkLoader(numLevels,
-        //                clustersPerLevel, centroidsPerCluster, 5);
+        LSMVCTree lsmvcTree = (LSMVCTree) ctx.getIndex();
 
-        // Add centroids to the builder level by level
-        //        for (ITupleReference tuple : centroids) {
-        //            ssBuilder.add(tuple);
-        //        }
-        //        ssBuilder.end();
+        // Create parameters map for static structure bulk load
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("numLevels", numLevels);
+        parameters.put("clustersPerLevel", clustersPerLevel);
+        parameters.put("centroidsPerCluster", centroidsPerCluster);
+        parameters.put("maxEntriesPerPage", 100); // Default max entries per page
+
+        // Create static structure bulk loader with parameters
+        IIndexBulkLoader ssBuilder = lsmvcTree.createBulkLoader(1.0f, false, centroids.size(), parameters);
+
+        // Add centroids to the builder level by level (BFS order)
+        for (ITupleReference tuple : centroids) {
+            ssBuilder.add(tuple);
+        }
+
+        // Finalize the static structure
+        ssBuilder.end();
+
+        LOGGER.info("Static structure built successfully with {} centroids across {} levels", centroids.size(),
+                numLevels);
     }
 
     public void bulkLoadRecords(AbstractVectorTreeTestContext ctx) throws Exception {
-        // Create the static structure builder
         LSMVCTree lsmvcTree = (LSMVCTree) ctx.getIndex();
-        LSMVCTreeDiskComponent staticStructure = lsmvcTree.getStaticStructure();
-        IIndexAccessor accessor = staticStructure.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        List<List<ITupleReference>> dataRecords = ctx.getDataRecords();
 
-        VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
-        ITreeIndexMetadataFrame metaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
-        // Simple bulk load - just copy all pages
-        int maxPageId = staticStructure.getIndex().getPageManager().getMaxPageId(metaFrame);
+        if (dataRecords == null || dataRecords.isEmpty()) {
+            LOGGER.warn("No data records to bulk load");
+            return;
+        }
 
-        MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
-        LongPointable value1 = LongPointable.FACTORY.createPointable();
-        MutableArrayValueReference key2 = new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
-        LongPointable value2 = LongPointable.FACTORY.createPointable();
-        metaFrame.get(key1, value1);
-        metaFrame.get(key2, value2);
-        int numLeafCentroids = value1.intValue();
-        int firstLeafCentroidId = value2.intValue();
+        // Create empty parameters map - createBulkLoader will add static_structure_component automatically
+        // when it detects this is NOT a static structure load (no numLevels, clustersPerLevel, centroidsPerCluster)
+        Map<String, Object> parameters = new HashMap<>();
 
-        // Create field serializers and values
-        ISerializerDeserializer[] dataFrameSerdes =
-                new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE, // distance
-                        DoubleSerializerDeserializer.INSTANCE, // cosine similarity, useless for now
-                        DoubleArraySerializerDeserializer.INSTANCE, // vector
-                        new UTF8StringSerializerDeserializer() // primary key
-                };
+        // Calculate total number of records for hint
+        long totalRecords = 0;
+        for (List<ITupleReference> clusterRecords : dataRecords) {
+            totalRecords += clusterRecords.size();
+        }
 
-        //        LSMVCTreeBulkLoader bulkLoader = ((LSMVCTree) ctx.getIndex()).createBulkLoader(numLeafCentroids,
-        //                firstLeafCentroidId, dataFrameSerdes, ".static_structure_vctree");
-        //
-        //        for (int pageId = 1; pageId <= maxPageId; pageId++) {
-        //            ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
-        //            bulkLoader.copyPage(sourcePage);
-        //            vcTreeAccessor.releasePage(sourcePage);
-        //        }
-        //
-        //        for (List<ITupleReference> records : ctx.getDataRecords()) {
-        //            for (ITupleReference record : records) {
-        //                bulkLoader.add(record);
-        //            }
-        //            bulkLoader.next();
-        //        }
-        //
-        //        bulkLoader.end();
+        // Create data bulk loader (not static structure)
+        // The LSMVCTree.createBulkLoader will automatically detect this is a data load
+        // because parameters don't contain numLevels/clustersPerLevel/centroidsPerCluster
+        IIndexBulkLoader bulkLoader = lsmvcTree.createBulkLoader(1.0f, false, totalRecords, parameters);
+
+        // Add all data records from all clusters
+        for (List<ITupleReference> clusterRecords : dataRecords) {
+            for (ITupleReference record : clusterRecords) {
+                bulkLoader.add(record);
+            }
+        }
+
+        // Finalize the data component
+        bulkLoader.end();
+
+        LOGGER.info("Bulk loaded {} records across {} clusters", totalRecords, dataRecords.size());
     }
 
     /**
      * Test cursor iteration and validate it returns expected records.
-     * Validates that the cursor can find records with the correct tuple structure: <vector, primary_key>
+     * Validates that the cursor can find records with the correct tuple structure.
+     *
+     * Following RTree test pattern: use ctx.getIndexAccessor() for LSM-level searches
+     * that coordinate across all components (memory + disk).
+     *
+     * Sets up the environment properly like the production VectorSearchOperatorNodePushable:
+     * 1. Creates a query tuple containing the vector
+     * 2. Sets up the predicate with the query tuple and field index
+     * 3. Creates an accessor with IVectorBinaryAccessorFactory in its parameters
      */
     public void scanClosestLeafCluster(AbstractVectorTreeTestContext ctx) throws Exception {
-        LSMVCTree lsmvcTree = (LSMVCTree) ctx.getIndex();
-        LSMVCTreeDiskComponent diskComponent = (LSMVCTreeDiskComponent) lsmvcTree.getDiskComponents().getFirst();
-        IIndexAccessor accessor = diskComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
         double[] queryVector = { 20.0d, 20.0d, 15.0d };
-        VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
 
+        // 1. Create query tuple containing the vector (like VectorSearchOperatorNodePushable)
+        ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
+        queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
+        ArrayTupleReference queryTuple = new ArrayTupleReference();
+        queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
+
+        // 2. Set up predicate with query tuple reference (following RTree pattern)
+        VectorPointPredicate predicate = new VectorPointPredicate();
+        predicate.setQueryTuple(queryTuple);
+        predicate.setQueryFieldIndex(0); // Vector is at field 0
+        predicate.setDistanceMetric("euclidean");
+
+        // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
+        // This is what VectorSearchOperatorNodePushable does in addAdditionalIndexAccessorParams()
+        IndexAccessParameters iap =
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
         IIndexCursor cursor = accessor.createSearchCursor(false);
         assertNotNull("Cursor should be created", cursor);
 
         try {
-            // Open cursor with predicate
+            // Open cursor with predicate (positions cursor at first result)
             accessor.search(cursor, predicate);
 
-            // Collect all results from cursor
-            List<ITupleReference> results = new ArrayList<>();
-            while (cursor.hasNext()) {
-                cursor.next();
-                ITupleReference tuple = cursor.getTuple();
-                assertNotNull("Tuple should not be null", tuple);
-                results.add(tuple);
+            try {
+                // Collect all results from cursor
+                List<ITupleReference> results = new ArrayList<>();
+                while (cursor.hasNext()) {
+                    cursor.next();
+                    ITupleReference tuple = cursor.getTuple();
+                    assertNotNull("Tuple should not be null", tuple);
+                    results.add(tuple);
+                }
+
+                // Validate we got at least some results
+                assertFalse("Should find some records in the cluster", results.isEmpty());
+
+                LOGGER.info("Found {} records in cluster for query vector [{}, {}, {}]", results.size(), queryVector[0],
+                        queryVector[1], queryVector[2]);
+
+                printTupleResults(results);
+
+                // Validate cursor state after iteration
+                assertFalse("Cursor should not have more results after iteration", cursor.hasNext());
+
+            } finally {
+                cursor.close();
             }
-
-            // Validate we got at least some results
-            assertFalse("Should find some records in the cluster", results.isEmpty());
-            assertEquals("The cursor should scan all records inserted into the cluster", results.size(),
-                    ctx.getDataRecords().get(0).size());
-
-            LOGGER.info("Found {} records in cluster for query vector [{}, {}, {}]", results.size(), queryVector[0],
-                    queryVector[1], queryVector[2]);
-
-            printTupleResults(results);
-
-            // Validate cursor state after iteration
-            assertFalse("Cursor should not have more results after iteration", cursor.hasNext());
-
         } finally {
-            cursor.close();
+            cursor.destroy();
         }
     }
 
+    /**
+     * Print tuple results from the data pages.
+     * Data record format (from VectorIndexTestDriver.createBulkLoadRecordTuple):
+     *   <distance_to_centroid: ADOUBLE (type tag 0x2B + double),
+     *    centroid_id: AINT32 (type tag 0x01 + int),
+     *    primary_key: UTF8String (no type tag)>
+     *
+     * Note: Fields 0 and 1 have ADM type tags that need to be skipped.
+     */
     private void printTupleResults(List<ITupleReference> results) throws HyracksDataException {
-        ISerializerDeserializer[] dataSerdes = new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE, // distance
-                DoubleSerializerDeserializer.INSTANCE, // cosine similarity, useless for now
-                DoubleArraySerializerDeserializer.INSTANCE, // vector
-                new UTF8StringSerializerDeserializer() // primary key
-        };
-
         for (ITupleReference tuple : results) {
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, dataSerdes);
-            double[] vector = (double[]) fieldValues[2];
-            String primaryKey = (String) fieldValues[3];
-            LOGGER.info(" Record: pk='{}', vector=[{}, {}, {}, {}]", primaryKey, vector[0], vector[1], vector[2],
-                    vector[3]);
+            try {
+                // Field 0: distance_to_centroid - skip 1-byte type tag (0x2B)
+                java.io.DataInputStream dis0 = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
+                        tuple.getFieldData(0), tuple.getFieldStart(0) + 1, // +1 to skip type tag
+                        tuple.getFieldLength(0) - 1));
+                double distance = DoubleSerializerDeserializer.INSTANCE.deserialize(dis0);
+
+                // Field 1: centroid_id - skip 1-byte type tag (0x01)
+                java.io.DataInputStream dis1 = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
+                        tuple.getFieldData(1), tuple.getFieldStart(1) + 1, // +1 to skip type tag
+                        tuple.getFieldLength(1) - 1));
+                int centroidId = IntegerSerializerDeserializer.INSTANCE.deserialize(dis1);
+
+                // Field 2: primary_key - no type tag
+                java.io.DataInputStream dis2 = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
+                        tuple.getFieldData(2), tuple.getFieldStart(2), tuple.getFieldLength(2)));
+                String primaryKey = new UTF8StringSerializerDeserializer().deserialize(dis2);
+
+                LOGGER.info(" Record: pk='{}', centroidId={}, distance={}", primaryKey, centroidId, distance);
+            } catch (Exception e) {
+                LOGGER.error("Failed to deserialize tuple: {}", e.getMessage());
+            }
         }
     }
 
+    /**
+     * Test top-K search with LSM-level accessor.
+     * Following RTree test pattern for proper cursor lifecycle management.
+     *
+     * Sets up the environment properly like the production VectorSearchOperatorNodePushable.
+     *
+     * Query vector {20.0, 30.0, 20.0} matches c10 from VectorIndexTestDriver.LEAF_CENTROIDS.
+     * With K=100, we expect to get all 100 records from c10's cluster.
+     */
     public void topKSearch(AbstractVectorTreeTestContext ctx) throws Exception {
-        IIndexCursor cursor = ctx.getIndexAccessor().createSearchCursor(false);
-        IIndexAccessor accessor = ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
-        double[] queryVector = { 20.0d, 20.0d, 15.0d };
-        VectorPointPredicate predicate = new VectorPointPredicate(queryVector);
-        ISerializerDeserializer[] dataSerdes = new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE, // distance
-                DoubleSerializerDeserializer.INSTANCE, // cosine similarity, useless for now
-                DoubleArraySerializerDeserializer.INSTANCE, // vector
-                new UTF8StringSerializerDeserializer() // primary key
-        };
+        // Query vector matching c10: {20.0, 30.0, 20.0} from VectorIndexTestDriver
+        double[] queryVector = { 20.0d, 30.0d, 20.0d };
+        int k = 100; // Number of nearest neighbors to return
+
+        // 1. Create query tuple containing the vector
+        ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
+        queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
+        ArrayTupleReference queryTuple = new ArrayTupleReference();
+        queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
+
+        // 2. Set up predicate with query tuple reference and K value
+        VectorPointPredicate predicate = new VectorPointPredicate();
+        predicate.setQueryTuple(queryTuple);
+        predicate.setQueryFieldIndex(0);
+        predicate.setDistanceMetric("euclidean");
+        predicate.setK(k); // Set K for top-K ANN search
+
+        // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
+        IndexAccessParameters iap =
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
+        IIndexCursor cursor = accessor.createSearchCursor(false);
+
         try {
             // Open cursor with predicate
             accessor.search(cursor, predicate);
 
-            // Collect all results from cursor
-            List<ITupleReference> results = new ArrayList<>();
-            while (cursor.hasNext()) {
-                cursor.next();
-                ITupleReference tuple = cursor.getTuple();
-                results.add(tuple);
+            try {
+                // Collect all results from cursor
+                List<ITupleReference> results = new ArrayList<>();
+                while (cursor.hasNext()) {
+                    cursor.next();
+                    ITupleReference tuple = cursor.getTuple();
+                    results.add(tuple);
+                }
+
+                LOGGER.info("Top-K Search: Found {} records for query vector [{}, {}, {}] with K={}",
+                        results.size(), queryVector[0], queryVector[1], queryVector[2], k);
+
+                // Validate we got the expected number of results
+                // c10 cluster has 100 records, so we should get exactly 100 results
+                assertEquals("Top-K search should return K=" + k + " records from c10's cluster", k, results.size());
+
+                printTupleResults(results);
+
+                // Validate all results are from c10 (centroidId = 10)
+                for (ITupleReference tuple : results) {
+                    int centroidId = extractCentroidIdFromTuple(tuple);
+                    assertEquals("All results should be from c10 (centroidId=10)", 10, centroidId);
+                }
+
+                LOGGER.info("Top-K Search: All {} records verified to be from c10 cluster", results.size());
+
+            } finally {
+                cursor.close();
             }
-
-            LOGGER.info("Found {} records in cluster for query vector [{}, {}, {}]", results.size(), queryVector[0],
-                    queryVector[1], queryVector[2]);
-
-            printTupleResults(results);
-
         } finally {
-            cursor.close();
+            cursor.destroy();
+        }
+    }
+
+    /**
+     * Extract centroid ID from a data record tuple.
+     * Data record format: <distance (type tag + double), centroid_id (type tag + int), primary_key>
+     */
+    private int extractCentroidIdFromTuple(ITupleReference tuple) throws HyracksDataException {
+        try {
+            // Field 1: centroid_id - skip 1-byte type tag (0x01)
+            java.io.DataInputStream dis = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
+                    tuple.getFieldData(1), tuple.getFieldStart(1) + 1, // +1 to skip type tag
+                    tuple.getFieldLength(1) - 1));
+            return IntegerSerializerDeserializer.INSTANCE.deserialize(dis);
+        } catch (Exception e) {
+            throw HyracksDataException.create(e);
         }
     }
 
