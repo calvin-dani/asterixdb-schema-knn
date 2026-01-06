@@ -44,6 +44,8 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
     protected final int[] vectorFields;
     protected final boolean atomic;
     protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
+    protected final int numPrimaryKeyFields;
+    protected final int numIncludeFields;
 
     public LSMVCTreeLocalResourceFactory(IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -54,7 +56,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
-            IVectorBinaryAccessorFactory vectorAccessorFactory) {
+            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -63,6 +65,8 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
         this.vectorFields = vectorFields;
         this.atomic = atomic;
         this.vectorAccessorFactory = vectorAccessorFactory;
+        this.numPrimaryKeyFields = numPrimaryKeyFields;
+        this.numIncludeFields = numIncludeFields;
     }
 
     @Override
@@ -71,6 +75,6 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
                 filterTypeTraits, filterCmpFactories, filterFields, opTrackerProvider, ioOpCallbackFactory,
                 pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                 mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions, vectorFields, nullTypeTraits,
-                nullIntrospector, atomic, vectorAccessorFactory);
+                nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
     }
 }

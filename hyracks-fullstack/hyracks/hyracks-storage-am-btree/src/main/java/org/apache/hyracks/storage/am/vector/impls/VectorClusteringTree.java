@@ -148,22 +148,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     }
 
     public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
-            ITreeIndexAccessor static_accessor, ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
+            ITreeIndexAccessor staticAccessor, ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
         @SuppressWarnings("rawtypes")
         ISerializerDeserializer[] dataFrameSerds;
-        if (dataFrameSerdes != null && dataFrameSerdes.length > 0) {
-            // Use provided serializers from RecordDescriptor
-            dataFrameSerds = dataFrameSerdes;
-        } else {
-            // Fallback to hardcoded serializers for backward compatibility
-            dataFrameSerds = new ISerializerDeserializer[4];
-            dataFrameSerds[0] = DoubleSerializerDeserializer.INSTANCE; // distance
-            dataFrameSerds[1] = IntegerSerializerDeserializer.INSTANCE; // cosine similarity
-            dataFrameSerds[2] = DoubleArraySerializerDeserializer.INSTANCE; // vector
-            dataFrameSerds[3] = IntegerSerializerDeserializer.INSTANCE; // primary key
-        }
+        // Use provided serializers from RecordDescriptor
+        dataFrameSerds = dataFrameSerdes;
+
         return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
-                DefaultBufferCacheWriteContext.INSTANCE, dataFrameSerds, static_accessor);
+                DefaultBufferCacheWriteContext.INSTANCE, dataFrameSerds, staticAccessor);
     }
 
     @Override
@@ -520,10 +512,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private boolean deleteVector(ITupleReference tuple, VectorClusteringOpContext ctx)
             throws HyracksDataException {
 
-        // Extract vector and primary key
+        // Extract vector and primary key (binary format - no type assumption)
         double[] vector = extractVectorFromTuple(tuple);
         byte[] primaryKey = extractPrimaryKeyFromTuple(tuple);
-        long pkValue = extractLongFromPrimaryKey(primaryKey);
 
         // Find cluster and access data pages
         ClusterAccessResult accessResult = findClusterAndPrepareAccess(tuple, ctx, true);
@@ -541,8 +532,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 primaryKey,
                 centroidId,
                 tuple,
-                ctx,
-                pkValue
+                ctx
             );
 
             if (foundAndDeleted) {
@@ -555,9 +545,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // - Empty metadata pages (creates new data page)
             // - Page splits (if data page is full)
             // - Metadata max distance updates
-            System.err.println("DELETE PK=" + pkValue + " → Tuple not found in memory, inserting antimatter");
+            System.err.println("DELETE PK=" + Arrays.toString(primaryKey) + " → Tuple not found in memory, inserting antimatter");
             insertIntoDataPages(accessResult.metadataPageId, vector, distance, centroidId, tuple, ctx);
-            System.err.println("DELETE PK=" + pkValue + " → ANTIMATTER inserted (disk tuple) in cluster=" + centroidId + ", distance=" + distance);
+            System.err.println("DELETE PK=" + Arrays.toString(primaryKey) + " → ANTIMATTER inserted (disk tuple) in cluster=" + centroidId + ", distance=" + distance);
             return true;
 
         } finally {
@@ -571,6 +561,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * Try to physically delete a tuple from data pages. Searches through metadata
      * pages to find the tuple and delete it. Returns true if found and deleted,
      * false if not found (caller should insert antimatter).
+     *
+     * Uses binary comparison for primary key matching - no type assumption.
      */
     private boolean tryPhysicalDelete(
             long metadataPageId,
@@ -578,8 +570,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             byte[] primaryKey,
             int centroidId,
             ITupleReference originalTuple,
-            VectorClusteringOpContext ctx,
-            long pkValue) throws HyracksDataException {
+            VectorClusteringOpContext ctx) throws HyracksDataException {
 
         // Traverse through all linked metadata pages
         long currentMetadataPageId = metadataPageId;
@@ -605,25 +596,24 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                         dataPage.acquireWriteLatch();
                         ctx.getDataFrame().setPage(dataPage);
 
-                        // Search for tuple by distance + PK
+                        // Search for tuple by distance + PK (uses binary comparison internally)
                         int tupleIndex = ((VectorClusteringDataFrame) ctx.getDataFrame())
-                            .findTupleByDistanceAndPrimaryKey(distance, primaryKey, pkValue);
+                            .findTupleByDistanceAndPrimaryKey(distance, primaryKey);
 
                         if (tupleIndex >= 0) {
                             // Found! Physically delete it
                             VectorClusteringDataFrame dataFrame = (VectorClusteringDataFrame) ctx.getDataFrame();
 
                             int tupleCountBefore = dataFrame.getTupleCount();
-                            System.err.println("BEFORE DELETE PK=" + pkValue + " | Page has " + tupleCountBefore +
+                            System.err.println("BEFORE DELETE PK=" + Arrays.toString(primaryKey) + " | Page has " + tupleCountBefore +
                                 " tuples, deleting at index=" + tupleIndex);
 
                             byte[] pkAtIndex = dataFrame.getPrimaryKey(tupleIndex);
-                            long pkAtIndexValue = extractLongFromPrimaryKey(pkAtIndex);
 
-                            // Safety check
-                            if (pkAtIndexValue != pkValue) {
-                                System.err.println("ERROR: DELETE PK=" + pkValue + " → Found WRONG tuple at index " +
-                                    tupleIndex + " with PK=" + pkAtIndexValue + " (BUG!)");
+                            // Safety check using binary comparison (no type assumption)
+                            if (!Arrays.equals(pkAtIndex, primaryKey)) {
+                                System.err.println("ERROR: DELETE PK=" + Arrays.toString(primaryKey) + " → Found WRONG tuple at index " +
+                                    tupleIndex + " with PK=" + Arrays.toString(pkAtIndex) + " (BUG!)");
                                 return false;
                             }
 
@@ -631,9 +621,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                             ctx.getDataFrame().delete(originalTuple, tupleIndex);
 
                             int tupleCountAfter = dataFrame.getTupleCount();
-                            System.err.println("AFTER DELETE PK=" + pkValue + " | Page now has " + tupleCountAfter +
+                            System.err.println("AFTER DELETE PK=" + Arrays.toString(primaryKey) + " | Page now has " + tupleCountAfter +
                                 " tuples (deleted 1)");
-                            System.err.println("DELETE PK=" + pkValue + " → PHYSICAL delete at index=" + tupleIndex +
+                            System.err.println("DELETE PK=" + Arrays.toString(primaryKey) + " → PHYSICAL delete at index=" + tupleIndex +
                                 " in cluster=" + centroidId + ", distance=" + distance + " (verified PK match)");
 
                             return true; // Successfully deleted
@@ -667,14 +657,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      */
     private byte[] extractPrimaryKeyFromTuple(ITupleReference tuple) {
         return VectorClusteringTupleUtils.extractPrimaryKeyFromTuple(tuple);
-    }
-
-    /**
-     * Extract long value from primary key bytes (format: [type_tag][8-byte long]).
-     */
-    private long extractLongFromPrimaryKey(byte[] primaryKey) {
-        // Skip type tag (first byte at offset 0), read 8-byte long value starting at offset 1
-        return LongPointable.getLong(primaryKey, 1);
     }
 
     /**

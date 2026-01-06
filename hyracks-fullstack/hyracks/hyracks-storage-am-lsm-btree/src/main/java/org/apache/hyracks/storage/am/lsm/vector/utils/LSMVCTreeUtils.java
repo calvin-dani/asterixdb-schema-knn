@@ -110,7 +110,8 @@ public class LSMVCTreeUtils {
             ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
             IComponentFilterHelper filterHelper, boolean durable,
             IMetadataPageManagerFactory metadataPageManagerFactory, boolean atomic, RecordDescriptor inputRecDesc,
-            org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory)
+            org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
+            int numPrimaryKeyFields, int numIncludeFields)
             throws HyracksDataException {
 
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
@@ -198,7 +199,7 @@ public class LSMVCTreeUtils {
                 diskBufferCache, fileManager, componentFactory, componentFactory, filterHelper, filterFrameFactory,
                 filterManager, bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler,
                 ioOpCallbackFactory, pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields,
-                filterFields, durable, atomic, vectorAccessorFactory);
+                filterFields, durable, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
 //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
 //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTree instance created successfully");
         return result;
@@ -245,10 +246,14 @@ public class LSMVCTreeUtils {
         IComponentFilterHelper filterHelper = null; // No filter helper by default
         boolean atomic = false; // Default to atomic operations
 
+        // Default: single primary key field, no include fields (for legacy/simplified use)
+        int numPrimaryKeyFields = 1;
+        int numIncludeFields = 0;
+
         return createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits,
                 cmpFactories, bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields,
                 filterFrameFactory, filterManager, filterHelper, durable, metadataPageManagerFactory, atomic,
-                inputRecDesc, vectorAccessorFactory);
+                inputRecDesc, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
     }
 }

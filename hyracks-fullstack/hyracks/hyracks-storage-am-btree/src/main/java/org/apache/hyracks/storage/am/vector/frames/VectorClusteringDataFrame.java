@@ -183,24 +183,17 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     /**
-     * Extract long value from primary key bytes (format: [type_tag][8-byte long]).
-     */
-    private long extractLongFromPrimaryKey(byte[] primaryKey) {
-        // Skip type tag (first byte at offset 0), read 8-byte long value starting at offset 1
-        return org.apache.hyracks.data.std.primitive.LongPointable.getLong(primaryKey, 1);
-    }
-
-    /**
      * Find tuple matching both distance and primary key using RIGHT BOUND search.
      * Returns the rightmost (most recently inserted) tuple if multiple matches exist.
      * This is critical for finding matter tuples after antimatter during deletion.
      *
+     * Uses binary comparison for primary key matching - no type assumption.
+     *
      * @param distance Target distance to centroid
-     * @param primaryKey Primary key bytes to match
-     * @param pkValue Primary key value for logging
+     * @param primaryKey Primary key bytes to match (binary format)
      * @return Tuple index if found, -1 if not found
      */
-    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey, long pkValue)
+    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey)
             throws HyracksDataException {
 
         // Step 1: Use RIGHT BOUND search to find upper boundary
@@ -216,7 +209,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
                 break;
             }
 
-            // Check primary key match
+            // Check primary key match using binary comparison (no type assumption)
             byte[] pk = getPrimaryKey(i);
             if (Arrays.equals(pk, primaryKey)) {
                 return i; // Found the rightmost matching tuple
@@ -226,31 +219,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         return -1; // Not found
     }
 
-    /**
-     * Get the maximum distance in this data frame.
-     */
-    public double getMaxDistance() throws HyracksDataException {
-        int tupleCount = getTupleCount();
-        if (tupleCount == 0) {
-            return 0.0;
-        }
-
-        // Since tuples are sorted by distance, max is the last tuple
-        return getDistanceToCentroid(tupleCount - 1);
-    }
-
-    /**
-     * Get the minimum distance in this data frame.
-     */
-    public double getMinDistance() throws HyracksDataException {
-        int tupleCount = getTupleCount();
-        if (tupleCount == 0) {
-            return Double.MAX_VALUE;
-        }
-
-        // Since tuples are sorted by distance, min is the first tuple
-        return getDistanceToCentroid(0);
-    }
 
     /**
      * Split this data frame using BTree-style approach.

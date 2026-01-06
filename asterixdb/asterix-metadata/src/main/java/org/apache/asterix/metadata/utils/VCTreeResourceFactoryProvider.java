@@ -142,12 +142,15 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
                     new AOrderedListVectorBinaryAccessorFactory();
+            // Get INCLUDE fields count from index details
+            List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+            int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
             return new LSMVCTreeLocalResourceFactory(storageManager, typeTraits, cmpFactories, filterTypeTraits,
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                    vectorAccessorFactory);
+                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields);
         } else {
             return null;
         }

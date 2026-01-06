@@ -116,6 +116,11 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     protected final boolean needKeyDupCheck;
     protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
+    // Field count information for dynamic primary key and include field handling
+    // Data tuple format: [distance, centroidId, primary_keys..., include_fields...]
+    protected final int numPrimaryKeyFields;
+    protected final int numIncludeFields;
+
     protected LSMVCTreeDiskComponent staticStructure;
 
     public LSMVCTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
@@ -129,7 +134,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
-            boolean atomic, org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory)
+            boolean atomic, org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
+            int numPrimaryKeyFields, int numIncludeFields)
             throws HyracksDataException {
 
         super(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
@@ -145,6 +151,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         this.vectorDimensions = vectorDimensions;
         this.needKeyDupCheck = needKeyDupCheck;
         this.vectorAccessorFactory = vectorAccessorFactory;
+        this.numPrimaryKeyFields = numPrimaryKeyFields;
+        this.numIncludeFields = numIncludeFields;
 
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
@@ -523,6 +531,28 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     public IBinaryComparatorFactory[] getCmpFactories() {
         return cmpFactories;
+    }
+
+    /**
+     * Gets the number of primary key fields in the data tuple.
+     * Data tuple format: [distance, centroidId, primary_keys..., include_fields...]
+     * Primary keys start at field index 2 and span numPrimaryKeyFields.
+     *
+     * @return number of primary key fields
+     */
+    public int getNumPrimaryKeyFields() {
+        return numPrimaryKeyFields;
+    }
+
+    /**
+     * Gets the number of INCLUDE fields in the data tuple.
+     * Data tuple format: [distance, centroidId, primary_keys..., include_fields...]
+     * Include fields start at field index (2 + numPrimaryKeyFields).
+     *
+     * @return number of INCLUDE fields
+     */
+    public int getNumIncludeFields() {
+        return numIncludeFields;
     }
 
     @Override
