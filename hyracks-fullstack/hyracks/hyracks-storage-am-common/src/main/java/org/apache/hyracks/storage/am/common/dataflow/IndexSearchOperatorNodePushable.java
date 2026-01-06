@@ -290,6 +290,7 @@ public abstract class IndexSearchOperatorNodePushable extends AbstractUnaryInput
                 writeFilterTupleToOutput(((ILSMIndexCursor) cursor).getFilterMinTuple());
                 writeFilterTupleToOutput(((ILSMIndexCursor) cursor).getFilterMaxTuple());
             }
+            /* TODO - vector index search early termination */
             FrameUtils.appendToWriter(writer, appender, tb.getFieldEndOffsets(), tb.getByteArray(), 0, tb.getSize());
             if (outputLimit >= 0 && ++outputCount >= outputLimit) {
                 finished = true;
