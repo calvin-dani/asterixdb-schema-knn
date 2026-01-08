@@ -713,6 +713,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     /**
      * Use DFS to find a cluster by centroid ID.
+     * Properly handles both leaf overflow pages (via searchLeafForCentroid) and
+     * interior overflow pages (by adding overflow page children to queue).
      */
     private ClusterSearchResult findClusterByCentroidIdDFS(int centroidId) throws HyracksDataException {
         // Traverse all leaf pages to find the centroid
@@ -731,20 +733,46 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 leafFrame.setPage(page);
 
                 if (leafFrame.isLeaf()) {
-                    // Search this leaf for the centroid
+                    // Search this leaf for the centroid (follows leaf overflow chain internally)
                     ClusterSearchResult result = searchLeafForCentroid(currentPageId, centroidId);
                     if (result != null) {
                         return result;
                     }
                 } else {
-                    // Interior node - add children to queue
+                    // Interior node - add children to queue and handle overflow pages
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
 
+                    // Add children from this interior page
                     for (int i = 0; i < interiorFrame.getTupleCount(); i++) {
                         int childPageId = interiorFrame.getChildPageId(i);
                         pageQueue.add(childPageId);
+                    }
+
+                    // Follow interior overflow chain and add children from overflow pages
+                    boolean hasOverflow = interiorFrame.getOverflowFlagBit();
+                    int overflowPageId = hasOverflow ? interiorFrame.getNextPage() : -1;
+                    while (overflowPageId != -1) {
+                        ICachedPage overflowPage =
+                                bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, overflowPageId));
+                        try {
+                            overflowPage.acquireReadLatch();
+                            IVectorClusteringInteriorFrame overflowFrame =
+                                    (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                            overflowFrame.setPage(overflowPage);
+
+                            for (int i = 0; i < overflowFrame.getTupleCount(); i++) {
+                                int childPageId = overflowFrame.getChildPageId(i);
+                                pageQueue.add(childPageId);
+                            }
+
+                            hasOverflow = overflowFrame.getOverflowFlagBit();
+                            overflowPageId = hasOverflow ? overflowFrame.getNextPage() : -1;
+                        } finally {
+                            overflowPage.releaseReadLatch();
+                            bufferCache.unpin(overflowPage);
+                        }
                     }
                 }
             } finally {
@@ -757,32 +785,42 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     /**
-     * Search a specific leaf page for a centroid by ID.
+     * Search a specific leaf page (and its overflow pages) for a centroid by ID.
      * Note: We don't extract the centroid vector here since it's not needed for opening the cluster.
      * The distance is already known from the LSM layer's globalLevelWiseClusters.
+     * This method follows the overflow chain via getNextLeaf() to search all overflow pages.
      */
     private ClusterSearchResult searchLeafForCentroid(int leafPageId, int centroidId) throws HyracksDataException {
-        ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, leafPageId));
-        try {
-            page.acquireReadLatch();
+        int currentPageId = leafPageId;
 
-            IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
-            leafFrame.setPage(page);
+        while (currentPageId != -1) {
+            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+            try {
+                page.acquireReadLatch();
 
-            for (int i = 0; i < leafFrame.getTupleCount(); i++) {
-                int cid = leafFrame.getCentroidId(i);
-                if (cid == centroidId) {
-                    // Found it - create ClusterSearchResult without centroid vector
-                    // Distance is not needed here since we're just looking up by ID
-                    return ClusterSearchResult.create(leafPageId, i, null, 0.0, centroidId);
+                IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                leafFrame.setPage(page);
+
+                for (int i = 0; i < leafFrame.getTupleCount(); i++) {
+                    int cid = leafFrame.getCentroidId(i);
+                    if (cid == centroidId) {
+                        // Found it - create ClusterSearchResult without centroid vector
+                        // Distance is not needed here since we're just looking up by ID
+                        return ClusterSearchResult.create(currentPageId, i, null, 0.0, centroidId);
+                    }
                 }
-            }
 
-            return null; // Not found in this leaf
-        } finally {
-            page.releaseReadLatch();
-            bufferCache.unpin(page);
+                // Check for overflow pages and continue searching
+                boolean hasOverflow = leafFrame.getOverflowFlagBit();
+                currentPageId = hasOverflow ? leafFrame.getNextLeaf() : -1;
+
+            } finally {
+                page.releaseReadLatch();
+                bufferCache.unpin(page);
+            }
         }
+
+        return null; // Not found in this leaf or any of its overflow pages
     }
 
     /**
