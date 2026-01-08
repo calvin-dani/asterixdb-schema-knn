@@ -68,9 +68,9 @@ public class ClusterSearchResult {
 
     /**
      * Check if this result has a valid directory page ID.
-     * @return true if directoryPageId is valid (> 0)
+     * @return true if directoryPageId is valid (>= 0), false if unknown (-1)
      */
     public boolean hasDirectoryPageId() {
-        return directoryPageId > 0;
+        return directoryPageId >= 0;
     }
 }
