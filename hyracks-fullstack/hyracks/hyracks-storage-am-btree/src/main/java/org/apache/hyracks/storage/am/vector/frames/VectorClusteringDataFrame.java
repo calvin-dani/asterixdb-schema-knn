@@ -85,9 +85,8 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     @Override
     public double getDistanceToCentroid(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
-        // Distance to centroid is the first field in data records - stored as double
-        int distanceOff = frameTuple.getFieldStart(0) + 1;
-        // Distance to centroid is the first field in data records - stored as double
+        // Distance to centroid is the first field in data records - stored as raw double (no type tag)
+        int distanceOff = frameTuple.getFieldStart(0);
         double distance = buf.getDouble(distanceOff);
         return distance;
     }
@@ -315,22 +314,20 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException {
-        // TEMPORARY FORMAT: <distance: ADOUBLE, AINTEGER, primaryKey: AINT64>
+        // FORMAT: <distance: raw double, centroidId: raw int, primaryKey>
         try {
             ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(3);
             DataOutput dos = dataTupleBuilder.getDataOutput();
 
-            // Field 0: distance as ADOUBLE (type tag + 8-byte double)
-            dos.writeByte(0x2B); // ADOUBLE type tag
+            // Field 0: distance as raw double (8 bytes, no type tag)
             dos.writeDouble(distance);
             dataTupleBuilder.addFieldEndOffset();
 
-            // Field 1: placeholder AINTEGER (type tag + 4-byte int)
-            dos.writeByte(0x1A); // AINT32 type tag
-            dos.writeInt(centroidId); // placeholder value
+            // Field 1: centroidId as raw int (4 bytes, no type tag)
+            dos.writeInt(centroidId);
             dataTupleBuilder.addFieldEndOffset();
 
-            // Field 2: primaryKey - copy directly from originalTuple field 1 (already in AINT64 format)
+            // Field 2: primaryKey - copy directly from originalTuple field 1
             dataTupleBuilder.addField(originalTuple.getFieldData(1), originalTuple.getFieldStart(1),
                     originalTuple.getFieldLength(1));
 

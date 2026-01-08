@@ -24,11 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
-import org.apache.asterix.om.base.ADouble;
-import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.types.EnumDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
 import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
@@ -239,10 +237,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             int totalFields = 2 + originalTuple.getFieldCount() - 1; // 2 new fields + all original fields - embedding
             ISerializerDeserializer<?>[] combinedSerdes = new ISerializerDeserializer<?>[totalFields];
 
-            // Set serializers for new fields
+            // Set serializers for new fields (raw types without ADM type tags)
             ISerializerDeserializer<?>[] outputFieldSerdes = outputRecDesc.getFields();
-            combinedSerdes[1] = AInt32SerializerDeserializer.INSTANCE;; // centroidId
-            combinedSerdes[0] = ADoubleSerializerDeserializer.INSTANCE; // distance
+            combinedSerdes[1] = IntegerSerializerDeserializer.INSTANCE; // centroidId (raw int)
+            combinedSerdes[0] = DoubleSerializerDeserializer.INSTANCE; // distance (raw double)
 
             // Set serializers for original fields
             for (int i = 1; i < originalTuple.getFieldCount(); i++) {
@@ -253,11 +251,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             Object[] originalFieldValues = TupleUtils.deserializeTuple(originalTuple, originalFieldSerdes);
 
             // Create combined field values: [new field values] + [original field values]
+            // Using raw primitive types (autoboxed) - no ADM type tags
             Object[] combinedValues = new Object[totalFields];
-            //            combinedValues[0] = searchResult.centroidId; // centroidId
-            //            combinedValues[1] = searchResult.distance;   // distance
-            combinedValues[0] = new ADouble(searchResult.distance);
-            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
+            combinedValues[0] = searchResult.distance; // raw double, autoboxed to Double
+            combinedValues[1] = searchResult.centroidId; // raw int, autoboxed to Integer
 
             // Add original field values
             for (int i = 1; i < originalFieldValues.length; i++) {
@@ -377,63 +374,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         //        System.err.println(" VCTreePartitioner initialized successfully");
     }
 
-    /**
-     * Process data using VCTreePartitioner for recursive partitioning with real data.
-     * 
-     * @param inputTuples List of input tuples to partition
-     * @param K Number of centroids
-     * @param centroidIdColumn Column index containing centroid ID (0 for first, -1 for last)
-     * @return Map of centroid ID to file reference
-     * @throws HyracksDataException if partitioning fails
-     */
-    public Map<Integer, FileReference> processDataWithPartitioner(List<ITupleReference> inputTuples, int K,
-            int centroidIdColumn) throws HyracksDataException {
-        System.err.println("=== PROCESSING DATA WITH VCTreePartitioner (REAL DATA) ===");
-        System.err.println("Input tuples: " + inputTuples.size());
-        System.err.println("K (centroids): " + K);
-        System.err.println("Centroid ID column: " + centroidIdColumn);
-
-        if (partitioner == null) {
-            throw new IllegalStateException("VCTreePartitioner not initialized. Call initializePartitioner() first.");
-        }
-
-        // Use VCTreePartitioner for recursive partitioning with real data
-        partitioner.partitionData(inputTuples, K, centroidIdColumn);
-        Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
-
-        System.err.println("✅ VCTreePartitioner processing complete");
-        System.err.println("Created " + centroidFiles.size() + " centroid files");
-
-        return centroidFiles;
-    }
-
-    /**
-     * Process data using VCTreePartitioner for recursive partitioning (legacy method).
-     * 
-     * @param K Number of centroids
-     * @param estimatedDataSize Estimated data size in bytes
-     * @return Map of centroid ID to file reference
-     * @throws HyracksDataException if partitioning fails
-     */
-    public Map<Integer, FileReference> processDataWithPartitioner(int K, long estimatedDataSize)
-            throws HyracksDataException {
-        System.err.println("=== PROCESSING DATA WITH VCTreePartitioner ===");
-        System.err.println("K (centroids): " + K);
-        System.err.println("Estimated data size: " + estimatedDataSize + " bytes");
-
-        if (partitioner == null) {
-            throw new IllegalStateException("VCTreePartitioner not initialized. Call initializePartitioner() first.");
-        }
-
-        // Use VCTreePartitioner for recursive partitioning
-        partitioner.partitionData(K, estimatedDataSize);
-        Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
-
-        System.err.println("VCTreePartitioner processing complete");
-        System.err.println("Created " + centroidFiles.size() + " centroid files");
-
-        return centroidFiles;
-    }
 
     /**
      * Close VCTreePartitioner and cleanup resources.
@@ -446,64 +386,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             partitioner.closeAllFiles();
             //            System.err.println("✅ VCTreePartitioner closed successfully");
         }
-    }
-
-    /**
-     * Calculate number of partitions using SHAPIRO formula for VCTree centroid distribution.
-     * 
-     * @param K Total number of centroids
-     * @param inputDataBytesSize Size of input data in bytes
-     * @param frameSize Frame size in bytes
-     * @param memoryBudget Available memory budget in frames
-     * @return Number of partitions for centroid distribution
-     */
-    public int calculatePartitionsUsingShapiro(int K, long inputDataBytesSize, int frameSize, int memoryBudget) {
-        System.err.println("=== CALCULATING PARTITIONS USING SHAPIRO FORMULA ===");
-        System.err.println("K (centroids): " + K);
-        System.err.println("Input data size: " + inputDataBytesSize + " bytes");
-        System.err.println("Frame size: " + frameSize + " bytes");
-        System.err.println("Memory budget: " + memoryBudget + " frames");
-
-        long numberOfInputFrames = inputDataBytesSize / frameSize;
-        System.err.println("Input frames: " + numberOfInputFrames);
-
-        // SHAPIRO FORMULA
-        final double FUDGE_FACTOR = 1.1;
-
-        if (memoryBudget >= numberOfInputFrames * FUDGE_FACTOR) {
-            // All in memory - use 2 partitions to avoid infinite loops
-            System.err.println("All data fits in memory, using 2 partitions");
-            return 2;
-        }
-
-        // Main SHAPIRO formula: ceil((inputFrames * FUDGE_FACTOR - availableFrames) / (availableFrames - 1))
-        long numberOfPartitions =
-                (long) (Math.ceil((numberOfInputFrames * FUDGE_FACTOR - memoryBudget) / (memoryBudget - 1)));
-        numberOfPartitions = Math.max(2, numberOfPartitions);
-
-        if (numberOfPartitions > memoryBudget) {
-            // Fallback: use square root when too many partitions
-            numberOfPartitions = (long) Math.ceil(Math.sqrt(numberOfInputFrames * FUDGE_FACTOR));
-            numberOfPartitions = Math.max(2, Math.min(numberOfPartitions, memoryBudget));
-        }
-
-        int numPartitions = (int) Math.min(numberOfPartitions, Integer.MAX_VALUE);
-
-        // Calculate centroids per partition
-        int centroidsPerPartition = (int) Math.ceil(1.0 * K / numPartitions);
-
-        System.err.println("SHAPIRO RESULT:");
-        System.err.println("  Number of partitions: " + numPartitions);
-        System.err.println("  Centroids per partition: " + centroidsPerPartition);
-
-        // Determine frame allocation strategy
-        if (numPartitions > 1) {
-            System.err.println("  Strategy: Group multiple centroids in one run file");
-        } else {
-            System.err.println("  Strategy: Allocate 1 frame per centroid");
-        }
-
-        return numPartitions;
     }
 
     @Override

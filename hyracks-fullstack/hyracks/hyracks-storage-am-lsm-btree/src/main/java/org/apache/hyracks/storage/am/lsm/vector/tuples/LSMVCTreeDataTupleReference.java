@@ -28,8 +28,8 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
 /**
  * Tuple reference for LSM Vector Clustering Tree data frames.
  * Handles tuples with format:
- * - Matter tuple: <distance:ADOUBLE, centroid_id:AINTEGER, primary_key:ALONG>
- * - Anti-matter tuple: <primary_key:ALONG> only (deletion marker)
+ * - Matter tuple: <distance:raw double, centroid_id:raw int, primary_key, include_fields...>
+ * - Anti-matter tuple: Same format with antimatter bit set (deletion marker)
  */
 public class LSMVCTreeDataTupleReference extends TypeAwareTupleReference implements ILSMTreeTupleReference {
 

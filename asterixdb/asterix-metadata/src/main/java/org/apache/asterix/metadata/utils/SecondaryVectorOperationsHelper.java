@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.formats.nontagged.BinaryComparatorFactoryProvider;
@@ -65,14 +66,18 @@ import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
+import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
 import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
-import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
-import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
 
@@ -174,11 +179,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             K = 20;
         }
         //        System.err.println("Using K value: " + K + " for K-means clustering");
-
-        // Extract distance metric from WITH clause
-        // Extract vector dimension from WITH clause
-        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
-        //        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
 
         int maxScalableKmeansIter = 2;
 
@@ -346,12 +346,14 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount() - 1];
         ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount() - 1];
 
-        outputRecFields[0] = serdeProvider.getSerializerDeserializer(ADOUBLE);
-        outputTypeTraits[0] = typeTraitProvider.getTypeTrait(ADOUBLE);
+        // Use raw serializers (without ADM type tags) to match VCTreeBulkLoaderAndGroupingOperatorDescriptor
+        // Distance field (raw double - 8 bytes, no type tag)
+        outputRecFields[0] = DoubleSerializerDeserializer.INSTANCE;
+        outputTypeTraits[0] = new FixedLengthTypeTrait(8);
 
-        // Add centroidId field (int)
-        outputRecFields[1] = serdeProvider.getSerializerDeserializer(AINT32);
-        outputTypeTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
+        // CentroidId field (raw int - 4 bytes, no type tag)
+        outputRecFields[1] = IntegerSerializerDeserializer.INSTANCE;
+        outputTypeTraits[1] = new FixedLengthTypeTrait(4);
 
         // Copy all original fields from secondaryRecDesc
         for (int i = 1; i < secondaryRecDesc.getFieldCount(); i++) {
@@ -393,12 +395,13 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
         //        System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         //        System.err.println("SortNumFrames from config: " + sortNumFrames);
-        int[] sortFields = { 1, 0, 2 }; // Sort by centroidId (0) first, then distance (1)
-        IBinaryComparatorFactory[] sortComparatorFactories =
-                { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
-                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true), // distance
-                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT64, true) // distance
-                };
+        // Sort by centroidId (field 1) first, then distance (field 0)
+        // Use raw type comparators to match the raw serializers (no ADM type tags)
+        int[] sortFields = { 1, 0 };
+        IBinaryComparatorFactory[] sortComparatorFactories = {
+                IntegerBinaryComparatorFactory.INSTANCE, // centroidId (raw int)
+                DoubleBinaryComparatorFactory.INSTANCE   // distance (raw double)
+        };
         // Ensure minimum frames for sort operator (must be > 1)
         int sortFrames = Math.max(sortNumFrames, 2);
         //        System.err.println("Using sortFrames: " + sortFrames);

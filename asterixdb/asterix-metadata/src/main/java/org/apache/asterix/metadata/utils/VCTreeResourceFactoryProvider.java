@@ -37,6 +37,9 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
+import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
 import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
@@ -172,11 +175,11 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         int totalFields = 2 + numPrimaryKeys + numIncludeFields;
         ITypeTraits[] typeTraits = new ITypeTraits[totalFields];
 
-        // Field 0: distance (DOUBLE with ADM type tag)
-        typeTraits[0] = ttProvider.getTypeTrait(BuiltinType.ADOUBLE);
+        // Field 0: distance (raw double - 8 bytes, no ADM type tag)
+        typeTraits[0] = new FixedLengthTypeTrait(8);
 
-        // Field 1: centroidId (INT32 with ADM type tag)
-        typeTraits[1] = ttProvider.getTypeTrait(BuiltinType.AINT32);
+        // Field 1: centroidId (raw int - 4 bytes, no ADM type tag)
+        typeTraits[1] = new FixedLengthTypeTrait(4);
 
         // Fields 2+: Primary keys
         for (int i = 0; i < numPrimaryKeys; i++) {
@@ -235,11 +238,11 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         int totalFields = 2 + numPrimaryKeys + numIncludeFields;
         IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[totalFields];
 
-        // Comparator 0: distance (DOUBLE)
-        cmpFactories[0] = cmpFactoryProvider.getBinaryComparatorFactory(BuiltinType.ADOUBLE, true);
+        // Comparator 0: distance (raw double - no ADM type tag)
+        cmpFactories[0] = DoubleBinaryComparatorFactory.INSTANCE;
 
-        // Comparator 1: centroidId (INT32)
-        cmpFactories[1] = cmpFactoryProvider.getBinaryComparatorFactory(BuiltinType.AINT32, true);
+        // Comparator 1: centroidId (raw int - no ADM type tag)
+        cmpFactories[1] = IntegerBinaryComparatorFactory.INSTANCE;
 
         // Comparators 2+: Primary keys
         IBinaryComparatorFactory[] primaryComparatorFactories =
