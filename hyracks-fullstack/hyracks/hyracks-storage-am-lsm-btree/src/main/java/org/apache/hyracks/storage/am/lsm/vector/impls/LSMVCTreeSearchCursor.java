@@ -854,31 +854,42 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
      * Advance ALL component cursors to the SAME next cluster.
      * Uses global level-wise list first, then falls back to DFS.
      * This ensures all components always explore the same cluster simultaneously.
+     *
+     * Uses iterative loop instead of recursion to avoid StackOverflowError
+     * when many consecutive clusters are empty.
      */
     private void advanceAllComponentsToNextCluster() throws HyracksDataException {
-        // Reset exhaustion flags for new cluster
-        java.util.Arrays.fill(clusterExhausted, false);
+        // Loop to handle consecutive empty clusters without recursion
+        // This avoids StackOverflowError with pathological data distributions
+        while (true) {
+            // Reset exhaustion flags for new cluster
+            java.util.Arrays.fill(clusterExhausted, false);
 
-        // Determine which cluster ALL components should advance to
-        ClusterSearchResult nextCluster = getNextGlobalCluster();
+            // Determine which cluster ALL components should advance to
+            ClusterSearchResult nextCluster = getNextGlobalCluster();
 
-        if (nextCluster == null) {
-            // No more clusters available
-            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] No more clusters available globally",
-                    Thread.currentThread().getName());
-            for (int i = 0; i < clusterExhausted.length; i++) {
-                clusterExhausted[i] = true;
+            if (nextCluster == null) {
+                // No more clusters available
+                LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] No more clusters available globally",
+                        Thread.currentThread().getName());
+                for (int i = 0; i < clusterExhausted.length; i++) {
+                    clusterExhausted[i] = true;
+                }
+                return;
             }
-            return;
-        }
 
-        // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
-        for (int i = 0; i < rangeCursors.length; i++) {
-            advanceComponentToCluster(i, nextCluster);
-        }
+            // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
+            for (int i = 0; i < rangeCursors.length; i++) {
+                advanceComponentToCluster(i, nextCluster);
+            }
 
-        // Check if all components found empty cluster and recursively skip
-        checkAndSkipEmptyCluster();
+            // Check if all components found empty cluster
+            // If so, continue loop to try next cluster (instead of recursion)
+            if (!shouldSkipToNextCluster()) {
+                return; // At least one component has data, or we should stop advancing
+            }
+            // All components empty and should continue - loop to next cluster
+        }
     }
 
     /**
@@ -985,9 +996,13 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     }
 
     /**
-     * Check if all components found empty cluster and recursively skip.
+     * Check if we should skip to the next cluster because all components found empty clusters.
+     * This method is called iteratively (not recursively) from advanceAllComponentsToNextCluster.
+     *
+     * @return true if all components have empty clusters and we should continue to the next cluster;
+     *         false if at least one component has data or we should stop advancing
      */
-    private void checkAndSkipEmptyCluster() throws HyracksDataException {
+    private boolean shouldSkipToNextCluster() {
         boolean allExhausted = true;
         for (int i = 0; i < clusterExhausted.length; i++) {
             if (!clusterExhausted[i]) {
@@ -997,7 +1012,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         }
 
         if (!allExhausted) {
-            return; // At least one component has data
+            return false; // At least one component has data
         }
 
         // All components found empty cluster - check if we should skip to next
@@ -1011,12 +1026,13 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             LOGGER.log(Level.INFO,
                     "[Thread:{}] [LSMVCTreeSearchCursor] All components empty, skipping to next global cluster (minClusters={}, nprobe={}, results={}, K={})",
                     Thread.currentThread().getName(), minClustersExplored, nprobe, reconciledOutputCount, K);
-            advanceAllComponentsToNextCluster();
+            return true; // Should skip to next cluster
         } else if (!hasMoreClusters) {
             LOGGER.log(Level.INFO,
                     "[Thread:{}] [LSMVCTreeSearchCursor] All components exhausted, no more global clusters",
                     Thread.currentThread().getName());
         }
+        return false; // Should not skip
     }
 
     /**
