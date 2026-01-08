@@ -39,17 +39,30 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int queryFieldIndex;
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
+    private int nprobe; // Number of clusters to probe (minimum before K-check)
+    private double epsilon; // Distance threshold for level-wise cross-pollination
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.distanceMetric = null;
+        this.nprobe = 10; // Default: probe 1 cluster
+        this.epsilon = 0.3; // Default: no epsilon (use nprobe count only)
     }
 
     public VectorPointPredicate(int k) {
         // Constructor for ANN queries with K parameter
         this.k = k;
+        this.distanceMetric = null;
+        this.nprobe = 10;
+        this.epsilon = 0.3;
+    }
+
+    public VectorPointPredicate(int k, int nprobe, double epsilon) {
+        // Constructor for ANN queries with K, nprobe, and epsilon parameters
+        this.k = k;
+        this.nprobe = nprobe;
+        this.epsilon = epsilon;
         this.distanceMetric = null;
     }
 
@@ -57,6 +70,8 @@ public class VectorPointPredicate implements ISearchPredicate {
         // Constructor kept for compatibility with tests
         // In runtime, query data comes via setQueryTuple()
         this.k = Integer.MAX_VALUE; // Default: no limit
+        this.nprobe = 10;
+        this.epsilon = 0.3;
     }
 
     /**
@@ -116,6 +131,36 @@ public class VectorPointPredicate implements ISearchPredicate {
         return k;
     }
 
+    /**
+     * Set the nprobe parameter (number of clusters to probe).
+     * This is the minimum number of clusters to explore before checking if K is satisfied.
+     */
+    public void setNprobe(int nprobe) {
+        this.nprobe = nprobe;
+    }
+
+    /**
+     * Get the nprobe parameter (number of clusters to probe).
+     */
+    public int getNprobe() {
+        return nprobe;
+    }
+
+    /**
+     * Set the epsilon parameter (distance threshold for level-wise cross-pollination).
+     * Clusters within (closestDistance + epsilon) will be explored via level-wise.
+     */
+    public void setEpsilon(double epsilon) {
+        this.epsilon = epsilon;
+    }
+
+    /**
+     * Get the epsilon parameter (distance threshold for level-wise cross-pollination).
+     */
+    public double getEpsilon() {
+        return epsilon;
+    }
+
     @Override
     public MultiComparator getLowKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
@@ -149,6 +194,6 @@ public class VectorPointPredicate implements ISearchPredicate {
     @Override
     public String toString() {
         return "VectorPointPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + ", distanceMetric="
-                + distanceMetric + "]";
+                + distanceMetric + ", k=" + k + ", nprobe=" + nprobe + ", epsilon=" + epsilon + "]";
     }
 }
