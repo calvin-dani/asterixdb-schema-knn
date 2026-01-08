@@ -946,12 +946,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     /**
      * Advance a single component to a specific cluster using ClusterSearchResult.
-     * 
-     * IMPORTANT: The directoryPageId in ClusterSearchResult is computed from component 0's tree only.
-     * Each LSM component has its own separate tree file with different page layouts.
-     * - For component 0: Use O(1) directoryPageId access since it was computed from this component's tree
-     * - For component 1+: Use openClusterById(centroidId) which traverses each component's own tree
-     *   to find the correct directoryPageId for that component
+     * Uses O(1) directoryPageId access when available.
      */
     private void advanceComponentToCluster(int componentIndex, ClusterSearchResult cluster)
             throws HyracksDataException {
@@ -967,21 +962,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) cursor;
 
-        boolean hasData;
-        if (componentIndex == 0) {
-            // Component 0: Use O(1) directoryPageId access since it was computed from this component's tree
-            hasData = vcCursor.openClusterByResult(cluster);
-            LOGGER.log(Level.INFO,
-                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} opened cluster cid={} via directoryPageId (O(1) access)",
-                    Thread.currentThread().getName(), componentIndex, cluster.centroidId);
-        } else {
-            // Component 1+: Use openClusterById to traverse THIS component's tree and find correct page
-            // Cannot use directoryPageId from component 0's tree as each component has different page layouts
-            hasData = vcCursor.openClusterById(cluster.centroidId);
-            LOGGER.log(Level.INFO,
-                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} opened cluster cid={} via centroidId (tree traversal)",
-                    Thread.currentThread().getName(), componentIndex, cluster.centroidId);
-        }
+        // Open specific cluster using ClusterSearchResult (O(1) access via directoryPageId)
+        boolean hasData = vcCursor.openClusterByResult(cluster);
 
         // Increment cluster index
         currentClusterIndex[componentIndex]++;
@@ -993,7 +975,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             pqe.reset(vcCursor.getTuple());
             outputPriorityQueue.offer(pqe);
             LOGGER.log(Level.INFO,
-                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} cluster cid={} has data",
+                    "[Thread:{}] [LSMVCTreeSearchCursor] Component {} opened cluster cid={} (has data, O(1) access)",
                     Thread.currentThread().getName(), componentIndex, cluster.centroidId);
         } else {
             clusterExhausted[componentIndex] = true;
