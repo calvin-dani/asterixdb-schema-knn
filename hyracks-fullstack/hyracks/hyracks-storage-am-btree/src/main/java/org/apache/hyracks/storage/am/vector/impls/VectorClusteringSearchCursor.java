@@ -23,9 +23,6 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
@@ -43,6 +40,9 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Search cursor for vector clustering tree operations.
@@ -295,7 +295,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     @Override
     public boolean hasNext() throws HyracksDataException {
         if (!isOpen) {
-            LOGGER.log(Level.INFO, "[Thread:{}] [VectorClusteringSearchCursor.hasNext] Cursor not open, returning false",
+            LOGGER.log(Level.INFO,
+                    "[Thread:{}] [VectorClusteringSearchCursor.hasNext] Cursor not open, returning false",
                     Thread.currentThread().getName());
             return false;
         }

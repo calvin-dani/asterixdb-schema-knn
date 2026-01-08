@@ -234,9 +234,9 @@ public class VCTreeNavigationUtils {
 
                     for (LeafCentroid centroid : stats.centroids) {
                         if (centroid.distance <= threshold) {
-                            results.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
-                                    centroid.centroid, centroid.distance, centroid.centroidId,
-                                    centroid.directoryPageId));
+                            results.add(
+                                    ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex, centroid.centroid,
+                                            centroid.distance, centroid.centroidId, centroid.directoryPageId));
                         } else {
                             break;
                         }
@@ -442,6 +442,147 @@ public class VCTreeNavigationUtils {
         //        logTraversalEvent("traversal_finish", finishFields);
 
         return results;
+    }
+
+    /**
+     * Find close centroids using level-by-level cross-pollination with global sorting.
+     * 
+     * This method follows the FAISS/SPANN approach:
+     * 1. Collects all centroids from all leaf pages discovered during level-wise traversal
+     * 2. Sorts all centroids globally by distance to query vector (not per-page)
+     * 3. Returns globally sorted list ensuring nprobe selects the truly closest clusters
+     * 
+     * At each interior node, finds closest sibling and explores all siblings within closestDistance + epsilon.
+     * At each leaf node, collects all centroids (not just those within threshold).
+     * After collecting from all leaf pages, sorts globally by distance to query vector.
+     * 
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
+     * @param rootPageId Root page ID to start traversal
+     * @param interiorFrameFactory Factory for creating interior frames
+     * @param leafFrameFactory Factory for creating leaf frames
+     * @param queryVector Query vector to find closest centroids for
+     * @param distanceFunction Distance function to use for centroid finding
+     * @param epsilon Absolute distance threshold added to closest sibling/centroid at each level
+     * @return List of ClusterSearchResult containing all centroids, globally sorted by distance to query vector
+     * @throws HyracksDataException if any error occurs during traversal
+     */
+    public static List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSort(IBufferCache bufferCache, int fileId,
+            int rootPageId, ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+            double[] queryVector, IVectorDistanceFunction distanceFunction, double epsilon)
+            throws HyracksDataException {
+
+        List<ClusterSearchResult> allCentroids = new ArrayList<>();
+        Set<Integer> visitedLeafPages = new HashSet<>();
+        Queue<LevelNode> queue = new ArrayDeque<>();
+        queue.add(new LevelNode(rootPageId, 0));
+
+        int levelsProcessed = 0;
+
+        // Phase 1: Collect all centroids from all leaf pages
+        while (!queue.isEmpty()) {
+            int currentLevel = queue.peek().level;
+            List<LevelNode> currentLevelNodes = new ArrayList<>();
+
+            // Collect all nodes at current level
+            while (!queue.isEmpty() && queue.peek().level == currentLevel) {
+                currentLevelNodes.add(queue.poll());
+            }
+
+            levelsProcessed = currentLevel;
+
+            // Process all nodes at current level
+            for (LevelNode node : currentLevelNodes) {
+                ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, node.pageId));
+                try {
+                    page.acquireReadLatch();
+
+                    IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                    leafFrame.setPage(page);
+                    boolean isLeaf = leafFrame.isLeaf();
+
+                    if (isLeaf) {
+                        // Leaf node processing - collect ALL centroids (no threshold filtering yet)
+                        if (!visitedLeafPages.add(node.pageId)) {
+                            continue; // Already visited
+                        }
+
+                        LeafCollectionStats stats = collectLeafCentroids(bufferCache, fileId, queryVector, node.pageId,
+                                leafFrame, leafFrameFactory, distanceFunction);
+
+                        if (stats.centroids.isEmpty()) {
+                            continue;
+                        }
+
+                        // Add ALL centroids from this leaf page to global collection
+                        // (distance is already computed and stored in LeafCentroid)
+                        for (LeafCentroid centroid : stats.centroids) {
+                            allCentroids.add(
+                                    ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex, centroid.centroid,
+                                            centroid.distance, centroid.centroidId, centroid.directoryPageId));
+                        }
+
+                    } else {
+                        // Interior node processing - same as original level-wise
+                        IVectorClusteringInteriorFrame interiorFrame =
+                                (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
+                        interiorFrame.setPage(page);
+
+                        List<ChildCentroid> sortedChildren = collectChildrenForFrontier(bufferCache, fileId,
+                                queryVector, node.pageId, interiorFrame, interiorFrameFactory, distanceFunction);
+
+                        if (sortedChildren.isEmpty()) {
+                            continue;
+                        }
+
+                        double closestDistance = sortedChildren.get(0).distance;
+                        double localThreshold = closestDistance + epsilon;
+
+                        for (ChildCentroid child : sortedChildren) {
+                            if (child.distance <= localThreshold) {
+                                queue.add(new LevelNode(child.childPageId, currentLevel + 1));
+                            } else {
+                                break; // Children are sorted, no more qualify
+                            }
+                        }
+                    }
+
+                } finally {
+                    page.releaseReadLatch();
+                    bufferCache.unpin(page);
+                }
+            }
+        }
+
+        if (allCentroids.isEmpty()) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest clusters found");
+        }
+
+        // Phase 2: Sort ALL centroids globally by distance to query vector
+        // This ensures nprobe selects the truly closest clusters (FAISS/SPANN approach)
+        allCentroids.sort(Comparator.comparingDouble(r -> r.distance));
+
+        // Phase 3: Apply epsilon threshold based on globally closest centroid
+        // This is more accurate than per-page local thresholds
+        if (epsilon > 0.0) {
+            double globalClosestDistance = allCentroids.get(0).distance;
+            double globalThreshold = globalClosestDistance + epsilon;
+
+            // Filter centroids that exceed the global threshold
+            List<ClusterSearchResult> filteredCentroids = new ArrayList<>();
+            for (ClusterSearchResult result : allCentroids) {
+                if (result.distance <= globalThreshold) {
+                    filteredCentroids.add(result);
+                } else {
+                    // Centroids are sorted, so we can break early
+                    break;
+                }
+            }
+
+            return filteredCentroids;
+        }
+
+        return allCentroids;
     }
 
     /**
@@ -1443,7 +1584,7 @@ public class VCTreeNavigationUtils {
         public final int tupleIndex;
         public final int pageId;
         public final double[] centroid;
-        public final long directoryPageId;  // Direct pointer to cluster's directory page
+        public final long directoryPageId; // Direct pointer to cluster's directory page
 
         public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid,
                 long directoryPageId) {

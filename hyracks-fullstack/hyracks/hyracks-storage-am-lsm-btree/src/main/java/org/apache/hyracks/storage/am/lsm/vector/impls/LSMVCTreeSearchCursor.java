@@ -25,9 +25,6 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
@@ -49,6 +46,9 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.util.IndexCursorUtils;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * LSM search cursor for Vector Clustering Tree.
@@ -129,8 +129,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
         this.reconciledOutputCount = 0;
-        this.nprobe = 5;
-        this.epsilon = 0.15;
+        this.nprobe = 10;
+        this.epsilon = 0.3;
         // Extract nprobe and epsilon from search predicate
 
         // Initialize shared visited tracking set
@@ -262,9 +262,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         VectorClusteringTree vcTree = (VectorClusteringTree) firstComponent.getIndex();
 
         try {
-            return VCTreeNavigationUtils.findCloseCentroidsLevelWise(vcTree.getBufferCache(), vcTree.getFileId(),
-                    vcTree.getRootPageId(), vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(), queryVector,
-                    distanceFunction, epsilon);
+            return VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(vcTree.getBufferCache(),
+                    vcTree.getFileId(), vcTree.getRootPageId(), vcTree.getInteriorFrameFactory(),
+                    vcTree.getLeafFrameFactory(), queryVector, distanceFunction, epsilon);
         } catch (Exception e) {
             LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Failed to compute level-wise clusters: {}",
                     Thread.currentThread().getName(), e.getMessage());
@@ -381,14 +381,14 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Print final reconciliation summary for demo
         LOGGER.log(Level.INFO, "[Thread:{}] ========== LSM Vector Index Search Summary ==========",
                 Thread.currentThread().getName());
-        LOGGER.log(Level.INFO, "[Thread:{}] Total tuples processed:     {}",
-                Thread.currentThread().getName(), totalTuplesPopped);
-        LOGGER.log(Level.INFO, "[Thread:{}] Antimatter tuples detected: {}",
-                Thread.currentThread().getName(), antimatterTuplesDetected);
-        LOGGER.log(Level.INFO, "[Thread:{}] Cancellations made:         {}",
-                Thread.currentThread().getName(), cancellationsMade);
-        LOGGER.log(Level.INFO, "[Thread:{}] Final output count:         {}",
-                Thread.currentThread().getName(), reconciledOutputCount);
+        LOGGER.log(Level.INFO, "[Thread:{}] Total tuples processed:     {}", Thread.currentThread().getName(),
+                totalTuplesPopped);
+        LOGGER.log(Level.INFO, "[Thread:{}] Antimatter tuples detected: {}", Thread.currentThread().getName(),
+                antimatterTuplesDetected);
+        LOGGER.log(Level.INFO, "[Thread:{}] Cancellations made:         {}", Thread.currentThread().getName(),
+                cancellationsMade);
+        LOGGER.log(Level.INFO, "[Thread:{}] Final output count:         {}", Thread.currentThread().getName(),
+                reconciledOutputCount);
         LOGGER.log(Level.INFO, "[Thread:{}] Verification:               {} - {} = {} ✓",
                 Thread.currentThread().getName(), totalTuplesPopped, cancellationsMade, reconciledOutputCount);
         LOGGER.log(Level.INFO, "[Thread:{}] =====================================================",
@@ -783,8 +783,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Current cluster exhausted for THIS component
         clusterExhausted[cursorIndex] = true;
 
-        LOGGER.log(Level.INFO,
-                "[Thread:{}] [LSMVCTreeSearchCursor] Component {} cluster exhausted (cluster_index={})",
+        LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Component {} cluster exhausted (cluster_index={})",
                 Thread.currentThread().getName(), cursorIndex, currentClusterIndex[cursorIndex]);
 
         // Check if ALL components have exhausted their current cluster

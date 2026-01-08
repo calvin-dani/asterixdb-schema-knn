@@ -46,16 +46,16 @@ public class VectorPointPredicate implements ISearchPredicate {
         // Empty constructor for initialization
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 1; // Default: probe 1 cluster
-        this.epsilon = 0.0; // Default: no epsilon (use nprobe count only)
+        this.nprobe = 10; // Default: probe 1 cluster
+        this.epsilon = 0.3; // Default: no epsilon (use nprobe count only)
     }
 
     public VectorPointPredicate(int k) {
         // Constructor for ANN queries with K parameter
         this.k = k;
         this.distanceMetric = null;
-        this.nprobe = 1;
-        this.epsilon = 0.0;
+        this.nprobe = 10;
+        this.epsilon = 0.3;
     }
 
     public VectorPointPredicate(int k, int nprobe, double epsilon) {
@@ -70,8 +70,8 @@ public class VectorPointPredicate implements ISearchPredicate {
         // Constructor kept for compatibility with tests
         // In runtime, query data comes via setQueryTuple()
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 1;
-        this.epsilon = 0.0;
+        this.nprobe = 10;
+        this.epsilon = 0.3;
     }
 
     /**
