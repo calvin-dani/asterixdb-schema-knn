@@ -806,7 +806,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                     if (cid == centroidId) {
                         // Found it - create ClusterSearchResult without centroid vector
                         // Distance is not needed here since we're just looking up by ID
-                        return ClusterSearchResult.create(currentPageId, i, null, 0.0, centroidId);
+                        // Include directoryPageId for O(1) cluster access in openClusterByResult()
+                        long directoryPageId = leafFrame.getMetadataPagePointer(i);
+                        return ClusterSearchResult.create(currentPageId, i, null, 0.0, centroidId, directoryPageId);
                     }
                 }
 
