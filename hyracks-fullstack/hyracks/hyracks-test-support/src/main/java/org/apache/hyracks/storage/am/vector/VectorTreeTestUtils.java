@@ -224,33 +224,28 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     /**
      * Print tuple results from the data pages.
      * Data record format (from VectorIndexTestDriver.createBulkLoadRecordTuple):
-     *   <distance_to_centroid: ADOUBLE (type tag 0x2B + double),
-     *    centroid_id: AINT32 (type tag 0x01 + int),
-     *    primary_key: UTF8String (no type tag)>
+     *   <distance_to_centroid: raw double (8 bytes),
+     *    centroid_id: raw int (4 bytes),
+     *    primary_key: UTF8String>
      *
-     * Note: Fields 0 and 1 have ADM type tags that need to be skipped.
+     * Note: Fields 0 and 1 use raw types (no ADM type tags).
      */
     private void printTupleResults(List<ITupleReference> results) throws HyracksDataException {
+        // Field serializers matching the raw tuple format
+        ISerializerDeserializer[] fieldSerdes = {
+                DoubleSerializerDeserializer.INSTANCE,      // Field 0: distance (raw double)
+                IntegerSerializerDeserializer.INSTANCE,     // Field 1: centroidId (raw int)
+                new UTF8StringSerializerDeserializer()      // Field 2: primary_key
+        };
+
         for (ITupleReference tuple : results) {
             try {
-                // Field 0: distance_to_centroid - skip 1-byte type tag (0x2B)
-                java.io.DataInputStream dis0 = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
-                        tuple.getFieldData(0), tuple.getFieldStart(0) + 1, // +1 to skip type tag
-                        tuple.getFieldLength(0) - 1));
-                double distance = DoubleSerializerDeserializer.INSTANCE.deserialize(dis0);
+                Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+                double distance = (Double) values[0];
+                int centroidId = (Integer) values[1];
+                String primaryKey = (String) values[2];
 
-                // Field 1: centroid_id - skip 1-byte type tag (0x01)
-                java.io.DataInputStream dis1 = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
-                        tuple.getFieldData(1), tuple.getFieldStart(1) + 1, // +1 to skip type tag
-                        tuple.getFieldLength(1) - 1));
-                int centroidId = IntegerSerializerDeserializer.INSTANCE.deserialize(dis1);
-
-                // Field 2: primary_key - no type tag
-                java.io.DataInputStream dis2 = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
-                        tuple.getFieldData(2), tuple.getFieldStart(2), tuple.getFieldLength(2)));
-                String primaryKey = new UTF8StringSerializerDeserializer().deserialize(dis2);
-
-                LOGGER.info(" Record: pk='{}', centroidId={}, distance={}", primaryKey, centroidId, distance);
+                System.out.println(" Record: pk='" + primaryKey + "', centroidId=" + centroidId + ", distance=" + distance);
             } catch (Exception e) {
                 LOGGER.error("Failed to deserialize tuple: {}", e.getMessage());
             }
@@ -332,18 +327,16 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
 
     /**
      * Extract centroid ID from a data record tuple.
-     * Data record format: <distance (type tag + double), centroid_id (type tag + int), primary_key>
+     * Data record format: <distance (raw double), centroid_id (raw int), primary_key>
      */
     private int extractCentroidIdFromTuple(ITupleReference tuple) throws HyracksDataException {
-        try {
-            // Field 1: centroid_id - skip 1-byte type tag (0x01)
-            java.io.DataInputStream dis = new java.io.DataInputStream(new java.io.ByteArrayInputStream(
-                    tuple.getFieldData(1), tuple.getFieldStart(1) + 1, // +1 to skip type tag
-                    tuple.getFieldLength(1) - 1));
-            return IntegerSerializerDeserializer.INSTANCE.deserialize(dis);
-        } catch (Exception e) {
-            throw HyracksDataException.create(e);
-        }
+        // Field serializers - only need first two fields to extract centroidId
+        ISerializerDeserializer[] fieldSerdes = {
+                DoubleSerializerDeserializer.INSTANCE,  // Field 0: distance (raw double)
+                IntegerSerializerDeserializer.INSTANCE  // Field 1: centroidId (raw int)
+        };
+        Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+        return (Integer) values[1];
     }
 
     public void clusterRecords(AbstractVectorTreeTestContext ctx) throws Exception {
