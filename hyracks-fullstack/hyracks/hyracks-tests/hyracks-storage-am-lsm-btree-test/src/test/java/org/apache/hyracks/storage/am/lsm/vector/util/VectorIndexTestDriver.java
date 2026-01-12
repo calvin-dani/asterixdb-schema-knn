@@ -207,24 +207,22 @@ public abstract class VectorIndexTestDriver {
     /**
      * Helper method to create a bulk load record tuple.
      * Format: <distance_to_centroid, centroid_id, primary_key>
-     * Note: All fields except primary_key have type tags.
+     * Note: distance and centroid_id use raw types (no ADM type tags).
      */
     private ITupleReference createBulkLoadRecordTuple(double distance, int centroidId, String primaryKey)
             throws Exception {
         ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
         ArrayTupleReference tupleRef = new ArrayTupleReference();
 
-        // Field 0: distance_to_centroid (ADOUBLE - type tag + 8-byte double)
-        tupleBuilder.getDataOutput().writeByte(0x2B); // ADOUBLE type tag
+        // Field 0: distance_to_centroid (raw double - 8 bytes, no type tag)
         tupleBuilder.getDataOutput().writeDouble(distance);
         tupleBuilder.addFieldEndOffset();
 
-        // Field 1: centroid_id (AINT32 - type tag + 4-byte int)
-        tupleBuilder.getDataOutput().writeByte(0x01); // AINT32 type tag
+        // Field 1: centroid_id (raw int - 4 bytes, no type tag)
         tupleBuilder.getDataOutput().writeInt(centroidId);
         tupleBuilder.addFieldEndOffset();
 
-        // Field 2: primary_key (no type tag - dynamic field)
+        // Field 2: primary_key (UTF8 string)
         new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
         tupleBuilder.addFieldEndOffset();
 
