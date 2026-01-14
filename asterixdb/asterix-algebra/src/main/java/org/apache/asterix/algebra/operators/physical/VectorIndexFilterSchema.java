@@ -19,6 +19,7 @@
 package org.apache.asterix.algebra.operators.physical;
 
 import java.util.Iterator;
+import java.util.Map;
 
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.IOperatorSchema;
@@ -28,15 +29,16 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.IOperatorSch
  * their correct physical tuple positions.
  *
  * Vector index physical tuple format: [distance, centroidId, pk, include_fields...]
- * The original opSchema only contains [pk, include_vars...] because distance and
- * centroidId are internal to the index and not exposed to the logical plan.
+ * The original opSchema only contains [pk] because:
+ * - distance and centroidId are internal to the index
+ * - INCLUDE fields are only used for filtering, not output
  *
- * This wrapper adds an offset of 2 to all variable positions so that:
- * - pk variable (position 0 in opSchema) maps to field 2 in physical tuple
- * - include field variables (position 1+ in opSchema) map to field 3+ in physical tuple
+ * This wrapper supports two mapping modes:
+ * 1. Variables in opSchema (like pk): position + 2 offset
+ * 2. Filter-only variables (INCLUDE fields): direct mapping via filterVarToFieldIndex
  *
  * This allows the TupleFilter to correctly access INCLUDE fields during vector index search
- * without changing the logical output schema (which still only outputs pk to downstream operators).
+ * without exposing them to downstream operators (which only need pk for primary index lookup).
  */
 public class VectorIndexFilterSchema implements IOperatorSchema {
 
@@ -45,12 +47,37 @@ public class VectorIndexFilterSchema implements IOperatorSchema {
 
     private final IOperatorSchema delegate;
 
+    // Direct mapping for filter-only variables (INCLUDE fields not in output schema)
+    // Maps LogicalVariable -> physical tuple field index
+    private final Map<LogicalVariable, Integer> filterVarToFieldIndex;
+
+    /**
+     * Constructor without direct mapping (backward compatibility).
+     * All variables must be in the delegate schema.
+     */
     public VectorIndexFilterSchema(IOperatorSchema delegate) {
+        this(delegate, null);
+    }
+
+    /**
+     * Constructor with direct mapping for filter-only variables.
+     *
+     * @param delegate The operator output schema (contains pk)
+     * @param filterVarToFieldIndex Direct mapping for INCLUDE field variables to physical field indexes
+     */
+    public VectorIndexFilterSchema(IOperatorSchema delegate, Map<LogicalVariable, Integer> filterVarToFieldIndex) {
         this.delegate = delegate;
+        this.filterVarToFieldIndex = filterVarToFieldIndex;
     }
 
     @Override
     public int findVariable(LogicalVariable var) {
+        // First check direct mapping for filter-only variables
+        if (filterVarToFieldIndex != null && filterVarToFieldIndex.containsKey(var)) {
+            return filterVarToFieldIndex.get(var);
+        }
+
+        // Fall back to delegate schema with offset
         int originalPos = delegate.findVariable(var);
         if (originalPos < 0) {
             // Variable not found
