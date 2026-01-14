@@ -41,10 +41,12 @@ import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.metadata.IDataSourceIndex;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractUnnestMapOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.IOperatorSchema;
+import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.visitors.VariableUtilities;
 import org.apache.hyracks.algebricks.core.algebra.properties.INodeDomain;
 import org.apache.hyracks.algebricks.core.jobgen.impl.JobGenContext;
 import org.apache.hyracks.api.dataflow.IOperatorDescriptor;
+import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 
 /**
  * Contributes the runtime operator for an unnest-map representing a vector index search.
@@ -94,11 +96,27 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
             VariableUtilities.getLiveVariables(unnestMap, outputVars);
         }
 
-        // TODO: Implement MetadataProvider.getVectorSearchRuntime()
-        // This should create and return the Hyracks operator descriptor for vector index search
+        // Create tuple filter factory if selectCondition is present (for INCLUDE field filtering)
+        // Vector index physical tuple format: [distance, centroidId, pk, include_fields...]
+        // The opSchema only has [pk, include_vars...] because distance and centroidId are internal.
+        // We use VectorIndexFilterSchema to add offset of 2, so the TupleFilter correctly maps
+        // include field variables to their physical tuple positions (field 3+).
+        ITupleFilterFactory tupleFilterFactory = null;
+        if (unnestMap instanceof UnnestMapOperator) {
+            UnnestMapOperator unnestMapOp = (UnnestMapOperator) unnestMap;
+            if (unnestMapOp.getSelectCondition() != null) {
+                // Wrap opSchema with VectorIndexFilterSchema to add field offset for correct mapping
+                IOperatorSchema filterSchema = new VectorIndexFilterSchema(opSchema);
+                tupleFilterFactory = mp.createTupleFilterFactory(new IOperatorSchema[] { filterSchema }, typeEnv,
+                        unnestMapOp.getSelectCondition().getValue(), context);
+            }
+        }
+
+        // Create and configure VectorSearchOperatorDescriptor via MetadataProvider
         Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> vectorSearch =
                 mp.getVectorSearchRuntime(builder.getJobSpec(), outputVars, opSchema, typeEnv, context,
-                        jobGenParams.getRetainInput(), dataset, jobGenParams.getIndexName(), queryIndexes);
+                        jobGenParams.getRetainInput(), dataset, jobGenParams.getIndexName(), queryIndexes,
+                        tupleFilterFactory);
 
         IOperatorDescriptor opDesc = vectorSearch.first;
         opDesc.setSourceLocation(unnestMap.getSourceLocation());

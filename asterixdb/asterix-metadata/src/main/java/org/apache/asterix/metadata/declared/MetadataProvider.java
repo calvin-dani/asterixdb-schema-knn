@@ -789,8 +789,8 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
 
     public Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> getVectorSearchRuntime(JobSpecification jobSpec,
             List<LogicalVariable> outputVars, IOperatorSchema opSchema, IVariableTypeEnvironment typeEnv,
-            JobGenContext context, boolean retainInput, Dataset dataset, String indexName, int[] queryFields)
-            throws AlgebricksException {
+            JobGenContext context, boolean retainInput, Dataset dataset, String indexName, int[] queryFields,
+            ITupleFilterFactory tupleFilterFactory) throws AlgebricksException {
         // Get vector index metadata
         Index vectorIndex = MetadataManager.INSTANCE.getIndex(mdTxnCtx, dataset.getDatabaseName(),
                 dataset.getDataverseName(), dataset.getDatasetName(), indexName);
@@ -843,7 +843,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
         VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
                 queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys);
+                distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }
@@ -1673,14 +1673,14 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             int k = 0;
 
             // DEBUG: Log prevSecondaryKeys variables
-            System.out.println("DEBUG [MetadataProvider.getVectorIndexModificationRuntime]: prevSecondaryKeys.size()=" +
-                               (prevSecondaryKeys != null ? prevSecondaryKeys.size() : "null"));
+            System.out.println("DEBUG [MetadataProvider.getVectorIndexModificationRuntime]: prevSecondaryKeys.size()="
+                    + (prevSecondaryKeys != null ? prevSecondaryKeys.size() : "null"));
 
             // Previous vector field + include fields
             for (LogicalVariable varKey : prevSecondaryKeys) {
                 int idx = propagatedSchema.findVariable(varKey);
-                System.out.println("DEBUG [MetadataProvider]: prevSecondaryKey variable=" + varKey +
-                                   " -> field index=" + idx);
+                System.out.println(
+                        "DEBUG [MetadataProvider]: prevSecondaryKey variable=" + varKey + " -> field index=" + idx);
                 prevFieldPermutation[k] = idx;
                 k++;
             }
@@ -1724,13 +1724,13 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             IOperatorDescriptor op;
             if (indexOp == IndexOperation.UPSERT) {
                 int operationFieldIndex = propagatedSchema.findVariable(operationVar);
-                op = new LSMSecondaryUpsertOperatorDescriptor(spec, inputRecordDesc, fieldPermutation,
-                        idfh, filterFactory, prevFilterFactory, modificationCallbackFactory,
-                        operationFieldIndex, BinaryIntegerInspector.FACTORY, prevFieldPermutation, partitionerFactory,
+                op = new LSMSecondaryUpsertOperatorDescriptor(spec, inputRecordDesc, fieldPermutation, idfh,
+                        filterFactory, prevFilterFactory, modificationCallbackFactory, operationFieldIndex,
+                        BinaryIntegerInspector.FACTORY, prevFieldPermutation, partitionerFactory,
                         partitioningProperties.getComputeStorageMap());
             } else {
-                op = new LSMTreeInsertDeleteOperatorDescriptor(spec, inputRecordDesc, fieldPermutation,
-                        indexOp, idfh, filterFactory, false, modificationCallbackFactory, partitionerFactory,
+                op = new LSMTreeInsertDeleteOperatorDescriptor(spec, inputRecordDesc, fieldPermutation, indexOp, idfh,
+                        filterFactory, false, modificationCallbackFactory, partitionerFactory,
                         partitioningProperties.getComputeStorageMap());
             }
 

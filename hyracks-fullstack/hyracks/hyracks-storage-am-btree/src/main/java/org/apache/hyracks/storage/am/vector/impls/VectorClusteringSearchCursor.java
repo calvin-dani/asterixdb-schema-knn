@@ -78,8 +78,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private IVectorDistanceFunction distanceFunction;
 
     // Multi-cluster support fields
-    /* Total records returned to user */
-    private int recordsCollected;
+    /* Total records iterated (before any LSM-layer filtering) */
+    private int recordsIterated;
     /* Current cluster being scanned */
     private ClusterSearchResult currentClusterResult;
     /* Flag when no more clusters available */
@@ -146,7 +146,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     @Override
     public void open(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
         this.isOpen = true;
-        this.recordsCollected = 0;
+        this.recordsIterated = 0;
         this.exhaustedAllClusters = false;
         this.clustersProbed = 0;
 
@@ -239,8 +239,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         }
 
         System.err.println(String.format(
-                "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsCollected=%d, exhaustedAllClusters=%s",
-                recordsCollected, exhaustedAllClusters));
+                "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsIterated=%d, exhaustedAllClusters=%s",
+                recordsIterated, exhaustedAllClusters));
 
         // Current cluster exhausted - return false
         // Let the LSM layer decide whether to advance to next cluster
@@ -262,7 +262,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             this.currentTuple = this.frameTuple;
         }
         currentTupleIndex++;
-        recordsCollected++; // Track how many records we've returned
+        recordsIterated++; // Track how many records we've iterated through
     }
 
     @Override
@@ -653,8 +653,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Log cluster probing
         System.err.println(String.format(
-                "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records collected so far: %d",
-                clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsCollected));
+                "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records iterated so far: %d",
+                clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsIterated));
     }
 
     /**
@@ -717,8 +717,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Log final statistics
             System.err.println(String.format(
-                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records returned: %d | Exhausted all clusters: %s",
-                    clustersProbed, recordsCollected, exhaustedAllClusters));
+                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records iterated: %d | Exhausted all clusters: %s",
+                    clustersProbed, recordsIterated, exhaustedAllClusters));
         }
         this.isOpen = false;
         this.currentTuple = null;

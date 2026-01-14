@@ -286,13 +286,15 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     }
 
     /**
-     * Get primary key from tuple (last field).
+     * Get primary key from data tuple.
+     * Data tuple format: <distance, centroidId, PK, include_fields...>
+     * PK is always at field index 2.
      */
     public byte[] getPrimaryKey(int tupleIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
 
-        // Primary key is the last field
-        int pkFieldIndex = frameTuple.getFieldCount() - 1;
+        // Primary key is at field index 2 (after distance and centroidId)
+        int pkFieldIndex = 2;
         byte[] data = frameTuple.getFieldData(pkFieldIndex);
         int offset = frameTuple.getFieldStart(pkFieldIndex);
         int length = frameTuple.getFieldLength(pkFieldIndex);
@@ -303,10 +305,21 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     /**
      * Create a data tuple for VectorClusteringTree. For DELETE operations, sets the antimatter bit.
      *
+     * Input tuple format: [vector, pk_field, include_fields...]
+     * - Field 0: vector
+     * - Field 1: primary key
+     * - Fields 2+: include fields (optional)
+     *
+     * Output data tuple format: <distance, centroidId, primaryKey, include_fields...>
+     * - Field 0: distance (raw double, 8 bytes, no type tag)
+     * - Field 1: centroidId (raw int, 4 bytes, no type tag)
+     * - Field 2: primaryKey (copied from originalTuple field 1)
+     * - Fields 3+: include fields (copied from originalTuple fields 2+)
+     *
      * @param vector Vector array
      * @param distance Distance as double
-     * @param centroidId Leaf cluster centoid Id
-     * @param originalTuple Original tuple containing primary key
+     * @param centroidId Leaf cluster centroid Id
+     * @param originalTuple Original tuple containing primary key and include fields
      * @param ctx Operation context to check if this is a DELETE operation
      * @return ITupleReference representing the data tuple (with antimatter bit if DELETE)
      * @throws HyracksDataException if tuple creation fails
@@ -314,9 +327,18 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException {
-        // FORMAT: <distance: raw double, centroidId: raw int, primaryKey>
         try {
-            ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(3);
+            // Calculate number of include fields from originalTuple
+            // originalTuple format: [vector, pk, include_fields...]
+            int originalFieldCount = originalTuple.getFieldCount();
+            int numIncludeFields = originalFieldCount - 2; // Subtract vector (field 0) and pk (field 1)
+            if (numIncludeFields < 0) {
+                numIncludeFields = 0;
+            }
+
+            // Total fields in data tuple: distance + centroidId + pk + include_fields
+            int dataFieldCount = 3 + numIncludeFields;
+            ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(dataFieldCount);
             DataOutput dos = dataTupleBuilder.getDataOutput();
 
             // Field 0: distance as raw double (8 bytes, no type tag)
@@ -330,6 +352,13 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             // Field 2: primaryKey - copy directly from originalTuple field 1
             dataTupleBuilder.addField(originalTuple.getFieldData(1), originalTuple.getFieldStart(1),
                     originalTuple.getFieldLength(1));
+
+            // Fields 3+: include fields - copy from originalTuple fields 2+
+            for (int i = 0; i < numIncludeFields; i++) {
+                int srcFieldIndex = 2 + i; // Source field in originalTuple
+                dataTupleBuilder.addField(originalTuple.getFieldData(srcFieldIndex),
+                        originalTuple.getFieldStart(srcFieldIndex), originalTuple.getFieldLength(srcFieldIndex));
+            }
 
             // Return tuple reference directly - let the tuple writer handle null flags byte
             // The tuple writer will add the null flags byte and set the antimatter bit if needed

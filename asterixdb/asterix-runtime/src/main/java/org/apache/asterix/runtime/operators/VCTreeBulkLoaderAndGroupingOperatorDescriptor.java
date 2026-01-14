@@ -25,8 +25,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.apache.asterix.om.types.EnumDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
 import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
@@ -53,6 +51,8 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
@@ -93,6 +93,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final RecordDescriptor outputRecDesc;
     private final String distanceMetric;
     private final int vectorDimension;
+    private final int numPrimaryKeys;
+    private final int numIncludeFields;
 
     // Partitioning components
     private VCTreePartitioner partitioner;
@@ -197,7 +199,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     public VCTreeBulkLoaderAndGroupingOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension) {
+            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension,
+            int numPrimaryKeys, int numIncludeFields) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -208,6 +211,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.args = args;
         this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
         this.vectorDimension = vectorDimension > 0 ? vectorDimension : 384; // Default to 384 if invalid
+        this.numPrimaryKeys = numPrimaryKeys;
+        this.numIncludeFields = numIncludeFields;
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -216,15 +221,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         System.err.println("Output record descriptor set: " + outputRecordDescriptor);
         System.err.println("Distance metric: " + this.distanceMetric);
         System.err.println("Vector dimension: " + this.vectorDimension);
+        System.err.println("NumPrimaryKeys: " + this.numPrimaryKeys + ", NumIncludeFields: " + this.numIncludeFields);
     }
 
     /**
-     * Create transformed tuple with centroidId, distance, and all original fields.
+     * Create transformed tuple with distance, centroidId, PKs, and include fields.
      * Uses TupleUtils.createTuple() with proper serializers from RecordDescriptor.
-     * 
+     *
+     * Input tuple format from CastAssign: [embedding, include_fields..., pk...]
+     * Output tuple format: [distance, centroidId, pk..., include_fields...]
+     *
      * @param originalTuple Input tuple with original fields to preserve
      * @param searchResult ClusterSearchResult containing all needed values
-     * @return Transformed tuple with format [centroidId, distance, ...original fields...]
+     * @return Transformed tuple with format [distance, centroidId, pk..., include_fields...]
      * @throws HyracksDataException if tuple creation fails
      */
     public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
@@ -233,46 +242,37 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             // Get serializers for original fields from input record descriptor
             ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
 
-            // Create combined serializers: [new fields] + [original fields]
-            int totalFields = 2 + originalTuple.getFieldCount() - 1; // 2 new fields + all original fields - embedding
-            ISerializerDeserializer<?>[] combinedSerdes = new ISerializerDeserializer<?>[totalFields];
+            // Total fields = 2 (distance, centroidId) + numPrimaryKeys + numIncludeFields
+            int totalFields = 2 + numPrimaryKeys + numIncludeFields;
 
-            // Set serializers for new fields (raw types without ADM type tags)
+            // Get output serializers
             ISerializerDeserializer<?>[] outputFieldSerdes = outputRecDesc.getFields();
-            combinedSerdes[1] = IntegerSerializerDeserializer.INSTANCE; // centroidId (raw int)
-            combinedSerdes[0] = DoubleSerializerDeserializer.INSTANCE; // distance (raw double)
-
-            // Set serializers for original fields
-            for (int i = 1; i < originalTuple.getFieldCount(); i++) {
-                combinedSerdes[2 + i - 1] = originalFieldSerdes[i];
-            }
 
             // Deserialize original fields to get their values
+            // Original tuple format: [embedding(0), include_fields(1 to numIncludeFields), pk(numIncludeFields+1 onwards)]
             Object[] originalFieldValues = TupleUtils.deserializeTuple(originalTuple, originalFieldSerdes);
 
-            // Create combined field values: [new field values] + [original field values]
-            // Using raw primitive types (autoboxed) - no ADM type tags
+            // Create combined field values with reordered fields:
+            // Output format: [distance, centroidId, pk..., include_fields...]
             Object[] combinedValues = new Object[totalFields];
-            combinedValues[0] = searchResult.distance; // raw double, autoboxed to Double
-            combinedValues[1] = searchResult.centroidId; // raw int, autoboxed to Integer
+            combinedValues[0] = searchResult.distance; // raw double
+            combinedValues[1] = searchResult.centroidId; // raw int
 
-            // Add original field values
-            for (int i = 1; i < originalFieldValues.length; i++) {
-                combinedValues[2 + i - 1] = originalFieldValues[i];
+            // Add primary key fields (they are at positions numIncludeFields+1 onwards in original tuple)
+            // In original: fields 1 to numIncludeFields are include fields, fields numIncludeFields+1 onwards are PKs
+            for (int i = 0; i < numPrimaryKeys; i++) {
+                int originalPkIndex = 1 + numIncludeFields + i; // Skip embedding(0) and include fields
+                combinedValues[2 + i] = originalFieldValues[originalPkIndex];
             }
 
-            // Use TupleUtils.createTuple() with combined serializers and values
-            ITupleReference result = TupleUtils.createTuple(outputFieldSerdes, combinedValues);
-            //            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
-            //            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
-            //            System.err.println("CombinedValues length: " + combinedValues.length);
-            //            System.err.println("Result field count: " + result.getFieldCount());
-            //            System.err.println("CentroidId: " + searchResult.centroidId + " (type: "
-            //                    + combinedValues[0].getClass().getSimpleName() + ")");
-            //            System.err.println("Distance: " + searchResult.distance + " (type: "
-            //                    + combinedValues[1].getClass().getSimpleName() + ")");
+            // Add include fields (they are at positions 1 to numIncludeFields in original tuple)
+            for (int i = 0; i < numIncludeFields; i++) {
+                int originalIncludeIndex = 1 + i; // Skip embedding(0)
+                combinedValues[2 + numPrimaryKeys + i] = originalFieldValues[originalIncludeIndex];
+            }
 
-            return result;
+            // Use TupleUtils.createTuple() with output serializers and reordered values
+            return TupleUtils.createTuple(outputFieldSerdes, combinedValues);
 
         } catch (Exception e) {
             System.err.println("ERROR: Failed to create transformed tuple: " + e.getMessage());
@@ -373,7 +373,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.partitioner = new VCTreePartitioner(ctx, memoryBudget, frameSize);
         //        System.err.println(" VCTreePartitioner initialized successfully");
     }
-
 
     /**
      * Close VCTreePartitioner and cleanup resources.
