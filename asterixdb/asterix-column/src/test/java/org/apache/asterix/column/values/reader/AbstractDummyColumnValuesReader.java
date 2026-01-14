@@ -169,4 +169,14 @@ public abstract class AbstractDummyColumnValuesReader implements IColumnValuesRe
         node.put("level", level);
         node.put("maxLevel", maxLevel);
     }
+
+    @Override
+    public void registerCurrentTuple(int tupleIndex) {
+
+    }
+
+    @Override
+    public boolean isColumnMissingForCurrentTuple(int tupleIndex) {
+        return false;
+    }
 }

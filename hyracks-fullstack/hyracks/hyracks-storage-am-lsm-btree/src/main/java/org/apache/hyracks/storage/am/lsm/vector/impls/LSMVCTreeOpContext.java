@@ -21,12 +21,10 @@ package org.apache.hyracks.storage.am.lsm.vector.impls;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
-import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.util.trace.ITracer;
 
@@ -44,9 +42,8 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
     private final IIndexAccessParameters iap;
 
     public LSMVCTreeOpContext(LSMVCTree lsmTree, int[] treeFields, int[] filterFields,
-            IBinaryComparatorFactory[] filterCmpFactories, IExtendedModificationOperationCallback modificationCallback,
-            ISearchOperationCallback searchCallback, ITracer tracer, IIndexAccessParameters iap) {
-        super(lsmTree, treeFields, filterFields, filterCmpFactories, searchCallback, modificationCallback, tracer);
+            IBinaryComparatorFactory[] filterCmpFactories, IIndexAccessParameters iap, ITracer tracer) {
+        super(lsmTree, treeFields, filterFields, filterCmpFactories, iap, tracer);
         this.iap = iap;
         this.searchInitialState = new LSMVCTreeCursorInitialState(lsmTree.getInteriorFrameFactory(),
                 lsmTree.getLeafFrameFactory(), lsmTree.getMetadataFrameFactory(), lsmTree.getDataFrameFactory(), null,

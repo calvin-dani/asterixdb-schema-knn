@@ -30,7 +30,6 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
-import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndex;
@@ -424,9 +423,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     @Override
     public LSMVCTreeOpContext createOpContext(IIndexAccessParameters iap) {
-        return new LSMVCTreeOpContext(this, getTreeFields(), getFilterFields(), getFilterCmpFactories(),
-                (IExtendedModificationOperationCallback) iap.getModificationCallback(),
-                iap.getSearchOperationCallback(), tracer, iap);
+        return new LSMVCTreeOpContext(this, getTreeFields(), getFilterFields(), getFilterCmpFactories(), iap, tracer);
     }
 
     @Override

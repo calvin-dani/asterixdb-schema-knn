@@ -115,4 +115,7 @@ public interface ILSMIndexOperationContext extends IIndexOperationContext {
      * @return the key value map of the context
      */
     Map<String, Object> getParameters();
+
+    //No, need to pass IndexAccessParamere. we could have exploited the parameters map in the context itself.
+    <T> T getIndexAccessParameter(String key, Class<T> clazz);
 }

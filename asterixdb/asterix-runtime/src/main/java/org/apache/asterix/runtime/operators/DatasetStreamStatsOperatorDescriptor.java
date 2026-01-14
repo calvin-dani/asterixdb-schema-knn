@@ -38,6 +38,7 @@ import org.apache.hyracks.api.job.profiling.IndexStats;
 import org.apache.hyracks.api.job.profiling.OperatorStats;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
+import org.apache.hyracks.dataflow.common.utils.TaskUtil;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
@@ -45,6 +46,8 @@ import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory
 import org.apache.hyracks.storage.am.lsm.common.api.AbstractLSMWithBloomFilterDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Computes total tuple count and total tuple length for all input tuples,
@@ -53,20 +56,29 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 public final class DatasetStreamStatsOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 2L;
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private final String operatorName;
     private final IIndexDataflowHelperFactory[] indexes;
     private final String[] indexesNames;
     private final int[][] partitionsMap;
+    private final boolean isSampling;
 
     public DatasetStreamStatsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
-            String operatorName, IIndexDataflowHelperFactory[] indexes, String[] indexesNames, int[][] partitionsMap) {
+            String operatorName, IIndexDataflowHelperFactory[] indexes, String[] indexesNames, int[][] partitionsMap,
+            boolean isSampling) {
         super(spec, 1, 1);
         outRecDescs[0] = rDesc;
         this.operatorName = operatorName;
         this.indexes = indexes;
         this.indexesNames = indexesNames;
         this.partitionsMap = partitionsMap;
+        this.isSampling = isSampling;
+    }
+
+    public DatasetStreamStatsOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor rDesc,
+            String operatorName, IIndexDataflowHelperFactory[] indexes, String[] indexesNames, int[][] partitionsMap) {
+        this(spec, rDesc, operatorName, indexes, indexesNames, partitionsMap, false);
     }
 
     @Override
@@ -79,9 +91,13 @@ public final class DatasetStreamStatsOperatorDescriptor extends AbstractSingleAc
             private long totalTupleCount;
             private long totalTupleLength;
             private Map<String, IndexStats> indexesStats;
+            private long openDuration;
+            private long nextFrameDuration;
+            private long closeDuration;
 
             @Override
             public void open() throws HyracksDataException {
+                long start = System.nanoTime();
                 fta = new FrameTupleAccessor(outRecDescs[0]);
                 totalTupleCount = 0;
                 writer.open();
@@ -94,14 +110,17 @@ public final class DatasetStreamStatsOperatorDescriptor extends AbstractSingleAc
                 if (indexes.length > 0) {
                     gatherIndexesStats(serviceCtx, partitionsMap[partition]);
                 }
+                openDuration = System.nanoTime() - start;
             }
 
             @Override
             public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+                long start = System.nanoTime();
                 //                fta.reset(buffer, " DATASET STREAM STATS " + partition);
                 fta.reset(buffer);
                 computeStats();
                 FrameUtils.flushFrame(buffer, writer);
+                nextFrameDuration += System.nanoTime() - start;
             }
 
             private void computeStats() {
@@ -119,12 +138,20 @@ public final class DatasetStreamStatsOperatorDescriptor extends AbstractSingleAc
 
             @Override
             public void close() throws HyracksDataException {
+                long start = System.nanoTime();
                 IStatsCollector statsCollector = ctx.getStatsCollector();
                 if (statsCollector != null) {
                     IOperatorStats stats = statsCollector.getOperatorStats(operatorName);
                     DatasetStreamStats.update(stats, totalTupleCount, totalTupleLength, indexesStats);
                 }
                 writer.close();
+                closeDuration = System.nanoTime() - start;
+
+                if (TaskUtil.get("SAMPLE_OPERATION_IS_GOING", ctx) != null) {
+                    LOGGER.debug("StatsLogging: DatasetStreamStats_Open_Time: {}ns", openDuration);
+                    LOGGER.debug("StatsLogging: DatasetStreamStats_NextFrame_Time: {}ns", nextFrameDuration);
+                    LOGGER.debug("StatsLogging: DatasetStreamStats_Close_Time: {}ns", closeDuration);
+                }
             }
 
             @Override

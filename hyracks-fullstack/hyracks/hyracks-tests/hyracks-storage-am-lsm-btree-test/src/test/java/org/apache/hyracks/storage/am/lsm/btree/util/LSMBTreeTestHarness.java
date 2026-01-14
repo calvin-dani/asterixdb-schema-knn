@@ -50,6 +50,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.NoOpPageWriteCallbackFacto
 import org.apache.hyracks.storage.am.lsm.common.impls.SynchronousSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.impls.ThreadCountingTracker;
 import org.apache.hyracks.storage.am.lsm.common.impls.VirtualBufferCache;
+import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.compression.SnappyCompressorDecompressorFactory;
@@ -87,6 +88,7 @@ public class LSMBTreeTestHarness {
     protected ILSMOperationTracker opTracker;
     protected ILSMIOOperationCallbackFactory ioOpCallbackFactory;
     protected ILSMPageWriteCallbackFactory pageWriteCallbackFactory;
+    protected IComponentStatsAccumulator statsAccumulator;
     protected IMetadataPageManagerFactory metadataPageManagerFactory;
 
     protected final Random rnd = new Random();

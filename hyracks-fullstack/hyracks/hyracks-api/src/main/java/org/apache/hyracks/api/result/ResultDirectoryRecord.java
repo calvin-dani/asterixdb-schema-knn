@@ -30,7 +30,7 @@ public class ResultDirectoryRecord implements Serializable {
         FAILED
     }
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private NetworkAddress address;
 
@@ -40,10 +40,15 @@ public class ResultDirectoryRecord implements Serializable {
 
     private boolean empty;
 
+    private long resultCount;
+
+    private String nodeId;
+
     public ResultDirectoryRecord() {
         this.address = null;
         this.readEOS = false;
         this.status = Status.IDLE;
+        this.nodeId = null;
     }
 
     public void setNetworkAddress(NetworkAddress address) {
@@ -54,8 +59,20 @@ public class ResultDirectoryRecord implements Serializable {
         return address;
     }
 
+    public void setNodeId(String nodeId) {
+        this.nodeId = nodeId;
+    }
+
+    public String getNodeId() {
+        return nodeId;
+    }
+
     public void setEmpty(boolean empty) {
         this.empty = empty;
+    }
+
+    public void setResultCount(long resultCount) {
+        this.resultCount = resultCount;
     }
 
     public boolean isEmpty() {
@@ -78,8 +95,16 @@ public class ResultDirectoryRecord implements Serializable {
         updateStatus(Status.SUCCESS);
     }
 
+    public boolean ready() {
+        return status == Status.SUCCESS;
+    }
+
     public void fail() {
         status = Status.FAILED;
+    }
+
+    public long getResultCount() {
+        return resultCount;
     }
 
     private void updateStatus(final ResultDirectoryRecord.Status newStatus) {

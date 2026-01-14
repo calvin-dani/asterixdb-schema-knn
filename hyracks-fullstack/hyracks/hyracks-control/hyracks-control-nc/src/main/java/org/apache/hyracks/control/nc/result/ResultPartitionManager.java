@@ -92,18 +92,32 @@ public class ResultPartitionManager extends AbstractResultManager implements IRe
         try {
             // Be sure to send the *public* network address to the CC
             ncs.getClusterController(jobId.getCcId()).registerResultPartitionLocation(jobId, rsId, metadata,
-                    emptyResult, partition, nPartitions, ncs.getResultNetworkManager().getPublicNetworkAddress());
+                    emptyResult, partition, nPartitions, ncs.getResultNetworkManager().getPublicNetworkAddress(),
+                    ncs.getId());
         } catch (Exception e) {
             throw HyracksException.create(e);
         }
     }
 
     @Override
-    public void reportPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition) throws HyracksException {
+    public void reportPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition, long resultCount)
+            throws HyracksException {
         try {
             LOGGER.trace("Reporting partition write completion: JobId: {}:ResultSetId: {}:partition: {}", jobId, rsId,
                     partition);
-            ncs.getClusterController(jobId.getCcId()).reportResultPartitionWriteCompletion(jobId, rsId, partition);
+            ncs.getClusterController(jobId.getCcId()).reportResultPartitionWriteCompletion(jobId, rsId, partition,
+                    resultCount);
+        } catch (Exception e) {
+            throw HyracksException.create(e);
+        }
+    }
+
+    @Override
+    public void reportPartitionConsumed(JobId jobId, ResultSetId rsId, int partition) throws HyracksException {
+        try {
+            LOGGER.trace("Reporting partition consumed: JobId: {}:ResultSetId: {}:partition: {}", jobId, rsId,
+                    partition);
+            ncs.getClusterController(jobId.getCcId()).reportResultPartitionConsumed(jobId, rsId, partition);
         } catch (Exception e) {
             throw HyracksException.create(e);
         }
@@ -137,10 +151,12 @@ public class ResultPartitionManager extends AbstractResultManager implements IRe
     }
 
     @Override
-    public synchronized void removePartition(JobId jobId, ResultSetId resultSetId, int partition) {
+    public synchronized void removePartition(JobId jobId, ResultSetId resultSetId, int partition)
+            throws HyracksException {
         ResultSetMap rsIdMap = partitionResultStateMap.get(jobId);
         if (rsIdMap != null && rsIdMap.removePartition(jobId, resultSetId, partition)) {
             partitionResultStateMap.remove(jobId);
+            reportPartitionConsumed(jobId, resultSetId, partition);
         }
     }
 

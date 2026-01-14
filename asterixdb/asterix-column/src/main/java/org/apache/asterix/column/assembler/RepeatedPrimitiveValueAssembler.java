@@ -27,14 +27,10 @@ import org.apache.hyracks.storage.am.lsm.btree.column.error.ColumnarValueExcepti
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 final class RepeatedPrimitiveValueAssembler extends AbstractPrimitiveValueAssembler {
-    private boolean arrayDelegate;
-    private int arrayLevel;
 
     RepeatedPrimitiveValueAssembler(int level, AssemblerInfo info, IColumnValuesReader reader,
             IValueGetter primitiveValue) {
         super(level, info, reader, primitiveValue);
-        this.arrayDelegate = false;
-        arrayLevel = 0;
     }
 
     @Override
@@ -43,15 +39,16 @@ final class RepeatedPrimitiveValueAssembler extends AbstractPrimitiveValueAssemb
     }
 
     @Override
-    public int next(AssemblerState state) throws HyracksDataException {
+    public int next(int tupleIndex, AssemblerState state) throws HyracksDataException {
         /*
          * Move to the next value if one of the following is true
          * - It is the first time we access this assembler (i.e., the first round)
          * - We are in an array (i.e., the parent array assembler is active)
          * - The value is a delimiter (i.e., the last round)
          */
-        if (!state.isInGroup() || reader.isRepeatedValue() || reader.isDelimiter()) {
-            next();
+        if (!state.isInGroup() || reader.isRepeatedValue() || reader.isDelimiter()
+                || reader.isColumnMissingForCurrentTuple(tupleIndex)) {
+            next(tupleIndex);
         }
 
         if (isDelegate()) {
@@ -63,20 +60,15 @@ final class RepeatedPrimitiveValueAssembler extends AbstractPrimitiveValueAssemb
         return NEXT_ASSEMBLER;
     }
 
-    public IColumnValuesReader getReader() {
-        return reader;
-    }
-
-    public void setAsDelegate(int arrayLevel) {
-        // This assembler is responsible for adding null values
-        this.arrayDelegate = true;
-        this.arrayLevel = arrayLevel;
-    }
-
-    private void next() throws HyracksDataException {
+    private void next(int tupleIndex) throws HyracksDataException {
+        if (reader.isColumnMissingForCurrentTuple(tupleIndex)) {
+            // If all values are missing, we add missing to the ancestor at the lowest missing level
+            addMissingToAncestor(reader.getLevel());
+            return;
+        }
         if (!reader.next()) {
             throw createException();
-        } else if (reader.isNull() && (arrayDelegate || reader.getLevel() + 1 == level)) {
+        } else if (reader.isNull()) {
             /*
              * There are two cases here for where the null belongs to:
              * 1- If the null is an array item, then add it
@@ -84,7 +76,7 @@ final class RepeatedPrimitiveValueAssembler extends AbstractPrimitiveValueAssemb
              * (i.e., arrayDelegate is true)
              */
             addNullToAncestor(reader.getLevel());
-        } else if (reader.isMissing() && (arrayLevel == reader.getLevel() || reader.getLevel() + 1 == level)) {
+        } else if ((reader.isMissing() && reader.getLevel() < level)) {
             /*
              * Add a missing item in either
              * - the array item is MISSING
@@ -100,7 +92,6 @@ final class RepeatedPrimitiveValueAssembler extends AbstractPrimitiveValueAssemb
         ColumnarValueException e = new ColumnarValueException();
         ObjectNode assemblerNode = e.createNode(getClass().getSimpleName());
         assemblerNode.put("isDelegate", isDelegate());
-        assemblerNode.put("isArrayDelegate", arrayDelegate);
 
         ObjectNode readerNode = assemblerNode.putObject("assemblerReader");
         reader.appendReaderInformation(readerNode);

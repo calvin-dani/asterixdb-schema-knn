@@ -42,6 +42,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class ResultState implements IStateObject {
     private static final String FILE_PREFIX = "result_";
+    public static final long UNLIMITED_READS = -1;
 
     private final ResultSetPartitionId resultSetPartitionId;
 
@@ -69,12 +70,12 @@ public class ResultState implements IStateObject {
 
     private long persistentSize;
     private long remainingReads;
+    private long maxReads;
 
     ResultState(ResultSetPartitionId resultSetPartitionId, boolean asyncMode, IIOManager ioManager,
             IWorkspaceFileFactory fileFactory, int frameSize, long maxReads) {
-        if (maxReads <= 0) {
-            throw new IllegalArgumentException("maxReads must be > 0");
-        }
+        validateMaxReads(maxReads);
+        this.maxReads = maxReads;
         this.resultSetPartitionId = resultSetPartitionId;
         this.asyncMode = asyncMode;
         this.ioManager = ioManager;
@@ -87,6 +88,12 @@ public class ResultState implements IStateObject {
 
         fileRef = null;
         fileHandle = null;
+    }
+
+    private void validateMaxReads(long maxReads) {
+        if (maxReads != UNLIMITED_READS && maxReads < 1) {
+            throw new IllegalArgumentException("maxReads must be >= 1 or -1 for unlimited reads");
+        }
     }
 
     public synchronized void open() {
@@ -376,6 +383,6 @@ public class ResultState implements IStateObject {
     }
 
     public synchronized boolean isExhausted() {
-        return remainingReads == 0;
+        return maxReads != UNLIMITED_READS && remainingReads == 0;
     }
 }

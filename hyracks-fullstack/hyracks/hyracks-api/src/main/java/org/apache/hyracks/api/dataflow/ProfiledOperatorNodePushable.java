@@ -20,6 +20,7 @@ package org.apache.hyracks.api.dataflow;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import org.apache.hyracks.api.com.job.profiling.counters.Counter;
 import org.apache.hyracks.api.comm.IFrameWriter;
@@ -55,6 +56,7 @@ public class ProfiledOperatorNodePushable implements IOperatorNodePushable, ISta
 
     @Override
     public void deinitialize() throws HyracksDataException {
+        ProfiledFrameWriter.timeMethod(op::deinitialize, totalTime);
         long ownTime = totalTime.get();
         for (ITimedWriter i : inputs.values()) {
             ownTime += i.getTotalTime();
@@ -62,7 +64,6 @@ public class ProfiledOperatorNodePushable implements IOperatorNodePushable, ISta
         for (ITimedWriter w : outputs.values()) {
             ownTime -= w.getTotalTime();
         }
-        op.deinitialize();
         stats.getTimeCounter().set(ownTime);
     }
 
@@ -108,7 +109,7 @@ public class ProfiledOperatorNodePushable implements IOperatorNodePushable, ISta
 
     public static IOperatorNodePushable time(IOperatorNodePushable op, IHyracksTaskContext ctx, ActivityId acId)
             throws HyracksDataException {
-        String name = acId.toString() + " - " + op.getDisplayName();
+        String name = acId.toString() + " - " + UUID.randomUUID();
         IStatsCollector statsCollector = ctx.getStatsCollector();
         IOperatorStats stats = new OperatorStats(name, acId.getOperatorDescriptorId().toString());
         if (!(op instanceof ISelfProfilingNodePushable)) {
@@ -128,7 +129,7 @@ public class ProfiledOperatorNodePushable implements IOperatorNodePushable, ISta
 
     public static void onlyAddStats(IOperatorNodePushable op, IHyracksTaskContext ctx, ActivityId acId)
             throws HyracksDataException {
-        String name = acId.toString() + " - " + op.getDisplayName();
+        String name = acId.toString() + " - " + UUID.randomUUID();
         IStatsCollector statsCollector = ctx.getStatsCollector();
         IOperatorStats stats = new OperatorStats(name, acId.getOperatorDescriptorId().toString());
         if (op instanceof IIntrospectingOperator) {
