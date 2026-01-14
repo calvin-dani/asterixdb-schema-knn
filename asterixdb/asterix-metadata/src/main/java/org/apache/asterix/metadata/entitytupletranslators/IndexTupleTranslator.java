@@ -93,6 +93,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
     // Field name of open field.
     public static final String GRAM_LENGTH_FIELD_NAME = "GramLength";
     public static final String FULL_TEXT_CONFIG_FIELD_NAME = "FullTextConfig";
+    public static final String INCLUDE_FIELDS_FIELD_NAME = "IncludeFields";
     public static final String INDEX_SEARCHKEY_TYPE_FIELD_NAME = "SearchKeyType";
     public static final String INDEX_ISENFORCED_FIELD_NAME = "IsEnforced";
     public static final String INDEX_EXCLUDE_UNKNOWN_FIELD_NAME = "ExcludeUnknownKey";
@@ -472,7 +473,20 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                 excludeUnknownKey = OptionalBoolean.empty();
                 castDefaultNull = OptionalBoolean.empty();
                 AdmObjectNode withObjectNode = readWithProperties(indexRecord);
-                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), keyFieldNames,
+
+                // Read include_fields from metadata
+                List<List<String>> includeFieldNames = new ArrayList<>();
+                int includeFieldsPos = indexRecord.getType().getFieldIndex(INCLUDE_FIELDS_FIELD_NAME);
+                if (includeFieldsPos >= 0) {
+                    IACursor cursor =
+                            ((AOrderedList) indexRecord.getValueByPos(includeFieldsPos)).getCursor();
+                    while (cursor.next()) {
+                        String fieldName = ((AString) cursor.get()).getStringValue();
+                        includeFieldNames.add(Collections.singletonList(fieldName));
+                    }
+                }
+
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), includeFieldNames,
                         keyFieldSourceIndicator, keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
                         castDefaultNull, null, null, null, withObjectNode);
                 break;
@@ -948,7 +962,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         fieldValue.reset();
         listBuilder.write(fieldValue.getDataOutput(), true);
         nameValue.reset();
-        aString.setValue("include_fields");
+        aString.setValue(INCLUDE_FIELDS_FIELD_NAME);
         stringSerde.serialize(aString, nameValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
     }
