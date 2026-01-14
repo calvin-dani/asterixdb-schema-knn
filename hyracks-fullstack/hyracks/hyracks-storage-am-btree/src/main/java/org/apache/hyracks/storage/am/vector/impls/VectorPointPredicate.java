@@ -40,6 +40,7 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int queryFieldIndex;
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
+    private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
     private int nprobe; // Number of clusters to probe (minimum before K-check)
     private double epsilon; // Distance threshold for level-wise cross-pollination
     private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
@@ -131,6 +132,22 @@ public class VectorPointPredicate implements ISearchPredicate {
      */
     public int getK() {
         return k;
+    }
+
+    /**
+     * Set the tuple filter for INCLUDE field predicates.
+     * When set, the cursor will only return tuples that pass this filter,
+     * and only count passing tuples toward K.
+     */
+    public void setTupleFilter(ITupleFilter tupleFilter) {
+        this.tupleFilter = tupleFilter;
+    }
+
+    /**
+     * Get the tuple filter for INCLUDE field predicates.
+     */
+    public ITupleFilter getTupleFilter() {
+        return tupleFilter;
     }
 
     /**
