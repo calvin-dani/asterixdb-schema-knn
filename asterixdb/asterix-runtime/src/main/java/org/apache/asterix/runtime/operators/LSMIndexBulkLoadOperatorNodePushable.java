@@ -67,7 +67,7 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
             throws HyracksDataException {
         this(indexDataflowHelperFactory, priamryIndexDataflowHelperFactory, ctx, partition, fieldPermutation,
                 fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, recDesc, usage, datasetId,
-                tupleFilterFactory, partitionerFactory, partitionsMap, null, null, null, null,false);
+                tupleFilterFactory, partitionerFactory, partitionsMap, null, null, null, null, false);
     }
 
     public LSMIndexBulkLoadOperatorNodePushable(IIndexDataflowHelperFactory indexDataflowHelperFactory,

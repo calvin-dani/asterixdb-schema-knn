@@ -27,6 +27,8 @@ import java.util.Set;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.OptimizationConfUtil;
+import org.apache.asterix.common.exceptions.CompilationException;
+import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.metadata.declared.MetadataProvider;
@@ -260,6 +262,13 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
         return spec;
+    }
+
+    @Override
+    public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
+        // K-means indexes don't support static structure creation
+        throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, sourceLoc,
+                "Static structure creation not supported for K-means index type");
     }
 
     //    @Override
