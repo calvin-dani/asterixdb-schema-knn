@@ -486,8 +486,17 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                     }
                 }
 
+                // Create proper source indicators and types for include fields
+                // Include fields always come from the record (not meta), and types are resolved later
+                List<Integer> includeFieldSourceIndicators = new ArrayList<>();
+                List<IAType> includeFieldTypes = new ArrayList<>();
+                for (int i = 0; i < includeFieldNames.size(); i++) {
+                    includeFieldSourceIndicators.add(Index.RECORD_INDICATOR);
+                    includeFieldTypes.add(BuiltinType.ANY);  // Type will be resolved from record schema
+                }
+
                 indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), includeFieldNames,
-                        keyFieldSourceIndicator, keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
+                        includeFieldSourceIndicators, includeFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
                         castDefaultNull, null, null, null, withObjectNode);
                 break;
             case TEXT:
