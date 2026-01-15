@@ -949,7 +949,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                         outputTransformedTuple(transformedTuple);
                                         count++;
                                         if (count >= 10) {
-                                            break; // Limit to top 10 results
+                                            break; // Limit to top 10 results bounded
                                         }
                                     }
                                 } else {
