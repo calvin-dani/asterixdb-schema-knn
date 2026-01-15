@@ -1207,7 +1207,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
 
         // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findCloseCentroidsLevelWise(bufferCache, getFileId(), rootPage,
+        return VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(bufferCache, getFileId(), rootPage,
                 getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
     }
 

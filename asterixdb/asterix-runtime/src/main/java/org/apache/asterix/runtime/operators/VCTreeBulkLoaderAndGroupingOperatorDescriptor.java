@@ -936,15 +936,21 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                             } else if (crossPollinate && interiorPollinate) {
                                 // FUTURE: Implement cross-partition centroid search
+                                int count = 0;
                                 List<ClusterSearchResult> result = findCloseCentroidsLevelWise(embedding, 0.15);
                                 if (result != null) {
                                     successfulQueries++;
                                     for (ClusterSearchResult res : result) {
+
                                         // Create transformed tuple with [centroidId, distance, ...original fields...]
                                         ITupleReference transformedTuple = createTransformedTuple(tuple, res);
 
                                         // Output the transformed tuple to downstream operators
                                         outputTransformedTuple(transformedTuple);
+                                        count++;
+                                        if (count >= 10) {
+                                            break; // Limit to top 10 results
+                                        }
                                     }
                                 } else {
                                     System.err.println("Failed to find closest centroid for query " + (i + 1));

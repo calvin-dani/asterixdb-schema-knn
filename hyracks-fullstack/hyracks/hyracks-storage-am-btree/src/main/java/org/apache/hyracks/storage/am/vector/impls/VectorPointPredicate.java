@@ -47,7 +47,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
         this.nprobe = 10; // Default: probe 1 cluster
-        this.epsilon = 0.3; // Default: no epsilon (use nprobe count only)
+        this.epsilon = 0.15; // Default: no epsilon (use nprobe count only)
     }
 
     public VectorPointPredicate(int k) {
@@ -55,7 +55,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.k = k;
         this.distanceMetric = null;
         this.nprobe = 10;
-        this.epsilon = 0.3;
+        this.epsilon = 0.15;
     }
 
     public VectorPointPredicate(int k, int nprobe, double epsilon) {
@@ -71,7 +71,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         // In runtime, query data comes via setQueryTuple()
         this.k = Integer.MAX_VALUE; // Default: no limit
         this.nprobe = 10;
-        this.epsilon = 0.3;
+        this.epsilon = 0.15;
     }
 
     /**
