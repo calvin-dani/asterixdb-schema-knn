@@ -87,8 +87,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         frameTuple.resetByTupleIndex(this, tupleIndex);
         // Distance to centroid is the first field in data records - stored as raw double (no type tag)
         int distanceOff = frameTuple.getFieldStart(0);
-        double distance = buf.getDouble(distanceOff);
-        return distance;
+        return buf.getDouble(distanceOff);
     }
 
 
@@ -100,41 +99,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
 
     public void insertSorted(ITupleReference tuple) {
         insert(tuple, getTupleCount());
-    }
-
-    @Override
-    public int[] findDistanceRange(double minDistance, double maxDistance) throws HyracksDataException {
-        int tupleCount = getTupleCount();
-        int startIndex = -1;
-        int endIndex = -1;
-
-        // Find start index (first tuple with distance >= minDistance)
-        for (int i = 0; i < tupleCount; i++) {
-            double distance = getDistanceToCentroid(i);
-            if (distance >= minDistance) {
-                startIndex = i;
-                break;
-            }
-        }
-
-        if (startIndex == -1) {
-            return new int[] { -1, -1 }; // No tuples in range
-        }
-
-        // Find end index (last tuple with distance <= maxDistance)
-        for (int i = tupleCount - 1; i >= startIndex; i--) {
-            double distance = getDistanceToCentroid(i);
-            if (distance <= maxDistance) {
-                endIndex = i;
-                break;
-            }
-        }
-
-        if (endIndex == -1) {
-            return new int[] { -1, -1 }; // No tuples in range
-        }
-
-        return new int[] { startIndex, endIndex };
     }
 
     @Override
@@ -305,22 +269,22 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
     /**
      * Create a data tuple for VectorClusteringTree. For DELETE operations, sets the antimatter bit.
      *
-     * Input tuple format: [vector, pk_field, include_fields...]
+     * Input tuple format: [vector, include_fields..., pk]
      * - Field 0: vector
-     * - Field 1: primary key
-     * - Fields 2+: include fields (optional)
+     * - Fields 1 to (fieldCount - 2): include fields (optional)
+     * - Field (fieldCount - 1): primary key (single field)
      *
-     * Output data tuple format: <distance, centroidId, primaryKey, include_fields...>
+     * Output data tuple format: <distance, centroidId, pk, include_fields...>
      * - Field 0: distance (raw double, 8 bytes, no type tag)
      * - Field 1: centroidId (raw int, 4 bytes, no type tag)
-     * - Field 2: primaryKey (copied from originalTuple field 1)
-     * - Fields 3+: include fields (copied from originalTuple fields 2+)
+     * - Field 2: primary key
+     * - Fields 3+: include fields
      *
      * @param vector Vector array
      * @param distance Distance as double
      * @param centroidId Leaf cluster centroid Id
-     * @param originalTuple Original tuple containing primary key and include fields
-     * @param ctx Operation context to check if this is a DELETE operation
+     * @param originalTuple Original tuple containing vector, include fields, and primary key
+     * @param ctx Operation context
      * @return ITupleReference representing the data tuple (with antimatter bit if DELETE)
      * @throws HyracksDataException if tuple creation fails
      */
@@ -328,10 +292,11 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException {
         try {
-            // Calculate number of include fields from originalTuple
-            // originalTuple format: [vector, pk, include_fields...]
+            // Calculate numIncludeFields from tuple structure
+            // Input: [vector, include_fields..., pk]
+            // numIncludeFields = fieldCount - 2 (subtract vector and pk)
             int originalFieldCount = originalTuple.getFieldCount();
-            int numIncludeFields = originalFieldCount - 2; // Subtract vector (field 0) and pk (field 1)
+            int numIncludeFields = originalFieldCount - 2;
             if (numIncludeFields < 0) {
                 numIncludeFields = 0;
             }
@@ -349,13 +314,14 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             dos.writeInt(centroidId);
             dataTupleBuilder.addFieldEndOffset();
 
-            // Field 2: primaryKey - copy directly from originalTuple field 1
-            dataTupleBuilder.addField(originalTuple.getFieldData(1), originalTuple.getFieldStart(1),
-                    originalTuple.getFieldLength(1));
+            // Field 2: primary key (last field of originalTuple)
+            int pkFieldIndex = originalFieldCount - 1;
+            dataTupleBuilder.addField(originalTuple.getFieldData(pkFieldIndex),
+                    originalTuple.getFieldStart(pkFieldIndex), originalTuple.getFieldLength(pkFieldIndex));
 
-            // Fields 3+: include fields - copy from originalTuple fields 2+
+            // Fields 3+: include fields (from originalTuple fields 1 to numIncludeFields)
             for (int i = 0; i < numIncludeFields; i++) {
-                int srcFieldIndex = 2 + i; // Source field in originalTuple
+                int srcFieldIndex = 1 + i;
                 dataTupleBuilder.addField(originalTuple.getFieldData(srcFieldIndex),
                         originalTuple.getFieldStart(srcFieldIndex), originalTuple.getFieldLength(srcFieldIndex));
             }

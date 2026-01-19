@@ -19,7 +19,6 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
-import java.io.DataOutput;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +38,6 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
-import org.apache.hyracks.storage.am.common.impls.NoOpOperationCallback;
 import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
@@ -66,16 +64,8 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkL
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
-import org.apache.hyracks.storage.am.common.util.BitOperationUtils;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
-import org.apache.hyracks.storage.am.lsm.vector.tuples.LSMVCTreeDataTupleReference;
-import org.apache.hyracks.storage.am.lsm.vector.tuples.LSMVCTreeDataTupleWriter;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
-import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
-import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -83,7 +73,6 @@ import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
-import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
@@ -324,7 +313,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     /**
      * Handles delete operation for vector index.
-     *
+     * <p>
      * Delete flow:
      * 1. Call delete() on VectorClusteringTreeAccessor with the original input tuple
      * 2. VectorClusteringTreeAccessor.delete() sets operation to DELETE and calls insertVector()
@@ -335,7 +324,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      * This approach reuses all existing insertVector() logic and only differs in
      * the antimatter bit being set when the operation type is DELETE.
      */
-    private boolean delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
+    private void delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
         // Get the current mutable VectorClusteringTree accessor
         VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor = (ctx.getCurrentMutableVCTreeAccessor());
         VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
@@ -354,7 +343,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         // insertVector() will create an antimatter tuple based on the DELETE operation
         memoryComponentAccessor.delete(tuple);
 
-        return true;
     }
 
     @Override

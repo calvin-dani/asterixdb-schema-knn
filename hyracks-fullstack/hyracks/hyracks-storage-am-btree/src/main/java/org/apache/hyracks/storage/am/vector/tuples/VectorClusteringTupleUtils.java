@@ -30,16 +30,12 @@ import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
  * Utility class for vector clustering tuple operations.
  * Provides common functionality for tuple copying, field extraction, and manipulation.
  *
- * Input tuple format: [vector, pk_fields..., include_fields...]
+ * Input tuple format: [vector, include_fields..., pk_field]
  * - Field 0: vector
- * - Fields 1 to (1 + numPrimaryKeyFields - 1): primary key fields
- * - Remaining fields: include fields (optional)
+ * - Fields 1 to (1 + numPrimaryKeyFields - 1): include fields
+ * - Last field: primary key
  */
 public class VectorClusteringTupleUtils {
-
-    /** Index where primary key fields start in input tuples */
-    public static final int INPUT_TUPLE_PK_START_INDEX = 1;
-
     /**
      * Copy tuple data to a new SimpleTupleReference using TupleUtils.
      * 
@@ -72,8 +68,8 @@ public class VectorClusteringTupleUtils {
             return null;
         }
 
-        // Primary key is at field index 1 (after vector field at index 0)
-        int pkFieldIndex = INPUT_TUPLE_PK_START_INDEX;
+        // Primary key is at the last field index
+        int pkFieldIndex = tuple.getFieldCount() - 1;
 
         byte[] data = tuple.getFieldData(pkFieldIndex);
         if (data == null) {

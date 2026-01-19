@@ -321,13 +321,40 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                 case VECTOR:
                     // Vector indexes are handled similarly to VALUE indexes
                     Index.VectorIndexDetails vectorIndexDetails2 = (Index.VectorIndexDetails) index.getIndexDetails();
-                    secondaryKeyFields = vectorIndexDetails2.getKeyFieldNames();
-                    // For vector indexes, create type list with ANY type
+                    // Start with the vector field (key field)
+                    secondaryKeyFields = new ArrayList<>(vectorIndexDetails2.getKeyFieldNames());
                     secondaryKeyTypes = new ArrayList<>();
-                    secondaryKeyTypes.add(BuiltinType.ANY);
+                    // Get actual type from schema for vector field (must match injectFieldAccessesForIndexes)
+                    List<String> vectorFieldName2 = secondaryKeyFields.get(0);
+                    IAType vectorFieldType2 = recType.getSubFieldType(vectorFieldName2);
+                    if (vectorFieldType2 == null) {
+                        vectorFieldType2 = BuiltinType.ANY;
+                    }
+                    secondaryKeyTypes.add(vectorFieldType2);
                     secondaryKeySources = new ArrayList<>();
                     secondaryKeySources.add(Index.RECORD_INDICATOR);
-                    // TODO: Handle include fields
+
+                    // Add include fields after vector field
+                    // This produces tuple format: [vector, include_fields..., pk...]
+                    List<List<String>> includeFieldNames = vectorIndexDetails2.getIncludeFieldNames();
+                    List<Integer> includeFieldSources = vectorIndexDetails2.getIncludeFieldSourceIndicators();
+                    if (includeFieldNames != null && !includeFieldNames.isEmpty()) {
+                        for (int j = 0; j < includeFieldNames.size(); j++) {
+                            List<String> includeFieldName = includeFieldNames.get(j);
+                            secondaryKeyFields.add(includeFieldName);
+                            // Get actual type from schema (must match injectFieldAccessesForIndexes)
+                            IAType includeFieldType = recType.getSubFieldType(includeFieldName);
+                            if (includeFieldType == null) {
+                                includeFieldType = BuiltinType.ANY;
+                            }
+                            secondaryKeyTypes.add(includeFieldType);
+                            if (includeFieldSources != null && j < includeFieldSources.size()) {
+                                secondaryKeySources.add(includeFieldSources.get(j));
+                            } else {
+                                secondaryKeySources.add(Index.RECORD_INDICATOR);
+                            }
+                        }
+                    }
                     break;
                 default:
                     continue;
@@ -848,7 +875,7 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                 case VECTOR:
                     Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
                     // For vector indexes, get the vector field name
-                    skNames = vectorIndexDetails.getKeyFieldNames();
+                    skNames = new ArrayList<>(vectorIndexDetails.getKeyFieldNames());
                     // For vector fields, try to get the actual type from the schema
                     // If not available (open field), use ANY type for type inference
                     skTypes = new ArrayList<>();
@@ -865,7 +892,27 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                     // Vector field is always from the record
                     indicators = new ArrayList<>();
                     indicators.add(Index.RECORD_INDICATOR);
-                    // TODO: Handle include fields (vectorIndexDetails.getIncludeFieldNames())
+
+                    // Handle include fields
+                    List<List<String>> vectorIncludeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+                    List<Integer> vectorIncludeFieldSources = vectorIndexDetails.getIncludeFieldSourceIndicators();
+                    if (vectorIncludeFieldNames != null && !vectorIncludeFieldNames.isEmpty()) {
+                        for (int j = 0; j < vectorIncludeFieldNames.size(); j++) {
+                            List<String> includeFieldName = vectorIncludeFieldNames.get(j);
+                            skNames.add(includeFieldName);
+                            // Get actual type from schema (not from index metadata which may be ANY)
+                            IAType includeFieldType = recType.getSubFieldType(includeFieldName);
+                            if (includeFieldType == null) {
+                                includeFieldType = BuiltinType.ANY;
+                            }
+                            skTypes.add(includeFieldType);
+                            if (vectorIncludeFieldSources != null && j < vectorIncludeFieldSources.size()) {
+                                indicators.add(vectorIncludeFieldSources.get(j));
+                            } else {
+                                indicators.add(Index.RECORD_INDICATOR);
+                            }
+                        }
+                    }
                     break;
                 default:
                     throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,

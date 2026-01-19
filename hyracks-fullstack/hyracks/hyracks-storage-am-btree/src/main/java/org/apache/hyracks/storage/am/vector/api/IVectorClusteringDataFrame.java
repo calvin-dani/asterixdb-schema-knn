@@ -80,15 +80,6 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
     ITupleReference createDataTuple(double[] vector, double distance, int centroidId, ITupleReference originalTuple, VectorClusteringOpContext ctx)
             throws HyracksDataException;
 
-    /**
-     * Finds the range of tuples within a distance range.
-     * @param minDistance the minimum distance
-     * @param maxDistance the maximum distance
-     * @return an array containing [startIndex, endIndex]
-     * @throws HyracksDataException if an error occurs
-     */
-    int[] findDistanceRange(double minDistance, double maxDistance) throws HyracksDataException;
-
     void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
             throws HyracksDataException;
 
