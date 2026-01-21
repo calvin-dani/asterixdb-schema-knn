@@ -69,7 +69,6 @@ public class VCTreeNavigationUtils {
      */
 
     private static final Logger LOGGER = LogManager.getLogger();
-
     public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
@@ -569,8 +568,9 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
-                                    + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
+                            LOGGER.info(
+                                    "tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
+                                            + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
                             processedTuples++;
                         } catch (Exception e) {
                             System.err.println("ERROR processing leaf tuple " + i + " on page " + currentPageId + ": "
@@ -607,8 +607,8 @@ public class VCTreeNavigationUtils {
                             String centroidStr = formatCentroid(centroid, printLimit);
                             String distStr = computeDistanceString(queryVector, centroid);
 
-                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr + " | dist="
-                                    + distStr + " | child=" + childPageId);
+                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr
+                                    + " | dist=" + distStr + " | child=" + childPageId);
                             processedTuples++;
 
                             if (childPageId != -1 && visited.add(childPageId)) {
