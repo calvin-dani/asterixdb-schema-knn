@@ -22,6 +22,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
@@ -102,12 +103,24 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /* All directory page IDs collected from all leaf pages */
     private List<Long> allDirectoryPageIds;
 
+    // Shared state from LSM layer (for DFS visited tracking)
+    private Set<Integer> sharedVisitedSet; // Shared visited set from LSM layer
+    private int nprobe; // Minimum clusters to probe before K-check
+    private double epsilon; // Distance threshold for level-wise
+
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
         this.currentTupleIndex = 0;
         this.tupleCount = 0;
         this.currentDataPageId = -1;
         this.targetMetadataPageId = -1;
+    }
+
+    /**
+     * Check if the cursor is open and ready for use.
+     */
+    public boolean isOpen() {
+        return isOpen;
     }
 
     public void setBufferCache(IBufferCache bufferCache) {
@@ -142,6 +155,58 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.fullScanMode = fullScanMode;
     }
 
+    /**
+     * Set the shared visited set from LSM layer.
+     * This allows tracking visited centroids across all LSM components.
+     */
+    public void setSharedVisitedSet(Set<Integer> visitedSet) {
+        this.sharedVisitedSet = visitedSet;
+        if (this.iteratorState != null) {
+            this.iteratorState.setVisitedSet(visitedSet);
+        }
+    }
+
+    /**
+     * Get the number of clusters probed so far.
+     */
+    public int getClustersProbed() {
+        return clustersProbed;
+    }
+
+    /**
+     * Reset the clusters probed counter.
+     * Used when re-opening cursor to a different first cluster (e.g., level-wise[0] instead of DFS result).
+     */
+    public void resetClustersProbed() {
+        this.clustersProbed = 0;
+    }
+
+    /**
+     * Get the distance function.
+     */
+    public IVectorDistanceFunction getDistanceFunction() {
+        return this.distanceFunction;
+    }
+
+    /**
+     * Extract nprobe value from search predicate.
+     */
+    private int extractNprobe(ISearchPredicate searchPred) {
+        if (searchPred instanceof VectorPointPredicate) {
+            return ((VectorPointPredicate) searchPred).getNprobe();
+        }
+        return 1; // Default: probe 1 cluster
+    }
+
+    /**
+     * Extract epsilon value from search predicate.
+     */
+    private double extractEpsilon(ISearchPredicate searchPred) {
+        if (searchPred instanceof VectorPointPredicate) {
+            return ((VectorPointPredicate) searchPred).getEpsilon();
+        }
+        return 0.0; // Default: no epsilon
+    }
 
     @Override
     public void open(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
@@ -176,22 +241,31 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
         }
 
+        // Extract nprobe and epsilon from predicate
+        this.nprobe = extractNprobe(searchPred);
+        this.epsilon = extractEpsilon(searchPred);
+
         if (fullScanMode) {
             // Full-scan mode: Navigate to cluster 0 and iterate sequentially
             navigateToFirstCluster();
         } else {
-            // Query mode: Find closest cluster and iterate by distance
-            // Initialize DFS iterator for multi-cluster search
+            // Query mode: Find closest cluster using DFS
+            // NOTE: Level-wise exploration is handled by LSM layer via openClusterById()
             if (this.queryVector == null) {
                 throw HyracksDataException
                         .create(new IllegalArgumentException("Query vector must be provided for centroid finding"));
             }
 
-            // Create navigation state for iterative DFS
-            this.iteratorState = new VCTreeNavigationUtils.NavigationState(bufferCache, fileId, rootPageId,
-                    interiorFrameFactory, leafFrameFactory, queryVector);
+            // Create navigation state for iterative DFS with shared visited set
+            if (sharedVisitedSet != null) {
+                this.iteratorState = new VCTreeNavigationUtils.NavigationState(bufferCache, fileId, rootPageId,
+                        interiorFrameFactory, leafFrameFactory, queryVector, sharedVisitedSet);
+            } else {
+                this.iteratorState = new VCTreeNavigationUtils.NavigationState(bufferCache, fileId, rootPageId,
+                        interiorFrameFactory, leafFrameFactory, queryVector);
+            }
 
-            // Initialize iterator and get first (closest) cluster
+            // Initialize DFS iterator and get first (closest) cluster
             this.currentClusterResult = VCTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
 
             if (this.currentClusterResult == null) {
@@ -276,6 +350,14 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      */
     public double[] getQueryVector() {
         return queryVector;
+    }
+
+    /**
+     * Get the current cluster result (the cluster this cursor is currently scanning).
+     * Used by LSM layer to mark the first cluster as visited.
+     */
+    public ClusterSearchResult getCurrentClusterResult() {
+        return currentClusterResult;
     }
 
     /**
@@ -370,6 +452,16 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.currentSequentialClusterIndex = 0;
         openClusterByDirectoryPage(this.firstDirectoryPageId);
         this.clustersProbed = 1;
+
+        // Create ClusterSearchResult for first cluster (for LSM layer to access)
+        this.currentClusterResult = new ClusterSearchResult(
+                -1, // No leaf page ID in full-scan mode
+                0, // Cluster index
+                null, // No centroid vector
+                0.0, // No distance in full-scan mode
+                0, // Cluster index as centroid ID
+                this.firstDirectoryPageId // Directory page ID for O(1) access
+        );
 
         System.err.println(String.format(
                 "[VectorClusteringSearchCursor.navigateToFirstCluster] Successfully opened cluster 0, tupleCount=%d",
@@ -482,6 +574,19 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                     currentSequentialClusterIndex, nextDirectoryPageId));
 
             openClusterByDirectoryPage(nextDirectoryPageId);
+
+            // Create ClusterSearchResult for this sequential cluster
+            // In full-scan mode, we don't have centroid info, but we have the directory page
+            this.currentClusterResult = new ClusterSearchResult(
+                    -1, // No leaf page ID in full-scan mode
+                    currentSequentialClusterIndex, // Cluster index
+                    null, // No centroid vector
+                    0.0, // No distance in full-scan mode
+                    currentSequentialClusterIndex, // Use cluster index as centroid ID
+                    nextDirectoryPageId // Directory page ID for O(1) access
+            );
+            this.clustersProbed++;
+
             return true;
 
         } else {
@@ -520,7 +625,69 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         return !exhaustedAllClusters;
     }
 
-     /**
+    /**
+     * Open a specific cluster using a ClusterSearchResult that already has directoryPageId.
+     * This is O(1) - no tree traversal needed since directoryPageId is already known.
+     * Used by LSM layer for efficient cluster advancement.
+     *
+     * @param cluster the ClusterSearchResult containing directoryPageId
+     * @return true if cluster was opened successfully and has data, false otherwise
+     */
+    public boolean openClusterByResult(ClusterSearchResult cluster) throws HyracksDataException {
+        if (cluster == null) {
+            return false;
+        }
+
+        System.err.println(String.format(
+                "[VectorClusteringSearchCursor.openClusterByResult] Opening cluster cid=%d with directoryPageId=%d (O(1) access)",
+                cluster.centroidId, cluster.directoryPageId));
+
+        // Use directoryPageId if available (O(1)), otherwise fall back to tree traversal (O(n))
+        if (cluster.hasDirectoryPageId()) {
+            // O(1) direct access using stored directory page ID
+            openClusterByDirectoryPage(cluster.directoryPageId);
+            this.currentClusterResult = cluster;
+            this.clustersProbed++;
+        } else {
+            // Fall back to tree traversal (legacy path)
+            System.err.println(
+                    "[VectorClusteringSearchCursor.openClusterByResult] No directoryPageId, falling back to openCluster()");
+            openCluster(cluster);
+        }
+
+        // Check if cluster has data
+        boolean hasData = currentTupleIndex < tupleCount;
+        System.err.println(String.format(
+                "[VectorClusteringSearchCursor.openClusterByResult] Opened cluster cid=%d, hasData=%s, tupleCount=%d",
+                cluster.centroidId, hasData, tupleCount));
+
+        return hasData;
+    }
+
+    /**
+     * Find next cluster using DFS (for LSM layer to get cluster ID).
+     * Does NOT open the cluster, just returns the result.
+     * Skips clusters already in the shared visited set.
+     */
+    public ClusterSearchResult findNextClusterDFS() throws HyracksDataException {
+        if (iteratorState == null) {
+            return null;
+        }
+
+        // Initialize if needed
+        if (!iteratorState.initialized) {
+            ClusterSearchResult first =
+                    VCTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
+            if (first != null) {
+                return first;
+            }
+        }
+
+        // Get next from DFS (automatically skips visited via NavigationState)
+        return VCTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
+    }
+
+    /**
      * Get the first data page ID from the target metadata page.
      */
     private long getFirstDataPageFromMetadata() throws HyracksDataException {
@@ -712,6 +879,11 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     @Override
     public void close() throws HyracksDataException {
+        // Debug: log who is calling close() to help track unexpected closure
+        System.err.println(String.format(
+                "[VectorClusteringSearchCursor.close] Called on cursor (isOpen=%s, recordsIterated=%d)",
+                isOpen, recordsIterated));
+
         if (isOpen) {
             closeCurrentPage();
 

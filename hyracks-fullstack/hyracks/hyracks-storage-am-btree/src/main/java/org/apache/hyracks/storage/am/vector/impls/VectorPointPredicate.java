@@ -40,40 +40,24 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int queryFieldIndex;
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
-    private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
     private int nprobe; // Number of clusters to probe (minimum before K-check)
     private double epsilon; // Distance threshold for level-wise cross-pollination
+    private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 10; // Default: probe 1 cluster
-        this.epsilon = 0.3; // Default: no epsilon (use nprobe count only)
-    }
-
-    public VectorPointPredicate(int k) {
-        // Constructor for ANN queries with K parameter
-        this.k = k;
-        this.distanceMetric = null;
-        this.nprobe = 10;
-        this.epsilon = 0.3;
-    }
-
-    public VectorPointPredicate(int k, int nprobe, double epsilon) {
-        // Constructor for ANN queries with K, nprobe, and epsilon parameters
-        this.k = k;
-        this.nprobe = nprobe;
-        this.epsilon = epsilon;
-        this.distanceMetric = null;
+        this.nprobe = 2; // Default: probe 10 clusters
+        this.epsilon = 0.1; // Default: epsilon for level-wise
     }
 
     public VectorPointPredicate(double[] queryVector) {
         // Constructor kept for compatibility with tests
         // In runtime, query data comes via setQueryTuple()
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 10;
-        this.epsilon = 0.3;
+        this.nprobe = 2;
+        this.epsilon = 0.1;
     }
 
     /**
@@ -134,22 +118,6 @@ public class VectorPointPredicate implements ISearchPredicate {
     }
 
     /**
-     * Set the tuple filter for INCLUDE field predicates.
-     * When set, the cursor will only return tuples that pass this filter,
-     * and only count passing tuples toward K.
-     */
-    public void setTupleFilter(ITupleFilter tupleFilter) {
-        this.tupleFilter = tupleFilter;
-    }
-
-    /**
-     * Get the tuple filter for INCLUDE field predicates.
-     */
-    public ITupleFilter getTupleFilter() {
-        return tupleFilter;
-    }
-
-    /**
      * Set the nprobe parameter (number of clusters to probe).
      * This is the minimum number of clusters to explore before checking if K is satisfied.
      */
@@ -179,6 +147,22 @@ public class VectorPointPredicate implements ISearchPredicate {
         return epsilon;
     }
 
+    /**
+     * Set the tuple filter for INCLUDE field predicates.
+     * When set, the cursor will only return tuples that pass this filter,
+     * and only count passing tuples toward K.
+     */
+    public void setTupleFilter(ITupleFilter tupleFilter) {
+        this.tupleFilter = tupleFilter;
+    }
+
+    /**
+     * Get the tuple filter for INCLUDE field predicates.
+     */
+    public ITupleFilter getTupleFilter() {
+        return tupleFilter;
+    }
+
     @Override
     public MultiComparator getLowKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
@@ -195,18 +179,6 @@ public class VectorPointPredicate implements ISearchPredicate {
     public ITupleReference getLowKey() {
         // Vector clustering tree doesn't use traditional key searches
         return null;
-    }
-
-    public ITupleReference getHighKey() {
-        return null;
-    }
-
-    public boolean isLowKeyInclusive() {
-        return false;
-    }
-
-    public boolean isHighKeyInclusive() {
-        return false;
     }
 
     @Override

@@ -30,7 +30,7 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
@@ -411,10 +411,15 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
         try {
             try {
-                RangePredicate rangePred = new RangePredicate(null, null, true, true, null, null);
+                // Use VectorPointPredicate for merge (full scan mode)
+                // K=MAX_VALUE to scan all records, nprobe=MAX_VALUE to probe all clusters,
+                // epsilon=0.0 to disable level-wise (use sequential iteration)
+                VectorPointPredicate mergePred = new VectorPointPredicate();
+                mergePred.setNprobe(Integer.MAX_VALUE);
+                mergePred.setEpsilon(0.0);
 
                 // Search all merging components (cursor already configured for full-scan mode)
-                search(mergeOp.getAccessor().getOpContext(), cursor, rangePred);
+                search(mergeOp.getAccessor().getOpContext(), cursor, mergePred);
 
                 try {
                     // Create merged disk component
@@ -614,10 +619,11 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         IIndexCursorStats stats = NoOpIndexCursorStats.INSTANCE;
         ILSMIndexAccessor accessor = createAccessor(opCtx);
 
-        // Create LSMVCTreeSearchCursor with fullScanMode=true for merge
-        boolean fullScanMode = true; // Merge requires sequential cluster iteration
-        IIndexCursor cursor = new LSMVCTreeSearchCursor((ILSMIndexOperationContext) opCtx, returnDeletedTuples,
-                fullScanMode, stats);
+        // Create LSMVCTreeSearchCursor in full-scan mode for merge operations
+        // fullScanMode=true enables sequential cluster iteration (0→1→2→...)
+        // returnDeletedTuples=true ensures antimatter tuples are visible for reconciliation
+        IIndexCursor cursor = new LSMVCTreeSearchCursor((ILSMIndexOperationContext) opCtx, returnDeletedTuples, true,
+                stats);
 
         return new LSMVCTreeMergeOperation(accessor, cursor, stats, mergeFileRefs.getInsertIndexFileReference(),
                 callback, getIndexIdentifier());
