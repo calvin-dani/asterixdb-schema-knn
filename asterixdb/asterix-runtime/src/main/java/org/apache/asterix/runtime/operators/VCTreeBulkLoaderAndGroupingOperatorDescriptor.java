@@ -567,176 +567,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     throw new IllegalStateException("DistanceFunction not initialized");
                 }
 
+                // Use accessor to find closest leaf centroid with distance function
                 ClusterSearchResult result =
                         vcTreeAccessor.findClosestLeafCentroid(queryVector, hyracksDistanceFunction);
-
-                if (result == null) {
-                    System.err.println("WARNING: No closest centroid found for query vector");
-                    return null;
-                }
-
-                return result;
-
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-                throw e;
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Find the closest centroid using VectorClusteringTreeAccessor.
-         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         *
-         * @param queryVector Query vector to find closest centroid for
-         * @return ClusterSearchResult containing closest centroid information
-         * @throws HyracksDataException if search fails
-         */
-        private List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector, double epi)
-                throws HyracksDataException {
-            try {
-                // Validate input vector
-                if (queryVector == null) {
-                    throw new IllegalArgumentException("Query vector cannot be null");
-                }
-
-                if (queryVector.length == 0) {
-                    throw new IllegalArgumentException("Query vector cannot be empty");
-                }
-
-                // Validate vector dimensions
-                if (queryVector.length != vectorDimension) {
-                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + vectorDimension + ")");
-                }
-
-                // Validate accessor is initialized
-                if (vcTreeAccessor == null) {
-                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
-                }
-
-                // Validate distance function is initialized
-                if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
-                }
-
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseLeafCentroid(queryVector, hyracksDistanceFunction, epi);
-
-                if (result == null) {
-                    System.err.println("WARNING: No closest centroid found for query vector");
-                    return null;
-                }
-
-                return result;
-
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-                throw e;
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Find the closest centroid using VectorClusteringTreeAccessor.
-         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         *
-         * @param queryVector Query vector to find closest centroid for
-         * @return ClusterSearchResult containing closest centroid information
-         * @throws HyracksDataException if search fails
-         */
-        private List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector, double epi)
-                throws HyracksDataException {
-            try {
-                // Validate input vector
-                if (queryVector == null) {
-                    throw new IllegalArgumentException("Query vector cannot be null");
-                }
-
-                if (queryVector.length == 0) {
-                    throw new IllegalArgumentException("Query vector cannot be empty");
-                }
-
-                // Validate vector dimensions
-                if (queryVector.length != vectorDimension) {
-                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + vectorDimension + ")");
-                }
-
-                // Validate accessor is initialized
-                if (vcTreeAccessor == null) {
-                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
-                }
-
-                // Validate distance function is initialized
-                if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
-                }
-
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsFrontier(queryVector, hyracksDistanceFunction, epi);
-
-                if (result == null) {
-                    System.err.println("WARNING: No closest centroid found for query vector");
-                    return null;
-                }
-
-                return result;
-
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-                throw e;
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Find the closest centroid using VectorClusteringTreeAccessor.
-         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         *
-         * @param queryVector Query vector to find closest centroid for
-         * @return ClusterSearchResult containing closest centroid information
-         * @throws HyracksDataException if search fails
-         */
-        private List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector, double epi)
-                throws HyracksDataException {
-            try {
-                // Validate input vector
-                if (queryVector == null) {
-                    throw new IllegalArgumentException("Query vector cannot be null");
-                }
-
-                if (queryVector.length == 0) {
-                    throw new IllegalArgumentException("Query vector cannot be empty");
-                }
-
-                // Validate vector dimensions
-                if (queryVector.length != vectorDimension) {
-                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + vectorDimension + ")");
-                }
-
-                // Validate accessor is initialized
-                if (vcTreeAccessor == null) {
-                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
-                }
-
-                // Validate distance function is initialized
-                if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
-                }
-
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsLevelWise(queryVector, hyracksDistanceFunction, epi);
 
                 if (result == null) {
                     System.err.println("WARNING: No closest centroid found for query vector");
@@ -781,74 +614,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                         if (embedding != null && embedding.length > 0) {
                             // Find closest centroid using the extracted embedding
-                            // Use accessor to find closest leaf centroid with distance function
-                            boolean crossPollinate = false; // Do not cross partition boundaries
-                            boolean leafPollinate = false;
-                            boolean interiorPollinate = false;
-                            if (!crossPollinate) {
-                                ClusterSearchResult result = findClosestCentroid(embedding);
-                                if (result != null) {
-                                    successfulQueries++;
+                            ClusterSearchResult result = findClosestCentroid(embedding);
+                            if (result != null) {
+                                successfulQueries++;
 
-                                    // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                    ITupleReference transformedTuple = createTransformedTuple(tuple, result);
+                                // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                ITupleReference transformedTuple = createTransformedTuple(tuple, result);
 
-                                    // Output the transformed tuple to downstream operators
-                                    outputTransformedTuple(transformedTuple);
-
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
-                            } else if (crossPollinate && leafPollinate) {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseLeafCentroid(embedding, 0.1);
-                                if (result != null) {
-                                    successfulQueries++;
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
-
-                            } else if (crossPollinate && interiorPollinate) {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseCentroidsLevelWise(embedding, 0.15);
-                                if (result != null) {
-                                    successfulQueries++;
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
+                                // Output the transformed tuple to downstream operators
+                                outputTransformedTuple(transformedTuple);
 
                             } else {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseCentroidsFrontier(embedding, 0.1);
-                                if (result != null) {
-                                    successfulQueries++;
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
-
+                                System.err.println("Failed to find closest centroid for query " + (i + 1));
                             }
-
                         } else {
                             System.err.println("Skipping tuple " + (i + 1) + " - no valid embedding extracted");
                         }
