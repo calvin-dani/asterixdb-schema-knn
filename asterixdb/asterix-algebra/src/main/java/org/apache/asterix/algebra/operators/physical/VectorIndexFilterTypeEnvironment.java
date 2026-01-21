@@ -28,6 +28,7 @@ import org.apache.hyracks.algebricks.core.algebra.base.LogicalExpressionTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IVariableTypeEnvironment;
 import org.apache.hyracks.algebricks.core.algebra.expressions.VariableReferenceExpression;
+import org.apache.hyracks.algebricks.core.jobgen.impl.JobGenContext;
 
 /**
  * A wrapper type environment for vector index filter compilation.
@@ -36,22 +37,30 @@ import org.apache.hyracks.algebricks.core.algebra.expressions.VariableReferenceE
  * so the regular type environment doesn't know their types. This wrapper provides
  * types for filter-only variables from the annotation map while delegating other
  * variable lookups to the original type environment.
+ *
+ * IMPORTANT: For function expressions (e.g., numeric-multiply($237, $237)), the type
+ * computation must use this wrapper's getVarType() to resolve filter variable types.
+ * We use JobGenContext.getType(expr, this) to ensure the expression type computer
+ * uses this wrapper for recursive type lookups, not the delegate.
  */
 public class VectorIndexFilterTypeEnvironment implements IVariableTypeEnvironment {
 
     private final IVariableTypeEnvironment delegate;
     private final Map<LogicalVariable, IAType> filterVarTypes;
+    private final JobGenContext context;
 
     /**
      * Creates a wrapper type environment with filter variable types.
      *
      * @param delegate The original type environment
      * @param filterVarTypes Map from filter-only variables to their types
+     * @param context The JobGenContext for expression type computation
      */
     public VectorIndexFilterTypeEnvironment(IVariableTypeEnvironment delegate,
-            Map<LogicalVariable, IAType> filterVarTypes) {
+            Map<LogicalVariable, IAType> filterVarTypes, JobGenContext context) {
         this.delegate = delegate;
         this.filterVarTypes = filterVarTypes;
+        this.context = context;
     }
 
     @Override
@@ -92,8 +101,11 @@ public class VectorIndexFilterTypeEnvironment implements IVariableTypeEnvironmen
                 return filterVarTypes.get(var);
             }
         }
-        // Fall back to delegate
-        return delegate.getType(expr);
+        // For function expressions (e.g., numeric-multiply($237, $237)), we need the
+        // expression type computer to use THIS wrapper for recursive type lookups,
+        // not the delegate. Otherwise, it won't find filter variable types.
+        // Use context.getType() which passes this wrapper to the type computer.
+        return context.getType(expr, this);
     }
 
     @Override

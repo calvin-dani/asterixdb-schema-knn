@@ -121,8 +121,9 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
                 IOperatorSchema filterSchema = new VectorIndexFilterSchema(opSchema, filterVarToFieldIndex);
 
                 // Create type environment with filter variable types
+                // Pass context so function expressions can use this wrapper for recursive type lookups
                 IVariableTypeEnvironment filterTypeEnv =
-                        new VectorIndexFilterTypeEnvironment(typeEnv, filterVarTypes);
+                        new VectorIndexFilterTypeEnvironment(typeEnv, filterVarTypes, context);
 
                 tupleFilterFactory = mp.createTupleFilterFactory(new IOperatorSchema[] { filterSchema }, filterTypeEnv,
                         unnestMapOp.getSelectCondition().getValue(), context);
