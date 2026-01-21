@@ -25,6 +25,9 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
@@ -129,8 +132,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
         this.reconciledOutputCount = 0;
-        this.nprobe = 10;
-        this.epsilon = 0.3;
+        this.nprobe = 5;
+        this.epsilon = 0.15;
         // Extract nprobe and epsilon from search predicate
 
         // Initialize shared visited tracking set
@@ -820,7 +823,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return;
         }
 
-        // NPROBE LOGIC:
+        // MERGE MODE: Always continue until all clusters exhausted (no early termination)
+        if (fullScanMode) {
+            LOGGER.log(Level.INFO, "[Thread:{}] [LSMVCTreeSearchCursor] Merge mode: advancing to next cluster",
+                    Thread.currentThread().getName());
+            advanceAllComponentsToNextCluster();
+            return;
+        }
+
+        // QUERY MODE: Apply nprobe logic
         // 1. If minClustersExplored < nprobe, always continue (haven't reached minimum probe count)
         // 2. If minClustersExplored >= nprobe AND reconciledOutputCount >= K, stop
         // 3. If minClustersExplored >= nprobe AND reconciledOutputCount < K, continue (need more results)
@@ -876,6 +887,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                 }
                 return;
             }
+            return;
+        }
 
             // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
             for (int i = 0; i < rangeCursors.length; i++) {
