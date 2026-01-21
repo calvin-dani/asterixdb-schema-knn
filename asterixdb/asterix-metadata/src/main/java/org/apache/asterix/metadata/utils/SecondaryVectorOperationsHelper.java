@@ -126,8 +126,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Extract sampling parameters from WITH clause
         AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
         int sampleSize = (withObjectNodeForSampling != null)
-                ? withObjectNodeForSampling.getOptionalInt("sample_size", 10000)
-                : 10000;
+                ? withObjectNodeForSampling.getOptionalInt("sample_size", 10000) : 10000;
         long sampleSeed = (withObjectNodeForSampling != null)
                 ? (long) withObjectNodeForSampling.getOptionalDouble("sample_seed", System.currentTimeMillis())
                 : System.currentTimeMillis();
