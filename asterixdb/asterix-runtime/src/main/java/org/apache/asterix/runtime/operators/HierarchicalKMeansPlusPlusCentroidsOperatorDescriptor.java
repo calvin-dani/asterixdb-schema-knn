@@ -38,6 +38,10 @@ import java.util.Random;
 import java.util.UUID;
 
 import org.apache.asterix.builders.OrderedListBuilder;
+import org.apache.asterix.common.api.INcApplicationContext;
+import org.apache.asterix.common.dataflow.DatasetLocalResource;
+import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
+import org.apache.asterix.transaction.management.resource.UpdatableLocalResourceRepositoryWrapper;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AOrderedListSerializerDeserializer;
 import org.apache.asterix.om.base.AMutableDouble;
@@ -49,6 +53,7 @@ import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
+import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
@@ -59,6 +64,7 @@ import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.IPersistedResourceRegistry;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.data.std.api.IPointable;
@@ -84,9 +90,20 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResource;
+import org.apache.hyracks.storage.common.IIndex;
+import org.apache.hyracks.storage.common.ILocalResourceRepository;
+import org.apache.hyracks.storage.common.IResource;
+import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 // Serializable distance function implementations
 class ManhattanDistanceFunction implements DistanceFunction, Serializable {
@@ -618,6 +635,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
     private DistanceFunction distanceFunction;
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
+    private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
@@ -797,7 +815,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
+            UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter,
+            IIndexDataflowHelperFactory indexHelperFactory) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -809,6 +828,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.args = args;
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
+        this.indexHelperFactory = indexHelperFactory;
 
         // Initialize distance function to euclidean squared to avoid null pointer issues
         this.distanceFunction = new EuclideanSquaredDistanceFunction();
@@ -940,6 +960,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         //                        System.err.println("Retrieved total tuple count: " + totalTupleCount);
 
+                        // Compute and write optimized scalar quantization parameters per partition
+                        if (indexHelperFactory != null) {
+                            computeAndWriteQuantizationParams(ctx, partition, sampleState, eval, inputVal,
+                                    listAccessorConstant, KMeansUtils, fta, tuple);
+                        }
+
                         // Perform memory-efficient hierarchical K-means clustering
                         HierarchicalClusterStructure clusterStructure =
                                 performMemoryEfficientHierarchicalKMeans(ctx, in, fta, tuple, eval, inputVal,
@@ -966,6 +992,277 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     } finally {
                         in.close();
                         writer.close();
+                    }
+                }
+
+                /**
+                 * Computes optimized scalar quantization parameters from sampled vectors and writes them
+                 * to a per-partition file in the index directory.
+                 * 
+                 * @param ctx The Hyracks task context
+                 * @param partition The partition ID
+                 * @param sampleState The materialized sample state containing the run file
+                 * @param eval Scalar evaluator for extracting vector data
+                 * @param inputVal Pointable for input values
+                 * @param listAccessorConstant List accessor for vector data
+                 * @param kMeansUtils K-means utilities
+                 * @param fta Frame tuple accessor
+                 * @param tuple Frame tuple reference
+                 */
+                private void computeAndWriteQuantizationParams(IHyracksTaskContext ctx, int partition,
+                        MaterializerTaskState sampleState, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, FrameTupleAccessor fta,
+                        FrameTupleReference tuple) throws HyracksDataException {
+                    IIndexDataflowHelper indexHelper = null;
+                    GeneratedRunFileReader quantReader = null;
+                    try {
+                        // Get index directory for this partition
+                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                        indexHelper.open();
+                        IIndex indexInstance = indexHelper.getIndexInstance();
+                        if (!(indexInstance instanceof ILSMIndex)) {
+                            // If not an LSM index, skip quantization computation
+                            return;
+                        }
+                        ILSMIndex lsmIndex = (ILSMIndex) indexInstance;
+                        //                        ILSMIndexFileManager fileManager = lsmIndex.getFileManager();
+                        //                        FileReference indexDir = fileManager.getBaseDir();
+
+                        // Collect sampled vectors (limit to 20,000)
+                        final int MAX_SAMPLES = 20000;
+                        List<float[]> sampledVectors = new ArrayList<>();
+                        quantReader = sampleState.creatReader();
+                        quantReader.open();
+
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        int collected = 0;
+
+                        while (quantReader.nextFrame(frame) && collected < MAX_SAMPLES) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+
+                            for (int j = 0; j < tupleCount && collected < MAX_SAMPLES; j++) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+
+                                // Check if the value is a list type (vector)
+                                ATypeTag tag = ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]);
+                                if (!tag.isListType()) {
+                                    continue;
+                                }
+
+                                // Extract vector as double[]
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                                // Convert double[] to float[]
+                                float[] floatPoint = new float[point.length];
+                                for (int i = 0; i < point.length; i++) {
+                                    floatPoint[i] = (float) point[i];
+                                }
+                                sampledVectors.add(floatPoint);
+                                collected++;
+                            }
+                        }
+
+                        // Compute and write quantization parameters if we collected any vectors
+                        if (!sampledVectors.isEmpty()) {
+                            OptimizedScalarQuantizationSampleFile.Params params =
+                                    OptimizedScalarQuantizationSampleFile.computeFromSamples(sampledVectors, 0.99f, 7);
+                            //                            OptimizedScalarQuantizationSampleFile.write(ctx.getIoManager(), indexDir, params);
+                            System.err.println("UPDATE CALL: Computed quantization for partition " + partition + " from "
+                                    + sampledVectors.size() + " vectors: bits=" + params.bits + ", alpha=" + params.alpha
+                                    + ", minQ=" + params.minQuantile + ", maxQ=" + params.maxQuantile + ", conf="
+                                    + params.confidenceInterval + ", sampleCount=" + params.sampleCount);
+
+                            // Update LocalResource metadata with quantization parameters
+                            try {
+                                System.err.println("UPDATE CALL: About to call updateLocalResourceWithQuantizationParams for partition " + partition);
+                                updateLocalResourceWithQuantizationParams(ctx, indexHelper, params);
+                                System.err.println("UPDATE CALL: Successfully called updateLocalResourceWithQuantizationParams for partition " + partition);
+                            } catch (Exception e) {
+                                // Log error but don't fail the job - metadata update is optional
+                                System.err.println("WARNING: Failed to update LocalResource metadata with quantization "
+                                        + "parameters for partition " + partition + ": " + e.getMessage());
+                                e.printStackTrace();
+                            }
+                        } else {
+                            System.err.println("UPDATE CALL: No sampled vectors collected for partition " + partition + ", skipping quantization update");
+                        }
+
+                    } catch (Exception e) {
+                        // Log error but don't fail the job - quantization is optional
+                        System.err.println("WARNING: Failed to compute quantization parameters for partition "
+                                + partition + ": " + e.getMessage());
+                        e.printStackTrace();
+                    } finally {
+                        if (quantReader != null) {
+                            try {
+                                quantReader.close();
+                            } catch (Exception e) {
+                                // Ignore close errors
+                            }
+                        }
+                        if (indexHelper != null) {
+                            try {
+                                indexHelper.close();
+                            } catch (Exception e) {
+                                // Ignore close errors
+                            }
+                        }
+                    }
+                }
+
+                /**
+                 * Updates the LocalResource metadata with computed quantization parameters.
+                 * 
+                 * @param ctx The Hyracks task context
+                 * @param indexHelper The index dataflow helper
+                 * @param params The computed quantization parameters
+                 * @throws HyracksDataException if the update fails
+                 */
+                private void updateLocalResourceWithQuantizationParams(IHyracksTaskContext ctx,
+                        IIndexDataflowHelper indexHelper, OptimizedScalarQuantizationSampleFile.Params params)
+                        throws HyracksDataException {
+                    try {
+                        // Get ILocalResourceRepository from context
+                        INCServiceContext serviceCtx = ctx.getJobletContext().getServiceContext();
+                        INcApplicationContext appCtx = (INcApplicationContext) serviceCtx.getApplicationContext();
+                        ILocalResourceRepository baseRepository = appCtx.getLocalResourceRepository();
+                        
+                        // Wrap repository to add update() method
+                        UpdatableLocalResourceRepositoryWrapper repository =
+                                new UpdatableLocalResourceRepositoryWrapper(baseRepository);
+
+                        // Get existing LocalResource
+                        LocalResource existingResource = indexHelper.getResource();
+                        if (existingResource == null) {
+                            System.err.println("WARNING: Cannot update quantization params - LocalResource not found");
+                            return;
+                        }
+
+                        // Extract existing LSMVCTreeLocalResource
+                        // Handle both direct LSMVCTreeLocalResource and DatasetLocalResource wrapper
+                        IResource existingIResource = existingResource.getResource();
+                        IResource actualVCResource = null;
+                        DatasetLocalResource datasetWrapper = null;
+                        
+                        // Check if it's wrapped in DatasetLocalResource
+                        if (existingIResource instanceof DatasetLocalResource) {
+                            datasetWrapper = (DatasetLocalResource) existingIResource;
+                            IResource wrappedResource = datasetWrapper.getResource();
+                            if (wrappedResource instanceof LSMVCTreeLocalResource) {
+                                actualVCResource = wrappedResource;
+                            } else {
+                                System.err.println(
+                                        "WARNING: Wrapped resource is not LSMVCTreeLocalResource, skipping quantization update");
+                                return;
+                            }
+                        } else if (existingIResource instanceof LSMVCTreeLocalResource) {
+                            // Direct LSMVCTreeLocalResource (not wrapped)
+                            actualVCResource = existingIResource;
+                        } else {
+                            System.err.println(
+                                    "WARNING: Resource is not LSMVCTreeLocalResource (direct or wrapped), skipping quantization update");
+                            return;
+                        }
+
+                        LSMVCTreeLocalResource existingVCResource = (LSMVCTreeLocalResource) actualVCResource;
+
+                        // Create new LSMVCTreeLocalResource with quantization parameters
+                        // Use JSON serialization/deserialization approach to preserve all existing fields
+                        // and add quantization parameters
+
+                        // Get IPersistedResourceRegistry from app context
+                        IPersistedResourceRegistry registry = appCtx.getPersistedResourceRegistry();
+
+                        // Serialize existing resource to JSON
+                        JsonNode existingJson = existingVCResource.toJson(registry);
+
+                        // Update JSON with quantization parameters
+                        ObjectNode jsonObject = (ObjectNode) existingJson;
+                        jsonObject.put("confidenceInterval", params.confidenceInterval);
+                        jsonObject.put("minQuantile", params.minQuantile);
+                        jsonObject.put("maxQuantile", params.maxQuantile);
+                        jsonObject.put("alpha", params.alpha);
+                        jsonObject.put("bits", params.bits);
+                        jsonObject.put("sampleCount", params.sampleCount);
+
+                        // DEBUG: Verify JSON has the values
+                        System.err.println("UPDATE CALL: JSON after adding params - bits: " + jsonObject.get("bits")
+                                + ", alpha: " + jsonObject.get("alpha") + ", minQ: " + jsonObject.get("minQuantile")
+                                + ", maxQ: " + jsonObject.get("maxQuantile") + ", conf: "
+                                + jsonObject.get("confidenceInterval"));
+
+                        // Deserialize back to LSMVCTreeLocalResource
+                        LSMVCTreeLocalResource updatedVCResource =
+                                (LSMVCTreeLocalResource) LSMVCTreeLocalResource.fromJson(registry, jsonObject);
+                        
+                        // DEBUG: Verify deserialized resource has the values
+                        try {
+                            java.lang.reflect.Field bitsField = updatedVCResource.getClass().getDeclaredField("bits");
+                            bitsField.setAccessible(true);
+                            Integer deserializedBits = (Integer) bitsField.get(updatedVCResource);
+                            java.lang.reflect.Field alphaField = updatedVCResource.getClass().getDeclaredField("alpha");
+                            alphaField.setAccessible(true);
+                            Float deserializedAlpha = (Float) alphaField.get(updatedVCResource);
+                            System.err.println("UPDATE CALL: Deserialized resource has bits: " + deserializedBits
+                                    + ", alpha: " + deserializedAlpha);
+                        } catch (Exception e) {
+                            System.err.println("UPDATE CALL: Failed to verify deserialized resource: " + e.getMessage());
+                        }
+
+                        // Create new LocalResource wrapper with same ID and version
+                        // If it was wrapped in DatasetLocalResource, wrap it back
+                        IResource finalResource;
+                        if (datasetWrapper != null) {
+                            // Re-wrap in DatasetLocalResource with same datasetId and partition
+                            finalResource = new DatasetLocalResource(datasetWrapper.getDatasetId(),
+                                    datasetWrapper.getPartition(), updatedVCResource);
+                        } else {
+                            // Use the updated resource directly
+                            finalResource = updatedVCResource;
+                        }
+                        
+                        LocalResource updatedResource = new LocalResource(existingResource.getId(),
+                                existingResource.getVersion(), existingResource.isDurable(), finalResource);
+
+                        // DEBUG: Log what we're about to update
+                        System.err.println("UPDATE CALL: About to call repository.update()");
+                        System.err.println("UPDATE CALL: Updated resource path: " + updatedResource.getPath());
+                        System.err.println("UPDATE CALL: Updated resource ID: " + updatedResource.getId());
+                        
+                        // Extract and log quantization params from the resource we're about to write
+                        try {
+                            IResource finalRes = updatedResource.getResource();
+                            if (finalRes instanceof DatasetLocalResource) {
+                                DatasetLocalResource dsWrap = (DatasetLocalResource) finalRes;
+                                IResource wrapped = dsWrap.getResource();
+                                if (wrapped instanceof LSMVCTreeLocalResource) {
+                                    LSMVCTreeLocalResource vcRes = (LSMVCTreeLocalResource) wrapped;
+                                    // Use reflection to read protected fields
+                                    java.lang.reflect.Field bitsField = vcRes.getClass().getDeclaredField("bits");
+                                    bitsField.setAccessible(true);
+                                    Integer bits = (Integer) bitsField.get(vcRes);
+                                    java.lang.reflect.Field alphaField = vcRes.getClass().getDeclaredField("alpha");
+                                    alphaField.setAccessible(true);
+                                    Float alpha = (Float) alphaField.get(vcRes);
+                                    System.err.println("UPDATE CALL: Resource being updated has bits=" + bits + ", alpha=" + alpha);
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("UPDATE CALL: Failed to read quantization params from resource object: " + e.getMessage());
+                        }
+                        
+                        // Update the existing resource (preserves checkpoints)
+                        repository.update(updatedResource);
+
+                        System.err.println("UPDATE CALL: Successfully called repository.update() for partition");
+
+                    } catch (Exception e) {
+                        throw HyracksDataException.create(e);
                     }
                 }
 

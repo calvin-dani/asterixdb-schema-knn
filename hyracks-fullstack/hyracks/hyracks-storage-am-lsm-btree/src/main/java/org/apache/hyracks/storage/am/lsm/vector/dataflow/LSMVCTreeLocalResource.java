@@ -57,6 +57,14 @@ public class LSMVCTreeLocalResource extends LsmResource {
     protected final int[] filterFields;
     protected final boolean atomic;
 
+    // Quantization parameters (optional, computed during index building)
+    protected final Float confidenceInterval;
+    protected final Float minQuantile;
+    protected final Float maxQuantile;
+    protected final Float alpha;
+    protected final Integer bits;
+    protected final Integer sampleCount;
+
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
             IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
@@ -66,6 +74,22 @@ public class LSMVCTreeLocalResource extends LsmResource {
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic) {
+        this(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
+                opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
+                vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions,
+                vectorFields, nullTypeTraits, nullIntrospector, atomic, null, null, null, null, null, null);
+    }
+
+    public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
+            IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
+            IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
+            ILSMOperationTrackerFactory opTrackerProvider, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
+            ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
+            ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
+            Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
+            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic, Float confidenceInterval,
+            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) {
         super(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -74,15 +98,33 @@ public class LSMVCTreeLocalResource extends LsmResource {
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
+        this.confidenceInterval = confidenceInterval;
+        this.minQuantile = minQuantile;
+        this.maxQuantile = maxQuantile;
+        this.alpha = alpha;
+        this.bits = bits;
+        this.sampleCount = sampleCount;
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
             int[] vectorFields, int[] filterFields, boolean atomic) throws HyracksDataException {
+        this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null);
+    }
+
+    protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
+            int[] vectorFields, int[] filterFields, boolean atomic, Float confidenceInterval, Float minQuantile,
+            Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) throws HyracksDataException {
         super(registry, json);
         this.vectorDimensions = vectorDimensions;
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
+        this.confidenceInterval = confidenceInterval;
+        this.minQuantile = minQuantile;
+        this.maxQuantile = maxQuantile;
+        this.alpha = alpha;
+        this.bits = bits;
+        this.sampleCount = sampleCount;
     }
 
     @Override
@@ -107,7 +149,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
     @Override
     public JsonNode toJson(IPersistedResourceRegistry registry) throws HyracksDataException {
         ObjectNode jsonObject = registry.getClassIdentifier(getClass(), serialVersionUID);
-        super.appendToJson(jsonObject, registry);
+        appendToJson(jsonObject, registry); // Call this.appendToJson() to include quantization params
         return jsonObject;
     }
 
@@ -119,6 +161,25 @@ public class LSMVCTreeLocalResource extends LsmResource {
         json.putPOJO("vectorFields", vectorFields);
         json.putPOJO("filterFields", filterFields);
         json.put("atomic", atomic);
+        // Write quantization parameters only if they are not null
+        if (confidenceInterval != null) {
+            json.put("confidenceInterval", confidenceInterval);
+        }
+        if (minQuantile != null) {
+            json.put("minQuantile", minQuantile);
+        }
+        if (maxQuantile != null) {
+            json.put("maxQuantile", maxQuantile);
+        }
+        if (alpha != null) {
+            json.put("alpha", alpha);
+        }
+        if (bits != null) {
+            json.put("bits", bits);
+        }
+        if (sampleCount != null) {
+            json.put("sampleCount", sampleCount);
+        }
     }
 
     public static IJsonSerializable fromJson(IPersistedResourceRegistry registry, JsonNode json)
@@ -127,6 +188,54 @@ public class LSMVCTreeLocalResource extends LsmResource {
         //        int[] vectorFields = OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class);
         //        int[] filterFields = OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class);
         //        boolean atomic = json.get("atomic").asBoolean();
-        return new LSMVCTreeLocalResource(registry, json, 784, null, null, false);
+
+        //TODO CALVIN DANI : MAKE DYNAMIC
+        int vectorDimensions = json.has("vectorDimensions") ? json.get("vectorDimensions").asInt() : 784;
+        int[] vectorFields =
+                json.has("vectorFields") ? OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class) : null;
+        int[] filterFields =
+                json.has("filterFields") ? OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class) : null;
+        boolean atomic = json.has("atomic") ? json.get("atomic").asBoolean() : false;
+
+        // Read quantization parameters with backward compatibility (default to null if not present)
+        Float confidenceInterval = getOrDefaultFloat(json, "confidenceInterval", null);
+        Float minQuantile = getOrDefaultFloat(json, "minQuantile", null);
+        Float maxQuantile = getOrDefaultFloat(json, "maxQuantile", null);
+        Float alpha = getOrDefaultFloat(json, "alpha", null);
+        Integer bits = getOrDefaultInt(json, "bits", null);
+        Integer sampleCount = getOrDefaultInt(json, "sampleCount", null);
+
+        return new LSMVCTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic,
+                confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount);
+    }
+
+    /**
+     * Helper method to read optional float fields from JSON with backward compatibility.
+     * Returns null if field is missing (instead of throwing exception).
+     */
+    protected static Float getOrDefaultFloat(JsonNode jsonNode, String fieldName, Float defaultValue) {
+        if (!jsonNode.has(fieldName)) {
+            return defaultValue;
+        }
+        JsonNode node = jsonNode.get(fieldName);
+        if (node.isNull()) {
+            return defaultValue;
+        }
+        return (float) node.asDouble();
+    }
+
+    /**
+     * Helper method to read optional int fields from JSON with backward compatibility.
+     * Returns null if field is missing (instead of throwing exception).
+     */
+    protected static Integer getOrDefaultInt(JsonNode jsonNode, String fieldName, Integer defaultValue) {
+        if (!jsonNode.has(fieldName)) {
+            return defaultValue;
+        }
+        JsonNode node = jsonNode.get(fieldName);
+        if (node.isNull()) {
+            return defaultValue;
+        }
+        return node.asInt();
     }
 }

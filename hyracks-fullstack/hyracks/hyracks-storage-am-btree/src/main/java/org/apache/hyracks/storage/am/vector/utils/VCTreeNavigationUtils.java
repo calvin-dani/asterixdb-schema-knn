@@ -586,6 +586,83 @@ public class VCTreeNavigationUtils {
     }
 
     /**
+     * Find close centroids using a hybrid approach: level-wise search with DFS fallback.
+     * 
+     * This method first uses level-wise global sort to find clusters within epsilon threshold.
+     * If the number of clusters found is less than minClusters, it falls back to DFS traversal
+     * to explore siblings and cousins (nodes that were rejected by the epsilon threshold).
+     * 
+     * The DFS fallback uses the NavigationState infrastructure which maintains a stack of the
+     * traversal path, enabling backtracking to explore unexplored siblings at each level.
+     * 
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
+     * @param rootPageId Root page ID to start traversal
+     * @param interiorFrameFactory Factory for creating interior frames
+     * @param leafFrameFactory Factory for creating leaf frames
+     * @param queryVector Query vector to find closest centroids for
+     * @param distanceFunction Distance function to use for centroid finding
+     * @param epsilon Absolute distance threshold added to closest sibling/centroid at each level
+     * @param minClusters Minimum number of clusters to return (will use DFS fallback if level-wise finds fewer)
+     * @return List of ClusterSearchResult containing at least minClusters (or all available), globally sorted by distance
+     * @throws HyracksDataException if any error occurs during traversal
+     */
+    public static List<ClusterSearchResult> findCloseCentroidsHybrid(IBufferCache bufferCache, int fileId,
+            int rootPageId, ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+            double[] queryVector, IVectorDistanceFunction distanceFunction, double epsilon, int minClusters)
+            throws HyracksDataException {
+
+        // Phase 1: Use level-wise global sort to find clusters within epsilon threshold
+        List<ClusterSearchResult> results = findCloseCentroidsLevelWiseGlobalSort(bufferCache, fileId, rootPageId,
+                interiorFrameFactory, leafFrameFactory, queryVector, distanceFunction, epsilon);
+
+        // If we have enough clusters, return them
+        if (results.size() >= minClusters) {
+            return results;
+        }
+
+        // Phase 2: DFS fallback to explore siblings and cousins
+        // Create a visited set with all centroid IDs already found
+        Set<Integer> visitedCentroidIds = new HashSet<>();
+        for (ClusterSearchResult result : results) {
+            visitedCentroidIds.add(result.centroidId);
+        }
+
+        // Initialize DFS navigation state with shared visited set
+        NavigationState dfsState = new NavigationState(bufferCache, fileId, rootPageId, interiorFrameFactory,
+                leafFrameFactory, queryVector, visitedCentroidIds);
+
+        // Initialize the DFS iterator (this will skip already-visited centroids)
+        ClusterSearchResult firstFromDfs = initializeClusterIterator(dfsState, distanceFunction);
+
+        // The first result from DFS might be one we already have (since it starts from root)
+        // But since we passed the visitedCentroidIds, it should skip those
+        if (firstFromDfs != null && !visitedCentroidIds.contains(firstFromDfs.centroidId)) {
+            results.add(firstFromDfs);
+            visitedCentroidIds.add(firstFromDfs.centroidId);
+        }
+
+        // Keep finding next closest clusters until we have enough or exhaust the tree
+        while (results.size() < minClusters) {
+            ClusterSearchResult nextCluster = findNextClosestCluster(dfsState, distanceFunction);
+            if (nextCluster == null) {
+                // No more clusters available in the tree
+                break;
+            }
+            // The DFS already marks visited, but double-check to be safe
+            if (!visitedCentroidIds.contains(nextCluster.centroidId)) {
+                results.add(nextCluster);
+                visitedCentroidIds.add(nextCluster.centroidId);
+            }
+        }
+
+        // Re-sort results by distance since DFS may have found clusters out of order
+        results.sort(Comparator.comparingDouble(r -> r.distance));
+
+        return results;
+    }
+
+    /**
      * Find close centroids using level-by-level cross-pollination.
      * At each interior node, finds closest sibling and explores all siblings within closestDistance + epsilon.
      * At each leaf node, finds closest centroid and collects all centroids within closestDistance + epsilon.

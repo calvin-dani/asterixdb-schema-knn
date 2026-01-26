@@ -1351,61 +1351,21 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void initialize() throws HyracksDataException {
-                    //                    System.err.println("=== PassThroughActivity INITIALIZING ===");
                     try {
 
-                        //                        System.err.println("✅ PassThroughActivity initialized successfully");
-
                     } catch (Exception e) {
-                        //                        System.err.println("ERROR: Failed to initialize PassThroughActivity: " + e.getMessage());
-                        //                        e.printStackTrace();
                         throw HyracksDataException.create(e);
                     }
                 }
 
-                private void initializeLSMBulkLoader() throws HyracksDataException {
-                    try {
-                        System.err.println("=== INITIALIZING VectorClusteringTree Bulk Loader ===");
 
-                        // Get index helper and open it
-                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
-                        indexHelper.open();
-                        lsmIndex = (ILSMIndex) indexHelper.getIndexInstance();
-
-                        // Create LSM bulk loader (which internally uses VectorClusteringTree)
-                        Map<String, Object> parameters = new HashMap<>();
-                        parameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID,
-                                LSMComponentId.DEFAULT_COMPONENT_ID);
-                        IIndexBulkLoader vcBulkLoader =
-                                lsmIndex.createBulkLoader(fillFactor, false, 0L, false, parameters);
-
-                        // End the bulk loader immediately
-                        vcBulkLoader.end();
-
-                        System.err.println("✅ VectorClusteringTree Bulk Loader created and ended successfully");
-
-                    } catch (Exception e) {
-                        System.err.println(
-                                "ERROR: Failed to initialize VectorClusteringTree Bulk Loader: " + e.getMessage());
-                        e.printStackTrace();
-                        throw HyracksDataException.create(e);
-                    }
-                }
 
                 @Override
                 public void deinitialize() throws HyracksDataException {
-                    //                    System.err.println("=== PassThroughActivity DEINITIALIZING ===");
                     try {
-                        if (lsmBulkLoader != null) {
-                            lsmBulkLoader.end();
-                        }
-                        if (indexHelper != null) {
-                            indexHelper.close();
-                        }
+
                     } catch (Exception e) {
-                        System.err.println("ERROR: Failed to deinitialize PassThroughActivity: " + e.getMessage());
                     }
-                    //                    System.err.println("=== PassThroughActivity COMPLETE ===");
                 }
             };
         }
