@@ -54,6 +54,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringBidirectionCursor;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
@@ -1222,6 +1223,24 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Set full-scan mode if requested (for merge operations)
             cursor.setFullScanMode(fullScanMode);
+
+            return cursor;
+        }
+
+        /**
+         * Create a bidirectional search cursor for optimized ANN search.
+         * This cursor supports bidirectional traversal from a pivot point
+         * where D(x,C) ≈ D(q,C), enabling triangle inequality-based early termination.
+         *
+         * @return VectorClusteringBidirectionCursor configured with tree navigation capabilities
+         * @throws HyracksDataException if cursor creation fails
+         */
+        public VectorClusteringBidirectionCursor createBidirectionCursor() throws HyracksDataException {
+            VectorClusteringBidirectionCursor cursor = new VectorClusteringBidirectionCursor();
+
+            // Configure cursor with tree navigation capabilities
+            cursor.setBufferCache(tree.bufferCache, tree.getFileId());
+            cursor.setFrameFactories(tree.metadataFrameFactory, tree.dataFrameFactory);
 
             return cursor;
         }
