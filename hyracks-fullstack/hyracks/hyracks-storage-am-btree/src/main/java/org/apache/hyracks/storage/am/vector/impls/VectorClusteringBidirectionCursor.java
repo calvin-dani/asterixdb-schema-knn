@@ -60,14 +60,14 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
     private ITreeIndexFrameFactory dataFrameFactory;
 
     // Directory page navigation
-    private Deque<Long> leftDirPageStack; // Stack of directory page IDs to the left
+    private Deque<Long> leftDirPageStack;  // Stack of directory page IDs to the left
     private long currentDirPageId;
     private ICachedPage currentDirPage;
     private IVectorClusteringMetadataFrame currentDirFrame;
 
     // Position within current directory page
-    private int rightEntryIndex; // Entry index for right cursor
-    private int leftEntryIndex; // Entry index for left cursor
+    private int rightEntryIndex;  // Entry index for right cursor
+    private int leftEntryIndex;   // Entry index for left cursor
 
     // Right data page state
     private long rightDataPageId;
@@ -91,7 +91,7 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
 
     // Cursor state
     private boolean isOpen;
-    private double distanceToQueryCentroid; // D(q, C)
+    private double distanceToQueryCentroid;  // D(q, C)
 
     public VectorClusteringBidirectionCursor() {
         this.isOpen = false;
@@ -167,7 +167,7 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
                 if (dqc <= maxDist) {
                     // Found! This directory page contains the pivot
                     currentDirPageId = dirPageId;
-                    currentDirPage = dirPage; // Keep pinned
+                    currentDirPage = dirPage;  // Keep pinned
                     currentDirFrame = dirFrame;
 
                     // Initialize cursors at this entry
@@ -196,14 +196,7 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
             currentDirFrame.setPage(currentDirPage);
 
             int lastEntry = currentDirFrame.getTupleCount() - 1;
-            if (lastEntry >= 0) {
-                initializeCursorsAtPivot(lastEntry, dqc);
-            } else {
-                // Empty metadata page - no data in this cluster for this component
-                closeCurrentDirPage();
-                rightExhausted = true;
-                leftExhausted = true;
-            }
+            initializeCursorsAtPivot(lastEntry, dqc);
         } else {
             // Empty cluster
             rightExhausted = true;
@@ -331,7 +324,7 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
         long nextDirPageId = currentDirFrame.getNextPage();
 
         if (nextDirPageId == -1) {
-            return false; // Exhausted
+            return false;  // Exhausted
         }
 
         // For right traversal, we don't modify leftDirPageStack
@@ -433,7 +426,7 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
 
         // Need to move to previous directory page - pop from stack!
         if (leftDirPageStack.isEmpty()) {
-            return false; // Exhausted
+            return false;  // Exhausted
         }
 
         // Don't close current dir page if right cursor is still using it
@@ -544,8 +537,8 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
 
     @Override
     public void next() throws HyracksDataException {
-        throw HyracksDataException
-                .create(new UnsupportedOperationException("Use nextRight() or nextLeft() for bidirectional cursor"));
+        throw HyracksDataException.create(
+                new UnsupportedOperationException("Use nextRight() or nextLeft() for bidirectional cursor"));
     }
 
     @Override

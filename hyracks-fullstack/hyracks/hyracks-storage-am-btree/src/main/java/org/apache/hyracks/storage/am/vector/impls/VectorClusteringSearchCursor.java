@@ -132,7 +132,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     public void setFrameFactories(ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
-            ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory) {
+                                  ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory) {
         this.interiorFrameFactory = interiorFrameFactory;
         this.leafFrameFactory = leafFrameFactory;
         this.metadataFrameFactory = metadataFrameFactory;
@@ -739,8 +739,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             // Get the next page ID from the current data frame's linked list pointer
             int nextDataPageId = dataFrame.getNextPage();
             if (nextDataPageId == -1) {
-                System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] "
-                        + "Reached end of data page chain, no more pages");
+                System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] " +
+                        "Reached end of data page chain, no more pages");
                 return false; // Reached end of chain
             }
 
@@ -750,21 +750,18 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Check if this page has tuples
             if (this.tupleCount > 0) {
-                System.err
-                        .println(String.format(
-                                "[VectorClusteringSearchCursor.moveToNextDataPage] "
-                                        + "Found non-empty data page %d with %d tuples",
-                                nextDataPageId, this.tupleCount));
+                System.err.println(String.format(
+                        "[VectorClusteringSearchCursor.moveToNextDataPage] " +
+                                "Found non-empty data page %d with %d tuples",
+                        nextDataPageId, this.tupleCount));
                 return true; // Found non-empty page
             }
 
             // Page is empty after deletion - continue to next page
-            System.err
-                    .println(
-                            String.format(
-                                    "[VectorClusteringSearchCursor.moveToNextDataPage] "
-                                            + "Data page %d is empty (after deletion), skipping to next page",
-                                    nextDataPageId));
+            System.err.println(String.format(
+                    "[VectorClusteringSearchCursor.moveToNextDataPage] " +
+                            "Data page %d is empty (after deletion), skipping to next page",
+                    nextDataPageId));
             // Loop continues to next page
         }
     }

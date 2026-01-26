@@ -55,6 +55,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringBidirectionCursor;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
