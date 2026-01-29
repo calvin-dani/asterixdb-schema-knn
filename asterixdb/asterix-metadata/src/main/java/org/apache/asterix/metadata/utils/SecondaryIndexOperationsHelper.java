@@ -230,6 +230,14 @@ public abstract class SecondaryIndexOperationsHelper implements ISecondaryIndexO
     }
 
     @Override
+    public JobSpecification buildQuantizationMetadataJobSpec() throws AlgebricksException {
+        // K-means indexes don't support static structure creation
+        throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, sourceLoc,
+                "Static structure creation not supported for K-means index type");
+    }
+
+
+    @Override
     public abstract JobSpecification buildCompactJobSpec() throws AlgebricksException;
 
     @Override

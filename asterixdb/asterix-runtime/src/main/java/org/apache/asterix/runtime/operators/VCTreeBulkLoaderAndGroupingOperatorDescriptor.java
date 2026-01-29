@@ -66,16 +66,16 @@ import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
-import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResource;
-import org.apache.hyracks.storage.common.IResource;
-import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexAccessor;
+import org.apache.hyracks.storage.common.IResource;
+import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
 /**
@@ -662,7 +662,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 // DEBUG: Log resource details
                 System.err.println("READ: Reading quantization params from resource");
                 System.err.println("READ: LocalResource path: " + localResource.getPath());
-                System.err.println("READ: LocalResource ID: " + localResource.getId() + ", Version: " + localResource.getVersion());
+                System.err.println("READ: LocalResource ID: " + localResource.getId() + ", Version: "
+                        + localResource.getVersion());
 
                 // Extract LSMVCTreeLocalResource (handle DatasetLocalResource wrapper)
                 IResource resource = localResource.getResource();
@@ -671,28 +672,31 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 if (resource instanceof DatasetLocalResource) {
                     datasetWrapper = (DatasetLocalResource) resource;
-                    System.err.println("READ: Resource is wrapped in DatasetLocalResource - datasetId: " + datasetWrapper.getDatasetId()
-                            + ", partition: " + datasetWrapper.getPartition());
+                    System.err.println("READ: Resource is wrapped in DatasetLocalResource - datasetId: "
+                            + datasetWrapper.getDatasetId() + ", partition: " + datasetWrapper.getPartition());
                     IResource wrappedResource = datasetWrapper.getResource();
                     if (wrappedResource instanceof LSMVCTreeLocalResource) {
                         vcResource = (LSMVCTreeLocalResource) wrappedResource;
                     } else {
-                        System.err.println("READ: Wrapped resource type: " + (wrappedResource != null ? wrappedResource.getClass().getName() : "null"));
+                        System.err.println("READ: Wrapped resource type: "
+                                + (wrappedResource != null ? wrappedResource.getClass().getName() : "null"));
                     }
                 } else if (resource instanceof LSMVCTreeLocalResource) {
                     vcResource = (LSMVCTreeLocalResource) resource;
                     System.err.println("READ: Resource is direct LSMVCTreeLocalResource (not wrapped)");
                 } else {
-                    System.err.println("READ: Resource type: " + (resource != null ? resource.getClass().getName() : "null"));
+                    System.err.println(
+                            "READ: Resource type: " + (resource != null ? resource.getClass().getName() : "null"));
                 }
 
                 if (vcResource == null) {
-                    System.err.println("READ: WARNING - LSMVCTreeLocalResource not found, using default quantization params");
+                    System.err.println(
+                            "READ: WARNING - LSMVCTreeLocalResource not found, using default quantization params");
                     return createDefaultQuantizationParams(vectorDimension);
                 }
 
                 System.err.println("READ: Resource type: " + vcResource.getClass().getName());
-                
+
                 // Read quantization parameters using reflection (fields are protected)
                 Integer bits = getFieldValue(vcResource, "bits", Integer.class);
                 Float confidenceInterval = getFieldValue(vcResource, "confidenceInterval", Float.class);
@@ -700,11 +704,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 Float maxQuantile = getFieldValue(vcResource, "maxQuantile", Float.class);
                 Float alpha = getFieldValue(vcResource, "alpha", Float.class);
                 Integer sampleCount = getFieldValue(vcResource, "sampleCount", Integer.class);
-                
+
                 // DEBUG: Log what we read
-                System.err.println("READ: Raw values from resource - bits: " + bits + ", alpha: " + alpha 
-                        + ", minQ: " + minQuantile + ", maxQ: " + maxQuantile + ", conf: " + confidenceInterval 
-                        + ", sampleCount: " + sampleCount);
+                System.err.println("READ: Raw values from resource - bits: " + bits + ", alpha: " + alpha + ", minQ: "
+                        + minQuantile + ", maxQ: " + maxQuantile + ", conf: " + confidenceInterval + ", sampleCount: "
+                        + sampleCount);
 
                 // Use defaults if any required parameter is missing
                 if (bits == null || confidenceInterval == null || minQuantile == null || maxQuantile == null
@@ -734,7 +738,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
          * Creates default quantization parameters as fallback.
          */
         private OptimizedScalarQuantizationSampleFile.Params createDefaultQuantizationParams(int vectorDimension) {
-            System.err.println("READ: Using DEFAULT quantization params (bits=7, minQ=-10.0, maxQ=10.0, alpha=6.35, conf=0.99, sampleCount=20000)");
+            System.err.println(
+                    "READ: Using DEFAULT quantization params (bits=7, minQ=-10.0, maxQ=10.0, alpha=6.35, conf=0.99, sampleCount=20000)");
             return new OptimizedScalarQuantizationSampleFile.Params(7, // bits
                     vectorDimension, // vectorDimensions
                     20000, // sampleCount
@@ -1084,11 +1089,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                             typeStr = "int[]";
                                             length = ((int[]) quantizedBytes).length;
                                         }
-//                                        System.err.println("Quantized vector: " + length + " " + typeStr + " (bits="
-//                                                + quantizationParams.bits + ", similarity="
-//                                                + quantizedVector.similarityFunction + ", normalized="
-//                                                + quantizedVector.isNormalized + ", correctiveMultiplier="
-//                                                + quantizedVector.correctiveMultiplier + ")");
+                                        System.err.println("Quantized vector: " + length + " " + typeStr + " (bits="
+                                                + quantizationParams.bits + ", similarity="
+                                                + quantizedVector.similarityFunction + ", normalized="
+                                                + quantizedVector.isNormalized + ", correctiveMultiplier="
+                                                + quantizedVector.correctiveMultiplier + ")");
                                     }
 
                                     // Create transformed tuple with [centroidId, distance, ...original fields...]

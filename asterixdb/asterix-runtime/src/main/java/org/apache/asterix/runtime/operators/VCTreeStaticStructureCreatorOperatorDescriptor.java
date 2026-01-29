@@ -36,6 +36,7 @@ import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
+import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.ActivityId;
 import org.apache.hyracks.api.dataflow.IActivityGraphBuilder;
@@ -59,6 +60,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
@@ -66,6 +68,8 @@ import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
+import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
+import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
@@ -100,19 +104,29 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     private final float fillFactor;
     private final UUID permitUUID;
     // private final UUID materializedDataUUID;
+    private final UUID scalarValuesUUID;
+    private final RecordDescriptor inputRecordDescriptor; // Store for CreateStructureActivity
 
     public VCTreeStaticStructureCreatorOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
-            RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID) {
+            RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID, UUID scalarValuesUUID,
+            RecordDescriptor scalarRecDesc) {
         super(spec, 1, 1);
         this.indexHelperFactory = indexHelperFactory;
         this.maxEntriesPerPage = maxEntriesPerPage;
         this.fillFactor = fillFactor;
         this.permitUUID = permitUUID;
         // this.materializedDataUUID = materializedDataUUID;
-        this.outRecDescs[0] = inputRecordDescriptor;
+        this.scalarValuesUUID = scalarValuesUUID;
+        this.inputRecordDescriptor = inputRecordDescriptor; // Store for CreateStructureActivity
+        // PassThroughActivity outputs scalar values, so use scalarRecDesc
+        // CreateStructureActivity uses inputRecordDescriptor (stored separately)
+        this.outRecDescs[0] = scalarRecDesc != null ? scalarRecDesc : inputRecordDescriptor;
         System.err.println("VCTreeStaticStructureCreatorOperatorDescriptor created with permit UUID: " + permitUUID);
-        System.err.println("Using hierarchical clustering output record descriptor: " + outRecDescs[0]);
+        System.err.println(
+                "VCTreeStaticStructureCreatorOperatorDescriptor created with scalarValuesUUID: " + scalarValuesUUID);
+        System.err.println("Using scalar values output record descriptor: " + outRecDescs[0]);
+        System.err.println("Input record descriptor (for CreateStructureActivity): " + inputRecordDescriptor);
     }
 
     /**
@@ -757,7 +771,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         clusterIdVal = new VoidPointable();
                         centroidIdVal = new VoidPointable();
 
-                        fta = new FrameTupleAccessor(outRecDescs[0]);
+                        // Use inputRecordDescriptor for reading input frames (hierarchical data)
+                        fta = new FrameTupleAccessor(inputRecordDescriptor);
                         System.err.println("CreateStructureActivity opened successfully");
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to open CreateStructureActivity: " + e.getMessage());
@@ -1063,7 +1078,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         // Process all accumulated tuples
                         int totalTuplesProcessed = 0;
                         for (ByteBuffer frameBuffer : frameAccumulator) {
-                            FrameTupleAccessor frameFta = new FrameTupleAccessor(outRecDescs[0]);
+                            // Use inputRecordDescriptor for reading hierarchical data frames
+                            FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecordDescriptor);
                             frameFta.reset(frameBuffer);
 
                             //                            System.err.println("Frame has " + frameFta.getTupleCount() + " tuples");
@@ -1352,13 +1368,79 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 @Override
                 public void initialize() throws HyracksDataException {
                     try {
+                        writer.open();
+
+                        // Check if scalarValuesUUID is provided
+                        if (scalarValuesUUID == null) {
+                            System.err.println("WARNING: scalarValuesUUID is null, skipping scalar values read");
+                            return;
+                        }
+
+                        // Get MaterializerTaskState from context
+                        MaterializerTaskState scalarState = (MaterializerTaskState) ctx
+                                .getStateObject(new PartitionedUUID(scalarValuesUUID, partition));
+
+                        if (scalarState == null) {
+                            System.err.println("WARNING: Scalar values state not found for partition " + partition
+                                    + ", UUID: " + scalarValuesUUID);
+                            return;
+                        }
+
+                        System.err.println("Reading scalar values run file for partition " + partition);
+                        System.err.println("Output RecordDescriptor: " + recordDesc);
+                        System.err.println("Output RecordDescriptor field count: "
+                                + (recordDesc != null ? recordDesc.getFieldCount() : "null"));
+
+                        // Manual frame reading - read frame by frame
+                        GeneratedRunFileReader reader = scalarState.creatReader();
+                        reader.open();
+
+                        try {
+                            VSizeFrame frame = new VSizeFrame(ctx);
+                            int frameCount = 0;
+                            int totalTuples = 0;
+
+                            // Create FrameTupleAccessor to validate frame format
+                            FrameTupleAccessor fta = new FrameTupleAccessor(recordDesc);
+
+                            while (reader.nextFrame(frame)) {
+                                fta.reset(frame.getBuffer());
+                                int tupleCount = fta.getTupleCount();
+                                totalTuples += tupleCount;
+                                frameCount++;
+
+                                if (frameCount == 1 && tupleCount > 0) {
+                                    // Debug first tuple
+                                    FrameTupleReference tuple = new FrameTupleReference();
+                                    tuple.reset(fta, 0);
+                                    System.err.println("First tuple - field count: " + tuple.getFieldCount());
+                                    System.err.println("First tuple - field 0 start: " + tuple.getFieldStart(0)
+                                            + ", length: " + tuple.getFieldLength(0));
+                                }
+
+                                writer.nextFrame(frame.getBuffer());
+                            }
+
+                            System.err.println("Read " + frameCount + " frames with " + totalTuples + " total tuples");
+                        } finally {
+                            reader.close();
+                        }
+
+                        System.err.println("Successfully read and passed scalar values to downstream operator");
 
                     } catch (Exception e) {
+                        System.err.println("ERROR: Failed to read scalar values run file: " + e.getMessage());
+                        e.printStackTrace();
+                        if (writer != null) {
+                            writer.fail();
+                        }
                         throw HyracksDataException.create(e);
+                    } finally {
+                        if (writer != null) {
+                            writer.close();
+                        }
                     }
                 }
-
-
 
                 @Override
                 public void deinitialize() throws HyracksDataException {

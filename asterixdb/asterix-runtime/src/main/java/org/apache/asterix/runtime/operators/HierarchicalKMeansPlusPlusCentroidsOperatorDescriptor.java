@@ -41,7 +41,6 @@ import org.apache.asterix.builders.OrderedListBuilder;
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.dataflow.DatasetLocalResource;
 import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
-import org.apache.asterix.transaction.management.resource.UpdatableLocalResourceRepositoryWrapper;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AOrderedListSerializerDeserializer;
 import org.apache.asterix.om.base.AMutableDouble;
@@ -50,6 +49,7 @@ import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
 import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
+import org.apache.asterix.transaction.management.resource.UpdatableLocalResourceRepositoryWrapper;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -628,6 +628,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private final UUID sampleUUID;
     private final UUID tupleCountUUID;
     private final UUID materializedDataUUID;
+    private final UUID scalarValuesUUID;
 
     // Configuration parameters for hierarchical clustering
     private IScalarEvaluatorFactory args; // Evaluator for extracting vector data from tuples
@@ -815,8 +816,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter,
-            IIndexDataflowHelperFactory indexHelperFactory) {
+            UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
+            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -825,6 +826,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.sampleUUID = sampleUUID;
         this.tupleCountUUID = tupleCountUUID;
         this.materializedDataUUID = materializedDataUUID;
+        this.scalarValuesUUID = scalarValuesUUID;
         this.args = args;
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
@@ -997,7 +999,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 /**
                  * Computes optimized scalar quantization parameters from sampled vectors and writes them
-                 * to a per-partition file in the index directory.
+                 * to a per-partition file in the index directory. Also writes individual embedding values
+                 * to a run file for downstream processing.
                  * 
                  * @param ctx The Hyracks task context
                  * @param partition The partition ID
@@ -1015,7 +1018,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         FrameTupleReference tuple) throws HyracksDataException {
                     IIndexDataflowHelper indexHelper = null;
                     GeneratedRunFileReader quantReader = null;
+                    ScalarValueRunFileWriter scalarWriter = null;
                     try {
+                        // Initialize scalar value writer for writing individual embedding values
+                        if (scalarValuesUUID != null) {
+                            scalarWriter = new ScalarValueRunFileWriter();
+                            scalarWriter.initialize(ctx, partition, scalarValuesUUID);
+                        }
+
                         // Get index directory for this partition
                         indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
                         indexHelper.open();
@@ -1029,7 +1039,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         //                        FileReference indexDir = fileManager.getBaseDir();
 
                         // Collect sampled vectors (limit to 20,000)
-                        final int MAX_SAMPLES = 20000;
+                        final int MAX_SAMPLES = 2000;
                         List<float[]> sampledVectors = new ArrayList<>();
                         quantReader = sampleState.creatReader();
                         quantReader.open();
@@ -1062,7 +1072,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 for (int i = 0; i < point.length; i++) {
                                     floatPoint[i] = (float) point[i];
                                 }
-                                sampledVectors.add(floatPoint);
+                                //                                sampledVectors.add(floatPoint);
+
+                                // Write each embedding value as individual entries to run file
+                                if (scalarWriter != null) {
+                                    scalarWriter.writeEmbeddingAsScalars(point);
+                                }
+
                                 collected++;
                             }
                         }
@@ -1072,16 +1088,20 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             OptimizedScalarQuantizationSampleFile.Params params =
                                     OptimizedScalarQuantizationSampleFile.computeFromSamples(sampledVectors, 0.99f, 7);
                             //                            OptimizedScalarQuantizationSampleFile.write(ctx.getIoManager(), indexDir, params);
-                            System.err.println("UPDATE CALL: Computed quantization for partition " + partition + " from "
-                                    + sampledVectors.size() + " vectors: bits=" + params.bits + ", alpha=" + params.alpha
-                                    + ", minQ=" + params.minQuantile + ", maxQ=" + params.maxQuantile + ", conf="
-                                    + params.confidenceInterval + ", sampleCount=" + params.sampleCount);
+                            System.err.println("UPDATE CALL: Computed quantization for partition " + partition
+                                    + " from " + sampledVectors.size() + " vectors: bits=" + params.bits + ", alpha="
+                                    + params.alpha + ", minQ=" + params.minQuantile + ", maxQ=" + params.maxQuantile
+                                    + ", conf=" + params.confidenceInterval + ", sampleCount=" + params.sampleCount);
 
                             // Update LocalResource metadata with quantization parameters
                             try {
-                                System.err.println("UPDATE CALL: About to call updateLocalResourceWithQuantizationParams for partition " + partition);
+                                System.err.println(
+                                        "UPDATE CALL: About to call updateLocalResourceWithQuantizationParams for partition "
+                                                + partition);
                                 updateLocalResourceWithQuantizationParams(ctx, indexHelper, params);
-                                System.err.println("UPDATE CALL: Successfully called updateLocalResourceWithQuantizationParams for partition " + partition);
+                                System.err.println(
+                                        "UPDATE CALL: Successfully called updateLocalResourceWithQuantizationParams for partition "
+                                                + partition);
                             } catch (Exception e) {
                                 // Log error but don't fail the job - metadata update is optional
                                 System.err.println("WARNING: Failed to update LocalResource metadata with quantization "
@@ -1089,7 +1109,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 e.printStackTrace();
                             }
                         } else {
-                            System.err.println("UPDATE CALL: No sampled vectors collected for partition " + partition + ", skipping quantization update");
+                            System.err.println("UPDATE CALL: No sampled vectors collected for partition " + partition
+                                    + ", skipping quantization update");
+                        }
+
+                        // Close scalar writer and save state for downstream operators
+                        if (scalarWriter != null) {
+                            scalarWriter.close(ctx);
+                            System.err.println("UPDATE CALL: Wrote " + collected
+                                    + " embeddings as individual scalar values to run file for partition " + partition);
                         }
 
                     } catch (Exception e) {
@@ -1131,7 +1159,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         INCServiceContext serviceCtx = ctx.getJobletContext().getServiceContext();
                         INcApplicationContext appCtx = (INcApplicationContext) serviceCtx.getApplicationContext();
                         ILocalResourceRepository baseRepository = appCtx.getLocalResourceRepository();
-                        
+
                         // Wrap repository to add update() method
                         UpdatableLocalResourceRepositoryWrapper repository =
                                 new UpdatableLocalResourceRepositoryWrapper(baseRepository);
@@ -1148,7 +1176,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         IResource existingIResource = existingResource.getResource();
                         IResource actualVCResource = null;
                         DatasetLocalResource datasetWrapper = null;
-                        
+
                         // Check if it's wrapped in DatasetLocalResource
                         if (existingIResource instanceof DatasetLocalResource) {
                             datasetWrapper = (DatasetLocalResource) existingIResource;
@@ -1199,7 +1227,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Deserialize back to LSMVCTreeLocalResource
                         LSMVCTreeLocalResource updatedVCResource =
                                 (LSMVCTreeLocalResource) LSMVCTreeLocalResource.fromJson(registry, jsonObject);
-                        
+
                         // DEBUG: Verify deserialized resource has the values
                         try {
                             java.lang.reflect.Field bitsField = updatedVCResource.getClass().getDeclaredField("bits");
@@ -1211,7 +1239,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             System.err.println("UPDATE CALL: Deserialized resource has bits: " + deserializedBits
                                     + ", alpha: " + deserializedAlpha);
                         } catch (Exception e) {
-                            System.err.println("UPDATE CALL: Failed to verify deserialized resource: " + e.getMessage());
+                            System.err
+                                    .println("UPDATE CALL: Failed to verify deserialized resource: " + e.getMessage());
                         }
 
                         // Create new LocalResource wrapper with same ID and version
@@ -1225,7 +1254,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             // Use the updated resource directly
                             finalResource = updatedVCResource;
                         }
-                        
+
                         LocalResource updatedResource = new LocalResource(existingResource.getId(),
                                 existingResource.getVersion(), existingResource.isDurable(), finalResource);
 
@@ -1233,7 +1262,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         System.err.println("UPDATE CALL: About to call repository.update()");
                         System.err.println("UPDATE CALL: Updated resource path: " + updatedResource.getPath());
                         System.err.println("UPDATE CALL: Updated resource ID: " + updatedResource.getId());
-                        
+
                         // Extract and log quantization params from the resource we're about to write
                         try {
                             IResource finalRes = updatedResource.getResource();
@@ -1249,13 +1278,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     java.lang.reflect.Field alphaField = vcRes.getClass().getDeclaredField("alpha");
                                     alphaField.setAccessible(true);
                                     Float alpha = (Float) alphaField.get(vcRes);
-                                    System.err.println("UPDATE CALL: Resource being updated has bits=" + bits + ", alpha=" + alpha);
+                                    System.err.println("UPDATE CALL: Resource being updated has bits=" + bits
+                                            + ", alpha=" + alpha);
                                 }
                             }
                         } catch (Exception e) {
-                            System.err.println("UPDATE CALL: Failed to read quantization params from resource object: " + e.getMessage());
+                            System.err.println("UPDATE CALL: Failed to read quantization params from resource object: "
+                                    + e.getMessage());
                         }
-                        
+
                         // Update the existing resource (preserves checkpoints)
                         repository.update(updatedResource);
 

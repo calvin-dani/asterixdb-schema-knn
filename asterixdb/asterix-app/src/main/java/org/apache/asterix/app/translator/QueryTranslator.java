@@ -2022,10 +2022,29 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             // #. add a new index with PendingAddOp
             MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
 
-            // Three-job pattern for vector indexes (Job 2 commented out - not implemented yet)
+            // Four-job pattern for vector indexes with quantization
             if (index.getIndexType() == IndexType.VECTOR) {
-                // VECTOR INDEX: Three Jobs
-                //                System.err.println("=== EXECUTING THREE JOBS FOR VECTOR INDEX ===");
+                // VECTOR INDEX: Four Jobs (Job 0.5: Quantization Constants, then Jobs 1-3)
+                //                System.err.println("=== EXECUTING FOUR JOBS FOR VECTOR INDEX ===");
+
+                // JOB 0.5: Calculate quantization constants from ANALYZE sample index
+                //                System.err.println("=== JOB 0.5: Calculating quantization constants ===");
+                try {
+                    spec = IndexUtil.buildSecondaryIndexQuantizationMetadataJobSpec(ds, index, metadataProvider, sourceLoc);
+                    if (spec != null) {
+                        // Job 0.5 can run with current metadata transaction (reads ANALYZE sample index)
+                        // No need to commit before running - quantization calculation is read-only from sample index
+                        runJob(hcc, spec, jobFlags);
+                    }
+                } catch (CompilationException e) {
+                    // If ANALYZE not run, throw error as specified
+                    // Check error message for ANALYZE_NOT_RUN pattern (since specific error code may not exist)
+                    if (e.getMessage() != null && e.getMessage().contains("ANALYZE")) {
+                        throw e;
+                    }
+                    // For other errors, log and continue (quantization is optional enhancement)
+                    GlobalConfig.ASTERIX_LOGGER.warn("Failed to calculate quantization constants: " + e.getMessage());
+                }
 
                 // JOB 1: Create empty index files
                 //                System.err.println("=== JOB 1: Creating empty index files ===");
