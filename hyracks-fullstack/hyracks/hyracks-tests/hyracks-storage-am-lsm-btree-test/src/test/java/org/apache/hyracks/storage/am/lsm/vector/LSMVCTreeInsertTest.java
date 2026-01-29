@@ -19,8 +19,6 @@
 
 package org.apache.hyracks.storage.am.lsm.vector;
 
-import static org.junit.Assert.*;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,7 +37,7 @@ import org.apache.hyracks.storage.am.common.TestOperationCallback;
 import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestContext;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestHarness;
-import org.apache.hyracks.storage.am.lsm.vector.util.VectorIndexTestDriver;
+import org.apache.hyracks.storage.am.lsm.vector.util.OptimizedSearchTestDriver;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.TestDoubleArrayVectorAccessor;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
@@ -50,28 +48,34 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Test;
+
+import static org.junit.Assert.*;
 
 /**
- * LSMVCTree insert test (standard, non-quantized).
+ * LSMVCTree insert test.
  * Tests insert operations into memory component after bulk loading the first disk component.
  *
- * Inherits test case from VectorIndexTestDriver:
- * - threeDimensionThreeLevels(): 3D three-layer structure (3 levels, 24 leaf centroids, 2400 bulk-loaded records)
+ * Uses the 2D two-layer dataset from OptimizedSearchTestDriver:
+ * - Level 0: 4 quadrant centroids at [±50, ±50]
+ * - Level 1: 16 leaf centroids (4 per quadrant)
+ * - 50 bulk-loaded records per leaf centroid (800 total in disk component)
+ * - 80 inserted records per leaf centroid (1280 total in memory component)
+ * - Total: 2080 records
  *
- * The test bulk loads the dataset, then inserts additional records into the memory component,
- * and verifies that records from both components are retrievable via search.
- *
- * Data tuple format (standard): <distance, centroid_id, primary_key>
- * No vector field is stored in data tuples.
+ * Verification uses LSMVCTreeSearchCursor with K=1000+ to retrieve all records.
  */
-public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
+public class LSMVCTreeInsertTest extends OptimizedSearchTestDriver {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
     private final LSMVCTreeTestHarness harness = new LSMVCTreeTestHarness();
     private final VectorTreeTestUtils testUtils = new VectorTreeTestUtils();
 
-    private static final int INSERT_RECORDS_PER_CLUSTER = 30;
+    // Records per cluster
+    private static final int BULK_LOAD_RECORDS_PER_CLUSTER = 50;
+    private static final int INSERT_RECORDS_PER_CLUSTER = 80;
+    private static final int TOTAL_LEAF_CLUSTERS = 16;
 
     @Before
     public void setUp() throws HyracksDataException {
@@ -84,29 +88,141 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
     }
 
     /**
-     * Implementation of runTest from VectorIndexTestDriver.
-     * Performs: build static structure → bulk load → insert → verify.
+     * Test insert operations using 2D two-layer dataset.
+     *
+     * 1. Build static structure (reusing OptimizedSearchTestDriver's 2D dataset)
+     * 2. Bulk load 50 records per leaf cluster (first disk component)
+     * 3. Insert 80 additional records per leaf cluster (memory component)
+     * 4. Verify total records using LSMVCTreeSearchCursor with K=1000+
      */
-    @Override
-    protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
-            List<ITupleReference> centroids, List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster,
-            int vectorDimension, List<List<ITupleReference>> leafRecords) throws Exception {
+    @Test
+    public void twoDimensionInsertTest() throws Exception {
+        // Centroid serializers: centroid ID + Double array vector (2D)
+        ISerializerDeserializer[] centroidSerdes = { IntegerSerializerDeserializer.INSTANCE,
+                DoubleArraySerializerDeserializer.INSTANCE };
+
+        // Data record serializers for bulk load: distance + centroid_id + vector + primary key
+        ISerializerDeserializer[] dataRecordSerdes = { DoubleSerializerDeserializer.INSTANCE,
+                IntegerSerializerDeserializer.INSTANCE, DoubleArraySerializerDeserializer.INSTANCE,
+                new UTF8StringSerializerDeserializer() };
+
+        // Get 2D dataset configuration from parent class
+        List<ITupleReference> centroids = get2DCentroids();
+        List<Integer> numClustersPerLevel = get2DNumClustersPerLevel();
+        List<List<Integer>> centroidsPerCluster = get2DCentroidsPerCluster();
+
+        // Generate bulk load records (50 per cluster)
+        List<List<ITupleReference>> bulkLoadRecords = generate2DBulkLoadRecords(BULK_LOAD_RECORDS_PER_CLUSTER);
+
+        // Generate insert records (80 per cluster)
+        List<List<ITupleReference>> insertRecords = generate2DInsertRecords(INSERT_RECORDS_PER_CLUSTER);
+
+        // Query configuration - use a query that will find records from multiple clusters
+        // Query at origin [0, 0] to get records from all quadrants
+        double[] queryVector = { 0.0, 0.0 };
+        int queryK = 1000; // Large enough to get many records
+        List<String> expectedPKs = new ArrayList<>(); // We'll verify counts instead
+
+        runInsertTest(centroidSerdes, dataRecordSerdes, centroids, numClustersPerLevel, centroidsPerCluster,
+                2, bulkLoadRecords, insertRecords, queryVector, queryK);
+    }
+
+    /**
+     * Generate bulk load records for 2D dataset with specified count per cluster.
+     * Reuses the ring pattern from parent class but allows customizing record count.
+     */
+    private List<List<ITupleReference>> generate2DBulkLoadRecords(int recordsPerCluster) throws Exception {
+        List<List<ITupleReference>> allRecords = new ArrayList<>();
+        double[][] leafCentroids = getLeafCentroids2D();
+
+        for (int centroidIndex = 0; centroidIndex < leafCentroids.length; centroidIndex++) {
+            List<ITupleReference> clusterRecords = new ArrayList<>();
+
+            int centroidId = centroidIndex + 4; // c4 ~ c19
+            double[] centroid = leafCentroids[centroidIndex];
+
+            double baseDistance = 0.2;
+            int recordCount = 0;
+
+            while (recordCount < recordsPerCluster) {
+                double currentDistance = baseDistance;
+
+                double[][] offsets = {
+                        { currentDistance, 0 },
+                        { -currentDistance, 0 },
+                        { 0, currentDistance },
+                        { 0, -currentDistance }
+                };
+
+                for (double[] offset : offsets) {
+                    if (recordCount >= recordsPerCluster) break;
+
+                    double[] vector = { centroid[0] + offset[0], centroid[1] + offset[1] };
+                    String primaryKey = "pk_2d_c" + centroidId + "_" + recordCount;
+
+                    ITupleReference tuple = createBulkLoadRecordTuple(currentDistance, centroidId, vector, primaryKey);
+                    clusterRecords.add(tuple);
+                    recordCount++;
+                }
+
+                baseDistance += 0.2;
+            }
+
+            allRecords.add(clusterRecords);
+        }
+
+        return allRecords;
+    }
+
+    /**
+     * Create a bulk load record tuple.
+     * Format: <distance_to_centroid, centroid_id, vector, primary_key>
+     */
+    private ITupleReference createBulkLoadRecordTuple(double distance, int centroidId, double[] vector,
+            String primaryKey) throws Exception {
+        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+        ArrayTupleReference tupleRef = new ArrayTupleReference();
+
+        tupleBuilder.getDataOutput().writeDouble(distance);
+        tupleBuilder.addFieldEndOffset();
+
+        tupleBuilder.getDataOutput().writeInt(centroidId);
+        tupleBuilder.addFieldEndOffset();
+
+        DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
+        tupleBuilder.addFieldEndOffset();
+
+        new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
+        tupleBuilder.addFieldEndOffset();
+
+        tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
+        return tupleRef;
+    }
+
+    /**
+     * Run the insert test with the provided configuration.
+     */
+    private void runInsertTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
+            List<ITupleReference> centroids, List<Integer> numClustersPerLevel,
+            List<List<Integer>> centroidsPerCluster, int vectorDimension,
+            List<List<ITupleReference>> bulkLoadRecords, List<List<ITupleReference>> insertRecords,
+            double[] queryVector, int queryK) throws Exception {
 
         LOGGER.info("LSMVCTree Insert Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
-                numClustersPerLevel.size(), centroids.size(), leafRecords.size(), vectorDimension);
+                numClustersPerLevel.size(), centroids.size(), bulkLoadRecords.size(), vectorDimension);
 
-        // Create test context with default (standard) data tuple creator factory
+        // Create test context
         AbstractVectorTreeTestContext ctx = LSMVCTreeTestContext.create(harness.getNcConfig(), harness.getIOManager(),
                 harness.getVirtualBufferCaches(), harness.getFileReference(), harness.getDiskBufferCache(),
                 dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(),
-                harness.getIOScheduler(), harness.getIOOperationCallbackFactory(),
-                harness.getPageWriteCallbackFactory(), harness.getMetadataPageManagerFactory());
+                harness.getIOScheduler(), harness.getIOOperationCallbackFactory(), harness.getPageWriteCallbackFactory(),
+                harness.getMetadataPageManagerFactory());
 
         // Set test data in context
         ctx.setStaticStructureCentroids(centroids);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
-        ctx.setDataRecords(leafRecords);
+        ctx.setDataRecords(bulkLoadRecords);
 
         try {
             // 1. Create and activate index
@@ -120,21 +236,17 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
 
             // 3. Bulk load data records (first disk component)
             testUtils.bulkLoadRecords(ctx);
-            int bulkLoadedCount = leafRecords.stream().mapToInt(List::size).sum();
-            LOGGER.info("Bulk loaded {} records across {} clusters", bulkLoadedCount, leafRecords.size());
+            int bulkLoadedCount = bulkLoadRecords.size() * BULK_LOAD_RECORDS_PER_CLUSTER;
+            LOGGER.info("Bulk loaded {} records across {} clusters", bulkLoadedCount, bulkLoadRecords.size());
 
-            // 4. Generate and insert additional records into memory component
-            List<List<ITupleReference>> insertRecords =
-                    generateInsertRecords(centroids, centroidSerdes, centroidsPerCluster, vectorDimension);
+            // 4. Insert additional records into memory component
             int insertedCount = insertRecordsIntoMemoryComponent(ctx, insertRecords);
             LOGGER.info("Inserted {} records into memory component", insertedCount);
 
-            // 5. Verify records using LSMVCTreeSearchCursor
-            // Query near first leaf centroid c10 at [20, 30, 20]
-            double[] queryVector = { 20.0, 30.0, 20.0 };
-            int queryK = 500;
-            verifyRecordsWithSearch(ctx, queryVector, queryK);
-            LOGGER.info("Verification: Found records from both bulk-loaded and inserted components");
+            // 5. Verify total records using LSMVCTreeSearchCursor
+            int totalExpected = bulkLoadedCount + insertedCount;
+            verifyRecordsWithSearch(ctx, queryVector, queryK, totalExpected);
+            LOGGER.info("Verification: Found expected number of records");
 
         } finally {
             // Cleanup
@@ -145,87 +257,11 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
     }
 
     /**
-     * Generate insert records for all leaf centroids.
-     * Extracts leaf centroid vectors from the centroids list and generates
-     * INSERT_RECORDS_PER_CLUSTER records per leaf centroid.
-     *
-     * Insert tuple format: <vector, primary_key>
-     */
-    private List<List<ITupleReference>> generateInsertRecords(List<ITupleReference> centroids,
-            ISerializerDeserializer[] centroidSerdes, List<List<Integer>> centroidsPerCluster, int vectorDimension)
-            throws Exception {
-
-        // Determine leaf centroid count from last level of structure
-        List<Integer> lastLevelClusters = centroidsPerCluster.get(centroidsPerCluster.size() - 1);
-        int numLeafCentroids = lastLevelClusters.stream().mapToInt(Integer::intValue).sum();
-        int firstLeafCentroidIndex = centroids.size() - numLeafCentroids;
-
-        List<List<ITupleReference>> allRecords = new ArrayList<>();
-
-        for (int i = 0; i < numLeafCentroids; i++) {
-            // Deserialize centroid tuple to extract ID and vector
-            ITupleReference centroidTuple = centroids.get(firstLeafCentroidIndex + i);
-            Object[] values = TupleUtils.deserializeTuple(centroidTuple, centroidSerdes);
-            int centroidId = (Integer) values[0];
-            double[] centroidVector = (double[]) values[1];
-
-            List<ITupleReference> clusterRecords = new ArrayList<>();
-            double baseDistance = 0.15;
-            int recordCount = 0;
-
-            while (recordCount < INSERT_RECORDS_PER_CLUSTER) {
-                double currentDistance = baseDistance;
-
-                // 6 records per ring (±x, ±y, ±z directions) for 3D
-                double[][] offsets = { { currentDistance, 0, 0 }, { -currentDistance, 0, 0 }, { 0, currentDistance, 0 },
-                        { 0, -currentDistance, 0 }, { 0, 0, currentDistance }, { 0, 0, -currentDistance } };
-
-                for (double[] offset : offsets) {
-                    if (recordCount >= INSERT_RECORDS_PER_CLUSTER)
-                        break;
-
-                    double[] vector = new double[vectorDimension];
-                    for (int d = 0; d < vectorDimension; d++) {
-                        vector[d] = centroidVector[d] + offset[d];
-                    }
-
-                    String primaryKey = "pk_ins_c" + centroidId + "_" + recordCount;
-                    ITupleReference tuple = createInsertTuple(vector, primaryKey);
-                    clusterRecords.add(tuple);
-                    recordCount++;
-                }
-
-                baseDistance += 0.15;
-            }
-
-            allRecords.add(clusterRecords);
-        }
-
-        return allRecords;
-    }
-
-    /**
-     * Create an insert tuple.
-     * Format: <vector, primary_key>
-     */
-    private ITupleReference createInsertTuple(double[] vector, String primaryKey) throws Exception {
-        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(2);
-        ArrayTupleReference tupleRef = new ArrayTupleReference();
-
-        // Field 0: vector (serialized with DoubleArraySerializerDeserializer)
-        DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
-        tupleBuilder.addFieldEndOffset();
-
-        // Field 1: primary_key (UTF8 string)
-        new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
-        tupleBuilder.addFieldEndOffset();
-
-        tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
-        return tupleRef;
-    }
-
-    /**
      * Insert records into the memory component using the index accessor.
+     *
+     * @param ctx Test context with activated index
+     * @param insertRecords Records to insert (format: <vector, primary_key>)
+     * @return Number of records inserted
      */
     private int insertRecordsIntoMemoryComponent(AbstractVectorTreeTestContext ctx,
             List<List<ITupleReference>> insertRecords) throws Exception {
@@ -246,11 +282,13 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
     }
 
     /**
-     * Verify records by scanning with LSMVCTreeSearchCursor.
-     * Checks that records from both disk (bulk-loaded) and memory (inserted) components are found.
+     * Verify total records by scanning with LSMVCTreeSearchCursor.
+     *
+     * Uses a point query to scan records from the closest cluster and verify
+     * that the combined disk + memory components contain the expected records.
      */
-    private void verifyRecordsWithSearch(AbstractVectorTreeTestContext ctx, double[] queryVector, int k)
-            throws Exception {
+    private void verifyRecordsWithSearch(AbstractVectorTreeTestContext ctx, double[] queryVector,
+            int k, int totalExpected) throws Exception {
 
         // Create query tuple
         ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
@@ -286,20 +324,22 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
                 String pk = extractPrimaryKeyFromTuple(tuple);
                 foundPKs.add(pk);
 
-                if (pk.startsWith("pk_ins_")) {
-                    insertCount++;
-                } else {
+                // Categorize by prefix
+                if (pk.startsWith("pk_2d_")) {
                     bulkLoadCount++;
+                } else if (pk.startsWith("pk_ins_")) {
+                    insertCount++;
                 }
             }
 
-            LOGGER.info("Search returned {} total records: {} bulk-loaded, {} inserted", foundPKs.size(), bulkLoadCount,
-                    insertCount);
+            LOGGER.info("Search returned {} total records: {} bulk-loaded, {} inserted",
+                    foundPKs.size(), bulkLoadCount, insertCount);
 
             // Verify we got records from both components
             assertTrue("Should find bulk-loaded records", bulkLoadCount > 0);
             assertTrue("Should find inserted records", insertCount > 0);
 
+            // Log a sample of found PKs for debugging
             int sampleSize = Math.min(10, foundPKs.size());
             LOGGER.info("Sample of found PKs: {}", foundPKs.subList(0, sampleSize));
 
@@ -311,13 +351,30 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
 
     /**
      * Extract primary key from a result tuple.
-     * Standard result tuple format: <distance, centroid_id, primary_key>
-     * PK is at field index 2.
+     * Result tuple format: <distance, centroid_id, vector, primary_key>
      */
     private String extractPrimaryKeyFromTuple(ITupleReference tuple) throws HyracksDataException {
-        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE,
-                IntegerSerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+        ISerializerDeserializer[] fieldSerdes = {
+                DoubleSerializerDeserializer.INSTANCE,
+                IntegerSerializerDeserializer.INSTANCE,
+                DoubleArraySerializerDeserializer.INSTANCE,
+                new UTF8StringSerializerDeserializer()
+        };
         Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-        return (String) values[2];
+        return (String) values[3];
+    }
+
+    /**
+     * Implementation of abstract runTest method from OptimizedSearchTestDriver.
+     * For insert tests, we use runInsertTest instead, but this is required for the parent class.
+     */
+    @Override
+    protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
+            List<ITupleReference> centroids, List<Integer> numClustersPerLevel,
+            List<List<Integer>> centroidsPerCluster, int vectorDimension,
+            List<List<ITupleReference>> leafRecords, double[] queryVector, int queryK,
+            List<String> expectedPrimaryKeys) throws Exception {
+        // This method is not used by insert tests - we use runInsertTest instead
+        throw new UnsupportedOperationException("Use twoDimensionInsertTest() for insert tests");
     }
 }

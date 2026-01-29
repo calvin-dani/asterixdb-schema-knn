@@ -63,7 +63,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkL
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
-import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
@@ -91,6 +90,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private static final ICursorFactory cursorFactory = LSMVCTreeSearchCursor::new;
+    private static final ICursorFactory annCursorFactory = LSMVCTreeAnnCursor::new;
 
     // Vector clustering specific frame factories
     protected final ITreeIndexFrameFactory interiorFrameFactory;
@@ -109,7 +109,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     // Data tuple format: [distance, centroidId, primary_keys..., include_fields...]
     protected final int numPrimaryKeyFields;
     protected final int numIncludeFields;
-    protected final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
     protected LSMVCTreeDiskComponent staticStructure;
 
@@ -125,8 +124,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
             boolean atomic, org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory)
-            throws HyracksDataException {
+            int numPrimaryKeyFields, int numIncludeFields) throws HyracksDataException {
 
         super(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
@@ -143,17 +141,16 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.numPrimaryKeyFields = numPrimaryKeyFields;
         this.numIncludeFields = numIncludeFields;
-        this.dataTupleCreatorFactory = dataTupleCreatorFactory;
 
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
             String baseDirPath = fileManager.getBaseDir() + "_virtual_" + i;
             FileReference virtualFileRef = ioManager.resolve(baseDirPath);
             // Memory components use insertDataFrameFactory for normal inserts
-            VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
-                    new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
-                    metadataFrameFactory, insertDataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef,
-                    vectorAccessorFactory, dataTupleCreatorFactory);
+            VectorClusteringTree vcTree =
+                    new VectorClusteringTree(virtualBufferCache, new VirtualFreePageManager(virtualBufferCache),
+                            interiorFrameFactory, leafFrameFactory, metadataFrameFactory, insertDataFrameFactory,
+                            cmpFactories, 1, vectorDimensions, virtualFileRef, vectorAccessorFactory);
             LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
                     filterHelper == null ? null : filterHelper.createFilter());
             memoryComponents.add(mutableComponent);
@@ -635,6 +632,20 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     protected ICursorFactory getCursorFactory() {
         return cursorFactory;
+    }
+
+    protected ICursorFactory getAnnCursorFactory() {
+        return annCursorFactory;
+    }
+
+    /**
+     * Creates an ANN search cursor for approximate nearest neighbor search.
+     *
+     * @param opCtx the operation context
+     * @return ANN search cursor
+     */
+    public IIndexCursor createAnnSearchCursor(AbstractLSMIndexOperationContext opCtx) {
+        return new LSMVCTreeAnnCursor(opCtx);
     }
 
     /**
