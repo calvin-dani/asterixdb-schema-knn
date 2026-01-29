@@ -26,7 +26,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestContext;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestHarness;
-import org.apache.hyracks.storage.am.lsm.vector.util.VectorIndexTestDriver;
+import org.apache.hyracks.storage.am.lsm.vector.util.OptimizedSearchTestDriver;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
 import org.apache.logging.log4j.LogManager;
@@ -35,10 +35,17 @@ import org.junit.After;
 import org.junit.Before;
 
 /**
- * LSMVCTree bulk load test.
- * Tests the bulk loading functionality of LSMVCTree with static structure and data records.
+ * LSMVCTree optimized search test.
+ * Tests the LSMVCTreeBlockedCursor with bidirectional traversal and triangle inequality termination.
+ *
+ * Uses test data from OptimizedSearchTestDriver.optimizedSearchThreeDimension():
+ * - Single centroid at origin [0, 0, 0]
+ * - 20 records at integer distances 1-20 along x-axis
+ * - Query at [5, 0, 0] gives D(q, C) = 5.0
+ *
+ * Tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
  */
-public class LSMVCTreeBulkLoadTest extends VectorIndexTestDriver {
+public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -58,18 +65,19 @@ public class LSMVCTreeBulkLoadTest extends VectorIndexTestDriver {
     @Override
     protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
             List<ITupleReference> centroids, List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster,
-            int vectorDimension, List<List<ITupleReference>> leafRecords) throws Exception {
+            int vectorDimension, List<List<ITupleReference>> leafRecords, double[] queryVector, int queryK,
+            List<String> expectedPrimaryKeys) throws Exception {
 
         if (LOGGER.isInfoEnabled()) {
-            LOGGER.info("LSMVCTree Bulk Load Test: {} levels, {} centroids, {} leaf clusters, {} dimension vectors",
+            LOGGER.info("LSMVCTree Optimized Search Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
                     numClustersPerLevel.size(), centroids.size(), leafRecords.size(), vectorDimension);
         }
 
-        // Create test context
+        // Create test context with the new tuple format (4 fields: distance, centroidId, vector, pk)
         AbstractVectorTreeTestContext ctx = LSMVCTreeTestContext.create(harness.getNcConfig(), harness.getIOManager(),
                 harness.getVirtualBufferCaches(), harness.getFileReference(), harness.getDiskBufferCache(),
-                dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(), harness.getIOScheduler(),
-                harness.getIOOperationCallbackFactory(), harness.getPageWriteCallbackFactory(),
+                dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(),
+                harness.getIOScheduler(), harness.getIOOperationCallbackFactory(), harness.getPageWriteCallbackFactory(),
                 harness.getMetadataPageManagerFactory());
 
         // Set test data in context
@@ -77,6 +85,11 @@ public class LSMVCTreeBulkLoadTest extends VectorIndexTestDriver {
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
         ctx.setDataRecords(leafRecords);
+
+        // Set query configuration
+        ctx.setQueryVector(queryVector);
+        ctx.setQueryK(queryK);
+        ctx.setExpectedPrimaryKeys(expectedPrimaryKeys);
 
         try {
             // 1. Create and activate index
@@ -87,36 +100,25 @@ public class LSMVCTreeBulkLoadTest extends VectorIndexTestDriver {
                 LOGGER.info("Index created and activated");
             }
 
-            // 2. Build static structure (hierarchical centroids)
+            // 2. Build static structure (single centroid at origin)
             testUtils.buildStaticStructure(ctx);
 
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Static structure built with {} centroids", centroids.size());
             }
 
-            // 3. Bulk load data records
+            // 3. Bulk load data records (20 records at distances 1-20)
             testUtils.bulkLoadRecords(ctx);
 
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Bulk loaded {} clusters with data records", leafRecords.size());
             }
 
-            // 4. Validate: scan closest leaf cluster
-            testUtils.scanClosestLeafCluster(ctx);
+            // 4. Validate: optimized search with bidirectional traversal
+            testUtils.optimizedSearch(ctx);
 
             if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("Validation: scan closest leaf cluster succeeded");
-            }
-
-            // 5. Validate: top-K search
-            // testUtils.topKSearch(ctx);
-
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("Validation: top-K search succeeded");
-            }
-
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("Index validation succeeded");
+                LOGGER.info("Validation: optimized search succeeded");
             }
 
         } finally {

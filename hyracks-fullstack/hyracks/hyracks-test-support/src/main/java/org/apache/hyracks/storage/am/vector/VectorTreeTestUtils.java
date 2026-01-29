@@ -339,6 +339,191 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         return (Integer) values[1];
     }
 
+    /**
+     * Test optimized search using LSMVCTreeBlockedCursor with bidirectional traversal
+     * and triangle inequality termination.
+     *
+     * Uses test data from VectorIndexTestDriver.optimizedSearchThreeDimension():
+     * - Centroid at origin [0, 0, 0]
+     * - Query vector at [5, 0, 0], giving D(q, C) = 5.0
+     * - 20 records at distances 1-20 along x-axis
+     *
+     * Tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
+     *
+     * Expected top-5 results (by D(q, x)):
+     * - pk_opt_5:  D(q,x) = 0.0  (vector [5,0,0])
+     * - pk_opt_4:  D(q,x) = 1.0  (vector [4,0,0])
+     * - pk_opt_6:  D(q,x) = 1.0  (vector [6,0,0])
+     * - pk_opt_3:  D(q,x) = 2.0  (vector [3,0,0])
+     * - pk_opt_7:  D(q,x) = 2.0  (vector [7,0,0])
+     */
+    public void optimizedSearch(AbstractVectorTreeTestContext ctx) throws Exception {
+        // Get query configuration from context
+        double[] queryVector = ctx.getQueryVector();
+        int k = ctx.getQueryK();
+        List<String> expectedPKs = ctx.getExpectedPrimaryKeys();
+
+        if (queryVector == null) {
+            throw new IllegalStateException("Query vector must be set in context via ctx.setQueryVector()");
+        }
+
+        // 1. Create query tuple containing the vector
+        ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
+        queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
+        ArrayTupleReference queryTuple = new ArrayTupleReference();
+        queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
+
+        // 2. Set up predicate with query tuple reference and K value
+        VectorPointPredicate predicate = new VectorPointPredicate();
+        predicate.setQueryTuple(queryTuple);
+        predicate.setQueryFieldIndex(0);
+        predicate.setDistanceMetric("euclidean");
+        predicate.setK(k);
+
+        // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
+        // Also set USE_OPTIMIZED_SEARCH flag to enable LSMVCTreeBlockedCursor
+        IndexAccessParameters iap =
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
+        iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
+        IIndexCursor cursor = accessor.createSearchCursor(false);
+
+        // Verify we got the optimized cursor
+        LOGGER.info("Created cursor type: {}", cursor.getClass().getSimpleName());
+
+        try {
+            // Open cursor with predicate
+            accessor.search(cursor, predicate);
+
+            try {
+                // Collect all results from cursor
+                List<ITupleReference> results = new ArrayList<>();
+                while (cursor.hasNext()) {
+                    cursor.next();
+                    ITupleReference tuple = cursor.getTuple();
+                    results.add(tuple);
+                }
+
+                LOGGER.info("Optimized Search: Found {} records for query vector {} with K={}",
+                        results.size(), Arrays.toString(queryVector), k);
+
+                // Print PKs immediately for debugging
+                System.err.println("[optimizedSearch] Results PKs:");
+                for (int i = 0; i < results.size(); i++) {
+                    ITupleReference tuple = results.get(i);
+                    String pk = extractPrimaryKeyFromOptimizedTuple(tuple);
+                    double dxc = extractDistanceFromTuple(tuple);
+                    double[] vec = extractVectorFromOptimizedTuple(tuple);
+                    double dqx = computeEuclideanDistance(queryVector, vec);
+                    System.err.println(String.format("  [%d] pk=%s, D(x,C)=%.2f, D(q,x)=%.2f, vec=%s",
+                            i, pk, dxc, dqx, Arrays.toString(vec)));
+                }
+
+                // Validate we got the expected number of results
+                assertEquals("Optimized search should return K=" + k + " records", k, results.size());
+
+                // Print results with details
+                printOptimizedSearchResults(results, queryVector);
+
+                // Validate expected primary keys are in results (if provided)
+                if (expectedPKs != null && !expectedPKs.isEmpty()) {
+                    List<String> actualPKs = new ArrayList<>();
+                    for (ITupleReference tuple : results) {
+                        actualPKs.add(extractPrimaryKeyFromOptimizedTuple(tuple));
+                    }
+
+                    for (String expectedPK : expectedPKs) {
+                        assertTrue("Expected " + expectedPK + " in results, but got: " + actualPKs,
+                                actualPKs.contains(expectedPK));
+                    }
+                }
+
+                LOGGER.info("Optimized Search: All {} results verified correctly", results.size());
+
+            } finally {
+                cursor.close();
+            }
+        } finally {
+            cursor.destroy();
+        }
+    }
+
+    /**
+     * Print detailed results from optimized search.
+     * Tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
+     */
+    private void printOptimizedSearchResults(List<ITupleReference> results, double[] queryVector)
+            throws HyracksDataException {
+        LOGGER.info("Optimized Search Results:");
+        for (int i = 0; i < results.size(); i++) {
+            ITupleReference tuple = results.get(i);
+
+            // Extract fields
+            double dxc = extractDistanceFromTuple(tuple);
+            int centroidId = extractCentroidIdFromTuple(tuple);
+            double[] vector = extractVectorFromOptimizedTuple(tuple);
+            String pk = extractPrimaryKeyFromOptimizedTuple(tuple);
+
+            // Compute actual D(q, x)
+            double dqx = computeEuclideanDistance(queryVector, vector);
+
+            LOGGER.info("  [{}] pk={}, D(x,C)={}, D(q,x)={}, vector={}",
+                    i, pk, dxc, dqx, Arrays.toString(vector));
+        }
+    }
+
+    /**
+     * Extract distance_to_centroid (field 0) from tuple.
+     */
+    private double extractDistanceFromTuple(ITupleReference tuple) throws HyracksDataException {
+        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE };
+        Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+        return (Double) values[0];
+    }
+
+    /**
+     * Extract vector (field 2) from optimized search tuple.
+     * Tuple format: <distance, centroid_id, vector, primary_key>
+     */
+    private double[] extractVectorFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
+        ISerializerDeserializer[] fieldSerdes = {
+                DoubleSerializerDeserializer.INSTANCE,      // Field 0: distance
+                IntegerSerializerDeserializer.INSTANCE,     // Field 1: centroidId
+                DoubleArraySerializerDeserializer.INSTANCE  // Field 2: vector
+        };
+        Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+        return (double[]) values[2];
+    }
+
+    /**
+     * Extract primary_key (field 3) from optimized search tuple.
+     * Tuple format: <distance, centroid_id, vector, primary_key>
+     */
+    private String extractPrimaryKeyFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
+        ISerializerDeserializer[] fieldSerdes = {
+                DoubleSerializerDeserializer.INSTANCE,      // Field 0: distance
+                IntegerSerializerDeserializer.INSTANCE,     // Field 1: centroidId
+                DoubleArraySerializerDeserializer.INSTANCE, // Field 2: vector
+                new UTF8StringSerializerDeserializer()      // Field 3: primary_key
+        };
+        Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+        return (String) values[3];
+    }
+
+    /**
+     * Compute Euclidean distance between two vectors.
+     */
+    private double computeEuclideanDistance(double[] v1, double[] v2) {
+        double sum = 0.0;
+        for (int i = 0; i < v1.length; i++) {
+            double diff = v1[i] - v2[i];
+            sum += diff * diff;
+        }
+        return Math.sqrt(sum);
+    }
+
     public void clusterRecords(AbstractVectorTreeTestContext ctx) throws Exception {
         LSMVCTree lsmvcTree = (LSMVCTree) ctx.getIndex();
         LSMVCTreeDiskComponent staticStructure = lsmvcTree.getStaticStructure();

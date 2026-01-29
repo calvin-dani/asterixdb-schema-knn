@@ -20,11 +20,13 @@
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMHarness;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor;
 import org.apache.hyracks.storage.am.vector.impls.VectorAnnPredicate;
+import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 
@@ -47,18 +49,41 @@ public class LSMVCTreeIndexAccessor extends LSMTreeIndexAccessor {
 
     @Override
     public IIndexCursor createSearchCursor(boolean exclusive) {
+        // Check if optimized search is requested via IndexAccessParameters
+        if (ctx instanceof LSMVCTreeOpContext) {
+            LSMVCTreeOpContext opCtx = (LSMVCTreeOpContext) ctx;
+            IIndexAccessParameters iap = opCtx.getIndexAccessParameters();
+            if (iap != null) {
+                Boolean useOptimized = iap.getParameter(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.class);
+                if (Boolean.TRUE.equals(useOptimized)) {
+                    return lsmVCTree.createBlockedSearchCursor(ctx);
+                }
+            }
+        }
         return super.createSearchCursor(exclusive);
     }
 
     /**
      * Creates an ANN search cursor for approximate nearest neighbor queries.
-     * 
+     *
      * @param exclusive whether the cursor should be exclusive
      * @return ANN search cursor
      * @throws HyracksDataException if cursor creation fails
      */
     public IIndexCursor createAnnSearchCursor(boolean exclusive) throws HyracksDataException {
         return lsmVCTree.createAnnSearchCursor((AbstractLSMIndexOperationContext) ctx);
+    }
+
+    /**
+     * Creates a blocked cursor for optimized search with bidirectional traversal
+     * and triangle inequality termination.
+     *
+     * @param exclusive whether the cursor should be exclusive
+     * @return blocked search cursor
+     * @throws HyracksDataException if cursor creation fails
+     */
+    public IIndexCursor createBlockedSearchCursor(boolean exclusive) throws HyracksDataException {
+        return lsmVCTree.createBlockedSearchCursor(ctx);
     }
 
     /**

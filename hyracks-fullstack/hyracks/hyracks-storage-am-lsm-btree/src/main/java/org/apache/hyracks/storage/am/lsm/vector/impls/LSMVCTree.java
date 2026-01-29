@@ -640,12 +640,23 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     /**
      * Creates an ANN search cursor for approximate nearest neighbor search.
-     * 
+     *
      * @param opCtx the operation context
      * @return ANN search cursor
      */
     public IIndexCursor createAnnSearchCursor(AbstractLSMIndexOperationContext opCtx) {
         return new LSMVCTreeAnnCursor(opCtx);
+    }
+
+    /**
+     * Creates a blocked cursor for optimized search with bidirectional traversal
+     * and triangle inequality termination.
+     *
+     * @param opCtx the operation context
+     * @return blocked search cursor
+     */
+    public IIndexCursor createBlockedSearchCursor(ILSMIndexOperationContext opCtx) {
+        return new LSMVCTreeBlockedCursor(opCtx);
     }
 
     @Override

@@ -182,19 +182,12 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         List<List<Integer>> centroidsPerCluster = (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster",
                 Arrays.asList(Arrays.asList(1, 1, 1, 1, 1), Arrays.asList(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
         int maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
-        LOGGER.info("VCTreeStaticStructureLoader parameters:");
-        LOGGER.info("  - numLevels: {}", numLevels);
-        LOGGER.info("  - clustersPerLevel: {}", clustersPerLevel);
-        LOGGER.info("  - centroidsPerCluster: {}", centroidsPerCluster);
-        LOGGER.info("  - maxEntriesPerPage: {}", maxEntriesPerPage);
-        LOGGER.info("  - fillFactor: {}", fillFactor);
-        //        System.err.println("VCTreeStaticStructureLoader parameters:");
-        //        System.err.println("  - numLevels: " + numLevels);
-        //        System.err.println("  - clustersPerLevel: " + clustersPerLevel);
-        //        System.err.println("  - centroidsPerCluster: " + centroidsPerCluster);
-        //        System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
-        //        System.err.println("  - fillFactor: " + fillFactor);
-
+//        LOGGER.info("VCTreeStaticStructureLoader parameters:");
+//        LOGGER.info("  - numLevels: {}", numLevels);
+//        LOGGER.info("  - clustersPerLevel: {}", clustersPerLevel);
+//        LOGGER.info("  - centroidsPerCluster: {}", centroidsPerCluster);
+//        LOGGER.info("  - maxEntriesPerPage: {}", maxEntriesPerPage);
+//        LOGGER.info("  - fillFactor: {}", fillFactor);
         try {
             // Create VCTreeStaticStructureLoader with real structure
             IIndexBulkLoader ssbuilder = getIndex().createStaticStructureBulkLoader(numLevels, clustersPerLevel,
@@ -232,12 +225,12 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
                 Arrays.asList(Arrays.asList(1, 1, 1, 1, 1), Arrays.asList(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
         int maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
 
-        System.err.println("VCTreeStaticStructureLoader parameters:");
-        System.err.println("  - numLevels: " + numLevels);
-        System.err.println("  - clustersPerLevel: " + clustersPerLevel);
-        System.err.println("  - centroidsPerCluster: " + centroidsPerCluster);
-        System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
-        System.err.println("  - fillFactor: " + fillFactor);
+//        System.err.println("VCTreeStaticStructureLoader parameters:");
+//        System.err.println("  - numLevels: " + numLevels);
+//        System.err.println("  - clustersPerLevel: " + clustersPerLevel);
+//        System.err.println("  - centroidsPerCluster: " + centroidsPerCluster);
+//        System.err.println("  - maxEntriesPerPage: " + maxEntriesPerPage);
+//        System.err.println("  - fillFactor: " + fillFactor);
         
         // Extract dataFrameSerdes from parameters if available (for RecordDescriptor support)
         @SuppressWarnings("rawtypes")
