@@ -110,6 +110,8 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
          * The tuple contains a BINARY field (field 0) with serialized QuantizationConstants.
          * Format: [typeTag (byte)] [serialized ABinary content]
          * ABinary content format: [length (int)] [minQ (float)] [maxQ (float)] [alpha (float)] [bits (int)] [confidenceInterval (float)] [sampleCount (int)]
+         * 
+         * @return QuantizationConstants or null if the input is SYSTEM_NULL (empty dataset)
          */
         private QuantizationConstants extractQuantizationConstants(ITupleReference tuple) throws HyracksDataException {
             try {
@@ -119,11 +121,19 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
                 int fieldLength = tuple.getFieldLength(0);
 
                 if (fieldLength == 0) {
-                    throw HyracksDataException.create(new IOException("Empty BINARY field"));
+                    System.err.println("[QuantizationConstantsSink] Empty field - no data");
+                    return null;
                 }
 
                 // Check type tag
                 ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(fieldData[fieldStart]);
+                
+                // Handle SYSTEM_NULL (empty dataset case)
+                if (typeTag == ATypeTag.SYSTEM_NULL || typeTag == ATypeTag.NULL || typeTag == ATypeTag.MISSING) {
+                    System.err.println("[QuantizationConstantsSink] Received " + typeTag + " - empty dataset");
+                    return null;
+                }
+                
                 if (typeTag != ATypeTag.BINARY) {
                     throw HyracksDataException.create(new IOException("Expected BINARY type, got: " + typeTag));
                 }
@@ -156,6 +166,8 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
                 float confidenceInterval = FloatSerializerDeserializer.read(constantsIn);
                 int sampleCount = IntegerSerializerDeserializer.read(constantsIn);
 
+                System.err.println("[QuantizationConstantsSink] Extracted: minQ=" + minQ + ", maxQ=" + maxQ + 
+                        ", alpha=" + alpha + ", bits=" + bits + ", sampleCount=" + sampleCount);
                 return new QuantizationConstants(minQ, maxQ, alpha, bits, confidenceInterval, sampleCount);
             } catch (IOException e) {
                 throw HyracksDataException.create(e);
@@ -164,11 +176,16 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
 
         @Override
         public void close() throws HyracksDataException {
-            // Store quantization constants in task context
+            // Store quantization constants in task context (if available)
             if (quantizationConstants == null) {
-                throw HyracksDataException.create(new IOException("No quantization constants received"));
+                // Empty dataset - no samples were found
+                System.err.println("[QuantizationConstantsSink] WARNING: No quantization constants computed (empty dataset or no samples)");
+                // Still store null to indicate completion without error
+                TaskUtil.put(quantizationKey, null, ctx);
+            } else {
+                System.err.println("[QuantizationConstantsSink] Storing quantization constants with key=" + quantizationKey);
+                TaskUtil.put(quantizationKey, quantizationConstants, ctx);
             }
-            TaskUtil.put(quantizationKey, quantizationConstants, ctx);
         }
 
         @Override

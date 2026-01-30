@@ -47,6 +47,7 @@ import org.apache.asterix.runtime.aggregates.std.QuantizationConstantsAggregateD
 import org.apache.asterix.runtime.operators.*;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
+import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraint;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -68,6 +69,8 @@ import org.apache.hyracks.api.dataflow.value.*;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
+import org.apache.hyracks.dataflow.common.data.partition.OnePartitionComputerFactory;
+import org.apache.hyracks.dataflow.std.connectors.MToNPartitioningConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.dataflow.std.group.AbstractAggregatorDescriptorFactory;
@@ -562,6 +565,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     public JobSpecification buildQuantizationMetadataJobSpec() throws AlgebricksException {
+        System.err.println("==========================================");
+        System.err.println("*** QUANTIZATION METADATA JOB: START ***");
+        System.err.println("==========================================");
+        System.err.println("Dataset: " + dataset.getDatasetName());
+        System.err.println("Index: " + index.getIndexName());
 
         // Check if ANALYZE sample index exists
         Index sampleIndex = metadataProvider.findSampleIndex(dataset.getDatabaseName(), dataset.getDataverseName(),
@@ -570,6 +578,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
                     "ANALYZE DATASET must be run before creating vector index with quantization");
         }
+        System.err.println("✓ Sample index found: " + sampleIndex.getIndexName());
 
         // Get vector index details
         Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
@@ -585,6 +594,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         float confidenceInterval = (withObjectNode != null)
                 ? (float) withObjectNode.getOptionalDouble("confidence_interval", DEFAULT_CONFIDENCE_INTERVAL)
                 : DEFAULT_CONFIDENCE_INTERVAL;
+        System.err.println("Quantization parameters: bits=" + bits + ", confidenceInterval=" + confidenceInterval);
 
         // Get dataset types
         ARecordType itemType = (ARecordType) metadataProvider.findType(dataset);
@@ -653,6 +663,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 dataset.getDatasetFormatInfo(), ALL_FIELDS_TYPE, itemType, metaType, dataset.getPrimaryKeys().size());
 
         // Step 1: Dummy key provider -> Sample index scan
+        System.err.println("--- STEP 1: Creating sample index scan ---");
         // Use DatasetUtil.createSampleScanOp() to scan the ANALYZE sample index
         // This is the same method used by SampleOperationsHelper and SecondaryVectorOperationsHelper
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
@@ -661,29 +672,26 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // The sample index already contains the ANALYZE samples, so we just need to scan all of them
         int sampleCardinalityPerPartition = Integer.MAX_VALUE; // Scan all samples
         long sampleSeed = 0; // Not used when scanning existing sample index
+        System.err.println("Sample scan: cardinalityPerPartition=" + sampleCardinalityPerPartition + ", seed=" + sampleSeed);
 
         IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
                 sampleCardinalityPerPartition, sampleSeed, projectorFactory);
 
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
+        System.err.println("✓ Connected: DummyKeyProvider → SampleIndexScan");
 
         // Step 2: Extract and flatten vector components
-        // Create evaluator factory to access vector field
+        System.err.println("--- STEP 2: Creating vector component extractor ---");
+        // Create evaluator factory to access vector field using proper nested field accessor
         // For sample index scan with ALL_FIELDS_TYPE projection, the record descriptor has:
         // [primary key fields..., payload field (which contains all other fields)]
-        // The vector field is inside the payload, so we need to access it via field path
-        // Since VectorComponentExtractorOperatorDescriptor expects an IScalarEvaluatorFactory,
-        // and we're scanning the full record, the vector field should be accessible via its path
-        // For now, assume the vector field is in the payload at position numPrimaryKeys
-        // (This is a simplification - in reality, we'd need a nested field accessor)
+        // The vector field is inside the payload, so we need to use createFieldAccessor
+        // which creates a proper evaluator that navigates into the record to extract the field
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
-        // The payload field is typically at numPrimaryKeys, and contains the full record
-        // For a proper implementation, we'd need a FieldAccessEvalFactory that can handle nested paths
-        // For now, use ColumnAccessEvalFactory assuming the vector field is directly accessible
-        // TODO: Implement proper nested field access for vector field path
-        int vectorFieldIndex = numPrimaryKeys; // This assumes vector field is directly in payload
-        IScalarEvaluatorFactory vectorFieldEvalFactory = new ColumnAccessEvalFactory(vectorFieldIndex);
+        int recordColumn = dataset.getDatasetType() == DatasetType.INTERNAL ? numPrimaryKeys : 0;
+        IScalarEvaluatorFactory vectorFieldEvalFactory = createFieldAccessor(itemType, recordColumn, vectorFieldName);
+        System.err.println("Vector field accessor: recordColumn=" + recordColumn + ", vectorFieldName=" + vectorFieldName);
 
         // Record descriptor for flattened components (single double value per tuple)
         IDataFormat format = metadataProvider.getDataFormat();
@@ -693,29 +701,37 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ADOUBLE) };
         ITypeTraits[] flattenedTypeTraits = new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ADOUBLE) };
         RecordDescriptor flattenedRecordDesc = new RecordDescriptor(flattenedSerDes, flattenedTypeTraits);
+        System.err.println("Flattened record descriptor: single DOUBLE field");
 
         targetOp = new VectorComponentExtractorOperatorDescriptor(spec, vectorFieldEvalFactory, sampleRecordDesc,
                 flattenedRecordDesc);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, samplePartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
+        System.err.println("✓ Connected: SampleIndexScan → VectorComponentExtractor");
 
         // Step 3: Local aggregate - collect all component values per partition
+        System.err.println("--- STEP 3: Creating local aggregate ---");
         // Record descriptor for aggregate output (binary containing serialized values)
         ISerializerDeserializer<?>[] aggOutputSerDes =
                 new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ABINARY) };
         ITypeTraits[] aggOutputTypeTraits = new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ABINARY) };
         RecordDescriptor aggOutputRecordDesc = new RecordDescriptor(aggOutputSerDes, aggOutputTypeTraits);
+        System.err.println("Aggregate output: BINARY (serialized double values)");
 
         // Create aggregate function (same descriptor for local and global)
         IScalarEvaluatorFactory[] aggArgs = new IScalarEvaluatorFactory[1];
         aggArgs[0] = new ColumnAccessEvalFactory(0); // Access the flattened component value
+        System.err.println("Aggregate argument: ColumnAccessEvalFactory(0) - flattened component value");
 
         QuantizationConstantsAggregateDescriptor aggDescriptor =
                 (QuantizationConstantsAggregateDescriptor) QuantizationConstantsAggregateDescriptor.FACTORY
                         .createFunctionDescriptor();
         aggDescriptor.setImmutableStates(confidenceInterval, bits);
+        System.err.println("Aggregate descriptor created with states: confidenceInterval=" + confidenceInterval + ", bits=" + bits);
 
         IAggregateEvaluatorFactory localAggFactory = aggDescriptor.createAggregateEvaluatorFactory(aggArgs);
+        System.err.println("Local aggregate factory created");
 
         // No grouping fields - collect all values into single aggregate
         int[] groupFields = new int[0];
@@ -737,13 +753,19 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         targetOp = new SortGroupByOperatorDescriptor(spec, groupbyNumFrames, sortFields, groupFields, normKeyFactories,
                 groupComparators, localAggFactoryDesc, localAggFactoryDesc, flattenedRecordDesc, aggOutputRecordDesc,
                 false);
+        // Local aggregate runs on all partitions (same as sample partition constraint)
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, samplePartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
+        System.err.println("✓ Connected: VectorComponentExtractor → LocalAggregate (SortGroupBy)");
+        System.err.println("Local aggregate: collecting all component values per partition");
 
         // Step 4: Exchange -> Global aggregate
+        System.err.println("--- STEP 4: Creating global aggregate ---");
         // Global aggregate - compute quantiles and alpha (same descriptor, receives serialized values)
-        // The aggregate operator will handle collecting from all partitions
+        // The global aggregate runs on a SINGLE partition to collect results from all local aggregates
         IAggregateEvaluatorFactory globalAggFactory = aggDescriptor.createAggregateEvaluatorFactory(aggArgs);
+        System.err.println("Global aggregate factory created");
 
         AbstractAggregatorDescriptorFactory globalAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
                 new IAggregateEvaluatorFactory[] { globalAggFactory }, groupFields);
@@ -751,18 +773,38 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         targetOp = new SortGroupByOperatorDescriptor(spec, groupbyNumFrames, sortFields, groupFields, normKeyFactories,
                 groupComparators, globalAggFactoryDesc, globalAggFactoryDesc, aggOutputRecordDesc, aggOutputRecordDesc,
                 false);
-        // Connect with OneToOne - the aggregate will collect from all partitions
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        
+        // Get single partition constraint - use first location from cluster
+        AlgebricksAbsolutePartitionConstraint clusterLocations =
+                metadataProvider.getApplicationContext().getClusterStateManager().getNodeSortedClusterLocations();
+        AlgebricksAbsolutePartitionConstraint singlePartitionConstraint =
+                new AlgebricksAbsolutePartitionConstraint(new String[] { clusterLocations.getLocations()[0] });
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, singlePartitionConstraint);
+        
+        // Use MToNPartitioningConnectorDescriptor with OnePartitionComputerFactory to route all tuples to partition 0
+        spec.connect(new MToNPartitioningConnectorDescriptor(spec, new OnePartitionComputerFactory()), sourceOp, 0,
+                targetOp, 0);
         sourceOp = targetOp;
+        System.err.println("✓ Connected: LocalAggregate → GlobalAggregate (via MToN with OnePartitionComputer)");
+        System.err.println("Global aggregate: computing quantiles and alpha from all partitions on single node");
 
         // Step 5: Sink operator - extract quantization constants and store in task context
+        System.err.println("--- STEP 5: Creating sink operator ---");
         String quantizationKey = java.util.UUID.randomUUID().toString();
         targetOp = new QuantizationConstantsSinkOperatorDescriptor(spec, quantizationKey, aggOutputRecordDesc);
+        // Sink runs on same single partition as global aggregate
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, singlePartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+        System.err.println("✓ Connected: GlobalAggregate → QuantizationConstantsSink");
+        System.err.println("Sink: storing quantization constants with key=" + quantizationKey);
 
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
+        System.err.println("==========================================");
+        System.err.println("*** QUANTIZATION METADATA JOB: COMPLETE ***");
+        System.err.println("==========================================");
+        System.err.println("Pipeline: SampleScan → VectorExtract → LocalAgg → GlobalAgg → Sink");
         return spec;
     }
 

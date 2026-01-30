@@ -143,6 +143,7 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
             localValues.clear();
             finalValues.clear();
             isWarned = false;
+            System.err.println("[QuantizationConstantsAgg] init() called - cleared localValues and finalValues");
         }
 
         /**
@@ -168,6 +169,7 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
             // Check if this is serialized binary (from local aggregate) or raw value
             if (typeTag == ATypeTag.BINARY) {
                 // This is global aggregate receiving serialized local values
+                System.err.println("[QuantizationConstantsAgg] step() - GLOBAL: received BINARY from local aggregate");
                 // The binary contains: [numValues (int)] [value1 (double)] [value2 (double)] ...
                 valuesPointable.set(data, offset + 1, input.getLength() - 1);
                 byte[] valuesBytes = valuesPointable.getByteArray();
@@ -175,17 +177,23 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
                 // Read number of values (serialized as int)
                 int numValues = IntegerPointable.getInteger(valuesBytes, pointer);
                 pointer += Integer.BYTES;
+                System.err.println("[QuantizationConstantsAgg] step() - GLOBAL: deserializing " + numValues + " values from binary");
                 // Read each double value
                 for (int i = 0; i < numValues; i++) {
                     double value = BufferSerDeUtil.getDouble(valuesBytes, pointer);
                     pointer += Double.BYTES;
                     finalValues.add(value);
                 }
+                System.err.println("[QuantizationConstantsAgg] step() - GLOBAL: added " + numValues + " values, total finalValues=" + finalValues.size());
             } else {
                 // This is local aggregate - extract numeric value like AvgAggregateFunction
+                System.err.println("[QuantizationConstantsAgg] step() - LOCAL: extracting numeric value, typeTag=" + typeTag);
                 double value = extractNumericValue(data, offset, typeTag);
                 if (!Double.isNaN(value)) {
                     localValues.add(value);
+                    System.err.println("[QuantizationConstantsAgg] step() - LOCAL: extracted value=" + value + ", total localValues=" + localValues.size());
+                } else {
+                    System.err.println("[QuantizationConstantsAgg] step() - LOCAL: skipped NaN value (unsupported type)");
                 }
             }
         }
@@ -198,34 +206,43 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
          * @return extracted numeric value as double, or NaN if type is not numeric
          */
         private double extractNumericValue(byte[] data, int offset, ATypeTag typeTag) {
+            System.err.println("[QuantizationConstantsAgg] extractNumericValue() - extracting from embedding, typeTag=" + typeTag);
             switch (typeTag) {
                 case TINYINT: {
                     byte val = AInt8SerializerDeserializer.getByte(data, offset + 1);
+                    System.err.println("[QuantizationConstantsAgg] extractNumericValue() - TINYINT: " + val);
                     return val;
                 }
                 case SMALLINT: {
                     short val = AInt16SerializerDeserializer.getShort(data, offset + 1);
+                    System.err.println("[QuantizationConstantsAgg] extractNumericValue() - SMALLINT: " + val);
                     return val;
                 }
                 case INTEGER: {
                     int val = AInt32SerializerDeserializer.getInt(data, offset + 1);
+                    System.err.println("[QuantizationConstantsAgg] extractNumericValue() - INTEGER: " + val);
                     return val;
                 }
                 case BIGINT: {
                     long val = AInt64SerializerDeserializer.getLong(data, offset + 1);
+                    System.err.println("[QuantizationConstantsAgg] extractNumericValue() - BIGINT: " + val);
                     return val;
                 }
                 case FLOAT: {
                     float val = AFloatSerializerDeserializer.getFloat(data, offset + 1);
+                    System.err.println("[QuantizationConstantsAgg] extractNumericValue() - FLOAT: " + val);
                     return val;
                 }
                 case DOUBLE: {
-                    return ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+                    double val = ADoubleSerializerDeserializer.getDouble(data, offset + 1);
+                    System.err.println("[QuantizationConstantsAgg] extractNumericValue() - DOUBLE: " + val);
+                    return val;
                 }
                 default: {
                     // Issue warning only once and skip unsupported types
                     if (!isWarned) {
                         isWarned = true;
+                        System.err.println("[QuantizationConstantsAgg] extractNumericValue() - WARNING: unsupported type " + typeTag);
                         ExceptionUtil.warnUnsupportedType(context, sourceLoc, getIdentifier().getName(), typeTag);
                     }
                     return Double.NaN;
@@ -245,6 +262,7 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
             try {
                 if (!localValues.isEmpty()) {
                     // Local aggregate: serialize collected double values
+                    System.err.println("[QuantizationConstantsAgg] finish() - LOCAL: serializing " + localValues.size() + " values");
                     // Format: [numValues (int)] [value1 (double)] [value2 (double)] ...
                     valuesBits.reset();
                     IntegerSerializerDeserializer.write(localValues.size(), valuesBits.getDataOutput());
@@ -254,9 +272,13 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
                     binary.setValue(valuesBits.getByteArray(), valuesBits.getStartOffset(), valuesBits.getLength());
                     binarySerde.serialize(binary, storage.getDataOutput());
                     result.set(storage);
+                    System.err.println("[QuantizationConstantsAgg] finish() - LOCAL: serialized " + localValues.size() + " values to binary");
                 } else if (!finalValues.isEmpty()) {
                     // Global aggregate: compute quantization constants
+                    System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: computing constants from " + finalValues.size() + " values");
+                    // Global aggregate: compute quantization constants
                     // Sort all values
+                    System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: sorting " + finalValues.size() + " values");
                     Collections.sort(finalValues);
 
                     // Compute quantiles using QuantileCalculatorOperatorDescriptor helper logic
@@ -271,20 +293,25 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
 
                     float minQ = finalValues.get(lowerIdx).floatValue();
                     float maxQ = finalValues.get(upperIdx).floatValue();
+                    System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: quantiles computed - lowerIdx=" + lowerIdx + 
+                            " (minQ=" + minQ + "), upperIdx=" + upperIdx + " (maxQ=" + maxQ + ")");
 
                     // Avoid division by zero
                     double eps = 1e-12;
                     if (maxQ <= minQ + eps) {
                         maxQ = minQ + 1e-6f;
+                        System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: adjusted maxQ to avoid division by zero: " + maxQ);
                     }
 
                     // Calculate alpha
                     int levels = 1 << bits; // 2^bits
                     float alpha = (levels - 1) / (maxQ - minQ);
+                    System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: alpha computed - levels=" + levels + ", alpha=" + alpha);
 
                     // Create QuantizationConstants object
                     QuantizationConstants constants = new QuantizationConstants(minQ, maxQ, alpha, bits,
                             confidenceInterval, totalCount);
+                    System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: QuantizationConstants created: " + constants);
 
                     // Serialize QuantizationConstants to binary format
                     valuesBits.reset();
@@ -292,8 +319,10 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
                     binary.setValue(valuesBits.getByteArray(), valuesBits.getStartOffset(), valuesBits.getLength());
                     binarySerde.serialize(binary, storage.getDataOutput());
                     result.set(storage);
+                    System.err.println("[QuantizationConstantsAgg] finish() - GLOBAL: serialized QuantizationConstants to binary");
                 } else {
                     // Empty dataset
+                    System.err.println("[QuantizationConstantsAgg] finish() - WARNING: empty dataset (no values collected)");
                     storage.getDataOutput().writeByte(ATypeTag.SERIALIZED_SYSTEM_NULL_TYPE_TAG);
                     result.set(storage);
                 }
