@@ -27,15 +27,11 @@ import java.nio.ByteBuffer;
 import org.apache.asterix.common.storage.QuantizationConstants;
 import org.apache.hyracks.dataflow.common.data.marshalling.FloatSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
-import org.apache.asterix.om.base.ABinary;
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
@@ -46,6 +42,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.utils.TaskUtil;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
+import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 
 /**
  * Sink operator that extracts QuantizationConstants from the input tuple
@@ -108,8 +105,11 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
         /**
          * Extracts QuantizationConstants from the input tuple.
          * The tuple contains a BINARY field (field 0) with serialized QuantizationConstants.
-         * Format: [typeTag (byte)] [serialized ABinary content]
-         * ABinary content format: [length (int)] [minQ (float)] [maxQ (float)] [alpha (float)] [bits (int)] [confidenceInterval (float)] [sampleCount (int)]
+         * Format: [typeTag (byte)] [variable-length encoded length prefix (1-5 bytes)] [content (24 bytes)]
+         * Content format: [minQ (float)] [maxQ (float)] [alpha (float)] [bits (int)] [confidenceInterval (float)] [sampleCount (int)]
+         * 
+         * Uses ByteArrayPointable to correctly handle the variable-length encoded length prefix,
+         * similar to how RangeMap's SortForwardOperatorDescriptor handles binary data.
          * 
          * @return QuantizationConstants or null if the input is SYSTEM_NULL (empty dataset)
          */
@@ -138,26 +138,26 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
                     throw HyracksDataException.create(new IOException("Expected BINARY type, got: " + typeTag));
                 }
 
-                // Skip type tag (1 byte) and deserialize ABinary
-                int dataOffset = fieldStart + 1; // Skip type tag
-                ByteArrayInputStream bais = new ByteArrayInputStream(fieldData, dataOffset, fieldLength - 1);
-                DataInput in = new DataInputStream(bais);
-
-                // Deserialize ABinary using ABinarySerializerDeserializer
-                @SuppressWarnings("unchecked")
-                ISerializerDeserializer<ABinary> binarySerde =
-                        SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ABINARY);
-                ABinary binary = binarySerde.deserialize(in);
-
-                // Extract bytes from ABinary and deserialize QuantizationConstants
-                byte[] binaryBytes = binary.getBytes();
-                int binaryStart = binary.getStart();
-                int binaryLength = binary.getLength();
-
-                ByteArrayInputStream constantsBais = new ByteArrayInputStream(binaryBytes, binaryStart, binaryLength);
+                // Use ByteArrayPointable to directly access content (skips length prefix automatically)
+                // Similar to how RangeMap's SortForwardOperatorDescriptor handles binary data
+                ByteArrayPointable pointable = new ByteArrayPointable();
+                pointable.set(fieldData, fieldStart + 1, fieldLength - 1); // Skip type tag
+                
+                // Get content start offset (after length prefix) and content length (24 bytes)
+                int contentStartOffset = pointable.getContentStartOffset();
+                int contentLength = pointable.getContentLength();
+                
+                System.err.println("[QuantizationConstantsSink] Binary content: startOffset=" + contentStartOffset + 
+                        ", contentLength=" + contentLength + ", expected=24");
+                
+                // Create stream from the actual content bytes (skipping length prefix)
+                ByteArrayInputStream constantsBais = new ByteArrayInputStream(
+                    pointable.getByteArray(),
+                    contentStartOffset,
+                    contentLength);
                 DataInput constantsIn = new DataInputStream(constantsBais);
 
-                // Deserialize QuantizationConstants from the data bytes
+                // Deserialize QuantizationConstants from the content bytes
                 // Format: [minQ (float)] [maxQ (float)] [alpha (float)] [bits (int)] [confidenceInterval (float)] [sampleCount (int)]
                 float minQ = FloatSerializerDeserializer.read(constantsIn);
                 float maxQ = FloatSerializerDeserializer.read(constantsIn);

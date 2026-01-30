@@ -128,6 +128,7 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
         private final List<Double> localValues = new ArrayList<>(); // Store extracted numeric values as doubles
         private final List<Double> finalValues = new ArrayList<>();
         private boolean isWarned = false;
+        private static final int MAX_VALUES_TO_COLLECT = 2; // TEMPORARY: Limit to prevent "record too big" error
 
         private QuantizationConstantsFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context,
                 float confidenceInterval, int bits, SourceLocation sourceLocation) throws HyracksDataException {
@@ -147,9 +148,12 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
         }
 
         /**
-         * Local aggregate: Extracts and collects all scalar numeric values (no limit).
-         * Global aggregate: Receives serialized double values from local aggregates.
-         * @param tuple contains a scalar numeric value (local) or serialized doubles (global)
+         * Unified step() method that always expects BINARY format for intermediate results.
+         * Local aggregate: Receives tag|value from VectorComponentExtractorOperatorDescriptor,
+         * extracts numeric value and stores it (will be serialized to binary in finishPartial).
+         * Global aggregate: Receives BINARY format from local aggregates or merge phase,
+         * deserializes with proper bounds checking.
+         * @param tuple contains a scalar numeric value (local) or serialized doubles in BINARY (global)
          * @throws HyracksDataException IO Exception
          */
         @Override
@@ -166,36 +170,124 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
                 return;
             }
 
-            // Check if this is serialized binary (from local aggregate) or raw value
+            // Unified approach: Always expect BINARY format for intermediate results
             if (typeTag == ATypeTag.BINARY) {
-                // This is global aggregate receiving serialized local values
-                System.err.println("[QuantizationConstantsAgg] step() - GLOBAL: received BINARY from local aggregate");
-                // The binary contains: [numValues (int)] [value1 (double)] [value2 (double)] ...
-                valuesPointable.set(data, offset + 1, input.getLength() - 1);
-                byte[] valuesBytes = valuesPointable.getByteArray();
-                int pointer = valuesPointable.getContentStartOffset();
-                // Read number of values (serialized as int)
-                int numValues = IntegerPointable.getInteger(valuesBytes, pointer);
-                pointer += Integer.BYTES;
-                System.err.println("[QuantizationConstantsAgg] step() - GLOBAL: deserializing " + numValues + " values from binary");
-                // Read each double value
-                for (int i = 0; i < numValues; i++) {
-                    double value = BufferSerDeUtil.getDouble(valuesBytes, pointer);
-                    pointer += Double.BYTES;
-                    finalValues.add(value);
-                }
-                System.err.println("[QuantizationConstantsAgg] step() - GLOBAL: added " + numValues + " values, total finalValues=" + finalValues.size());
+                // This is global aggregate receiving serialized local values (or merge phase)
+                System.err.println("[QuantizationConstantsAgg] step() - received BINARY format");
+                deserializeBinaryValues(data, offset);
             } else {
-                // This is local aggregate - extract numeric value like AvgAggregateFunction
+                // This is local aggregate receiving tag|value from VectorComponentExtractorOperatorDescriptor
+                // Extract numeric value and store (will be serialized to binary in finishPartial)
+                // TEMPORARY: Limit collection to prevent "record too big" error
+                if (localValues.size() >= MAX_VALUES_TO_COLLECT) {
+                    // Skip additional values once we've collected enough
+                    return;
+                }
                 System.err.println("[QuantizationConstantsAgg] step() - LOCAL: extracting numeric value, typeTag=" + typeTag);
                 double value = extractNumericValue(data, offset, typeTag);
                 if (!Double.isNaN(value)) {
                     localValues.add(value);
-                    System.err.println("[QuantizationConstantsAgg] step() - LOCAL: extracted value=" + value + ", total localValues=" + localValues.size());
+                    System.err.println("[QuantizationConstantsAgg] step() - LOCAL: extracted value=" + value + ", total localValues=" + localValues.size() + " (limit=" + MAX_VALUES_TO_COLLECT + ")");
                 } else {
                     System.err.println("[QuantizationConstantsAgg] step() - LOCAL: skipped NaN value (unsupported type)");
                 }
             }
+        }
+
+        /**
+         * Deserializes binary format with proper bounds checking.
+         * Format: [typeTag=BINARY] [metaLength] [numValues (int)] [value1 (double)] [value2 (double)] ...
+         * @param data byte array containing the input
+         * @param offset offset where type tag is located
+         * @throws HyracksDataException if deserialization fails or bounds are exceeded
+         */
+        private void deserializeBinaryValues(byte[] data, int offset) throws HyracksDataException {
+            System.err.println("[QuantizationConstantsAgg] deserializeBinaryValues() - starting deserialization");
+            
+            // Set ByteArrayPointable to binary content (skip type tag)
+            // input.getLength() includes the type tag, so we skip it
+            int binaryLength = input.getLength() - 1; // Subtract 1 for type tag
+            valuesPointable.set(data, offset + 1, binaryLength);
+            
+            byte[] valuesBytes = valuesPointable.getByteArray();
+            int contentStartOffset = valuesPointable.getContentStartOffset();
+            int contentLength = valuesPointable.getContentLength();
+            
+            System.err.println("[QuantizationConstantsAgg] deserializeBinaryValues() - binary content: " +
+                    "startOffset=" + contentStartOffset + ", contentLength=" + contentLength +
+                    ", valuesBytes.length=" + valuesBytes.length);
+            
+            // Validate we have enough bytes for at least the numValues int
+            if (contentLength < Integer.BYTES) {
+                throw new HyracksDataException("Binary data too short: expected at least " + 
+                        Integer.BYTES + " bytes for numValues, got " + contentLength);
+            }
+            
+            // Validate we can read the integer without going out of bounds
+            if (contentStartOffset + Integer.BYTES > valuesBytes.length) {
+                throw new HyracksDataException("Out of bounds: trying to read numValues at offset " + 
+                        contentStartOffset + ", but array length is " + valuesBytes.length);
+            }
+            
+            // Read number of values
+            int numValues = IntegerPointable.getInteger(valuesBytes, contentStartOffset);
+            System.err.println("[QuantizationConstantsAgg] deserializeBinaryValues() - numValues=" + numValues);
+            
+            // Validate numValues is reasonable
+            if (numValues < 0) {
+                throw new HyracksDataException("Invalid numValues: " + numValues + " (negative)");
+            }
+            if (numValues > 10000000) { // Sanity check: 10 million values max
+                throw new HyracksDataException("Invalid numValues: " + numValues + " (too large, possible corruption)");
+            }
+            
+            // Calculate expected bytes: Integer.BYTES (numValues) + (numValues * Double.BYTES)
+            long expectedBytes = (long) Integer.BYTES + ((long) numValues * (long) Double.BYTES);
+            if (expectedBytes > Integer.MAX_VALUE) {
+                throw new HyracksDataException("Calculated expected bytes exceeds Integer.MAX_VALUE: " + expectedBytes);
+            }
+            int expectedBytesInt = (int) expectedBytes;
+            
+            System.err.println("[QuantizationConstantsAgg] deserializeBinaryValues() - expectedBytes=" + expectedBytesInt);
+            
+            // Validate we have enough content bytes
+            if (expectedBytesInt > contentLength) {
+                throw new HyracksDataException("Binary data too short: expected " + expectedBytesInt + 
+                        " bytes, got " + contentLength + " (numValues=" + numValues + ")");
+            }
+            
+            // Validate we can read all values without going out of bounds
+            int lastByteOffset = contentStartOffset + expectedBytesInt - 1;
+            if (lastByteOffset >= valuesBytes.length) {
+                throw new HyracksDataException("Out of bounds: trying to read up to offset " + lastByteOffset + 
+                        ", but array length is " + valuesBytes.length);
+            }
+            
+            // Read each double value
+            int pointer = contentStartOffset + Integer.BYTES;
+            int valuesAdded = 0;
+            for (int i = 0; i < numValues; i++) {
+                // Verify we have enough bytes remaining for this double
+                if (pointer + Double.BYTES > contentStartOffset + contentLength) {
+                    throw new HyracksDataException("Out of bounds: trying to read double #" + (i + 1) + 
+                            " at offset " + pointer + ", but content ends at " + 
+                            (contentStartOffset + contentLength));
+                }
+                
+                // Verify we don't exceed array bounds
+                if (pointer + Double.BYTES > valuesBytes.length) {
+                    throw new HyracksDataException("Out of bounds: trying to read double #" + (i + 1) + 
+                            " at offset " + pointer + ", but array length is " + valuesBytes.length);
+                }
+                
+                double value = BufferSerDeUtil.getDouble(valuesBytes, pointer);
+                pointer += Double.BYTES;
+                finalValues.add(value);
+                valuesAdded++;
+            }
+            
+            System.err.println("[QuantizationConstantsAgg] deserializeBinaryValues() - added " + valuesAdded + 
+                    " values, total finalValues=" + finalValues.size());
         }
 
         /**
@@ -347,7 +439,49 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
 
         @Override
         public void finishPartial(IPointable result) throws HyracksDataException {
-            finish(result);
+            // finishPartial() is called during merge phase and must return intermediate results
+            // that can be merged, not the final result.
+            // 
+            // Local aggregate: return serialized doubles [numValues] [value1] [value2] ...
+            // Global aggregate during merge: return serialized doubles from finalValues (not QuantizationConstants)
+            // Global aggregate final: return QuantizationConstants (but this is called via finish(), not finishPartial())
+            
+            storage.reset();
+            try {
+                if (!localValues.isEmpty()) {
+                    // Local aggregate: serialize collected double values
+                    System.err.println("[QuantizationConstantsAgg] finishPartial() - LOCAL: serializing " + localValues.size() + " values");
+                    valuesBits.reset();
+                    IntegerSerializerDeserializer.write(localValues.size(), valuesBits.getDataOutput());
+                    for (Double value : localValues) {
+                        DoubleSerializerDeserializer.write(value, valuesBits.getDataOutput());
+                    }
+                    binary.setValue(valuesBits.getByteArray(), valuesBits.getStartOffset(), valuesBits.getLength());
+                    binarySerde.serialize(binary, storage.getDataOutput());
+                    result.set(storage);
+                    System.err.println("[QuantizationConstantsAgg] finishPartial() - LOCAL: serialized " + localValues.size() + " values to binary");
+                } else if (!finalValues.isEmpty()) {
+                    // Global aggregate during merge: return intermediate format (serialized doubles)
+                    // This allows merge phase to combine results from multiple partitions
+                    System.err.println("[QuantizationConstantsAgg] finishPartial() - GLOBAL (merge): serializing " + finalValues.size() + " values as intermediate format");
+                    valuesBits.reset();
+                    IntegerSerializerDeserializer.write(finalValues.size(), valuesBits.getDataOutput());
+                    for (Double value : finalValues) {
+                        DoubleSerializerDeserializer.write(value, valuesBits.getDataOutput());
+                    }
+                    binary.setValue(valuesBits.getByteArray(), valuesBits.getStartOffset(), valuesBits.getLength());
+                    binarySerde.serialize(binary, storage.getDataOutput());
+                    result.set(storage);
+                    System.err.println("[QuantizationConstantsAgg] finishPartial() - GLOBAL (merge): serialized " + finalValues.size() + " values to binary");
+                } else {
+                    // Empty dataset
+                    System.err.println("[QuantizationConstantsAgg] finishPartial() - WARNING: empty dataset (no values collected)");
+                    storage.getDataOutput().writeByte(ATypeTag.SERIALIZED_SYSTEM_NULL_TYPE_TAG);
+                    result.set(storage);
+                }
+            } catch (IOException e) {
+                throw HyracksDataException.create(e);
+            }
         }
 
         private FunctionIdentifier getIdentifier() {

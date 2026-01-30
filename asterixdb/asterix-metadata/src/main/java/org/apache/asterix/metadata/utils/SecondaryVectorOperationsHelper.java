@@ -74,7 +74,7 @@ import org.apache.hyracks.dataflow.std.connectors.MToNPartitioningConnectorDescr
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.dataflow.std.group.AbstractAggregatorDescriptorFactory;
-import org.apache.hyracks.dataflow.std.group.sort.SortGroupByOperatorDescriptor;
+import org.apache.hyracks.dataflow.std.group.preclustered.PreclusteredGroupOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
@@ -733,16 +733,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         IAggregateEvaluatorFactory localAggFactory = aggDescriptor.createAggregateEvaluatorFactory(aggArgs);
         System.err.println("Local aggregate factory created");
 
-        // No grouping fields - collect all values into single aggregate
+        // No grouping fields - collect all values into single aggregate (groupAll)
         int[] groupFields = new int[0];
-        int[] sortFields = new int[0]; // No sorting needed when no grouping
-        IBinaryComparatorFactoryProvider bcfp = format.getBinaryComparatorFactoryProvider();
-        IBinaryComparatorFactory[] groupComparators = new IBinaryComparatorFactory[0];
-        INormalizedKeyComputerFactoryProvider normKeyProvider = format.getNormalizedKeyComputerFactoryProvider();
-        INormalizedKeyComputerFactory[] normKeyFactories = null; // No normalized keys when no grouping
-
+        
         // Get frames limit for group by operator
-        int groupbyNumFrames = OptimizationConfUtil.getGroupByNumFrames(
+        int framesLimit = OptimizationConfUtil.getGroupByNumFrames(
                 metadataProvider.getApplicationContext().getCompilerProperties(), metadataProvider.getConfig(),
                 sourceLoc);
 
@@ -750,15 +745,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         AbstractAggregatorDescriptorFactory localAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
                 new IAggregateEvaluatorFactory[] { localAggFactory }, groupFields);
 
-        targetOp = new SortGroupByOperatorDescriptor(spec, groupbyNumFrames, sortFields, groupFields, normKeyFactories,
-                groupComparators, localAggFactoryDesc, localAggFactoryDesc, flattenedRecordDesc, aggOutputRecordDesc,
-                false);
+        // Use PreclusteredGroupOperatorDescriptor for in-memory aggregation (no external sort, no merge phase)
+        IBinaryComparatorFactory[] comparatorFactories = new IBinaryComparatorFactory[0]; // Empty for groupAll
+        targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories, 
+                localAggFactoryDesc, aggOutputRecordDesc, true, framesLimit); // groupAll=true
         // Local aggregate runs on all partitions (same as sample partition constraint)
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, samplePartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
-        System.err.println("✓ Connected: VectorComponentExtractor → LocalAggregate (SortGroupBy)");
-        System.err.println("Local aggregate: collecting all component values per partition");
+        System.err.println("✓ Connected: VectorComponentExtractor → LocalAggregate (PreclusteredGroup)");
+        System.err.println("Local aggregate: collecting all component values per partition (in-memory, no external sort)");
 
         // Step 4: Exchange -> Global aggregate
         System.err.println("--- STEP 4: Creating global aggregate ---");
@@ -770,9 +766,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         AbstractAggregatorDescriptorFactory globalAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
                 new IAggregateEvaluatorFactory[] { globalAggFactory }, groupFields);
 
-        targetOp = new SortGroupByOperatorDescriptor(spec, groupbyNumFrames, sortFields, groupFields, normKeyFactories,
-                groupComparators, globalAggFactoryDesc, globalAggFactoryDesc, aggOutputRecordDesc, aggOutputRecordDesc,
-                false);
+        // Use PreclusteredGroupOperatorDescriptor for in-memory aggregation (no external sort, no merge phase)
+        targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories, 
+                globalAggFactoryDesc, aggOutputRecordDesc, true, framesLimit); // groupAll=true
         
         // Get single partition constraint - use first location from cluster
         AlgebricksAbsolutePartitionConstraint clusterLocations =
@@ -786,7 +782,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 targetOp, 0);
         sourceOp = targetOp;
         System.err.println("✓ Connected: LocalAggregate → GlobalAggregate (via MToN with OnePartitionComputer)");
-        System.err.println("Global aggregate: computing quantiles and alpha from all partitions on single node");
+        System.err.println("Global aggregate: computing quantiles and alpha from all partitions on single node (in-memory, no external sort)");
 
         // Step 5: Sink operator - extract quantization constants and store in task context
         System.err.println("--- STEP 5: Creating sink operator ---");
@@ -805,7 +801,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("*** QUANTIZATION METADATA JOB: COMPLETE ***");
         System.err.println("==========================================");
         System.err.println("Pipeline: SampleScan → VectorExtract → LocalAgg → GlobalAgg → Sink");
-        return spec;
+         return spec;
     }
 
     @Override
