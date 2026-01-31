@@ -35,11 +35,10 @@ import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.IColumnProj
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.buffercache.IColumnReadContext;
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.buffercache.IColumnWriteContext;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm.LSMColumnBTreeOpContext;
-import org.apache.hyracks.storage.am.lsm.common.impls.ComponentStatsAccumulator;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
@@ -58,20 +57,18 @@ public class ColumnBTree extends DiskBTree {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator) {
+            boolean checkIfEmptyIndex, ISampler thetaSampler, IPageWriteCallback callback) {
         throw new IllegalAccessError("Missing write column metadata");
     }
 
     public IIndexBulkLoader createBulkLoader(NCConfig storageConfig, float fillFactor, boolean verifyInput,
             IPageWriteCallback callback, IColumnMetadata columnMetadata, IColumnWriteContext writeContext,
-            ComponentStatsAccumulator componentStatsAccumulator) throws HyracksDataException {
-        // I could send the statsAccumulator through the writer, but ig it should come via bulkloader
-        // and also the row format does not have a writer.
+            ISampler sampler) throws HyracksDataException {
         ColumnBTreeLeafFrameFactory columnLeafFrameFactory = (ColumnBTreeLeafFrameFactory) leafFrameFactory;
         ColumnBTreeWriteLeafFrame writeLeafFrame =
                 columnLeafFrameFactory.createWriterFrame(columnMetadata, writeContext);
         return new ColumnBTreeBulkloader(storageConfig, fillFactor, verifyInput, callback, this, writeLeafFrame,
-                writeContext, componentStatsAccumulator);
+                writeContext, sampler);
     }
 
     @Override
@@ -122,12 +119,12 @@ public class ColumnBTree extends DiskBTree {
         }
 
         @Override
-        public ITreeIndexCursor createSampleCursor(int componentSampleCardinality, long sampleSeed,
-                ILSMIndexBatchPointCursor searchCursor) {
+        public ITreeIndexCursor createSampleCursor(long componentSampleCardinality, long sampleSeed,
+                ILSMIndexBatchPointCursor searchCursor, int maxLeafAttempts) {
             ColumnBTreeLeafFrameFactory columnLeafFrameFactory = (ColumnBTreeLeafFrameFactory) leafFrameFactory;
             ColumnBTreeReadLeafFrame readLeafFrame = columnLeafFrameFactory.createReadFrame(projectionInfo);
-            return new ColumnBtreeSampleCursor2((ColumnBTree) btree, readLeafFrame, ctx, context,
-                    componentSampleCardinality, sampleSeed, index, searchCursor);
+            return new ColumnBtreeSampleCursor((ColumnBTree) btree, readLeafFrame, ctx, context,
+                    componentSampleCardinality, sampleSeed, index, searchCursor, maxLeafAttempts);
         }
 
         @Override

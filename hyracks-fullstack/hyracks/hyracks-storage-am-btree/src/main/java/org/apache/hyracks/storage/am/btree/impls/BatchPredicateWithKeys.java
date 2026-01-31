@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
 package org.apache.hyracks.storage.am.btree.impls;
 
 import java.util.List;
@@ -24,7 +25,11 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.common.MultiComparator;
 
+/**
+ *
+ */
 public class BatchPredicateWithKeys extends RangePredicate {
+    private static final long serialVersionUID = 1L;
 
     protected List<ITupleReference> keyTuples;
     protected ITupleReference keyTuple;
@@ -56,15 +61,11 @@ public class BatchPredicateWithKeys extends RangePredicate {
     @Override
     public ITupleReference getMinFilterTuple() {
         return null;
-        //        throw new UnsupportedOperationException(
-        //                "Min filter tuple not supported in " + getClass().getName() + " implementation.");
     }
 
     @Override
     public ITupleReference getMaxFilterTuple() {
         return null;
-        //        throw new UnsupportedOperationException(
-        //                "Max filter tuple not supported in " + getClass().getName() + " implementation.");
     }
 
     @Override

@@ -90,7 +90,7 @@ public class LSMBTreeOpContext extends AbstractLSMIndexOperationContext {
             LSMBTreeMemoryComponent mutableComponent = (LSMBTreeMemoryComponent) mutableComponents.get(i);
             mutableBTrees[i] = mutableComponent.getIndex();
             IIndexAccessParameters iap =
-                    new IndexAccessParameters(modificationCallback, NoOpOperationCallback.INSTANCE);
+                    new IndexAccessParameters(lsmIap.getModificationCallback(), NoOpOperationCallback.INSTANCE);
             mutableBTreeAccessors[i] = mutableBTrees[i].createAccessor(iap);
             mutableBTreeOpCtxs[i] = mutableBTreeAccessors[i].getOpContext();
         }
@@ -107,7 +107,7 @@ public class LSMBTreeOpContext extends AbstractLSMIndexOperationContext {
         searchPredicate = new RangePredicate(null, null, true, true, getCmp(), getCmp());
         memCursor = (insertLeafFrame != null) ? new BTreeRangeSearchCursor(insertLeafFrame, false) : null;
         searchInitialState = new LSMBTreeCursorInitialState(insertLeafFrameFactory, getCmp(), bloomFilterCmp,
-                lsmHarness, null, searchCallback, null);
+                lsmHarness, null, lsmIap.getSearchOperationCallback(), null);
         insertSearchCursor = new LSMBTreePointSearchCursor(this);
     }
 

@@ -49,23 +49,26 @@ public class LSMColumnBTreeLocalResourceFactory extends LSMBTreeLocalResourceFac
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate,
-            int[] btreeFields, ICompressorDecompressorFactory compressorDecompressorFactory, ITypeTraits nullTypeTraits,
+            int thetaSketchK, int maxSampleLeafAttempts, int[] btreeFields,
+            ICompressorDecompressorFactory compressorDecompressorFactory, ITypeTraits nullTypeTraits,
             INullIntrospector nullIntrospector, boolean isSecondaryNoIncrementalMaintenance,
             IColumnManagerFactory columnManagerFactory, boolean atomic) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, true, bloomFilterKeyFields,
-                bloomFilterFalsePositiveRate, true, btreeFields, compressorDecompressorFactory, true, nullTypeTraits,
-                nullIntrospector, isSecondaryNoIncrementalMaintenance, atomic);
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, true, btreeFields,
+                compressorDecompressorFactory, true, nullTypeTraits, nullIntrospector,
+                isSecondaryNoIncrementalMaintenance, atomic);
         this.columnManagerFactory = columnManagerFactory;
     }
 
     @Override
     public LsmResource createResource(FileReference fileRef) {
         return new LSMColumnBTreeLocalResource(typeTraits, cmpFactories, bloomFilterKeyFields,
-                bloomFilterFalsePositiveRate, fileRef.getRelativePath(), storageManager, mergePolicyFactory,
-                mergePolicyProperties, btreeFields, opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory,
-                metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, compressorDecompressorFactory,
-                nullTypeTraits, nullIntrospector, isSecondaryNoIncrementalMaintenance, columnManagerFactory, atomic);
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, fileRef.getRelativePath(),
+                storageManager, mergePolicyFactory, mergePolicyProperties, btreeFields, opTrackerProvider,
+                ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider,
+                ioSchedulerProvider, compressorDecompressorFactory, nullTypeTraits, nullIntrospector,
+                isSecondaryNoIncrementalMaintenance, columnManagerFactory, atomic);
     }
 }

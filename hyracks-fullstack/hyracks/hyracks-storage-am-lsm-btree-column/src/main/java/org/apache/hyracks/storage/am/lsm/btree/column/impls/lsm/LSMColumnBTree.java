@@ -72,7 +72,8 @@ public class LSMColumnBTree extends LSMBTree {
             ITreeIndexFrameFactory deleteLeafFrameFactory, IBufferCache diskBufferCache,
             IColumnBufferPool columnBufferPool, ILSMIndexFileManager fileManager,
             ILSMDiskComponentFactory componentFactory, ILSMDiskComponentFactory mergeComponentFactory,
-            ILSMDiskComponentFactory bulkloadComponentFactory, double bloomFilterFalsePositiveRate, int fieldCount,
+            ILSMDiskComponentFactory bulkloadComponentFactory, int[] bloomFilterKeyFields,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts, int fieldCount,
             IBinaryComparatorFactory[] cmpFactories, ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker,
             ILSMIOOperationScheduler ioScheduler, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
             ILSMPageWriteCallbackFactory pageWriteCallbackFactory, int[] btreeFields, ITracer tracer,
@@ -80,9 +81,9 @@ public class LSMColumnBTree extends LSMBTree {
             throws HyracksDataException {
         super(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory, insertLeafFrameFactory,
                 deleteLeafFrameFactory, diskBufferCache, fileManager, componentFactory, bulkloadComponentFactory, null,
-                null, null, bloomFilterFalsePositiveRate, fieldCount, cmpFactories, mergePolicy, opTracker, ioScheduler,
-                ioOpCallbackFactory, pageWriteCallbackFactory, true, true, btreeFields, null, true, false, tracer,
-                atomic);
+                null, null, bloomFilterKeyFields, bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts,
+                fieldCount, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
+                pageWriteCallbackFactory, true, true, btreeFields, null, true, false, tracer, atomic);
         this.columnManager = columnManager;
         this.mergeComponentFactory = mergeComponentFactory;
         this.diskCacheManager = diskCacheManager;
@@ -111,9 +112,11 @@ public class LSMColumnBTree extends LSMBTree {
                 ((LSMColumnBTreeWithBloomFilterDiskComponentFactory) componentFactory).getBloomFilterKeyFields().length;
         IColumnTupleProjector tupleProjector =
                 ColumnUtil.getTupleProjector(iap, columnManager.getMergeColumnProjector());
-        return new LSMColumnBTreeOpContext(this, memoryComponents, insertLeafFrameFactory, deleteLeafFrameFactory, iap,
-                numBloomFilterKeyFields, getTreeFields(), getFilterFields(), getHarness(), getFilterCmpFactories(),
-                tracer, tupleProjector);
+        LSMColumnBTreeOpContext opCtx = new LSMColumnBTreeOpContext(this, memoryComponents, insertLeafFrameFactory,
+                deleteLeafFrameFactory, iap, numBloomFilterKeyFields, getTreeFields(), getFilterFields(), getHarness(),
+                getFilterCmpFactories(), tracer, tupleProjector);
+        opCtx.setParameters(iap.getParameters());
+        return opCtx;
     }
 
     protected IColumnManager getColumnManager() {

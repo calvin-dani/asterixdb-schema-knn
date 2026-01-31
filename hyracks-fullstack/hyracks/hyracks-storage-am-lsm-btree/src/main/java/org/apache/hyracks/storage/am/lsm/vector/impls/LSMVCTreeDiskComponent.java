@@ -39,6 +39,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoade
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 
@@ -92,6 +93,11 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
     @Override
     public void validate() throws HyracksDataException {
         vcTree.validate();
+    }
+
+    @Override
+    public ISampler getThetaSampler() {
+        return super.getThetaSampler();
     }
 
     /**
@@ -160,7 +166,7 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             IIndexBulkLoader ssbuilder = getIndex().createStaticStructureBulkLoader(numLevels, clustersPerLevel,
                     centroidsPerCluster, maxEntriesPerPage, callback);
             // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
-            return new LSMIndexBulkLoader(ssbuilder, getMetadata(), getStatsAccumulator());
+            return new LSMIndexBulkLoader(ssbuilder, getMetadata(), getThetaSampler());
 
         } catch (Exception e) {
             throw HyracksDataException.create(e);
@@ -192,8 +198,9 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
 
         try {
             IIndexBulkLoader builder =
-                    getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE, staticAccessor);
-            return new LSMIndexBulkLoader(builder, getMetadata(), getStatsAccumulator());
+                    getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE, staticAccessor,
+                            getThetaSampler());
+            return new LSMIndexBulkLoader(builder, getMetadata(), getThetaSampler());
         } catch (Exception e) {
             throw HyracksDataException.create(e);
         }

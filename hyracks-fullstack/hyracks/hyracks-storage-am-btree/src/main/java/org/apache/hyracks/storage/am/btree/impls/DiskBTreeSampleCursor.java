@@ -23,8 +23,8 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.ThreadLocalRandom;
 
+import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.api.IBTreeLeafFrame;
@@ -44,9 +44,6 @@ import org.apache.logging.log4j.Logger;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 
-// todo: copies parts from DiskBTreePointSearchCursor and BTreeRangeSearchCursor
-//  unify the code and remove duplication
-// Also extract abstract out the common parts between DiskBTreeSampleCursor and ColumnBTreeSampleCursor
 public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements ITreeIndexCursor {
 
     private static final Logger LOGGER = LogManager.getLogger();
@@ -55,23 +52,14 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
     private final IBufferCacheReadContext bufferCacheOpCtx;
     private final IBTreeLeafFrame leafFrame;
     private final ITreeIndexTupleReference frameTuple;
-    private long totalTimeTakenToFindRandomLeaf = 0;
-    private long totalTimeTakenToFindRandomTuples = 0;
 
-    // todo: need a map to keep track of keys already seen, to avoid duplicates.
     // u64: (pageId << 32) | tupleIndex
     private final LongSet seenTupleIndexes;
 
-    // Cardinality variables
-    private static final int MAX_LEAF_FINDING_ATTEMPTS = 500; // Setting just a random value for now
-    private boolean endedPreemptively = false;
-    private final int componentSampleCardinality;
+    // Sampling related fields
+    private final int maxLeafFindingAttempts;
+    private final long componentSampleCardinality;
     private final Random randomNumGen;
-    // Number of LIVE tuples sampled from the component so far.
-    private int sampledCount;
-    private boolean continueCurrentLeaf = false;
-    private int hasNextAttemptCount = 0;
-    private int totalAccessCount;
 
     private ICachedPage page = null;
     private int pageId = -1;
@@ -86,9 +74,19 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
     private final List<ITupleReference> searchKeys;
     private final BitSet foundIndexes;
 
-    public DiskBTreeSampleCursor(DiskBTree diskBTree, IBTreeLeafFrame leafFrame, int componentSampleCardinality,
+    // Number of LIVE tuples sampled from the component so far.
+    private int sampledCount;
+    private int hasNextAttemptCount = 0;
+    private int totalAccessCount;
+
+    // Debug and traceability
+    private long totalTimeTakenToFindRandomLeaf = 0;
+    private long totalTimeTakenToFindRandomTuples = 0;
+    private boolean endedPreemptively = false;
+
+    public DiskBTreeSampleCursor(DiskBTree diskBTree, IBTreeLeafFrame leafFrame, long componentSampleCardinality,
             long sampleSeed, BTreeOpContext ctx, IBufferCacheReadContext bufferCacheOpCtx,
-            ILSMIndexBatchPointCursor searchCursor) {
+            ILSMIndexBatchPointCursor searchCursor, int maxLeafFindingAttempts) {
         this.bTree = diskBTree;
         this.leafFrame = leafFrame;
         this.randomNumGen = new Random(sampleSeed);
@@ -102,11 +100,7 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
         this.searchKeys = new ArrayList<>();
         this.batchPredicate = new BatchPredicateWithKeys();
         this.totalAccessCount = 0;
-    }
-
-    @Override
-    public boolean isExclusiveLatchNodes() {
-        return false;
+        this.maxLeafFindingAttempts = maxLeafFindingAttempts;
     }
 
     @Override
@@ -114,80 +108,71 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
         if (page != null) {
             releasePage();
         }
-        pageId = ((BTreeCursorInitialState) initialState).getPageId();
         rootPageId = ((BTreeCursorInitialState) initialState).getRootPageId();
-        page = initialState.getPage();
-        leafFrame.setPage(page);
-        if (leafFrame.getTupleCount() > 0) {
-            continueCurrentLeaf = true;
-        }
     }
 
-    // todo: please convert it into an iterative function
     @Override
     protected boolean doHasNext() throws HyracksDataException {
-        if (sampledCount >= componentSampleCardinality || hasNextAttemptCount >= MAX_LEAF_FINDING_ATTEMPTS) {
-            endedPreemptively = true;
-            return false; // No more samples to take from this component.
-        }
+        while (sampledCount < componentSampleCardinality && hasNextAttemptCount < maxLeafFindingAttempts) {
+            totalAccessCount++;
 
-        totalAccessCount++;
-        // todo: continueCurrentLeaf if true, picks elements from the same leaf page as the last call to doHasNext()
-        // currently, we are picking one item from each leaf page, and then randomly picking another leaf page
-        // and picking one item from there, and so on.
-        // we can batch this to pick multiple items from the same leaf page.
-        if (!continueCurrentLeaf) {
-            ICachedPage nextLeaf = findNextRandomLeafPage();
-        }
+            findNextRandomLeafPage();
 
-        // todo: can we avoid the variable continueCurrentLeaf altogether? -> ig so
-        continueCurrentLeaf = false;
-        int foundTupleIndex = findRandomTuple();
-        long pageTupleKey = getPageTupleKey(pageId, foundTupleIndex);
-        if (foundTupleIndex == -1 || seenTupleIndexes.contains(pageTupleKey)) {
+            int foundTupleIndex = findRandomTuple();
+            long pageTupleKey = getPageTupleKey(pageId, foundTupleIndex);
+
+            // Skip if no valid tuple found or already seen
+            if (foundTupleIndex == -1 || seenTupleIndexes.contains(pageTupleKey)) {
+                hasNextAttemptCount++;
+                continue;
+            }
+
+            // Check if tuple exists in newer LSM components
+            searchKeys.clear();
+            foundIndexes.clear();
+            searchKeys.add(frameTuple);
+            batchPredicate.reset(searchKeys);
+            searchCursor.setPredicate(batchPredicate);
+            searchCursor.doHasNextWithPredicate(foundIndexes);
+
+            if (foundIndexes.isEmpty()) {
+                // Tuple is unique and not found in newer components - valid sample
+                hasNextAttemptCount = 0;
+                sampledCount++;
+                seenTupleIndexes.add(pageTupleKey);
+                return true;
+            }
+
+            // Tuple exists in newer component, try again
             hasNextAttemptCount++;
-            return doHasNext();
         }
 
-        searchKeys.clear();
-        foundIndexes.clear();
-        searchKeys.add(frameTuple);
-        batchPredicate.reset(searchKeys);
-        searchCursor.setPredicate(batchPredicate);
-
-        searchCursor.doHasNextWithPredicate(foundIndexes);
-        if (foundIndexes.isEmpty()) {
-            hasNextAttemptCount = 0;
-            sampledCount++;
-            seenTupleIndexes.add(pageTupleKey);
-            return true;
-        }
-
-        hasNextAttemptCount++;
-        return doHasNext();
-    }
-
-    @Override
-    public void print() {
-        LOGGER.info(
-                "StatsLogging: Sampled tree {} with {} tuples from BTree, target={} endedPreemptively={} totalAccessCount={} totalTimeToFindRandomLeaf={} totalTimeToFindRandomTuples={}",
-                bTree, sampledCount, componentSampleCardinality, endedPreemptively, totalAccessCount,
-                totalTimeTakenToFindRandomLeaf, totalTimeTakenToFindRandomTuples);
+        endedPreemptively = (sampledCount < componentSampleCardinality);
+        return false;
     }
 
     private long getPageTupleKey(int pageId, int tupleIndex) {
         return (((long) pageId) << 32) | (tupleIndex & 0xffffffffL);
     }
 
-    private ICachedPage findNextRandomLeafPage() throws HyracksDataException {
+    /**
+     * Navigates from the root to a random leaf page by uniformly selecting a child at each interior level.
+     * <p>
+     * <b>Sampling bias note:</b> This gives each leaf a probability proportional to
+     * {@code ∏(1/fan_out_of_ancestor)}. If interior nodes at the same level have different fan-outs
+     * (e.g. the rightmost node is partially full), leaves under low-fan-out ancestors are slightly
+     * over-represented. For well-balanced B-trees the bias is negligible.
+     * </p>
+     */
+    private void findNextRandomLeafPage() throws HyracksDataException {
         long nanos = System.nanoTime();
         int numberOfAttempts = 0;
-        while (numberOfAttempts < MAX_LEAF_FINDING_ATTEMPTS) {
+        while (numberOfAttempts < maxLeafFindingAttempts) {
             releasePage();
-            ICachedPage rootPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, rootPageId));
-            ICachedPage randomLeafPage = bTree.getRandomLeafPage(rootPage, bTreeOpCtx, bufferCacheOpCtx);
+            // Pass the random generator to ensure reproducible sampling
+            ICachedPage randomLeafPage =
+                    bTree.getRandomLeafPage(rootPageId, bTreeOpCtx, bufferCacheOpCtx, randomNumGen);
             // page is already pinned in the above call
-            // a bad side effect?
             long leafPageDiskPageId = randomLeafPage.getDiskPageId();
             page = randomLeafPage;
             leafFrame.setPage(page);
@@ -198,28 +183,44 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
                 continue;
             }
             totalTimeTakenToFindRandomLeaf += (System.nanoTime() - nanos);
-            return leafFrame.getPage();
+            return;
         }
-        // todo: replace with proper exception
-        throw new HyracksDataException("Attempt cycle exhausted while trying to find a random leaf page with tuples.");
+
+        throw HyracksDataException.create(ErrorCode.RANDOM_SAMPLE_LEAF_NOT_FOUND, maxLeafFindingAttempts);
     }
 
+    /**
+     * Picks a random non-antimatter tuple from the current leaf page.
+     * <p>
+     * Chooses a random starting index and scans sequentially (wrapping around),
+     * guaranteeing every slot is visited exactly once. Returns the first
+     * non-antimatter tuple found, or -1 if the entire leaf is antimatter.
+     * </p>
+     */
     private int findRandomTuple() {
         long nanos = System.nanoTime();
         totalAccessCount--; // compensate for the increment in doHasNext
         int numberOfTuples = leafFrame.getTupleCount();
+        int idx = randomNumGen.nextInt(numberOfTuples);
         for (int i = 0; i < numberOfTuples; i++) {
             totalAccessCount++;
-            //            int randomTupleIndex = (int) (randomNumGen.nextDouble() * numberOfTuples);
-            int randomTupleIndex = ThreadLocalRandom.current().nextInt(numberOfTuples);
-            frameTuple.resetByTupleIndex(leafFrame, randomTupleIndex);
+            frameTuple.resetByTupleIndex(leafFrame, idx);
             if (!frameTuple.isAntimatter()) {
                 totalTimeTakenToFindRandomTuples += (System.nanoTime() - nanos);
-                return randomTupleIndex;
+                return idx;
+            }
+            idx++;
+            if (idx == numberOfTuples) {
+                idx = 0;
             }
         }
         totalTimeTakenToFindRandomTuples += (System.nanoTime() - nanos);
         return -1;
+    }
+
+    @Override
+    public boolean isExclusiveLatchNodes() {
+        return false;
     }
 
     @Override
@@ -234,14 +235,26 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
 
     @Override
     protected void doClose() throws HyracksDataException {
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug(
+                    "{} stats - sampledCount: {}, totalAccessCount: {}, "
+                            + "totalTimeTakenToFindRandomLeaf: {} ns, totalTimeTakenToFindRandomTuples: {} ns, "
+                            + "endedPreemptively: {}",
+                    this.getClass().getName(), sampledCount, totalAccessCount, totalTimeTakenToFindRandomLeaf,
+                    totalTimeTakenToFindRandomTuples, endedPreemptively);
+        }
         if (page != null) {
             releasePage();
         }
-        // todo: haven't given a thought about making the cursor reusable after close
         sampledCount = 0;
         page = null;
         seenTupleIndexes.clear();
         pageId = -1;
+        // Reset debug counters
+        totalAccessCount = 0;
+        totalTimeTakenToFindRandomLeaf = 0;
+        totalTimeTakenToFindRandomTuples = 0;
+        endedPreemptively = false;
     }
 
     @Override
@@ -260,7 +273,10 @@ public final class DiskBTreeSampleCursor extends EnforcedIndexCursor implements 
     }
 
     private void releasePage() {
-        bufferCache.unpin(page);
+        if (page != null) {
+            // first page of the cursor.
+            bufferCache.unpin(page);
+        }
         page = null;
     }
 }

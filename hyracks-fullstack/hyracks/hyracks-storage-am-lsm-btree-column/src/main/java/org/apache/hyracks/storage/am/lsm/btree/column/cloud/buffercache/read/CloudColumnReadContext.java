@@ -131,7 +131,7 @@ public final class CloudColumnReadContext implements IColumnReadContext {
     }
 
     @Override
-    public ICachedPage pinNext(ColumnBTreeReadLeafFrame leafFrame, long nextPageDiskPageId, IBufferCache bufferCache)
+    public ICachedPage pinNext(ColumnBTreeReadLeafFrame leafFrame, IBufferCache bufferCache, long nextPageDiskPageId)
             throws HyracksDataException {
         // Release the previous pages
         release(bufferCache);

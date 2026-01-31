@@ -33,6 +33,7 @@ import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
 public class BTreeSampleCollectorOperatorDescriptor extends BTreeSearchOperatorDescriptor {
+    private static final long serialVersionUID = 1L;
 
     private final int sampleCardinalityTargetPerPartition;
     private final long sampleSeed;

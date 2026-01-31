@@ -66,10 +66,11 @@ public class LSMColumnBTreeUtil {
     public static LSMBTree createLSMTree(NCConfig storageConfig, IIOManager ioManager,
             List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
             IColumnBufferPool columnBufferPool, ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories,
-            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, ILSMMergePolicy mergePolicy,
-            ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
-            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-            int[] btreeFields, IMetadataPageManagerFactory freePageManagerFactory, boolean updateAware, ITracer tracer,
+            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, int thetaSketchK,
+            int maxSampleLeafAttempts, ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker,
+            ILSMIOOperationScheduler ioScheduler, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
+            ILSMPageWriteCallbackFactory pageWriteCallbackFactory, int[] btreeFields,
+            IMetadataPageManagerFactory freePageManagerFactory, boolean updateAware, ITracer tracer,
             ICompressorDecompressorFactory compressorDecompressorFactory, ITypeTraits nullTypeTraits,
             INullIntrospector nullIntrospector, IColumnManagerFactory columnManagerFactory, boolean atomic,
             IDiskCacheMonitoringService diskCacheService) throws HyracksDataException {
@@ -128,8 +129,9 @@ public class LSMColumnBTreeUtil {
 
         return new LSMColumnBTree(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory,
                 insertLeafFrameFactory, deleteLeafFrameFactory, diskBufferCache, columnBufferPool, fileNameManager,
-                flushComponentFactory, mergeComponentFactory, bulkLoadComponentFactory, bloomFilterFalsePositiveRate,
-                typeTraits.length, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
-                pageWriteCallbackFactory, btreeFields, tracer, columnManager, atomic, diskCacheManager);
+                flushComponentFactory, mergeComponentFactory, bulkLoadComponentFactory, bloomFilterKeyFields,
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, typeTraits.length, cmpFactories,
+                mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, btreeFields, tracer,
+                columnManager, atomic, diskCacheManager);
     }
 }

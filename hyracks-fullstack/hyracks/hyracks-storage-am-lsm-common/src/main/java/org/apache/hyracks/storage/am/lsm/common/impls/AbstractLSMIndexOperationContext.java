@@ -51,7 +51,6 @@ public abstract class AbstractLSMIndexOperationContext implements ILSMIndexOpera
     protected final List<ILSMDiskComponent> componentsToBeReplicated;
     protected final ISearchOperationCallback searchCallback;
     protected final IExtendedModificationOperationCallback modificationCallback;
-    private final IIndexAccessParameters iap;
     protected IndexOperation op;
     protected boolean accessingComponents = false;
     protected ISearchPredicate searchPredicate;
@@ -62,6 +61,7 @@ public abstract class AbstractLSMIndexOperationContext implements ILSMIndexOpera
     protected boolean recovery = false;
     private ILSMIOOperation ioOperation;
     private Map<String, Object> parametersMap;
+    private final IIndexAccessParameters iap;
 
     public AbstractLSMIndexOperationContext(ILSMIndex index, int[] treeFields, int[] filterFields,
             IBinaryComparatorFactory[] filterCmpFactories, IIndexAccessParameters iap, ITracer tracer) {
@@ -232,9 +232,9 @@ public abstract class AbstractLSMIndexOperationContext implements ILSMIndexOpera
         return parametersMap;
     }
 
-    //No, need to pass IndexAccessParamere. we could have exploited the parameters map in the context itself.
     @Override
     public <T> T getIndexAccessParameter(String key, Class<T> clazz) {
         return iap.getParameter(key, clazz);
     }
+
 }

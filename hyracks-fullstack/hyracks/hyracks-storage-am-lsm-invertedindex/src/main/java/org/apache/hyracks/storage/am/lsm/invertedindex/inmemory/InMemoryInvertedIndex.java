@@ -38,10 +38,10 @@ import org.apache.hyracks.storage.am.lsm.invertedindex.api.IInPlaceInvertedIndex
 import org.apache.hyracks.storage.am.lsm.invertedindex.api.IInvertedListCursor;
 import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.IFullTextConfigEvaluatorFactory;
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.IBinaryTokenizerFactory;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 
@@ -212,8 +212,7 @@ public class InMemoryInvertedIndex implements IInPlaceInvertedIndex {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
-            throws HyracksDataException {
+            boolean checkIfEmptyIndex, ISampler thetaSampler, IPageWriteCallback callback) throws HyracksDataException {
         throw new UnsupportedOperationException("Bulk load not supported by in-memory inverted index.");
     }
 

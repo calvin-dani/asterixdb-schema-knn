@@ -59,10 +59,10 @@ import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
@@ -170,16 +170,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return 0;
     }
 
-    public IIndexBulkLoader createComponentBulkLoader(IPageWriteCallback callback, ITreeIndexAccessor staticAccessor)
-            throws HyracksDataException {
-        return new VCTreeBulkLoader(callback, this, staticAccessor);
+    public IIndexBulkLoader createComponentBulkLoader(IPageWriteCallback callback, ITreeIndexAccessor staticAccessor,
+            ISampler sampler) throws HyracksDataException {
+        return new VCTreeBulkLoader(callback, this, staticAccessor, sampler);
     }
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
-            throws HyracksDataException {
-        //        return new VCTreeBulkLoader(fillFactor, verifyInput, callback, this);
+            boolean checkIfEmptyIndex, ISampler sampler, IPageWriteCallback callback) throws HyracksDataException {
         throw new UnsupportedOperationException();
     }
 

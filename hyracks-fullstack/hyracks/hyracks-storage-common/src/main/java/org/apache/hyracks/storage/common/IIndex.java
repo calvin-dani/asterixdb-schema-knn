@@ -130,11 +130,11 @@ public interface IIndex {
     /**
      * @param fillFactor
      * @param verifyInput
+     * @param thetaSampler
      * @throws HyracksDataException
      */
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
-            throws HyracksDataException;
+            boolean checkIfEmptyIndex, ISampler thetaSampler, IPageWriteCallback callback) throws HyracksDataException;
 
     /**
      * TODO: This should be moved to ILSMIndex since filters don't make sense in non LSM context

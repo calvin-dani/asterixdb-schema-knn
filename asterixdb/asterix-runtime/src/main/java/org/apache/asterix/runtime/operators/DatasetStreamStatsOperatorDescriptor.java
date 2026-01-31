@@ -20,6 +20,7 @@
 package org.apache.asterix.runtime.operators;
 
 import static org.apache.hyracks.api.job.profiling.NoOpOperatorStats.INVALID_ODID;
+import static org.apache.hyracks.storage.am.lsm.btree.dataflow.BTreeSampleCollectorOperatorDescriptorNodePushable.ESTIMATE_CARDINALITY;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
@@ -142,7 +143,11 @@ public final class DatasetStreamStatsOperatorDescriptor extends AbstractSingleAc
                 IStatsCollector statsCollector = ctx.getStatsCollector();
                 if (statsCollector != null) {
                     IOperatorStats stats = statsCollector.getOperatorStats(operatorName);
-                    DatasetStreamStats.update(stats, totalTupleCount, totalTupleLength, indexesStats);
+                    Object totalNum = TaskUtil.get(ESTIMATE_CARDINALITY, ctx);
+                    if (totalNum == null) {
+                        totalNum = totalTupleCount;
+                    }
+                    DatasetStreamStats.update(stats, totalTupleCount, (long) totalNum, totalTupleLength, indexesStats);
                 }
                 writer.close();
                 closeDuration = System.nanoTime() - start;

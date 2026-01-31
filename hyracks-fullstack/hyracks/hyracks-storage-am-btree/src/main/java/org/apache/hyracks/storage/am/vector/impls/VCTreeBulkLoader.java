@@ -44,6 +44,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IFIFOPageWriter;
@@ -97,10 +98,12 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
     private final ITreeIndexTupleWriter directoryFrameTupleWriter;
     private final List<ICachedPage> pendingDirectoryPages = new ArrayList<>();
     private ICachedPage currentDirectoryPage;
+    private final ISampler sampler;
 
     public VCTreeBulkLoader(IPageWriteCallback callback, VectorClusteringTree vectorTree,
-            ITreeIndexAccessor staticAccessor) throws HyracksDataException {
+            ITreeIndexAccessor staticAccessor, ISampler sampler) throws HyracksDataException {
 
+        this.sampler = sampler;
         this.bufferCache = vectorTree.getBufferCache();
         this.freePageManager = vectorTree.getPageManager();
         this.fileId = vectorTree.getFileId();
@@ -175,6 +178,7 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
+        sampler.addTuple(tuple);
         int tupleCentroidId = extractCentroidId(tuple);
         if (currentCentroidId == -1) {
             // First tuple being added - initialize for first cluster

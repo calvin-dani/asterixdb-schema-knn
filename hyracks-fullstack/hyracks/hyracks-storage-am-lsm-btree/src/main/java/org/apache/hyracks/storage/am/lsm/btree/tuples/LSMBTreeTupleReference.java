@@ -89,7 +89,7 @@ public class LSMBTreeTupleReference extends BTreeTypeAwareTupleReference impleme
     @Override
     public boolean isAntimatter() {
         // Check antimatter bit.
-        return BitOperationUtils.getBit(buf, tupleStartOff, ANTIMATTER_BIT_OFFSET);
+        return BitOperationUtils.getBit(buf, tupleStartOff, ILSMTreeTupleReference.ANTIMATTER_BIT_OFFSET);
     }
 
     public int getTupleStart() {

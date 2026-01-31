@@ -244,7 +244,6 @@ public class LSMTreeIndexAccessor implements ILSMIndexAccessor {
 
     @Override
     public void scanDiskComponentsForSample(IIndexCursor cursor) throws HyracksDataException {
-        // Seems fine for now, will see if it causes issues later
         ctx.setOperation(IndexOperation.DISK_COMPONENT_SCAN);
         lsmHarness.scanDiskComponentsForSample(ctx, cursor);
     }

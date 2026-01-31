@@ -21,6 +21,7 @@ package org.apache.hyracks.storage.am.lsm.btree.column.impls.btree;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -87,6 +88,7 @@ public final class ColumnBtreeSampleCursor2 extends EnforcedIndexCursor
     private final BatchPredicateWithKeys batchPredicate;
     private final List<ITupleReference> searchKeys;
     private final BitSet foundIndexes;
+    private final Random randomNumGen;
 
     public ColumnBtreeSampleCursor2(ColumnBTree columnBTree, ColumnBTreeReadLeafFrame leafFrame,
             BTreeOpContext opContext, IColumnReadContext context, int componentSampleCardinality, long sampleSeed,
@@ -97,6 +99,7 @@ public final class ColumnBtreeSampleCursor2 extends EnforcedIndexCursor
         this.context = context;
         this.componentSampleCardinality = componentSampleCardinality;
         this.sampleSeed = sampleSeed;
+        this.randomNumGen = new Random(sampleSeed);
         this.batchPredicate = new BatchPredicateWithKeys();
         this.searchCursor = searchCursor;
         this.frameTuple = leafFrame.createTupleReference(index, this);
@@ -212,17 +215,15 @@ public final class ColumnBtreeSampleCursor2 extends EnforcedIndexCursor
         long nanos = System.nanoTime();
         int numberOfAttempts = 0;
         while (numberOfAttempts < MAX_LEAF_FINDING_ATTEMPTS) {
-            ICachedPage rootPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, rootPageId), context);
-            // Here randomLeafPage is already pinned, so unpin it and pin with the columnCloudContext.
-            ICachedPage randomLeafPage = bTree.getRandomLeafPage(rootPage, opCtx, context);
-            // todo: what the hell is these two lines? I feel it used to make sense at some point of time
-            // but now it looks fishy.
-            // Ah, now I get it, since pinNext do releasePages and other stuff
+            context.release(bufferCache);
+            ICachedPage randomLeafPage = bTree.getRandomLeafPage(rootPageId, opCtx, context, randomNumGen);
+            // randomLeafPage is already pinned, unpin it and re-pin with the column context
+            // since pinNext does releasePages and other column-specific setup
             long leafPageDiskPageId = randomLeafPage.getDiskPageId();
             bufferCache.unpin(randomLeafPage, context);
 
             // Pin with the cloud context
-            context.pinNext(leafFrame, leafPageDiskPageId, bufferCache);
+            context.pinNext(leafFrame, bufferCache, leafPageDiskPageId);
             page0 = leafFrame.getPage();
             page0Id = BufferedFileHandle.getPageId(leafPageDiskPageId);
             // Tuple count can be checked here, as the pageZero is already pinned.

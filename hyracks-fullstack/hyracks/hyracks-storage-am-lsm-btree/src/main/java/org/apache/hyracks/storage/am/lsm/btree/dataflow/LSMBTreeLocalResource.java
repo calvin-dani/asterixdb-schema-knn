@@ -44,6 +44,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCacheProvider;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResource;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.compression.NoOpCompressorDecompressorFactory;
 
@@ -58,6 +59,8 @@ public class LSMBTreeLocalResource extends LsmResource {
     protected final boolean hasBloomFilter;
     protected final int[] bloomFilterKeyFields;
     protected final double bloomFilterFalsePositiveRate;
+    protected final int thetaSketchK;
+    protected final int maxSampleLeafAttempts;
     protected final boolean isPrimary;
     protected final int[] btreeFields;
     protected final ICompressorDecompressorFactory compressorDecompressorFactory;
@@ -65,12 +68,12 @@ public class LSMBTreeLocalResource extends LsmResource {
     protected final boolean atomic;
 
     public LSMBTreeLocalResource(ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories,
-            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, boolean isPrimary, String path,
-            IStorageManager storageManager, ILSMMergePolicyFactory mergePolicyFactory,
-            Map<String, String> mergePolicyProperties, ITypeTraits[] filterTypeTraits,
-            IBinaryComparatorFactory[] filterCmpFactories, int[] btreeFields, int[] filterFields,
-            ILSMOperationTrackerFactory opTrackerProvider, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
-            ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, int thetaSketchK,
+            int maxSampleLeafAttempts, boolean isPrimary, String path, IStorageManager storageManager,
+            ILSMMergePolicyFactory mergePolicyFactory, Map<String, String> mergePolicyProperties,
+            ITypeTraits[] filterTypeTraits, IBinaryComparatorFactory[] filterCmpFactories, int[] btreeFields,
+            int[] filterFields, ILSMOperationTrackerFactory opTrackerProvider,
+            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, boolean durable,
             ICompressorDecompressorFactory compressorDecompressorFactory, boolean hasBloomFilter,
@@ -82,6 +85,8 @@ public class LSMBTreeLocalResource extends LsmResource {
                 nullIntrospector);
         this.bloomFilterKeyFields = bloomFilterKeyFields;
         this.bloomFilterFalsePositiveRate = bloomFilterFalsePositiveRate;
+        this.thetaSketchK = thetaSketchK;
+        this.maxSampleLeafAttempts = maxSampleLeafAttempts;
         this.isPrimary = isPrimary;
         this.btreeFields = btreeFields;
         this.compressorDecompressorFactory = compressorDecompressorFactory;
@@ -91,12 +96,14 @@ public class LSMBTreeLocalResource extends LsmResource {
     }
 
     protected LSMBTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int[] bloomFilterKeyFields,
-            double bloomFilterFalsePositiveRate, boolean isPrimary, int[] btreeFields,
-            ICompressorDecompressorFactory compressorDecompressorFactory, boolean hasBloomFilter,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts, boolean isPrimary,
+            int[] btreeFields, ICompressorDecompressorFactory compressorDecompressorFactory, boolean hasBloomFilter,
             boolean isSecondaryNoIncrementalMaintenance, boolean atomic) throws HyracksDataException {
         super(registry, json);
         this.bloomFilterKeyFields = bloomFilterKeyFields;
         this.bloomFilterFalsePositiveRate = bloomFilterFalsePositiveRate;
+        this.thetaSketchK = thetaSketchK;
+        this.maxSampleLeafAttempts = maxSampleLeafAttempts;
         this.isPrimary = isPrimary;
         this.btreeFields = btreeFields;
         this.compressorDecompressorFactory = compressorDecompressorFactory;
@@ -117,7 +124,8 @@ public class LSMBTreeLocalResource extends LsmResource {
         boolean updateAware = false;
         return LSMBTreeUtil.createLSMTree(storageConfig, ioManager, vbcs, file,
                 storageManager.getBufferCache(serviceCtx), typeTraits, cmpFactories, bloomFilterKeyFields,
-                bloomFilterFalsePositiveRate, mergePolicyFactory.createMergePolicy(mergePolicyProperties, serviceCtx),
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts,
+                mergePolicyFactory.createMergePolicy(mergePolicyProperties, serviceCtx),
                 opTrackerProvider.getOperationTracker(serviceCtx, this), ioSchedulerProvider.getIoScheduler(serviceCtx),
                 ioOpCallbackFactory, pageWriteCallbackFactory, isPrimary, filterTypeTraits, filterCmpFactories,
                 btreeFields, filterFields, durable, metadataPageManagerFactory, updateAware, serviceCtx.getTracer(),
@@ -139,6 +147,8 @@ public class LSMBTreeLocalResource extends LsmResource {
             throws HyracksDataException {
         final int[] bloomFilterKeyFields = OBJECT_MAPPER.convertValue(json.get("bloomFilterKeyFields"), int[].class);
         final double bloomFilterFalsePositiveRate = json.get("bloomFilterFalsePositiveRate").asDouble();
+        final int thetaSketchK = getOrDefaultInt(json, "thetaSketchK", ThetaSampler.DEFAULT_K);
+        final int maxSampleLeafAttempts = getOrDefaultInt(json, "maxSampleLeafAttempts", 500);
         final boolean isPrimary = json.get("isPrimary").asBoolean();
         boolean hasBloomFilter = getOrDefaultHasBloomFilter(json, isPrimary);
         final int[] btreeFields = OBJECT_MAPPER.convertValue(json.get("btreeFields"), int[].class);
@@ -148,8 +158,9 @@ public class LSMBTreeLocalResource extends LsmResource {
         boolean isSecondaryNoIncrementalMaintenance =
                 getOrDefaultBoolean(json, "isSecondaryNoIncrementalMaintenance", false);
         boolean atomic = getOrDefaultBoolean(json, "atomic", false);
-        return new LSMBTreeLocalResource(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate, isPrimary,
-                btreeFields, compDecompFactory, hasBloomFilter, isSecondaryNoIncrementalMaintenance, atomic);
+        return new LSMBTreeLocalResource(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
+                thetaSketchK, maxSampleLeafAttempts, isPrimary, btreeFields, compDecompFactory, hasBloomFilter,
+                isSecondaryNoIncrementalMaintenance, atomic);
     }
 
     @Override
@@ -159,6 +170,8 @@ public class LSMBTreeLocalResource extends LsmResource {
         json.put(HAS_BLOOM_FILTER_FIELD, hasBloomFilter);
         json.putPOJO("bloomFilterKeyFields", bloomFilterKeyFields);
         json.put("bloomFilterFalsePositiveRate", bloomFilterFalsePositiveRate);
+        json.put("thetaSketchK", thetaSketchK);
+        json.put("maxSampleLeafAttempts", maxSampleLeafAttempts);
         json.put("isPrimary", isPrimary);
         json.putPOJO("btreeFields", btreeFields);
         json.putPOJO("compressorDecompressorFactory", compressorDecompressorFactory.toJson(registry));
@@ -173,6 +186,10 @@ public class LSMBTreeLocalResource extends LsmResource {
 
     protected static boolean getOrDefaultBoolean(JsonNode jsonNode, String fieldName, boolean defaultValue) {
         return jsonNode.has(fieldName) ? jsonNode.get(fieldName).asBoolean() : defaultValue;
+    }
+
+    protected static int getOrDefaultInt(JsonNode jsonNode, String fieldName, int defaultValue) {
+        return jsonNode.has(fieldName) ? jsonNode.get(fieldName).asInt() : defaultValue;
     }
 
 }
