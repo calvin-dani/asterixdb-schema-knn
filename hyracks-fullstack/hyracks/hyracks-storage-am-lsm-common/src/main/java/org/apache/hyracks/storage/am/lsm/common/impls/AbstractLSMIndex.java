@@ -71,10 +71,11 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.api.LSMOperationType;
 import org.apache.hyracks.storage.am.lsm.common.cloud.DefaultIndexDiskCacheManager;
 import org.apache.hyracks.storage.am.lsm.common.cloud.IIndexDiskCacheManager;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.util.trace.ITracer;
@@ -122,6 +123,9 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
     private final List<ILSMDiskComponent> temporaryDiskComponents;
     private final ILSMMergePolicy mergePolicy;
     private final ILSMIOOperationScheduler ioScheduler;
+    private int[] bloomFilterKeyFields;
+    protected int thetaSketchK = ThetaSampler.DEFAULT_K;
+    protected int maxSampleLeafAttempts = 500;
 
     public AbstractLSMIndex(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
             IBufferCache diskBufferCache, ILSMIndexFileManager fileManager, double bloomFilterFalsePositiveRate,
@@ -183,8 +187,24 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
         for (int i = 0; i < virtualBufferCaches.size(); i++) {
             flushRequests[i] = new AtomicBoolean();
         }
-        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-        //                + "] AbstractLSMIndex constructor: Constructor completed");
+    }
+
+    public AbstractLSMIndex(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
+            IBufferCache diskBufferCache, ILSMIndexFileManager fileManager, int[] bloomFilterKeyFields,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts,
+            ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
+            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            ILSMDiskComponentFactory componentFactory, ILSMDiskComponentFactory bulkLoadComponentFactory,
+            ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
+            int[] filterFields, boolean durable, IComponentFilterHelper filterHelper, int[] treeFields, ITracer tracer,
+            boolean atomic) throws HyracksDataException {
+        this(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
+                mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
+                bulkLoadComponentFactory, filterFrameFactory, filterManager, filterFields, durable, filterHelper,
+                treeFields, tracer, atomic);
+        this.bloomFilterKeyFields = bloomFilterKeyFields;
+        this.thetaSketchK = thetaSketchK;
+        this.maxSampleLeafAttempts = maxSampleLeafAttempts;
     }
 
     public AbstractLSMIndex(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
@@ -204,6 +224,18 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
     @Override
     public boolean isAtomic() {
         return atomic;
+    }
+
+    public int[] getBloomFilterKeyFields() {
+        return bloomFilterKeyFields;
+    }
+
+    public int getThetaSketchK() {
+        return thetaSketchK;
+    }
+
+    public int getMaxSampleLeafAttempts() {
+        return maxSampleLeafAttempts;
     }
 
     @Override
@@ -573,10 +605,7 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
 
     @Override
     public final IIndexBulkLoader createBulkLoader(float fillLevel, boolean verifyInput, long numElementsHint,
-            // Bro, this seems like an ill interface, as I'm forced to put statsAccumulator even if I don't use it
-            // in case of LSMDiskComponent, it will be populated later.
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
-            throws HyracksDataException {
+            boolean checkIfEmptyIndex, ISampler thetaSampler, IPageWriteCallback callback) throws HyracksDataException {
         return createBulkLoader(fillLevel, verifyInput, numElementsHint, checkIfEmptyIndex, Collections.emptyMap());
     }
 

@@ -49,7 +49,7 @@ import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.MultiComparator;
-import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
+import org.apache.hyracks.storage.common.NoOpSampler;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -648,10 +648,8 @@ public abstract class OrderedIndexExamplesTest {
             LOGGER.info("Bulk loading " + ins + " tuples");
         }
         long start = System.currentTimeMillis();
-
-        // todo: add a concrete statsAccumulator and assert the insert count
-        IIndexBulkLoader bulkLoader = treeIndex.createBulkLoader(0.7f, false, ins, true, NoOpPageWriteCallback.INSTANCE,
-                NoOpStatsAccumulator.INSTANCE);
+        IIndexBulkLoader bulkLoader = treeIndex.createBulkLoader(0.7f, false, ins, true, NoOpSampler.INSTANCE,
+                NoOpPageWriteCallback.INSTANCE);
         ArrayTupleBuilder tb = new ArrayTupleBuilder(fieldCount);
         ArrayTupleReference tuple = new ArrayTupleReference();
         for (int i = 0; i < ins; i++) {
@@ -724,9 +722,8 @@ public abstract class OrderedIndexExamplesTest {
             treeIndex.activate();
 
             // Load sorted records, and expect to fail at tuple i.
-            // todo: add a concrete statsAccumulator and assert the insert count
-            IIndexBulkLoader bulkLoader = treeIndex.createBulkLoader(0.7f, true, ins, true,
-                    NoOpPageWriteCallback.INSTANCE, NoOpStatsAccumulator.INSTANCE);
+            IIndexBulkLoader bulkLoader = treeIndex.createBulkLoader(0.7f, true, ins, true, NoOpSampler.INSTANCE,
+                    NoOpPageWriteCallback.INSTANCE);
             for (int j = 0; j < ins; j++) {
                 if (j > i) {
                     fail("Bulk load failure test unexpectedly succeeded past tuple: " + j);

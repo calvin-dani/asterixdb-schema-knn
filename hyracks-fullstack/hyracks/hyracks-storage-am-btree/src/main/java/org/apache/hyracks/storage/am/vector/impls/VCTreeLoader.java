@@ -37,6 +37,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
+import org.apache.hyracks.storage.common.NoOpSampler;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
@@ -111,7 +112,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext, int numLevels,
             List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage)
             throws HyracksDataException {
-        super(fillFactor, callback, vectorTree, leafFrame, writeContext);
+        super(fillFactor, callback, vectorTree, leafFrame, writeContext, NoOpSampler.INSTANCE);
 
         this.numLevels = numLevels;
         this.clustersPerLevel = new ArrayList<>(clustersPerLevel); // Defensive copy
@@ -174,7 +175,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
     public VCTreeLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
             Map<String, Object> parameters) throws HyracksDataException {
-        super(fillFactor, callback, vectorTree, leafFrame, writeContext);
+        super(fillFactor, callback, vectorTree, leafFrame, writeContext, NoOpSampler.INSTANCE);
 
         // Extract parameters from Map with defaults
         this.numLevels = (Integer) parameters.getOrDefault("numLevels", 2);

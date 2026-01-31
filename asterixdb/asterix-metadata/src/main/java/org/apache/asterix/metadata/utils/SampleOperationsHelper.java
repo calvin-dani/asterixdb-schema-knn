@@ -27,8 +27,6 @@ import java.util.Set;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.OptimizationConfUtil;
-import org.apache.asterix.common.exceptions.CompilationException;
-import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.metadata.declared.MetadataProvider;
@@ -123,6 +121,7 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
     private int groupbyNumFrames;
     private int[][] computeStorageMap;
     private int numPartitions;
+    private boolean isFullScan;
 
     protected SampleOperationsHelper(Dataset dataset, Index sampleIdx, MetadataProvider metadataProvider,
             SourceLocation sourceLoc) {
@@ -130,6 +129,7 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         this.sampleIdx = sampleIdx;
         this.metadataProvider = metadataProvider;
         this.sourceLoc = sourceLoc;
+        this.isFullScan = ((Index.SampleIndexDetails) sampleIdx.getIndexDetails()).isFullScan();
     }
 
     @Override
@@ -176,7 +176,13 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
 
     //    @Override
     public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
-        // build using sampleOp.
+        if (isFullScan) {
+            return buildFullScanAnalyzePipeline();
+        }
+        return buildRandomScanAnalyzePipeline();
+    }
+
+    private JobSpecification buildRandomScanAnalyzePipeline() throws AlgebricksException {
         Index.SampleIndexDetails indexDetails = (Index.SampleIndexDetails) sampleIdx.getIndexDetails();
         int sampleCardinalityTarget = indexDetails.getSampleCardinalityTarget();
         long sampleSeed = indexDetails.getSampleSeed();
@@ -229,16 +235,19 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         int[] sortFields = dataset.getPrimaryBloomFilterFields();
         INormalizedKeyComputerFactoryProvider normKeyProvider = format.getNormalizedKeyComputerFactoryProvider();
         INormalizedKeyComputerFactory[] normKeyFactories = new INormalizedKeyComputerFactory[sortFields.length];
-        int i = 0;
-        InternalDatasetDetails datasetDetails = (InternalDatasetDetails) dataset.getDatasetDetails();
-        for (IAType primaryKeyType : datasetDetails.getPrimaryKeyType()) {
+        List<IAType> primaryKeyTypes = KeyFieldTypeUtil
+                .getPartitioningKeyTypes((InternalDatasetDetails) dataset.getDatasetDetails(), itemType, metaType);
+        for (int i = 0; i < primaryKeyTypes.size(); i++) {
+            IAType primaryKeyType = primaryKeyTypes.get(i);
             INormalizedKeyComputerFactory normalizedKeyComputerFactory =
                     normKeyProvider.getNormalizedKeyComputerFactory(primaryKeyType, true);
             if (normalizedKeyComputerFactory == null) {
-                LOGGER.info("No normalized key computer for primary key field {} of type {}", i,
+                LOGGER.error("No normalized key computer for primary key field {} of type {}", i,
                         primaryKeyType.getTypeName());
+                throw new IllegalArgumentException(
+                        "No normalized key computer for primary key type " + primaryKeyType.getTypeName());
             }
-            normKeyFactories[i++] = normalizedKeyComputerFactory;
+            normKeyFactories[i] = normalizedKeyComputerFactory;
         }
 
         targetOp = new ExternalSortOperatorDescriptor(spec, getSortNumFrames(metadataProvider, sourceLoc), sortFields,
@@ -264,22 +273,7 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         return spec;
     }
 
-    @Override
-    public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
-        // K-means indexes don't support static structure creation
-        throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, sourceLoc,
-                "Static structure creation not supported for K-means index type");
-    }
-
-    @Override
-    public JobSpecification buildQuantizationMetadataJobSpec() throws AlgebricksException {
-        // K-means indexes don't support static structure creation
-        throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, sourceLoc,
-                "Static structure creation not supported for K-means index type");
-    }
-
-    //    @Override
-    public JobSpecification buildLoadingJobSpecOld() throws AlgebricksException {
+    private JobSpecification buildFullScanAnalyzePipeline() throws AlgebricksException {
         Index.SampleIndexDetails indexDetails = (Index.SampleIndexDetails) sampleIdx.getIndexDetails();
         int sampleCardinalityTarget = indexDetails.getSampleCardinalityTarget();
         long sampleSeed = indexDetails.getSampleSeed();
@@ -499,5 +493,15 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         return OptimizationConfUtil.getSortNumFrames(metadataProvider.getApplicationContext().getCompilerProperties(),
                 metadataProvider.getConfig(), sourceLoc,
                 metadataProvider.getApplicationContext().getCompilerProperties().getFrameSize());
+    }
+
+    @Override
+    public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public JobSpecification buildQuantizationMetadataJobSpec() throws AlgebricksException {
+        throw new UnsupportedOperationException();
     }
 }

@@ -37,7 +37,7 @@ import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.util.ResourceReleaseUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
-import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
+import org.apache.hyracks.storage.common.NoOpSampler;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -183,7 +183,7 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
 
     protected void initializeBulkLoader(IIndex index, int indexId) throws HyracksDataException {
         bulkLoaders[indexId] = index.createBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
-                NoOpPageWriteCallback.INSTANCE, NoOpStatsAccumulator.INSTANCE);
+                NoOpSampler.INSTANCE, NoOpPageWriteCallback.INSTANCE);
     }
 
     private void closeBulkLoaders() throws HyracksDataException {

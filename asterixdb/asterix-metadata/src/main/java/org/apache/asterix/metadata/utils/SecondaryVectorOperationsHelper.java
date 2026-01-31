@@ -40,7 +40,6 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
-import org.apache.asterix.metadata.utils.KeyFieldTypeUtil;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
@@ -198,6 +197,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             if (sampleIndex != null && sampleIndex.getIndexDetails() instanceof Index.SampleIndexDetails) {
                 Index.SampleIndexDetails sampleDetails = (Index.SampleIndexDetails) sampleIndex.getIndexDetails();
                 datasetCardinality = sampleDetails.getSourceCardinality();
+                System.err.println("Retrieved sourceCardinality from sample index: " + datasetCardinality);
                 //            System.err.println("Retrieved sourceCardinality from sample index: " + datasetCardinality);
             }
         } catch (Exception e) {

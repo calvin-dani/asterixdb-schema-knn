@@ -1,4 +1,3 @@
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -27,5 +26,5 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 public interface ISampler {
     IValueReference serializeSamplingMetadata() throws IOException;
 
-    void update(ITupleReference tuple, boolean b);
+    void addTuple(ITupleReference tuple);
 }

@@ -27,6 +27,7 @@ import org.apache.hyracks.api.dataflow.value.INormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.ByteArrayNormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.DoubleNormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.FloatNormalizedKeyComputerFactory;
+import org.apache.hyracks.dataflow.common.data.normalizers.Integer16NormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.Integer64NormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.Integer8NormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.IntegerNormalizedKeyComputerFactory;
@@ -46,6 +47,8 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
             switch (type.getTypeTag()) {
                 case TINYINT:
                     return new AWrappedAscNormalizedKeyComputerFactory(new Integer8NormalizedKeyComputerFactory());
+                case SMALLINT:
+                    return new AWrappedAscNormalizedKeyComputerFactory(new Integer16NormalizedKeyComputerFactory());
                 case DATE:
                 case TIME:
                 case YEARMONTHDURATION:
@@ -72,6 +75,8 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
             switch (type.getTypeTag()) {
                 case TINYINT:
                     return new AWrappedDescNormalizedKeyComputerFactory(new Integer8NormalizedKeyComputerFactory());
+                case SMALLINT:
+                    return new AWrappedDescNormalizedKeyComputerFactory(new Integer16NormalizedKeyComputerFactory());
                 case DATE:
                 case TIME:
                 case YEARMONTHDURATION:

@@ -22,6 +22,8 @@ package org.apache.hyracks.storage.am.common.api;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 
 public interface ITreeIndexTupleReference extends ITupleReference {
+    byte ANTIMATTER_BIT_OFFSET = 7;
+
     public void setFieldCount(int fieldCount);
 
     public void setFieldCount(int fieldStartIndex, int fieldCount);

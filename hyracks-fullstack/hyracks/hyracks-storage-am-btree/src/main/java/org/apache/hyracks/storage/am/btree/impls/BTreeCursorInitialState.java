@@ -28,7 +28,6 @@ public class BTreeCursorInitialState implements ICursorInitialState {
 
     // This is only used by the LSM-RTree
     private int pageId;
-    // This is used by the sample cursor, to pick the new random leaf page
     private int rootPageId;
     private ICachedPage page;
     private ISearchOperationCallback searchCallback;

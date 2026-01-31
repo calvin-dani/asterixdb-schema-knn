@@ -18,7 +18,7 @@
  */
 package org.apache.hyracks.storage.am.lsm.btree.column.utils;
 
-import static org.apache.hyracks.storage.am.lsm.common.impls.DiskComponentMetadata.STATS_KEY;
+import static org.apache.hyracks.storage.am.lsm.common.impls.DiskComponentMetadata.COLUMN_STATS_KEY;
 
 import org.apache.hyracks.api.compression.ICompressorDecompressor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -96,7 +96,7 @@ final class ColumnMetadataReaderWriter {
      */
     public void writeColumnStats(IValueReference columnStats, IComponentMetadata componentMetadata)
             throws HyracksDataException {
-        componentMetadata.put(STATS_KEY, columnStats);
+        componentMetadata.put(COLUMN_STATS_KEY, columnStats);
     }
 
     /**

@@ -95,7 +95,7 @@ public class LSMColumnBTreeWithBloomFilterDiskComponent extends LSMBTreeWithBloo
         IColumnIndexDiskCacheManager diskCacheManager = lsmColumnBTree.getDiskCacheManager();
         IColumnWriteContext writeContext = diskCacheManager.createWriteContext(numberOfColumns, operationType);
         IIndexBulkLoader bulkLoader = columnBTree.createBulkLoader(storageConfig, fillFactor, verifyInput, callback,
-                columnMetadata, writeContext, getStatsAccumulator());
-        return new LSMColumnIndexBulkloader(bulkLoader, columnMetadata, getMetadata(), getStatsAccumulator());
+                columnMetadata, writeContext, thetaSampler);
+        return new LSMColumnIndexBulkloader(bulkLoader, columnMetadata, getMetadata(), thetaSampler);
     }
 }

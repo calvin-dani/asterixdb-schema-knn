@@ -84,7 +84,7 @@ public class LSMVCTreeDataTupleReference extends TypeAwareTupleReference impleme
 
     @Override
     public boolean isAntimatter() {
-        return BitOperationUtils.getBit(buf, tupleStartOff, ANTIMATTER_BIT_OFFSET);
+        return BitOperationUtils.getBit(buf, tupleStartOff, ILSMTreeTupleReference.ANTIMATTER_BIT_OFFSET);
     }
 
     public int getTupleStart() {

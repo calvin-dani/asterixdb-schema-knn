@@ -28,8 +28,10 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation.LSMIOOperationType;
 import org.apache.hyracks.storage.am.lsm.common.api.LSMOperationType;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.am.lsm.common.util.ComponentUtils;
 import org.apache.hyracks.storage.am.lsm.common.util.LSMComponentIdUtils;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteFailureCallback;
@@ -40,7 +42,7 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
 
     private static final Logger LOGGER = LogManager.getLogger();
 
-    private final ComponentStatsAccumulator statsAccumulator;
+    protected final ISampler thetaSampler;
     private final DiskComponentMetadata metadata;
     private final ArrayBackedValueStorage buffer = new ArrayBackedValueStorage(Long.BYTES);
 
@@ -54,7 +56,9 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
         super(lsmIndex, filter);
         state = ComponentState.READABLE_UNWRITABLE;
         metadata = new DiskComponentMetadata(mdPageManager);
-        statsAccumulator = new ComponentStatsAccumulator();
+        thetaSampler = lsmIndex.isPrimaryIndex()
+                ? ThetaSampler.createSampler(lsmIndex.getBloomFilterKeyFields(), lsmIndex.getThetaSketchK())
+                : org.apache.hyracks.storage.common.NoOpSampler.INSTANCE;
     }
 
     @Override
@@ -228,7 +232,7 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
     protected IChainedComponentBulkLoader createIndexBulkLoader(float fillFactor, boolean verifyInput,
             long numElementsHint, boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
         return new LSMIndexBulkLoader(getIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint,
-                checkIfEmptyIndex, callback, getStatsAccumulator()), getMetadata(), getStatsAccumulator());
+                checkIfEmptyIndex, thetaSampler, callback), getMetadata(), thetaSampler);
     }
 
     /**
@@ -257,8 +261,8 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
         return chainedBulkLoader;
     }
 
-    public ComponentStatsAccumulator getStatsAccumulator() {
-        return statsAccumulator;
+    public ISampler getThetaSampler() {
+        return thetaSampler;
     }
 
     @Override

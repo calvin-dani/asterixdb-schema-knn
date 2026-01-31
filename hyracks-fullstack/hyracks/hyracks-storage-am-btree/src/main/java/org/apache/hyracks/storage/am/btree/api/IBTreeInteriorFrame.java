@@ -30,11 +30,11 @@ public interface IBTreeInteriorFrame extends IBTreeFrame {
 
     int getRightmostChildPageId();
 
-    void setRightmostChildPageId(int pageId);
+    public void setRightmostChildPageId(int pageId);
 
-    int getRightLeafOffset();
+    public int getRightLeafOffset();
 
-    ITreeIndexTupleReference getTupleRef();
+    public ITreeIndexTupleReference getTupleRef();
 
-    void deleteGreatest();
+    public void deleteGreatest();
 }

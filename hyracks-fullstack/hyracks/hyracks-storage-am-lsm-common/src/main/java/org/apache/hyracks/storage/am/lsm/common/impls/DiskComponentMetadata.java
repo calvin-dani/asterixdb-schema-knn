@@ -28,7 +28,11 @@ import org.apache.hyracks.storage.common.IComponentMetadata;
 public class DiskComponentMetadata implements IComponentMetadata {
 
     private final IMetadataPageManager mdpManager;
-    public static final MutableArrayValueReference STATS_KEY = new MutableArrayValueReference("STATS".getBytes());
+    public static final MutableArrayValueReference THETA_INSERT_DELETE_SKETCH_KEY =
+            new MutableArrayValueReference("THETA_INSERT_DELETE_SKETCH_KEY".getBytes());
+
+    public static final MutableArrayValueReference COLUMN_STATS_KEY =
+            new MutableArrayValueReference("COLUMN_STATS".getBytes());
 
     public DiskComponentMetadata(IMetadataPageManager mdpManager) {
         this.mdpManager = mdpManager;

@@ -113,4 +113,5 @@ public class LSMBTreeBatchPointSearchCursor extends LSMBTreePointSearchCursor im
     public int getKeyIndex() {
         return ((BatchPredicate) predicate).getKeyIndex();
     }
+
 }

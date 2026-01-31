@@ -85,7 +85,9 @@ public class StorageProperties extends AbstractProperties {
                     return (long) (0.03 * MAX_HEAP_BYTES);
                 }),
         STORAGE_COLUMN_BUFFER_POOL_MAX_SIZE(getRangedIntegerType(1, 50000), 8000),
-        STORAGE_COLUMN_BUFFER_ACQUIRE_TIMEOUT(LONG, TimeUnit.SECONDS.toMillis(120));
+        STORAGE_COLUMN_BUFFER_ACQUIRE_TIMEOUT(LONG, TimeUnit.SECONDS.toMillis(120)),
+        STORAGE_LSM_THETA_SKETCH_K(POSITIVE_INTEGER, 1024),
+        STORAGE_MAX_SAMPLE_LEAF_ATTEMPTS(POSITIVE_INTEGER, 500);
 
         private final IOptionType interpreter;
         private final Object defaultValue;
@@ -114,6 +116,8 @@ public class StorageProperties extends AbstractProperties {
                 case STORAGE_COLUMN_MAX_TUPLE_COUNT:
                 case STORAGE_COLUMN_FREE_SPACE_TOLERANCE:
                 case STORAGE_COLUMN_MAX_LEAF_NODE_SIZE:
+                case STORAGE_LSM_THETA_SKETCH_K:
+                case STORAGE_MAX_SAMPLE_LEAF_ATTEMPTS:
                     return Section.COMMON;
                 default:
                     return Section.NC;
@@ -190,6 +194,13 @@ public class StorageProperties extends AbstractProperties {
                     return "The maximum number of buffers in the column buffer pool.";
                 case STORAGE_COLUMN_BUFFER_ACQUIRE_TIMEOUT:
                     return "The maximum time in milliseconds to wait for acquiring a buffer from the column buffer pool.";
+                case STORAGE_LSM_THETA_SKETCH_K:
+                    return "The K parameter for the Theta Sketch (KMV) used in LSM cardinality estimation. "
+                            + "Higher values improve estimation accuracy but increase memory and storage overhead. "
+                            + "With K=1024, each sketch uses ~8KB and provides ~3% error rate.";
+                case STORAGE_MAX_SAMPLE_LEAF_ATTEMPTS:
+                    return "The maximum number of attempts to find a random leaf page during B-tree sampling. "
+                            + "If exceeded, the sampling operation will fail with an error.";
                 default:
                     throw new IllegalStateException("NYI: " + this);
             }
@@ -259,6 +270,14 @@ public class StorageProperties extends AbstractProperties {
 
     public double getBloomFilterFalsePositiveRate() {
         return accessor.getDouble(Option.STORAGE_LSM_BLOOMFILTER_FALSEPOSITIVERATE);
+    }
+
+    public int getThetaSketchK() {
+        return accessor.getInt(Option.STORAGE_LSM_THETA_SKETCH_K);
+    }
+
+    public int getMaxSampleLeafAttempts() {
+        return accessor.getInt(Option.STORAGE_MAX_SAMPLE_LEAF_ATTEMPTS);
     }
 
     public int getColumnBufferSize() {

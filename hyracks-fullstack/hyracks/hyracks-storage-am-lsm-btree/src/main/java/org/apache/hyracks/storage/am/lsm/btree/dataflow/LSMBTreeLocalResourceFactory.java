@@ -45,6 +45,8 @@ public class LSMBTreeLocalResourceFactory extends LsmResourceFactory {
     protected final boolean hasBloomFilter;
     protected final int[] bloomFilterKeyFields;
     protected final double bloomFilterFalsePositiveRate;
+    protected final int thetaSketchK;
+    protected final int maxSampleLeafAttempts;
     protected final boolean isPrimary;
     protected final int[] btreeFields;
     protected final ICompressorDecompressorFactory compressorDecompressorFactory;
@@ -59,8 +61,8 @@ public class LSMBTreeLocalResourceFactory extends LsmResourceFactory {
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int[] bloomFilterKeyFields,
-            double bloomFilterFalsePositiveRate, boolean isPrimary, int[] btreeFields,
-            ICompressorDecompressorFactory compressorDecompressorFactory, boolean hasBloomFilter,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts, boolean isPrimary,
+            int[] btreeFields, ICompressorDecompressorFactory compressorDecompressorFactory, boolean hasBloomFilter,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean isSecondaryNoIncrementalMaintenance,
             boolean atomic) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
@@ -70,6 +72,8 @@ public class LSMBTreeLocalResourceFactory extends LsmResourceFactory {
         this.hasBloomFilter = hasBloomFilter;
         this.bloomFilterKeyFields = bloomFilterKeyFields;
         this.bloomFilterFalsePositiveRate = bloomFilterFalsePositiveRate;
+        this.thetaSketchK = thetaSketchK;
+        this.maxSampleLeafAttempts = maxSampleLeafAttempts;
         this.isPrimary = isPrimary;
         this.btreeFields = btreeFields;
         this.compressorDecompressorFactory = compressorDecompressorFactory;
@@ -80,11 +84,11 @@ public class LSMBTreeLocalResourceFactory extends LsmResourceFactory {
     @Override
     public LsmResource createResource(FileReference fileRef) {
         return new LSMBTreeLocalResource(typeTraits, cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
-                isPrimary, fileRef.getRelativePath(), storageManager, mergePolicyFactory, mergePolicyProperties,
-                filterTypeTraits, filterCmpFactories, btreeFields, filterFields, opTrackerProvider, ioOpCallbackFactory,
-                pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, durable,
-                compressorDecompressorFactory, hasBloomFilter, nullTypeTraits, nullIntrospector,
-                isSecondaryNoIncrementalMaintenance, atomic);
+                thetaSketchK, maxSampleLeafAttempts, isPrimary, fileRef.getRelativePath(), storageManager,
+                mergePolicyFactory, mergePolicyProperties, filterTypeTraits, filterCmpFactories, btreeFields,
+                filterFields, opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory,
+                metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, durable, compressorDecompressorFactory,
+                hasBloomFilter, nullTypeTraits, nullIntrospector, isSecondaryNoIncrementalMaintenance, atomic);
     }
 
     private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {
