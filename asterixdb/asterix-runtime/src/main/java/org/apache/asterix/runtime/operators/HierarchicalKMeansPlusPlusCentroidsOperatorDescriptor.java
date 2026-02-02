@@ -38,6 +38,7 @@ import java.util.Random;
 import java.util.UUID;
 
 import org.apache.asterix.builders.OrderedListBuilder;
+import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.dataflow.data.nontagged.serde.AOrderedListSerializerDeserializer;
 import org.apache.asterix.om.base.AMutableDouble;
@@ -84,6 +85,10 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -611,6 +616,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private final UUID sampleUUID;
     private final UUID tupleCountUUID;
     private final UUID materializedDataUUID;
+    private final UUID scalarValuesUUID;
 
     // Configuration parameters for hierarchical clustering
     private IScalarEvaluatorFactory args; // Evaluator for extracting vector data from tuples
@@ -618,6 +624,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
     private DistanceFunction distanceFunction;
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
+    private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
@@ -797,7 +804,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter) {
+            UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
+            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -806,9 +814,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.sampleUUID = sampleUUID;
         this.tupleCountUUID = tupleCountUUID;
         this.materializedDataUUID = materializedDataUUID;
+        this.scalarValuesUUID = scalarValuesUUID;
         this.args = args;
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
+        this.indexHelperFactory = indexHelperFactory;
 
         // Initialize distance function to euclidean squared to avoid null pointer issues
         this.distanceFunction = new EuclideanSquaredDistanceFunction();
@@ -940,6 +950,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         //                        System.err.println("Retrieved total tuple count: " + totalTupleCount);
 
+                        // Compute and write optimized scalar quantization parameters per partition
+                        if (indexHelperFactory != null) {
+                            //                            computeAndWriteQuantizationParams(ctx, partition, sampleState, eval, inputVal,
+                            //                                    listAccessorConstant, KMeansUtils, fta, tuple);
+                        }
+
                         // Perform memory-efficient hierarchical K-means clustering
                         HierarchicalClusterStructure clusterStructure =
                                 performMemoryEfficientHierarchicalKMeans(ctx, in, fta, tuple, eval, inputVal,
@@ -966,6 +982,136 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     } finally {
                         in.close();
                         writer.close();
+                    }
+                }
+
+                /**
+                 * Computes optimized scalar quantization parameters from sampled vectors and writes them
+                 * to a per-partition file in the index directory. Also writes individual embedding values
+                 * to a run file for downstream processing.
+                 * 
+                 * @param ctx The Hyracks task context
+                 * @param partition The partition ID
+                 * @param sampleState The materialized sample state containing the run file
+                 * @param eval Scalar evaluator for extracting vector data
+                 * @param inputVal Pointable for input values
+                 * @param listAccessorConstant List accessor for vector data
+                 * @param kMeansUtils K-means utilities
+                 * @param fta Frame tuple accessor
+                 * @param tuple Frame tuple reference
+                 */
+                private void computeAndWriteQuantizationParams(IHyracksTaskContext ctx, int partition,
+                        MaterializerTaskState sampleState, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, FrameTupleAccessor fta,
+                        FrameTupleReference tuple) throws HyracksDataException {
+                    IIndexDataflowHelper indexHelper = null;
+                    GeneratedRunFileReader quantReader = null;
+                    ScalarValueRunFileWriter scalarWriter = null;
+                    try {
+                        // Initialize scalar value writer for writing individual embedding values
+                        if (scalarValuesUUID != null) {
+                            scalarWriter = new ScalarValueRunFileWriter();
+                            scalarWriter.initialize(ctx, partition, scalarValuesUUID);
+                        }
+
+                        // Get index directory for this partition
+                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                        indexHelper.open();
+                        IIndex indexInstance = indexHelper.getIndexInstance();
+                        if (!(indexInstance instanceof ILSMIndex)) {
+                            // If not an LSM index, skip quantization computation
+                            return;
+                        }
+                        ILSMIndex lsmIndex = (ILSMIndex) indexInstance;
+                        //                        ILSMIndexFileManager fileManager = lsmIndex.getFileManager();
+                        //                        FileReference indexDir = fileManager.getBaseDir();
+
+                        // Collect sampled vectors (limit to 20,000)
+                        final int MAX_SAMPLES = 2000;
+                        List<float[]> sampledVectors = new ArrayList<>();
+                        quantReader = sampleState.creatReader();
+                        quantReader.open();
+
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        int collected = 0;
+
+                        while (quantReader.nextFrame(frame) && collected < MAX_SAMPLES) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+
+                            for (int j = 0; j < tupleCount && collected < MAX_SAMPLES; j++) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+
+                                // Check if the value is a list type (vector)
+                                ATypeTag tag = ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]);
+                                if (!tag.isListType()) {
+                                    continue;
+                                }
+
+                                // Extract vector as double[]
+                                listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
+
+                                // Convert double[] to float[]
+                                float[] floatPoint = new float[point.length];
+                                for (int i = 0; i < point.length; i++) {
+                                    floatPoint[i] = (float) point[i];
+                                }
+                                //                                sampledVectors.add(floatPoint);
+
+                                // Write each embedding value as individual entries to run file
+                                if (scalarWriter != null) {
+                                    scalarWriter.writeEmbeddingAsScalars(point);
+                                }
+
+                                collected++;
+                            }
+                        }
+
+                        // Compute quantization parameters if we collected any vectors
+                        // Note: Quantization parameters are now written via sidecar file mechanism
+                        if (!sampledVectors.isEmpty()) {
+                            OptimizedScalarQuantizationSampleFile.Params params =
+                                    OptimizedScalarQuantizationSampleFile.computeFromSamples(sampledVectors, 0.99f, 7);
+                            System.err.println("Computed quantization for partition " + partition + " from "
+                                    + sampledVectors.size() + " vectors: bits=" + params.bits + ", alpha="
+                                    + params.alpha + ", minQ=" + params.minQuantile + ", maxQ=" + params.maxQuantile
+                                    + ", conf=" + params.confidenceInterval + ", sampleCount=" + params.sampleCount);
+                        } else {
+                            System.err.println("No sampled vectors collected for partition " + partition
+                                    + ", skipping quantization computation");
+                        }
+
+                        // Close scalar writer and save state for downstream operators
+                        if (scalarWriter != null) {
+                            scalarWriter.close(ctx);
+                            System.err.println("UPDATE CALL: Wrote " + collected
+                                    + " embeddings as individual scalar values to run file for partition " + partition);
+                        }
+
+                    } catch (Exception e) {
+                        // Log error but don't fail the job - quantization is optional
+                        System.err.println("WARNING: Failed to compute quantization parameters for partition "
+                                + partition + ": " + e.getMessage());
+                        e.printStackTrace();
+                    } finally {
+                        if (quantReader != null) {
+                            try {
+                                quantReader.close();
+                            } catch (Exception e) {
+                                // Ignore close errors
+                            }
+                        }
+                        if (indexHelper != null) {
+                            try {
+                                indexHelper.close();
+                            } catch (Exception e) {
+                                // Ignore close errors
+                            }
+                        }
                     }
                 }
 

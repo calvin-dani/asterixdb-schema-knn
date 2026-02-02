@@ -2022,13 +2022,36 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             // #. add a new index with PendingAddOp
             MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
 
-            // Three-job pattern for vector indexes (Job 2 commented out - not implemented yet)
+            // Four-job pattern for vector indexes with quantization
             if (index.getIndexType() == IndexType.VECTOR) {
-                // VECTOR INDEX: Three Jobs
-                //                System.err.println("=== EXECUTING THREE JOBS FOR VECTOR INDEX ===");
+                // VECTOR INDEX: Four Jobs
+
+                // JOB 0.5: Calculate quantization constants from ANALYZE sample index
+                // The quantization constants are written to a sidecar file in the dataset directory
+                // which is then read by LSMVCTreeLocalResource in Job 1
+                try {
+                    spec = IndexUtil.buildSecondaryIndexQuantizationMetadataJobSpec(ds, index, metadataProvider,
+                            sourceLoc);
+                    if (spec != null) {
+                        System.err.println("[QueryTranslator] Running Job 0.5: quantization constants computation");
+                        runJob(hcc, spec, jobFlags);
+                        System.err.println(
+                                "[QueryTranslator] Job 0.5 completed - sidecar file written to dataset directory");
+                    } else {
+                        System.err
+                                .println("[QueryTranslator] Job 0.5 spec was null - no ANALYZE sample index available");
+                    }
+                } catch (CompilationException e) {
+                    // No sample index available - proceed without quantization
+                    System.err.println(
+                            "[QueryTranslator] No ANALYZE sample available for quantization: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("[QueryTranslator] Exception during Job 0.5: " + e.getMessage());
+                    e.printStackTrace();
+                }
 
                 // JOB 1: Create empty index files
-                //                System.err.println("=== JOB 1: Creating empty index files ===");
+                // LSMVCTreeLocalResource will read the sidecar file and include quantization constants in .metadata
                 spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
                 if (spec == null) {
                     throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,

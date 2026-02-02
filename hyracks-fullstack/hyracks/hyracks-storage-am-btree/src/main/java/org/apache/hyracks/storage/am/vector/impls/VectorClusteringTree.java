@@ -980,6 +980,22 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return isStaticStructureInitialized;
     }
 
+    /**
+     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
+     * interior and leaf frames.
+     */
+    public List<ClusterSearchResult> findCloseCentroidsLevelWiseFromRoot(double[] queryVector,
+            VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
+            throws HyracksDataException {
+
+        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
+
+        // Use the common navigation logic from VCTreeNavigationUtils
+        return VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(bufferCache, getFileId(), rootPage,
+                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
+      
+    }
+  
     public void setStaticStructureInitialized() {
         isStaticStructureInitialized = true;
     }

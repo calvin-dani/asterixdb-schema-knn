@@ -24,6 +24,7 @@ import java.util.List;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparator;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.LongBinaryComparatorFactory;
