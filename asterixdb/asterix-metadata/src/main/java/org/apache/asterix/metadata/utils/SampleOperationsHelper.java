@@ -271,13 +271,6 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
                 "Static structure creation not supported for K-means index type");
     }
 
-    @Override
-    public JobSpecification buildQuantizationMetadataJobSpec() throws AlgebricksException {
-        // K-means indexes don't support static structure creation
-        throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, sourceLoc,
-                "Static structure creation not supported for K-means index type");
-    }
-
     //    @Override
     public JobSpecification buildLoadingJobSpecOld() throws AlgebricksException {
         Index.SampleIndexDetails indexDetails = (Index.SampleIndexDetails) sampleIdx.getIndexDetails();

@@ -452,8 +452,6 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-local-sampling", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier RANGE_MAP =
             FunctionConstants.newAsterix("agg-range-map", FunctionIdentifier.VARARGS);
-    public static final FunctionIdentifier QUANTIZATION_CONSTANTS =
-            FunctionConstants.newAsterix("agg-quantization-constants", 1);
     public static final FunctionIdentifier STDDEV_POP = FunctionConstants.newAsterix("agg-stddev_pop", 1);
     public static final FunctionIdentifier GLOBAL_STDDEV_POP = FunctionConstants.newAsterix("agg-global-stddev_pop", 1);
     public static final FunctionIdentifier INTERMEDIATE_STDDEV_POP =
@@ -1636,7 +1634,6 @@ public class BuiltinFunctions {
         addPrivateFunction(GLOBAL_STDDEV_SAMP, NullableDoubleTypeComputer.INSTANCE, true);
         addPrivateFunction(LOCAL_SAMPLING, ABinaryTypeComputer.INSTANCE, true);
         addPrivateFunction(RANGE_MAP, ABinaryTypeComputer.INSTANCE, true);
-        addPrivateFunction(QUANTIZATION_CONSTANTS, ABinaryTypeComputer.INSTANCE, true);
         addPrivateFunction(LOCAL_STDDEV_POP, LocalSingleVarStatisticsTypeComputer.INSTANCE, true);
         addFunction(STDDEV_POP, NullableDoubleTypeComputer.INSTANCE, true);
         addPrivateFunction(GLOBAL_STDDEV_POP, NullableDoubleTypeComputer.INSTANCE, true);
@@ -2519,11 +2516,6 @@ public class BuiltinFunctions {
         addIntermediateAgg(LOCAL_SAMPLING, RANGE_MAP);
         addIntermediateAgg(RANGE_MAP, RANGE_MAP);
         addGlobalAgg(RANGE_MAP, RANGE_MAP);
-
-        // QUANTIZATION_CONSTANTS
-        addAgg(QUANTIZATION_CONSTANTS);
-        addIntermediateAgg(QUANTIZATION_CONSTANTS, QUANTIZATION_CONSTANTS);
-        addGlobalAgg(QUANTIZATION_CONSTANTS, QUANTIZATION_CONSTANTS);
 
         addAgg(NULL_WRITER);
         addLocalAgg(NULL_WRITER, NULL_WRITER);

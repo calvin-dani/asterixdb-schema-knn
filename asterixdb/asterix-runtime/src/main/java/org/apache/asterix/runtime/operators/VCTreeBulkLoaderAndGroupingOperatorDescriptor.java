@@ -24,12 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.asterix.common.dataflow.DatasetLocalResource;
-import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
-import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
-import org.apache.asterix.om.base.ADouble;
-import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
@@ -69,15 +63,12 @@ import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
-import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexAccessor;
-import org.apache.hyracks.storage.common.IResource;
-import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 
 /**
@@ -432,7 +423,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private RecordDescriptor outputRecDesc;
         private DistanceFunction distanceFunction;
         private IVectorDistanceFunction hyracksDistanceFunction;
-        private OptimizedScalarQuantizationSampleFile.Params quantizationParams;
 
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
@@ -511,127 +501,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 vcTreeAccessor = (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
                 //                System.err.println("✅ VectorClusteringTreeAccessor created successfully");
 
-                // Read quantization parameters from metadata file
-                quantizationParams = readQuantizationParamsFromMetadata(indexHelper, vectorDimension);
-                System.err.println("Initialized quantization params from metadata: bits=" + quantizationParams.bits
-                        + ", minQ=" + quantizationParams.minQuantile + ", maxQ=" + quantizationParams.maxQuantile
-                        + ", alpha=" + quantizationParams.alpha + ", confidenceInterval="
-                        + quantizationParams.confidenceInterval + ", sampleCount=" + quantizationParams.sampleCount);
-
             } catch (Exception e) {
                 e.printStackTrace();
                 throw HyracksDataException.create(e);
             }
-        }
-
-        /**
-         * Reads quantization parameters from the metadata file.
-         * Falls back to default values if parameters are not available.
-         * 
-         * @param indexHelper The index dataflow helper to get the resource
-         * @param vectorDimension The vector dimension (used as fallback)
-         * @return OptimizedScalarQuantizationSampleFile.Params with values from metadata or defaults
-         * @throws HyracksDataException if reading fails
-         */
-        private OptimizedScalarQuantizationSampleFile.Params readQuantizationParamsFromMetadata(
-                org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper indexHelper, int vectorDimension)
-                throws HyracksDataException {
-            try {
-                // Get LocalResource from index helper
-                LocalResource localResource = indexHelper.getResource();
-                if (localResource == null) {
-                    System.err.println("READ: WARNING - LocalResource not found, using default quantization params");
-                    return createDefaultQuantizationParams(vectorDimension);
-                }
-
-                // DEBUG: Log resource details
-                System.err.println("READ: Reading quantization params from resource");
-                System.err.println("READ: LocalResource path: " + localResource.getPath());
-                System.err.println("READ: LocalResource ID: " + localResource.getId() + ", Version: "
-                        + localResource.getVersion());
-
-                // Extract LSMVCTreeLocalResource (handle DatasetLocalResource wrapper)
-                IResource resource = localResource.getResource();
-                LSMVCTreeLocalResource vcResource = null;
-                DatasetLocalResource datasetWrapper = null;
-
-                if (resource instanceof DatasetLocalResource) {
-                    datasetWrapper = (DatasetLocalResource) resource;
-                    System.err.println("READ: Resource is wrapped in DatasetLocalResource - datasetId: "
-                            + datasetWrapper.getDatasetId() + ", partition: " + datasetWrapper.getPartition());
-                    IResource wrappedResource = datasetWrapper.getResource();
-                    if (wrappedResource instanceof LSMVCTreeLocalResource) {
-                        vcResource = (LSMVCTreeLocalResource) wrappedResource;
-                    } else {
-                        System.err.println("READ: Wrapped resource type: "
-                                + (wrappedResource != null ? wrappedResource.getClass().getName() : "null"));
-                    }
-                } else if (resource instanceof LSMVCTreeLocalResource) {
-                    vcResource = (LSMVCTreeLocalResource) resource;
-                    System.err.println("READ: Resource is direct LSMVCTreeLocalResource (not wrapped)");
-                } else {
-                    System.err.println(
-                            "READ: Resource type: " + (resource != null ? resource.getClass().getName() : "null"));
-                }
-
-                if (vcResource == null) {
-                    System.err.println(
-                            "READ: WARNING - LSMVCTreeLocalResource not found, using default quantization params");
-                    return createDefaultQuantizationParams(vectorDimension);
-                }
-
-                System.err.println("READ: Resource type: " + vcResource.getClass().getName());
-
-                // Read quantization parameters using public getter methods
-                Integer bits = vcResource.getBits();
-                Float confidenceInterval = vcResource.getConfidenceInterval();
-                Float minQuantile = vcResource.getMinQuantile();
-                Float maxQuantile = vcResource.getMaxQuantile();
-                Float alpha = vcResource.getAlpha();
-                Integer sampleCount = vcResource.getSampleCount();
-
-                // DEBUG: Log what we read
-                System.err.println("READ: Raw values from resource - bits: " + bits + ", alpha: " + alpha + ", minQ: "
-                        + minQuantile + ", maxQ: " + maxQuantile + ", conf: " + confidenceInterval + ", sampleCount: "
-                        + sampleCount);
-
-                // Use defaults if any required parameter is missing
-                if (!vcResource.hasQuantizationParams()) {
-                    System.err.println("WARNING: Some quantization parameters missing in metadata, using defaults");
-                    return createDefaultQuantizationParams(vectorDimension);
-                }
-
-                // Use provided sampleCount or default
-                int finalSampleCount = (sampleCount != null) ? sampleCount : 20000;
-
-                System.err.println("Successfully read quantization params from metadata: bits=" + bits + ", minQ="
-                        + minQuantile + ", maxQ=" + maxQuantile + ", alpha=" + alpha + ", confidenceInterval="
-                        + confidenceInterval + ", sampleCount=" + finalSampleCount);
-
-                return new OptimizedScalarQuantizationSampleFile.Params(bits, vectorDimension, finalSampleCount,
-                        confidenceInterval, minQuantile, maxQuantile, alpha);
-
-            } catch (Exception e) {
-                System.err.println("WARNING: Failed to read quantization params from metadata: " + e.getMessage());
-                e.printStackTrace();
-                return createDefaultQuantizationParams(vectorDimension);
-            }
-        }
-
-        /**
-         * Creates default quantization parameters as fallback.
-         */
-        private OptimizedScalarQuantizationSampleFile.Params createDefaultQuantizationParams(int vectorDimension) {
-            System.err.println(
-                    "READ: Using DEFAULT quantization params (bits=7, minQ=-10.0, maxQ=10.0, alpha=6.35, conf=0.99, sampleCount=20000)");
-            return new OptimizedScalarQuantizationSampleFile.Params(7, // bits
-                    vectorDimension, // vectorDimensions
-                    20000, // sampleCount
-                    0.99f, // confidenceInterval
-                    -10.0f, // minQuantile
-                    10.0f, // maxQuantile
-                    6.35f // alpha: (127)/(10.0-(-10.0)) = 6.35
-            );
         }
 
         /**
@@ -715,197 +588,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             }
         }
 
-        /**
-         * Find the closest centroid using VectorClusteringTreeAccessor.
-         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         *
-         * @param queryVector Query vector to find closest centroid for
-         * @return ClusterSearchResult containing closest centroid information
-         * @throws HyracksDataException if search fails
-         */
-        private List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector, double epi)
-                throws HyracksDataException {
-            try {
-                // Validate input vector
-                if (queryVector == null) {
-                    throw new IllegalArgumentException("Query vector cannot be null");
-                }
-
-                if (queryVector.length == 0) {
-                    throw new IllegalArgumentException("Query vector cannot be empty");
-                }
-
-                // Validate vector dimensions
-                if (queryVector.length != vectorDimension) {
-                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + vectorDimension + ")");
-                }
-
-                // Validate accessor is initialized
-                if (vcTreeAccessor == null) {
-                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
-                }
-
-                // Validate distance function is initialized
-                if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
-                }
-
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseLeafCentroid(queryVector, hyracksDistanceFunction, epi);
-
-                if (result == null) {
-                    System.err.println("WARNING: No closest centroid found for query vector");
-                    return null;
-                }
-
-                return result;
-
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-                throw e;
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Find the closest centroid using VectorClusteringTreeAccessor.
-         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         *
-         * @param queryVector Query vector to find closest centroid for
-         * @return ClusterSearchResult containing closest centroid information
-         * @throws HyracksDataException if search fails
-         */
-        private List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector, double epi)
-                throws HyracksDataException {
-            try {
-                // Validate input vector
-                if (queryVector == null) {
-                    throw new IllegalArgumentException("Query vector cannot be null");
-                }
-
-                if (queryVector.length == 0) {
-                    throw new IllegalArgumentException("Query vector cannot be empty");
-                }
-
-                // Validate vector dimensions
-                if (queryVector.length != vectorDimension) {
-                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + vectorDimension + ")");
-                }
-
-                // Validate accessor is initialized
-                if (vcTreeAccessor == null) {
-                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
-                }
-
-                // Validate distance function is initialized
-                if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
-                }
-
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsFrontier(queryVector, hyracksDistanceFunction, epi);
-
-                if (result == null) {
-                    System.err.println("WARNING: No closest centroid found for query vector");
-                    return null;
-                }
-
-                return result;
-
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-                throw e;
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
-        /**
-         * Quantizes a vector using optimized scalar quantization with similarity-function awareness.
-         * Uses the new API that returns QuantizedVector with corrective multiplier.
-         * 
-         * @param embedding The input embedding vector (double array)
-         * @param params Quantization parameters
-         * @param distanceMetric Distance metric string to determine similarity function
-         * @return QuantizedVector containing quantized bytes, corrective multiplier, and metadata
-         */
-        private OptimizedScalarQuantizationSampleFile.QuantizedVector quantizeVector(double[] embedding,
-                OptimizedScalarQuantizationSampleFile.Params params, String distanceMetric) {
-            if (embedding == null || params == null) {
-                return null;
-            }
-
-            // Convert distance metric string to SimilarityFunction enum
-            OptimizedScalarQuantizationSampleFile.SimilarityFunction similarityFunction =
-                    OptimizedScalarQuantizationSampleFile.fromDistanceMetric(distanceMetric);
-
-            // Use the new quantizeVector API with similarity function awareness
-            return OptimizedScalarQuantizationSampleFile.quantizeVector(embedding, params, similarityFunction);
-        }
-
-        /**
-         * Find the closest centroid using VectorClusteringTreeAccessor.
-         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         *
-         * @param queryVector Query vector to find closest centroid for
-         * @return ClusterSearchResult containing closest centroid information
-         * @throws HyracksDataException if search fails
-         */
-        private List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector, double epi)
-                throws HyracksDataException {
-            try {
-                // Validate input vector
-                if (queryVector == null) {
-                    throw new IllegalArgumentException("Query vector cannot be null");
-                }
-
-                if (queryVector.length == 0) {
-                    throw new IllegalArgumentException("Query vector cannot be empty");
-                }
-
-                // Validate vector dimensions
-                if (queryVector.length != vectorDimension) {
-                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
-                            + ") does not match expected dimension (" + vectorDimension + ")");
-                }
-
-                // Validate accessor is initialized
-                if (vcTreeAccessor == null) {
-                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
-                }
-
-                // Validate distance function is initialized
-                if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
-                }
-
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsLevelWise(queryVector, hyracksDistanceFunction, epi);
-
-                if (result == null) {
-                    System.err.println("WARNING: No closest centroid found for query vector");
-                    return null;
-                }
-
-                return result;
-
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
-                throw e;
-            } catch (Exception e) {
-                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
-                e.printStackTrace();
-                throw HyracksDataException.create(e);
-            }
-        }
-
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
 
@@ -932,118 +614,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                         if (embedding != null && embedding.length > 0) {
                             // Find closest centroid using the extracted embedding
-                            // Use accessor to find closest leaf centroid with distance function
-                            boolean crossPollinate = false; // Do not cross partition boundaries
-                            boolean leafPollinate = false;
-                            boolean interiorPollinate = false;
-                            if (!crossPollinate) {
-                                ClusterSearchResult result = findClosestCentroid(embedding);
-                                if (result != null) {
-                                    successfulQueries++;
+                            ClusterSearchResult result = findClosestCentroid(embedding);
+                            if (result != null) {
+                                successfulQueries++;
 
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
-
-                                    // Log quantization details including corrective multiplier
-                                    if (quantizedVector != null) {
-                                        Object quantizedBytes = quantizedVector.quantizedBytes;
-                                        String typeStr = "unknown";
-                                        int length = 0;
-                                        if (quantizedBytes instanceof byte[]) {
-                                            typeStr = "byte[]";
-                                            length = ((byte[]) quantizedBytes).length;
-                                        } else if (quantizedBytes instanceof short[]) {
-                                            typeStr = "short[]";
-                                            length = ((short[]) quantizedBytes).length;
-                                        } else if (quantizedBytes instanceof int[]) {
-                                            typeStr = "int[]";
-                                            length = ((int[]) quantizedBytes).length;
-                                        }
-                                        System.err.println("Quantized vector: " + length + " " + typeStr + " (bits="
-                                                + quantizationParams.bits + ", similarity="
-                                                + quantizedVector.similarityFunction + ", normalized="
-                                                + quantizedVector.isNormalized + ", correctiveMultiplier="
-                                                + quantizedVector.correctiveMultiplier + ")");
-                                    }
-
-                                    // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                    ITupleReference transformedTuple = createTransformedTuple(tuple, result);
-
-                                    // Output the transformed tuple to downstream operators
-                                    outputTransformedTuple(transformedTuple);
-
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
-                            } else if (crossPollinate && leafPollinate) {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseLeafCentroid(embedding, 0.1);
-                                if (result != null) {
-                                    successfulQueries++;
-
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
-
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
-
-                            } else if (crossPollinate && interiorPollinate) {
-                                // FUTURE: Implement cross-partition centroid search
-                                int count = 0;
-                                List<ClusterSearchResult> result = findCloseCentroidsLevelWise(embedding, 0.15);
-                                if (result != null) {
-                                    successfulQueries++;
-
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
-
-                                    for (ClusterSearchResult res : result) {
-
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                        count++;
-                                        if (count >= 10) {
-                                            break; // Limit to top 10 results bounded
-                                        }
-                                    }
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
-
-                            } else {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseCentroidsFrontier(embedding, 0.1);
-                                if (result != null) {
-                                    successfulQueries++;
-
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
-
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
-                                } else {
-                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
-                                }
+                                // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                ITupleReference transformedTuple = createTransformedTuple(tuple, result);
 
                                 // Output the transformed tuple to downstream operators
                                 outputTransformedTuple(transformedTuple);
