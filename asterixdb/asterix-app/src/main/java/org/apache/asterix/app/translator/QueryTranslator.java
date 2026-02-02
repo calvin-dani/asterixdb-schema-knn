@@ -2024,30 +2024,30 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
 
             // Four-job pattern for vector indexes with quantization
             if (index.getIndexType() == IndexType.VECTOR) {
-                // VECTOR INDEX: Four Jobs (Job 0.5: Quantization Constants, then Jobs 1-3)
-                //                System.err.println("=== EXECUTING FOUR JOBS FOR VECTOR INDEX ===");
-
+                // VECTOR INDEX: Four Jobs
+                
                 // JOB 0.5: Calculate quantization constants from ANALYZE sample index
-                //                System.err.println("=== JOB 0.5: Calculating quantization constants ===");
+                // The quantization constants are written to a sidecar file in the dataset directory
+                // which is then read by LSMVCTreeLocalResource in Job 1
                 try {
                     spec = IndexUtil.buildSecondaryIndexQuantizationMetadataJobSpec(ds, index, metadataProvider, sourceLoc);
                     if (spec != null) {
-                        // Job 0.5 can run with current metadata transaction (reads ANALYZE sample index)
-                        // No need to commit before running - quantization calculation is read-only from sample index
+                        System.err.println("[QueryTranslator] Running Job 0.5: quantization constants computation");
                         runJob(hcc, spec, jobFlags);
+                        System.err.println("[QueryTranslator] Job 0.5 completed - sidecar file written to dataset directory");
+                    } else {
+                        System.err.println("[QueryTranslator] Job 0.5 spec was null - no ANALYZE sample index available");
                     }
                 } catch (CompilationException e) {
-                    // If ANALYZE not run, throw error as specified
-                    // Check error message for ANALYZE_NOT_RUN pattern (since specific error code may not exist)
-                    if (e.getMessage() != null && e.getMessage().contains("ANALYZE")) {
-                        throw e;
-                    }
-                    // For other errors, log and continue (quantization is optional enhancement)
-                    GlobalConfig.ASTERIX_LOGGER.warn("Failed to calculate quantization constants: " + e.getMessage());
+                    // No sample index available - proceed without quantization
+                    System.err.println("[QueryTranslator] No ANALYZE sample available for quantization: " + e.getMessage());
+                } catch (Exception e) {
+                    System.err.println("[QueryTranslator] Exception during Job 0.5: " + e.getMessage());
+                    e.printStackTrace();
                 }
 
                 // JOB 1: Create empty index files
-                //                System.err.println("=== JOB 1: Creating empty index files ===");
+                // LSMVCTreeLocalResource will read the sidecar file and include quantization constants in .metadata
                 spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
                 if (spec == null) {
                     throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
@@ -6278,7 +6278,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
     }
 
     private static List<IOperatorStats> runJob(IHyracksClientConnection hcc, JobSpecification jobSpec,
-            EnumSet<JobFlag> jobFlags, List<String> statOperatorNames) throws Exception {
+                                               EnumSet<JobFlag> jobFlags, List<String> statOperatorNames) throws Exception {
         Pair<JobId, List<IOperatorStats>> p = JobUtils.runJobIfActive(hcc, jobSpec, jobFlags, true, statOperatorNames);
         return p.second;
     }

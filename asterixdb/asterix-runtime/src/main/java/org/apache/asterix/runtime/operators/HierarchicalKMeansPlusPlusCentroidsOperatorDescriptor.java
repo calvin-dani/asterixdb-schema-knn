@@ -964,8 +964,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Compute and write optimized scalar quantization parameters per partition
                         if (indexHelperFactory != null) {
-                            computeAndWriteQuantizationParams(ctx, partition, sampleState, eval, inputVal,
-                                    listAccessorConstant, KMeansUtils, fta, tuple);
+//                            computeAndWriteQuantizationParams(ctx, partition, sampleState, eval, inputVal,
+//                                    listAccessorConstant, KMeansUtils, fta, tuple);
                         }
 
                         // Perform memory-efficient hierarchical K-means clustering

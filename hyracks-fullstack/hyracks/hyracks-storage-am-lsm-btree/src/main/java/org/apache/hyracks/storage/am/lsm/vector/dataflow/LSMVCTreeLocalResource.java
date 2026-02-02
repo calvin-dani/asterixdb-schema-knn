@@ -18,8 +18,12 @@
  */
 package org.apache.hyracks.storage.am.lsm.vector.dataflow;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
@@ -50,20 +54,28 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class LSMVCTreeLocalResource extends LsmResource {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
+    private static final Logger LOGGER = Logger.getLogger(LSMVCTreeLocalResource.class.getName());
+    
+    /** Prefix for quantization sidecar files: .quantization_<indexName> */
+    public static final String QUANTIZATION_FILE_PREFIX = ".quantization_";
 
     protected final int vectorDimensions;
     protected final int[] vectorFields;
     protected final int[] filterFields;
     protected final boolean atomic;
+    
+    // Index name for locating sidecar file (optional, only set during index creation)
+    protected final String indexName;
 
     // Quantization parameters (optional, computed during index building)
-    protected final Float confidenceInterval;
-    protected final Float minQuantile;
-    protected final Float maxQuantile;
-    protected final Float alpha;
-    protected final Integer bits;
-    protected final Integer sampleCount;
+    // These are non-final so they can be populated from sidecar file in createInstance()
+    protected Float confidenceInterval;
+    protected Float minQuantile;
+    protected Float maxQuantile;
+    protected Float alpha;
+    protected Integer bits;
+    protected Integer sampleCount;
 
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -77,7 +89,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
         this(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions,
-                vectorFields, nullTypeTraits, nullIntrospector, atomic, null, null, null, null, null, null);
+                vectorFields, nullTypeTraits, nullIntrospector, atomic, null, null, null, null, null, null, null);
     }
 
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
@@ -88,8 +100,9 @@ public class LSMVCTreeLocalResource extends LsmResource {
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
-            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic, Float confidenceInterval,
-            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) {
+            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic, String indexName,
+            Float confidenceInterval, Float minQuantile, Float maxQuantile, Float alpha, Integer bits, 
+            Integer sampleCount) {
         super(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -98,6 +111,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
+        this.indexName = indexName;
         this.confidenceInterval = confidenceInterval;
         this.minQuantile = minQuantile;
         this.maxQuantile = maxQuantile;
@@ -108,17 +122,20 @@ public class LSMVCTreeLocalResource extends LsmResource {
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
             int[] vectorFields, int[] filterFields, boolean atomic) throws HyracksDataException {
-        this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null);
+        this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null, 
+                null);
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-            int[] vectorFields, int[] filterFields, boolean atomic, Float confidenceInterval, Float minQuantile,
-            Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) throws HyracksDataException {
+            int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval, 
+            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) 
+            throws HyracksDataException {
         super(registry, json);
         this.vectorDimensions = vectorDimensions;
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
+        this.indexName = indexName;
         this.confidenceInterval = confidenceInterval;
         this.minQuantile = minQuantile;
         this.maxQuantile = maxQuantile;
@@ -132,6 +149,12 @@ public class LSMVCTreeLocalResource extends LsmResource {
         IIOManager ioManager = storageManager.getIoManager(ncServiceCtx);
         NCConfig storageConfig = ((NodeControllerService) ncServiceCtx.getControllerService()).getConfiguration();
         FileReference fileRef = ioManager.resolve(path);
+        
+        // Try to read quantization constants from sidecar file if not already set
+        if (minQuantile == null && indexName != null) {
+            tryReadQuantizationSidecarFile(ioManager, fileRef);
+        }
+        
         List<IVirtualBufferCache> virtualBufferCaches = vbcProvider.getVirtualBufferCaches(ncServiceCtx, fileRef);
         ioOpCallbackFactory.initialize(ncServiceCtx, this);
         pageWriteCallbackFactory.initialize(ncServiceCtx, this);
@@ -144,6 +167,63 @@ public class LSMVCTreeLocalResource extends LsmResource {
                 null, // filterManager
                 null, // filterHelper
                 durable, metadataPageManagerFactory, atomic, null);
+    }
+    
+    /**
+     * Tries to read quantization constants from a sidecar file.
+     * The sidecar file is located in the dataset directory (parent of index directory).
+     * File format: .quantization_<indexName> containing 24 bytes of binary data.
+     * 
+     * @param ioManager The IO manager
+     * @param indexFileRef The index file reference (used to derive dataset directory)
+     */
+    private void tryReadQuantizationSidecarFile(IIOManager ioManager, FileReference indexFileRef) {
+        try {
+            // Get dataset directory (parent of rebalance directory)
+            // Index path: storage/partition_X/<namespace>/<datasetName>/<rebalanceCount>/<indexName>
+            // Dataset path: storage/partition_X/<namespace>/<datasetName>
+            FileReference rebalanceDir = indexFileRef.getParent();   // .../datasetName/rebalanceCount
+            FileReference datasetDir = rebalanceDir.getParent();     // .../datasetName
+            
+            // Construct sidecar file path: .quantization_<indexName>
+            String sidecarFileName = QUANTIZATION_FILE_PREFIX + indexName;
+            FileReference sidecarFile = datasetDir.getChild(sidecarFileName);
+            
+            LOGGER.info("[LSMVCTreeLocalResource] Looking for sidecar file: " + sidecarFile.getAbsolutePath());
+            
+            if (!ioManager.exists(sidecarFile)) {
+                LOGGER.info("[LSMVCTreeLocalResource] Sidecar file not found, index will be created without quantization");
+                return;
+            }
+            
+            // Read the sidecar file using IIOManager.readAllBytes()
+            byte[] data = ioManager.readAllBytes(sidecarFile);
+            ByteArrayInputStream bais = new ByteArrayInputStream(data);
+            DataInputStream dis = new DataInputStream(bais);
+            
+            this.minQuantile = dis.readFloat();
+            this.maxQuantile = dis.readFloat();
+            this.alpha = dis.readFloat();
+            this.bits = dis.readInt();
+            this.confidenceInterval = dis.readFloat();
+            this.sampleCount = dis.readInt();
+            
+            LOGGER.info("[LSMVCTreeLocalResource] Read quantization constants from sidecar file: " +
+                    "minQ=" + minQuantile + ", maxQ=" + maxQuantile + ", alpha=" + alpha + 
+                    ", bits=" + bits + ", sampleCount=" + sampleCount);
+            
+            // Delete the sidecar file after reading (cleanup)
+            try {
+                ioManager.delete(sidecarFile);
+                LOGGER.info("[LSMVCTreeLocalResource] Deleted sidecar file: " + sidecarFile.getAbsolutePath());
+            } catch (Exception e) {
+                LOGGER.warning("[LSMVCTreeLocalResource] Failed to delete sidecar file: " + e.getMessage());
+            }
+            
+        } catch (IOException e) {
+            LOGGER.warning("[LSMVCTreeLocalResource] Error reading sidecar file: " + e.getMessage());
+            // Continue without quantization - not a fatal error
+        }
     }
 
     @Override
@@ -196,6 +276,9 @@ public class LSMVCTreeLocalResource extends LsmResource {
         int[] filterFields =
                 json.has("filterFields") ? OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class) : null;
         boolean atomic = json.has("atomic") ? json.get("atomic").asBoolean() : false;
+        
+        // indexName is only used during index creation, not needed after persistence
+        String indexName = json.has("indexName") ? json.get("indexName").asText() : null;
 
         // Read quantization parameters with backward compatibility (default to null if not present)
         Float confidenceInterval = getOrDefaultFloat(json, "confidenceInterval", null);
@@ -206,7 +289,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
         Integer sampleCount = getOrDefaultInt(json, "sampleCount", null);
 
         return new LSMVCTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic,
-                confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount);
+                indexName, confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount);
     }
 
     /**

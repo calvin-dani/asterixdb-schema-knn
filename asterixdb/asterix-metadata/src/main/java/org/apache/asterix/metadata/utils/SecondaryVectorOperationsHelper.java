@@ -784,15 +784,30 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("✓ Connected: LocalAggregate → GlobalAggregate (via MToN with OnePartitionComputer)");
         System.err.println("Global aggregate: computing quantiles and alpha from all partitions on single node (in-memory, no external sort)");
 
-        // Step 5: Sink operator - extract quantization constants and store in task context
-        System.err.println("--- STEP 5: Creating sink operator ---");
+        // Step 5: Broadcast to all partitions -> Sink operator - write quantization constants to sidecar files
+        // The sidecar file must be written to ALL partitions because Job 1's IndexBuilder runs on all partitions
+        // and each partition's LSMVCTreeLocalResource reads from its own partition directory
+        System.err.println("--- STEP 5: Creating broadcast and sink operators ---");
         String quantizationKey = java.util.UUID.randomUUID().toString();
-        targetOp = new QuantizationConstantsSinkOperatorDescriptor(spec, quantizationKey, aggOutputRecordDesc);
-        // Sink runs on same single partition as global aggregate
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, singlePartitionConstraint);
-        spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-        System.err.println("✓ Connected: GlobalAggregate → QuantizationConstantsSink");
-        System.err.println("Sink: storing quantization constants with key=" + quantizationKey);
+        
+        // Get dataset partitioning properties for writing sidecar file
+        // The sink will write to the dataset directory (not the index directory, which doesn't exist yet)
+        PartitioningProperties datasetPartitioningProperties = metadataProvider.getPartitioningProperties(dataset);
+        org.apache.hyracks.api.io.FileSplit[] datasetFileSplits = 
+                datasetPartitioningProperties.getSplitsProvider().getFileSplits();
+        AlgebricksPartitionConstraint datasetPartitionConstraint = datasetPartitioningProperties.getConstraints();
+        System.err.println("Dataset file splits for sidecar file: " + datasetFileSplits.length);
+        
+        targetOp = new QuantizationConstantsSinkOperatorDescriptor(spec, quantizationKey, aggOutputRecordDesc,
+                datasetFileSplits, index.getIndexName());
+        // Sink runs on ALL partitions to write sidecar file to each partition's dataset directory
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, datasetPartitionConstraint);
+        // Use broadcast connector to replicate the quantization constants from single partition to all partitions
+        spec.connect(new org.apache.hyracks.dataflow.std.connectors.MToNBroadcastConnectorDescriptor(spec), 
+                sourceOp, 0, targetOp, 0);
+        System.err.println("✓ Connected: GlobalAggregate → (broadcast) → QuantizationConstantsSink");
+        System.err.println("Sink: writing quantization constants to sidecar files on all " + 
+                datasetFileSplits.length + " partitions");
 
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());

@@ -25,8 +25,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.apache.asterix.common.storage.QuantizationConstants;
-import org.apache.hyracks.dataflow.common.data.marshalling.FloatSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.asterix.common.storage.QuantizationConstantsFileManager;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
@@ -34,32 +33,47 @@ import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.FileSplit;
+import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
+import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
-
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.FloatSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TaskUtil;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePushable;
-import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 
 /**
  * Sink operator that extracts QuantizationConstants from the input tuple
  * (which contains a BINARY field with serialized QuantizationConstants)
- * and stores them in the Hyracks task context using TaskUtil.
+ * and writes them to a sidecar file for retrieval by subsequent jobs.
+ * 
+ * The sidecar file is written to the dataset directory with the name:
+ * .quantization_<indexName>
+ * 
+ * This file-based approach is used because IOperatorStats aggregation
+ * only copies a limited set of counters (tupleCounter, timeCounter, pageReads),
+ * which is insufficient for passing all quantization parameters.
  */
 public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
-    private static final long serialVersionUID = 1L;
-
+    private static final long serialVersionUID = 3L;
+    
     private final String quantizationKey;
     private final RecordDescriptor inputRecDesc;
+    private final FileSplit[] datasetFileSplits;
+    private final String indexName;
 
     public QuantizationConstantsSinkOperatorDescriptor(IOperatorDescriptorRegistry spec, String quantizationKey,
-            RecordDescriptor inputRecDesc) {
+            RecordDescriptor inputRecDesc, FileSplit[] datasetFileSplits, String indexName) {
         super(spec, 1, 0); // 1 input, 0 outputs
         this.quantizationKey = quantizationKey;
         this.inputRecDesc = inputRecDesc;
+        this.datasetFileSplits = datasetFileSplits;
+        this.indexName = indexName;
     }
 
     @Override
@@ -67,7 +81,10 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions)
             throws HyracksDataException {
         RecordDescriptor inputRecordDescriptor = recordDescProvider.getInputRecordDescriptor(getActivityId(), 0);
-        return new QuantizationConstantsSinkNodePushable(ctx, inputRecordDescriptor, quantizationKey);
+        // Pass the FileSplit for this partition - FileReference will be resolved in close() using IIOManager
+        FileSplit fileSplit = datasetFileSplits[partition];
+        return new QuantizationConstantsSinkNodePushable(ctx, inputRecordDescriptor, quantizationKey, 
+                fileSplit, indexName);
     }
 
     private static class QuantizationConstantsSinkNodePushable extends AbstractUnaryInputSinkOperatorNodePushable {
@@ -75,19 +92,23 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
         private final FrameTupleAccessor frameTupleAccessor;
         private final FrameTupleReference frameTupleReference;
         private final String quantizationKey;
+        private final FileSplit fileSplit;
+        private final String indexName;
         private QuantizationConstants quantizationConstants;
 
         private QuantizationConstantsSinkNodePushable(IHyracksTaskContext ctx, RecordDescriptor inputRecordDescriptor,
-                String quantizationKey) {
+                String quantizationKey, FileSplit fileSplit, String indexName) {
             this.ctx = ctx;
             this.frameTupleAccessor = new FrameTupleAccessor(inputRecordDescriptor);
             this.frameTupleReference = new FrameTupleReference();
             this.quantizationKey = quantizationKey;
+            this.fileSplit = fileSplit;
+            this.indexName = indexName;
         }
 
         @Override
         public void open() throws HyracksDataException {
-            // No-op
+            // No initialization needed - we write to sidecar file in close()
         }
 
         @Override
@@ -176,16 +197,31 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
 
         @Override
         public void close() throws HyracksDataException {
-            // Store quantization constants in task context (if available)
             if (quantizationConstants == null) {
-                // Empty dataset - no samples were found
                 System.err.println("[QuantizationConstantsSink] WARNING: No quantization constants computed (empty dataset or no samples)");
-                // Still store null to indicate completion without error
-                TaskUtil.put(quantizationKey, null, ctx);
             } else {
-                System.err.println("[QuantizationConstantsSink] Storing quantization constants with key=" + quantizationKey);
-                TaskUtil.put(quantizationKey, quantizationConstants, ctx);
+                // Write quantization constants to sidecar file for retrieval by subsequent jobs
+                IIOManager ioManager = ctx.getIoManager();
+                
+                // Resolve FileReference from FileSplit using IIOManager (must be done here, not in createPushRuntime)
+                // The FileSplit points to the PRIMARY INDEX path: .../datasetName/rebalanceCount/datasetName
+                // We need to go up 2 levels to get the actual DATASET directory: .../datasetName
+                FileReference primaryIndexDir = fileSplit.getFileReference(ioManager);
+                FileReference rebalanceDir = primaryIndexDir.getParent();  // .../datasetName/rebalanceCount
+                FileReference datasetDir = rebalanceDir.getParent();       // .../datasetName
+                
+                System.err.println("[QuantizationConstantsSink] Writing quantization constants to sidecar file");
+                System.err.println("[QuantizationConstantsSink] Primary index dir: " + primaryIndexDir.getAbsolutePath());
+                System.err.println("[QuantizationConstantsSink] Dataset dir: " + datasetDir.getAbsolutePath());
+                System.err.println("[QuantizationConstantsSink] Index name: " + indexName);
+                
+                QuantizationConstantsFileManager.write(ioManager, datasetDir, indexName, quantizationConstants);
+                
+                System.err.println("[QuantizationConstantsSink] Successfully wrote sidecar file: " + quantizationConstants);
             }
+            
+            // Also store in TaskUtil for backward compatibility (within same job)
+            TaskUtil.put(quantizationKey, quantizationConstants, ctx);
         }
 
         @Override
