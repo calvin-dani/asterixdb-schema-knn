@@ -1438,9 +1438,7 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
       )*
     <RIGHTPAREN>
     ( <TYPE> indexParams = IndexType() )? ( <ENFORCED> { enforced = true; } )?
-    // Parse INCLUDE/EXCLUDE UNKNOWN KEY (for non-vector indexes)
-    // Lookahead checks that INCLUDE/EXCLUDE is followed by UNKNOWN to disambiguate from INCLUDE (fields)
-    ( LOOKAHEAD({(laIdentifier(EXCLUDE) || laIdentifier(INCLUDE)) && laToken(2, UNKNOWN)}) <IDENTIFIER>
+    ( LOOKAHEAD({laIdentifier(EXCLUDE) || laIdentifier(INCLUDE)}) <IDENTIFIER>
     {
       if (isToken(EXCLUDE)) {
         excludeUnknown = true;
@@ -1457,27 +1455,6 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
         castConfig = castConfigDefaultNull.first;
         castDefaultNull = castConfigDefaultNull.second;
       }
-    )?
-
-    // Parse INCLUDE clause for vector index additional fields (e.g., INCLUDE (year, title))
-    // Lookahead checks that INCLUDE is followed by LEFTPAREN to disambiguate from INCLUDE UNKNOWN KEY
-    // This allows filtering on these fields during vector search
-    ( LOOKAHEAD({laIdentifier(INCLUDE) && laToken(2, LEFTPAREN)}) <IDENTIFIER>
-      {
-        if (!isToken(INCLUDE)) {
-          throw createUnexpectedTokenError();
-        }
-      }
-      <LEFTPAREN> { startElementToken = token; }
-        indexedElement = IndexedElement(startElementToken) {
-          nonVectorFieldsList.add(indexedElement);
-        }
-        (<COMMA> { startElementToken = token; }
-          indexedElement = IndexedElement(startElementToken) {
-            nonVectorFieldsList.add(indexedElement);
-          }
-        )*
-      <RIGHTPAREN>
     )?
 
     // Parse WITH clause for vector index configuration

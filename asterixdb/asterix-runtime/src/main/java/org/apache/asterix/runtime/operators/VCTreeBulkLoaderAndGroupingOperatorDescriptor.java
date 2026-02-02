@@ -24,6 +24,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
+import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
+import org.apache.asterix.om.base.ADouble;
+import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
@@ -51,8 +55,6 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
@@ -93,8 +95,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final RecordDescriptor outputRecDesc;
     private final String distanceMetric;
     private final int vectorDimension;
-    private final int numPrimaryKeys;
-    private final int numIncludeFields;
 
     // Partitioning components
     private VCTreePartitioner partitioner;
@@ -199,8 +199,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     public VCTreeBulkLoaderAndGroupingOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
-            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension,
-            int numPrimaryKeys, int numIncludeFields) {
+            UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -211,8 +210,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.args = args;
         this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
         this.vectorDimension = vectorDimension > 0 ? vectorDimension : 384; // Default to 384 if invalid
-        this.numPrimaryKeys = numPrimaryKeys;
-        this.numIncludeFields = numIncludeFields;
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -221,19 +218,15 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         System.err.println("Output record descriptor set: " + outputRecordDescriptor);
         System.err.println("Distance metric: " + this.distanceMetric);
         System.err.println("Vector dimension: " + this.vectorDimension);
-        System.err.println("NumPrimaryKeys: " + this.numPrimaryKeys + ", NumIncludeFields: " + this.numIncludeFields);
     }
 
     /**
-     * Create transformed tuple with distance, centroidId, PKs, and include fields.
+     * Create transformed tuple with centroidId, distance, and all original fields.
      * Uses TupleUtils.createTuple() with proper serializers from RecordDescriptor.
-     *
-     * Input tuple format from CastAssign: [embedding, include_fields..., pk...]
-     * Output tuple format: [distance, centroidId, pk..., include_fields...]
-     *
+     * 
      * @param originalTuple Input tuple with original fields to preserve
      * @param searchResult ClusterSearchResult containing all needed values
-     * @return Transformed tuple with format [distance, centroidId, pk..., include_fields...]
+     * @return Transformed tuple with format [centroidId, distance, ...original fields...]
      * @throws HyracksDataException if tuple creation fails
      */
     public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
@@ -242,37 +235,47 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             // Get serializers for original fields from input record descriptor
             ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
 
-            // Total fields = 2 (distance, centroidId) + numPrimaryKeys + numIncludeFields
-            int totalFields = 2 + numPrimaryKeys + numIncludeFields;
+            // Create combined serializers: [new fields] + [original fields]
+            int totalFields = 2 + originalTuple.getFieldCount() - 1; // 2 new fields + all original fields - embedding
+            ISerializerDeserializer<?>[] combinedSerdes = new ISerializerDeserializer<?>[totalFields];
 
-            // Get output serializers
+            // Set serializers for new fields
             ISerializerDeserializer<?>[] outputFieldSerdes = outputRecDesc.getFields();
+            combinedSerdes[1] = AInt32SerializerDeserializer.INSTANCE;; // centroidId
+            combinedSerdes[0] = ADoubleSerializerDeserializer.INSTANCE; // distance
+
+            // Set serializers for original fields
+            for (int i = 1; i < originalTuple.getFieldCount(); i++) {
+                combinedSerdes[2 + i - 1] = originalFieldSerdes[i];
+            }
 
             // Deserialize original fields to get their values
-            // Original tuple format: [embedding(0), include_fields(1 to numIncludeFields), pk(numIncludeFields+1 onwards)]
             Object[] originalFieldValues = TupleUtils.deserializeTuple(originalTuple, originalFieldSerdes);
 
-            // Create combined field values with reordered fields:
-            // Output format: [distance, centroidId, pk..., include_fields...]
+            // Create combined field values: [new field values] + [original field values]
             Object[] combinedValues = new Object[totalFields];
-            combinedValues[0] = searchResult.distance; // raw double
-            combinedValues[1] = searchResult.centroidId; // raw int
+            //            combinedValues[0] = searchResult.centroidId; // centroidId
+            //            combinedValues[1] = searchResult.distance;   // distance
+            combinedValues[0] = new ADouble(searchResult.distance);
+            combinedValues[1] = new AInt32(searchResult.centroidId); // Wrap in AInt32
 
-            // Add primary key fields (they are at positions numIncludeFields+1 onwards in original tuple)
-            // In original: fields 1 to numIncludeFields are include fields, fields numIncludeFields+1 onwards are PKs
-            for (int i = 0; i < numPrimaryKeys; i++) {
-                int originalPkIndex = 1 + numIncludeFields + i; // Skip embedding(0) and include fields
-                combinedValues[2 + i] = originalFieldValues[originalPkIndex];
+            // Add original field values
+            for (int i = 1; i < originalFieldValues.length; i++) {
+                combinedValues[2 + i - 1] = originalFieldValues[i];
             }
 
-            // Add include fields (they are at positions 1 to numIncludeFields in original tuple)
-            for (int i = 0; i < numIncludeFields; i++) {
-                int originalIncludeIndex = 1 + i; // Skip embedding(0)
-                combinedValues[2 + numPrimaryKeys + i] = originalFieldValues[originalIncludeIndex];
-            }
+            // Use TupleUtils.createTuple() with combined serializers and values
+            ITupleReference result = TupleUtils.createTuple(outputFieldSerdes, combinedValues);
+            //            System.err.println("=== TRANSFORMED TUPLE DEBUG ===");
+            //            System.err.println("OutputFieldSerdes length: " + outputFieldSerdes.length);
+            //            System.err.println("CombinedValues length: " + combinedValues.length);
+            //            System.err.println("Result field count: " + result.getFieldCount());
+            //            System.err.println("CentroidId: " + searchResult.centroidId + " (type: "
+            //                    + combinedValues[0].getClass().getSimpleName() + ")");
+            //            System.err.println("Distance: " + searchResult.distance + " (type: "
+            //                    + combinedValues[1].getClass().getSimpleName() + ")");
 
-            // Use TupleUtils.createTuple() with output serializers and reordered values
-            return TupleUtils.createTuple(outputFieldSerdes, combinedValues);
+            return result;
 
         } catch (Exception e) {
             System.err.println("ERROR: Failed to create transformed tuple: " + e.getMessage());
@@ -375,6 +378,64 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     }
 
     /**
+     * Process data using VCTreePartitioner for recursive partitioning with real data.
+     * 
+     * @param inputTuples List of input tuples to partition
+     * @param K Number of centroids
+     * @param centroidIdColumn Column index containing centroid ID (0 for first, -1 for last)
+     * @return Map of centroid ID to file reference
+     * @throws HyracksDataException if partitioning fails
+     */
+    public Map<Integer, FileReference> processDataWithPartitioner(List<ITupleReference> inputTuples, int K,
+            int centroidIdColumn) throws HyracksDataException {
+        System.err.println("=== PROCESSING DATA WITH VCTreePartitioner (REAL DATA) ===");
+        System.err.println("Input tuples: " + inputTuples.size());
+        System.err.println("K (centroids): " + K);
+        System.err.println("Centroid ID column: " + centroidIdColumn);
+
+        if (partitioner == null) {
+            throw new IllegalStateException("VCTreePartitioner not initialized. Call initializePartitioner() first.");
+        }
+
+        // Use VCTreePartitioner for recursive partitioning with real data
+        partitioner.partitionData(inputTuples, K, centroidIdColumn);
+        Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
+
+        System.err.println("✅ VCTreePartitioner processing complete");
+        System.err.println("Created " + centroidFiles.size() + " centroid files");
+
+        return centroidFiles;
+    }
+
+    /**
+     * Process data using VCTreePartitioner for recursive partitioning (legacy method).
+     * 
+     * @param K Number of centroids
+     * @param estimatedDataSize Estimated data size in bytes
+     * @return Map of centroid ID to file reference
+     * @throws HyracksDataException if partitioning fails
+     */
+    public Map<Integer, FileReference> processDataWithPartitioner(int K, long estimatedDataSize)
+            throws HyracksDataException {
+        System.err.println("=== PROCESSING DATA WITH VCTreePartitioner ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Estimated data size: " + estimatedDataSize + " bytes");
+
+        if (partitioner == null) {
+            throw new IllegalStateException("VCTreePartitioner not initialized. Call initializePartitioner() first.");
+        }
+
+        // Use VCTreePartitioner for recursive partitioning
+        partitioner.partitionData(K, estimatedDataSize);
+        Map<Integer, FileReference> centroidFiles = partitioner.getCentroidFiles();
+
+        System.err.println("VCTreePartitioner processing complete");
+        System.err.println("Created " + centroidFiles.size() + " centroid files");
+
+        return centroidFiles;
+    }
+
+    /**
      * Close VCTreePartitioner and cleanup resources.
      * 
      * @throws HyracksDataException if cleanup fails
@@ -385,6 +446,64 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             partitioner.closeAllFiles();
             //            System.err.println("✅ VCTreePartitioner closed successfully");
         }
+    }
+
+    /**
+     * Calculate number of partitions using SHAPIRO formula for VCTree centroid distribution.
+     * 
+     * @param K Total number of centroids
+     * @param inputDataBytesSize Size of input data in bytes
+     * @param frameSize Frame size in bytes
+     * @param memoryBudget Available memory budget in frames
+     * @return Number of partitions for centroid distribution
+     */
+    public int calculatePartitionsUsingShapiro(int K, long inputDataBytesSize, int frameSize, int memoryBudget) {
+        System.err.println("=== CALCULATING PARTITIONS USING SHAPIRO FORMULA ===");
+        System.err.println("K (centroids): " + K);
+        System.err.println("Input data size: " + inputDataBytesSize + " bytes");
+        System.err.println("Frame size: " + frameSize + " bytes");
+        System.err.println("Memory budget: " + memoryBudget + " frames");
+
+        long numberOfInputFrames = inputDataBytesSize / frameSize;
+        System.err.println("Input frames: " + numberOfInputFrames);
+
+        // SHAPIRO FORMULA
+        final double FUDGE_FACTOR = 1.1;
+
+        if (memoryBudget >= numberOfInputFrames * FUDGE_FACTOR) {
+            // All in memory - use 2 partitions to avoid infinite loops
+            System.err.println("All data fits in memory, using 2 partitions");
+            return 2;
+        }
+
+        // Main SHAPIRO formula: ceil((inputFrames * FUDGE_FACTOR - availableFrames) / (availableFrames - 1))
+        long numberOfPartitions =
+                (long) (Math.ceil((numberOfInputFrames * FUDGE_FACTOR - memoryBudget) / (memoryBudget - 1)));
+        numberOfPartitions = Math.max(2, numberOfPartitions);
+
+        if (numberOfPartitions > memoryBudget) {
+            // Fallback: use square root when too many partitions
+            numberOfPartitions = (long) Math.ceil(Math.sqrt(numberOfInputFrames * FUDGE_FACTOR));
+            numberOfPartitions = Math.max(2, Math.min(numberOfPartitions, memoryBudget));
+        }
+
+        int numPartitions = (int) Math.min(numberOfPartitions, Integer.MAX_VALUE);
+
+        // Calculate centroids per partition
+        int centroidsPerPartition = (int) Math.ceil(1.0 * K / numPartitions);
+
+        System.err.println("SHAPIRO RESULT:");
+        System.err.println("  Number of partitions: " + numPartitions);
+        System.err.println("  Centroids per partition: " + centroidsPerPartition);
+
+        // Determine frame allocation strategy
+        if (numPartitions > 1) {
+            System.err.println("  Strategy: Group multiple centroids in one run file");
+        } else {
+            System.err.println("  Strategy: Allocate 1 frame per centroid");
+        }
+
+        return numPartitions;
     }
 
     @Override
@@ -567,9 +686,176 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     throw new IllegalStateException("DistanceFunction not initialized");
                 }
 
-                // Use accessor to find closest leaf centroid with distance function
                 ClusterSearchResult result =
                         vcTreeAccessor.findClosestLeafCentroid(queryVector, hyracksDistanceFunction);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
+         */
+        private List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector, double epi)
+                throws HyracksDataException {
+            try {
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
+                }
+
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
+                }
+
+                // Validate vector dimensions
+                if (queryVector.length != vectorDimension) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + vectorDimension + ")");
+                }
+
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                List<ClusterSearchResult> result =
+                        vcTreeAccessor.findCloseLeafCentroid(queryVector, hyracksDistanceFunction, epi);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
+         */
+        private List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector, double epi)
+                throws HyracksDataException {
+            try {
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
+                }
+
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
+                }
+
+                // Validate vector dimensions
+                if (queryVector.length != vectorDimension) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + vectorDimension + ")");
+                }
+
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                List<ClusterSearchResult> result =
+                        vcTreeAccessor.findCloseCentroidsFrontier(queryVector, hyracksDistanceFunction, epi);
+
+                if (result == null) {
+                    System.err.println("WARNING: No closest centroid found for query vector");
+                    return null;
+                }
+
+                return result;
+
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                System.err.println("ERROR: Invalid input or state for closest centroid search: " + e.getMessage());
+                throw e;
+            } catch (Exception e) {
+                System.err.println("ERROR: Failed to find closest centroid: " + e.getMessage());
+                e.printStackTrace();
+                throw HyracksDataException.create(e);
+            }
+        }
+
+        /**
+         * Find the closest centroid using VectorClusteringTreeAccessor.
+         * This follows the same approach as VectorTreeTestUtils.clusterRecords().
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @return ClusterSearchResult containing closest centroid information
+         * @throws HyracksDataException if search fails
+         */
+        private List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector, double epi)
+                throws HyracksDataException {
+            try {
+                // Validate input vector
+                if (queryVector == null) {
+                    throw new IllegalArgumentException("Query vector cannot be null");
+                }
+
+                if (queryVector.length == 0) {
+                    throw new IllegalArgumentException("Query vector cannot be empty");
+                }
+
+                // Validate vector dimensions
+                if (queryVector.length != vectorDimension) {
+                    System.err.println("WARNING: Query vector dimension (" + queryVector.length
+                            + ") does not match expected dimension (" + vectorDimension + ")");
+                }
+
+                // Validate accessor is initialized
+                if (vcTreeAccessor == null) {
+                    throw new IllegalStateException("VectorClusteringTreeAccessor not initialized");
+                }
+
+                // Validate distance function is initialized
+                if (distanceFunction == null) {
+                    throw new IllegalStateException("DistanceFunction not initialized");
+                }
+
+                List<ClusterSearchResult> result =
+                        vcTreeAccessor.findCloseCentroidsLevelWise(queryVector, hyracksDistanceFunction, epi);
 
                 if (result == null) {
                     System.err.println("WARNING: No closest centroid found for query vector");
@@ -614,19 +900,80 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                         if (embedding != null && embedding.length > 0) {
                             // Find closest centroid using the extracted embedding
-                            ClusterSearchResult result = findClosestCentroid(embedding);
-                            if (result != null) {
-                                successfulQueries++;
+                            // Use accessor to find closest leaf centroid with distance function
+                            boolean crossPollinate = false; // Do not cross partition boundaries
+                            boolean leafPollinate = false;
+                            boolean interiorPollinate = false;
+                            if (!crossPollinate) {
+                                ClusterSearchResult result = findClosestCentroid(embedding);
+                                if (result != null) {
+                                    successfulQueries++;
 
-                                // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                ITupleReference transformedTuple = createTransformedTuple(tuple, result);
+                                    // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                    ITupleReference transformedTuple = createTransformedTuple(tuple, result);
 
-                                // Output the transformed tuple to downstream operators
-                                outputTransformedTuple(transformedTuple);
+                                    // Output the transformed tuple to downstream operators
+                                    outputTransformedTuple(transformedTuple);
+
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
+                            } else if (crossPollinate && leafPollinate) {
+                                // FUTURE: Implement cross-partition centroid search
+                                List<ClusterSearchResult> result = findCloseLeafCentroid(embedding, 0.1);
+                                if (result != null) {
+                                    successfulQueries++;
+                                    for (ClusterSearchResult res : result) {
+                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+
+                                        // Output the transformed tuple to downstream operators
+                                        outputTransformedTuple(transformedTuple);
+                                    }
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
+
+                            } else if (crossPollinate && interiorPollinate) {
+                                // FUTURE: Implement cross-partition centroid search
+                                int count = 0;
+                                List<ClusterSearchResult> result = findCloseCentroidsLevelWise(embedding, 0.15);
+                                if (result != null) {
+                                    successfulQueries++;
+                                    for (ClusterSearchResult res : result) {
+
+                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+
+                                        // Output the transformed tuple to downstream operators
+                                        outputTransformedTuple(transformedTuple);
+                                        count++;
+                                        if (count >= 10) {
+                                            break; // Limit to top 10 results bounded
+                                        }
+                                    }
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
 
                             } else {
-                                System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                // FUTURE: Implement cross-partition centroid search
+                                List<ClusterSearchResult> result = findCloseCentroidsFrontier(embedding, 0.1);
+                                if (result != null) {
+                                    successfulQueries++;
+                                    for (ClusterSearchResult res : result) {
+                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
+                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+
+                                        // Output the transformed tuple to downstream operators
+                                        outputTransformedTuple(transformedTuple);
+                                    }
+                                } else {
+                                    System.err.println("Failed to find closest centroid for query " + (i + 1));
+                                }
+
                             }
+
                         } else {
                             System.err.println("Skipping tuple " + (i + 1) + " - no valid embedding extracted");
                         }

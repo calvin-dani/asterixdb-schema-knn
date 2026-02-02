@@ -79,7 +79,6 @@ import org.apache.asterix.optimizer.rules.PushAggregateIntoNestedSubplanRule;
 import org.apache.asterix.optimizer.rules.PushFieldAccessRule;
 import org.apache.asterix.optimizer.rules.PushGroupByThroughProduct;
 import org.apache.asterix.optimizer.rules.PushLimitIntoOrderByRule;
-import org.apache.asterix.optimizer.rules.PushFilterIntoVectorSearchRule;
 import org.apache.asterix.optimizer.rules.PushLimitIntoPrimarySearchRule;
 import org.apache.asterix.optimizer.rules.PushProperJoinThroughProduct;
 import org.apache.asterix.optimizer.rules.PushSimilarityFunctionsBelowJoin;
@@ -434,8 +433,7 @@ public final class RuleCollections {
         physicalRewritesTopLevel.add(new ConstantFoldingRule(appCtx));
         physicalRewritesTopLevel.add(new PushLimitIntoOrderByRule());
         physicalRewritesTopLevel.add(new PushLimitIntoPrimarySearchRule());
-        physicalRewritesTopLevel.add(new PushFilterIntoVectorSearchRule());
-        // remove assigns that could become unused after PushLimitIntoPrimarySearchRule or PushFilterIntoVectorSearchRule
+        // remove assigns that could become unused after PushLimitIntoPrimarySearchRule
         physicalRewritesTopLevel.add(new RemoveUnusedAssignAndAggregateRule());
         physicalRewritesTopLevel.add(new IntroduceProjectsRule());
         //Infer the types for the pushed down condition

@@ -623,9 +623,6 @@ public class DatasetUtil {
             } else if (index.getIndexType() == DatasetConfig.IndexType.ARRAY) {
                 Index.ArrayIndexDetails indexDetails = (Index.ArrayIndexDetails) index.getIndexDetails();
                 indexPaths.add(indexDetails.getIndexExpectedType());
-            } else if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
-                Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
-                indexPaths.add(indexDetails.getIndexExpectedType());
             }
         }
 

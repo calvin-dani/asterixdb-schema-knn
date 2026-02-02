@@ -93,7 +93,6 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
     // Field name of open field.
     public static final String GRAM_LENGTH_FIELD_NAME = "GramLength";
     public static final String FULL_TEXT_CONFIG_FIELD_NAME = "FullTextConfig";
-    public static final String INCLUDE_FIELDS_FIELD_NAME = "IncludeFields";
     public static final String INDEX_SEARCHKEY_TYPE_FIELD_NAME = "SearchKeyType";
     public static final String INDEX_ISENFORCED_FIELD_NAME = "IsEnforced";
     public static final String INDEX_EXCLUDE_UNKNOWN_FIELD_NAME = "ExcludeUnknownKey";
@@ -473,30 +472,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                 excludeUnknownKey = OptionalBoolean.empty();
                 castDefaultNull = OptionalBoolean.empty();
                 AdmObjectNode withObjectNode = readWithProperties(indexRecord);
-
-                // Read include_fields from metadata
-                List<List<String>> includeFieldNames = new ArrayList<>();
-                int includeFieldsPos = indexRecord.getType().getFieldIndex(INCLUDE_FIELDS_FIELD_NAME);
-                if (includeFieldsPos >= 0) {
-                    IACursor cursor =
-                            ((AOrderedList) indexRecord.getValueByPos(includeFieldsPos)).getCursor();
-                    while (cursor.next()) {
-                        String fieldName = ((AString) cursor.get()).getStringValue();
-                        includeFieldNames.add(Collections.singletonList(fieldName));
-                    }
-                }
-
-                // Create proper source indicators and types for include fields
-                // Include fields always come from the record (not meta), and types are resolved later
-                List<Integer> includeFieldSourceIndicators = new ArrayList<>();
-                List<IAType> includeFieldTypes = new ArrayList<>();
-                for (int i = 0; i < includeFieldNames.size(); i++) {
-                    includeFieldSourceIndicators.add(Index.RECORD_INDICATOR);
-                    includeFieldTypes.add(BuiltinType.ANY);  // Type will be resolved from record schema
-                }
-
-                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), includeFieldNames,
-                        includeFieldSourceIndicators, includeFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), keyFieldNames,
+                        keyFieldSourceIndicator, keyFieldTypes, isOverridingKeyTypes, excludeUnknownKey,
                         castDefaultNull, null, null, null, withObjectNode);
                 break;
             case TEXT:
@@ -971,7 +948,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         fieldValue.reset();
         listBuilder.write(fieldValue.getDataOutput(), true);
         nameValue.reset();
-        aString.setValue(INCLUDE_FIELDS_FIELD_NAME);
+        aString.setValue("include_fields");
         stringSerde.serialize(aString, nameValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
     }

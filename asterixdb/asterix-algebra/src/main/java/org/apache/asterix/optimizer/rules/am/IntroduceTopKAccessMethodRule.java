@@ -20,11 +20,9 @@ package org.apache.asterix.optimizer.rules.am;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
@@ -32,7 +30,6 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.commons.lang3.mutable.Mutable;
-import org.apache.commons.lang3.mutable.MutableObject;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalExpression;
@@ -50,7 +47,6 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.AssignOperat
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.LimitOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator.IOrder;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperator;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
 
 /**
@@ -77,11 +73,6 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
     protected IVariableTypeEnvironment typeEnvironment = null;
     protected final OptimizableOperatorSubTree subTree = new OptimizableOperatorSubTree();
     protected String queryDistanceMetric = null; // Distance metric from the query (e.g., "euclidean", "cosine")
-
-    // SELECT operator info for filter pushdown
-    protected SelectOperator selectOp = null;
-    protected Mutable<ILogicalOperator> selectRef = null;
-    protected Set<List<String>> filterFieldNames = null; // Field names referenced in WHERE clause
 
     // Register vector index access method
     protected static Map<FunctionIdentifier, List<IAccessMethod>> accessMethods = new HashMap<>();
@@ -253,51 +244,46 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             return false;
         }
 
-        // 2. Get type environment for type checking
+        // 2. Check if there are filter predicates (SELECT operators) between ORDER and DATASOURCE_SCAN
+        // If yes, skip vector index optimization to avoid returning too few results
+        // Reason: Vector index partitions by similarity, not by other fields.
+        // Filtering top-k results by other predicates may yield insufficient results.
+        if (hasSelectOperatorInSubTree()) {
+            System.err.println("Query has WHERE clause (SELECT operator) - skipping vector index optimization");
+            System.err.println("Reason: Vector index + filters may return too few results");
+            context.addToDontApplySet(this, limitOp);
+            return false;
+        }
+
+        // 3. Get type environment for type checking
         typeEnvironment = context.getOutputTypeEnvironment(orderOp);
 
         // 3. Load dataset metadata (including vector indexes)
-        // This MUST be done before extracting filter fields because field-access-by-index
-        // needs the record type to resolve field index to field name
         MetadataProvider metadataProvider = (MetadataProvider) context.getMetadataProvider();
         if (!subTree.setDatasetAndTypeMetadata(metadataProvider)) {
             return false;
         }
 
-        // 4. Find SELECT operator (if any) and extract filter fields
-        // This populates selectOp, selectRef, and filterFieldNames if a SELECT exists
-        // Must be called AFTER setDatasetAndTypeMetadata so recordType is available
-        findSelectOperatorInSubTree();
-
-        if (selectOp != null) {
-            System.err.println("Query has WHERE clause (SELECT operator)");
-            System.err.println("Filter fields: " + filterFieldNames);
-        }
-
-        // 5. Analyze ANN_DISTANCE function arguments
+        // 4. Analyze ANN_DISTANCE function arguments
         Map<IAccessMethod, AccessMethodAnalysisContext> analyzedAMs = new TreeMap<>();
         if (!analyzeAnnDistanceFunction(analyzedAMs, context)) {
             return false;
         }
 
-        // 6. Find applicable vector indexes on the dataset
+        // 5. Find applicable vector indexes on the dataset
         fillSubTreeIndexExprs(subTree, analyzedAMs, context, false);
 
-        // 7. Choose best vector index (considering INCLUDE fields if filter exists)
+        // 6. Choose best vector index
         List<Pair<IAccessMethod, Index>> chosenIndexes = new ArrayList<>();
         chooseVectorIndex(analyzedAMs, chosenIndexes);
 
         if (chosenIndexes.isEmpty()) {
-            // No vector index available (either none exists, or none has required INCLUDE fields)
-            // Fall back to data scan + sort
-            if (selectOp != null && filterFieldNames != null && !filterFieldNames.isEmpty()) {
-                System.err.println("No vector index with required INCLUDE fields - falling back to data scan");
-            }
+            // No vector index available - fall back to data scan + sort
             context.addToDontApplySet(this, limitOp);
             return false;
         }
 
-        // 8. Apply plan transformation
+        // 7. Apply plan transformation
         Index vectorIndex = chosenIndexes.get(0).second;
         AccessMethodAnalysisContext analysisCtx = analyzedAMs.get(VectorIndexAccessMethod.INSTANCE);
 
@@ -310,27 +296,26 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
     }
 
     /**
-     * Finds SELECT operator between ORDER and DATASOURCE_SCAN.
-     * Also extracts filter field names from the SELECT condition.
+     * Checks if there are any SELECT operators between ORDER and DATASOURCE_SCAN.
+     * SELECT operators represent WHERE clause predicates that filter rows.
      *
-     * @return The SELECT operator if found, null otherwise
+     * We skip vector index optimization when filters exist because:
+     * - Vector index returns top-k results partitioned by vector similarity
+     * - Applying additional filters (e.g., year > 2000) may yield too few results
+     * - Better to scan all data and apply filters, then sort by ANN distance
      */
-    protected SelectOperator findSelectOperatorInSubTree() {
+    protected boolean hasSelectOperatorInSubTree() {
         if (orderOp.getInputs().isEmpty()) {
-            return null;
+            return false;
         }
 
         // Traverse from ORDER down to DATASOURCE_SCAN
-        Mutable<ILogicalOperator> currentRef = orderOp.getInputs().get(0);
-        AbstractLogicalOperator currentOp = (AbstractLogicalOperator) currentRef.getValue();
+        AbstractLogicalOperator currentOp = (AbstractLogicalOperator) orderOp.getInputs().get(0).getValue();
 
         while (currentOp != null) {
             if (currentOp.getOperatorTag() == LogicalOperatorTag.SELECT) {
-                // Found SELECT operator - store it and extract filter fields
-                selectOp = (SelectOperator) currentOp;
-                selectRef = currentRef;
-                filterFieldNames = extractFilterFieldsFromCondition(selectOp.getCondition().getValue());
-                return selectOp;
+                // Found SELECT operator - query has WHERE clause
+                return true;
             }
 
             // Stop at DATASOURCE_SCAN
@@ -342,231 +327,10 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             if (currentOp.getInputs().isEmpty()) {
                 break;
             }
-            currentRef = currentOp.getInputs().get(0);
-            currentOp = (AbstractLogicalOperator) currentRef.getValue();
+            currentOp = (AbstractLogicalOperator) currentOp.getInputs().get(0).getValue();
         }
 
-        return null;
-    }
-
-    /**
-     * Extracts field names referenced in a filter condition expression.
-     * Traverses function call expressions to find field access operations.
-     *
-     * @param condition The filter condition expression
-     * @return Set of field names (as List<String> for nested field paths)
-     */
-    protected Set<List<String>> extractFilterFieldsFromCondition(ILogicalExpression condition) {
-        Set<List<String>> fields = new HashSet<>();
-        System.err.println("=== extractFilterFieldsFromCondition ===");
-        System.err.println("Condition: " + condition);
-        System.err.println("Condition tag: " + condition.getExpressionTag());
-        extractFieldsFromExpressionRecursive(condition, fields);
-        System.err.println("Extracted fields: " + fields);
-        return fields;
-    }
-
-    /**
-     * Recursively extracts field names from an expression.
-     * Handles function calls (AND, OR, comparison operators, field-access).
-     */
-    private void extractFieldsFromExpressionRecursive(ILogicalExpression expr, Set<List<String>> fields) {
-        if (expr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
-            AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) expr;
-
-            // Check if this is a field access function (e.g., field-access-by-name)
-            if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_NAME)
-                    || funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_INDEX)) {
-                // Extract field name from field access function
-                List<String> fieldPath = extractFieldPathFromFieldAccess(funcExpr);
-                if (fieldPath != null && !fieldPath.isEmpty()) {
-                    fields.add(fieldPath);
-                }
-            } else {
-                // Recursively process arguments for other functions (AND, OR, GT, LT, etc.)
-                for (Mutable<ILogicalExpression> arg : funcExpr.getArguments()) {
-                    extractFieldsFromExpressionRecursive(arg.getValue(), fields);
-                }
-            }
-        } else if (expr.getExpressionTag() == LogicalExpressionTag.VARIABLE) {
-            // Variable reference - need to trace back through assigns to find field access
-            VariableReferenceExpression varRef = (VariableReferenceExpression) expr;
-            LogicalVariable var = varRef.getVariableReference();
-
-            System.err.println("=== Found VARIABLE in condition: " + var + " ===");
-            System.err.println("subTree assigns count: " + subTree.getAssignsAndUnnests().size());
-
-            // Search assigns for the variable definition
-            // First check subTree assigns
-            boolean found = findFieldFromAssigns(var, subTree.getAssignsAndUnnests(), fields);
-            System.err.println("Found in subTree assigns: " + found);
-
-            // If not found in subtree, search all operators from ORDER down to DATASOURCE_SCAN
-            if (!found && orderOp != null) {
-                found = searchAssignsInPlan(var, orderOp, fields);
-                System.err.println("Found in plan search: " + found);
-            }
-        }
-    }
-
-    /**
-     * Searches for variable definition in a list of assigns and extracts field info.
-     */
-    private boolean findFieldFromAssigns(LogicalVariable var, List<AbstractLogicalOperator> assigns,
-            Set<List<String>> fields) {
-        for (AbstractLogicalOperator op : assigns) {
-            if (op.getOperatorTag() == LogicalOperatorTag.ASSIGN) {
-                AssignOperator assignOp = (AssignOperator) op;
-                List<LogicalVariable> assignVars = assignOp.getVariables();
-                List<Mutable<ILogicalExpression>> assignExprs = assignOp.getExpressions();
-
-                for (int i = 0; i < assignVars.size(); i++) {
-                    if (assignVars.get(i).equals(var)) {
-                        // Found the assignment - recursively extract fields
-                        ILogicalExpression assignExpr = assignExprs.get(i).getValue();
-                        System.err.println("=== Found assignment for " + var + ": " + assignExpr + " ===");
-                        System.err.println("=== Expression tag: " + assignExpr.getExpressionTag() + " ===");
-                        if (assignExpr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
-                            AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) assignExpr;
-                            System.err.println("=== Function: " + funcExpr.getFunctionIdentifier() + " ===");
-                        }
-                        extractFieldsFromExpressionRecursive(assignExpr, fields);
-                        return true;
-                    }
-                }
-            }
-        }
         return false;
-    }
-
-    /**
-     * Searches all operators in the plan from the given operator downward for variable definition.
-     */
-    private boolean searchAssignsInPlan(LogicalVariable var, ILogicalOperator startOp, Set<List<String>> fields) {
-        ILogicalOperator currentOp = startOp;
-
-        while (currentOp != null) {
-            if (currentOp.getOperatorTag() == LogicalOperatorTag.ASSIGN) {
-                AssignOperator assignOp = (AssignOperator) currentOp;
-                List<LogicalVariable> assignVars = assignOp.getVariables();
-                List<Mutable<ILogicalExpression>> assignExprs = assignOp.getExpressions();
-
-                for (int i = 0; i < assignVars.size(); i++) {
-                    if (assignVars.get(i).equals(var)) {
-                        // Found the assignment - recursively extract fields
-                        extractFieldsFromExpressionRecursive(assignExprs.get(i).getValue(), fields);
-                        return true;
-                    }
-                }
-            }
-
-            // Move to next operator
-            if (currentOp.getInputs().isEmpty()) {
-                break;
-            }
-            currentOp = currentOp.getInputs().get(0).getValue();
-        }
-        return false;
-    }
-
-    /**
-     * Extracts field path from a field-access function expression.
-     * For nested fields like row.nested.field, returns ["nested", "field"].
-     */
-    private List<String> extractFieldPathFromFieldAccess(AbstractFunctionCallExpression funcExpr) {
-        List<String> fieldPath = new ArrayList<>();
-        extractFieldPathRecursive(funcExpr, fieldPath);
-        return fieldPath;
-    }
-
-    /**
-     * Recursively builds field path from nested field access expressions.
-     */
-    private void extractFieldPathRecursive(ILogicalExpression expr, List<String> fieldPath) {
-        if (expr.getExpressionTag() != LogicalExpressionTag.FUNCTION_CALL) {
-            return;
-        }
-
-        AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) expr;
-
-        if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_NAME)) {
-            // First argument is the record, second argument is the field name
-            if (funcExpr.getArguments().size() >= 2) {
-                // Recursively process the record argument (for nested field access)
-                extractFieldPathRecursive(funcExpr.getArguments().get(0).getValue(), fieldPath);
-
-                // Extract field name from second argument
-                ILogicalExpression fieldNameExpr = funcExpr.getArguments().get(1).getValue();
-                String fieldName = AccessMethodUtils.getStringConstant(new MutableObject<>(fieldNameExpr));
-                if (fieldName != null) {
-                    fieldPath.add(fieldName);
-                }
-            }
-        } else if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_INDEX)) {
-            // First argument is the record, second argument is the field index
-            if (funcExpr.getArguments().size() >= 2) {
-                // Recursively process the record argument (for nested field access)
-                extractFieldPathRecursive(funcExpr.getArguments().get(0).getValue(), fieldPath);
-
-                // Extract field index from second argument and look up field name
-                ILogicalExpression fieldIndexExpr = funcExpr.getArguments().get(1).getValue();
-                Integer fieldIndex = AccessMethodUtils.getInt32Constant(new MutableObject<>(fieldIndexExpr));
-                if (fieldIndex != null && subTree.getRecordType() != null) {
-                    String[] fieldNames = subTree.getRecordType().getFieldNames();
-                    if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
-                        String fieldName = fieldNames[fieldIndex];
-                        fieldPath.add(fieldName);
-                        System.err.println("=== Resolved field-access-by-index: index " + fieldIndex + " -> field '" + fieldName + "' ===");
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Checks if a vector index has all required filter fields in its INCLUDE fields.
-     *
-     * @param index The vector index to check
-     * @param filterFields The set of field names referenced in the filter
-     * @return true if all filter fields are in the index's INCLUDE fields
-     */
-    protected boolean indexHasIncludeFields(Index index, Set<List<String>> filterFields) {
-        if (filterFields == null || filterFields.isEmpty()) {
-            // No filter fields - index can be used
-            return true;
-        }
-
-        if (index.getIndexType() != IndexType.VECTOR) {
-            return false;
-        }
-
-        Index.VectorIndexDetails vectorDetails = (Index.VectorIndexDetails) index.getIndexDetails();
-        List<List<String>> includeFieldNames = vectorDetails.getIncludeFieldNames();
-
-        if (includeFieldNames == null || includeFieldNames.isEmpty()) {
-            // Index has no INCLUDE fields - cannot support filters
-            System.err.println("Index " + index.getIndexName() + " has no INCLUDE fields, cannot support filter");
-            return false;
-        }
-
-        // Check if all filter fields are in INCLUDE fields
-        for (List<String> filterField : filterFields) {
-            boolean found = false;
-            for (List<String> includeField : includeFieldNames) {
-                if (includeField.equals(filterField)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                System.err.println("Filter field " + filterField + " not in index " + index.getIndexName()
-                        + " INCLUDE fields: " + includeFieldNames);
-                return false;
-            }
-        }
-
-        System.err.println("All filter fields found in index " + index.getIndexName() + " INCLUDE fields");
-        return true;
     }
 
     /**
@@ -720,9 +484,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
 
     /**
      * Chooses the best vector index from candidates.
-     * Considers:
-     * 1. INCLUDE fields: If query has filter (WHERE clause), index must have all filter fields in INCLUDE
-     * 2. Distance metric: Prefers indexes with matching distance metrics
+     * Prefers indexes with matching distance metrics when query metric is available.
      * Falls back to first field match if no metric match is found.
      */
     protected void chooseVectorIndex(Map<IAccessMethod, AccessMethodAnalysisContext> analyzedAMs,
@@ -733,34 +495,23 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             return;
         }
 
-        // Check if query has filter predicates
-        boolean hasFilter = selectOp != null && filterFieldNames != null && !filterFieldNames.isEmpty();
-
         // Iterate over candidate vector indexes
         Iterator<Map.Entry<Index, List<Pair<Integer, Integer>>>> indexIt =
                 analysisCtx.getIteratorForIndexExprsAndVars();
 
-        Pair<IAccessMethod, Index> exactMatch = null; // Index with matching field, metric, AND INCLUDE fields
-        Pair<IAccessMethod, Index> fieldMatch = null; // Index with matching field only (and INCLUDE if needed)
+        Pair<IAccessMethod, Index> exactMatch = null; // Index with matching field AND metric
+        Pair<IAccessMethod, Index> fieldMatch = null; // Index with matching field only
 
         while (indexIt.hasNext()) {
             Map.Entry<Index, List<Pair<Integer, Integer>>> indexEntry = indexIt.next();
             Index index = indexEntry.getKey();
 
             if (index.getIndexType() == IndexType.VECTOR) {
-                // If query has filter, check if index has required INCLUDE fields
-                if (hasFilter && !indexHasIncludeFields(index, filterFieldNames)) {
-                    // Skip this index - it doesn't have required INCLUDE fields for the filter
-                    System.err.println("Skipping index " + index.getIndexName()
-                            + " - missing required INCLUDE fields for filter");
-                    continue;
-                }
-
                 // If query distance metric is available, check for metric compatibility
                 if (queryDistanceMetric != null && !queryDistanceMetric.isEmpty()) {
                     String indexMetric = VectorIndexAccessMethod.getIndexDistanceMetric(index);
                     if (queryDistanceMetric.equals(indexMetric)) {
-                        // Exact match: field name AND distance metric match (AND INCLUDE fields if needed)
+                        // Exact match: field name AND distance metric match
                         exactMatch = new Pair<>(VectorIndexAccessMethod.INSTANCE, index);
                         System.err.println("=== Found exact match: index " + index.getIndexName() + " with metric "
                                 + indexMetric + " ===");
@@ -815,9 +566,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
 
         // Call VectorIndexAccessMethod to create the index search plan
         // This creates UNNEST-MAP operator that returns candidate tuples from vector index
-        // Pass selectOp so the access method can set selectCondition for filter pushdown
         ILogicalOperator indexSearchOp = VectorIndexAccessMethod.INSTANCE.createIndexSearchPlan(limitRef, orderRef,
-                annDistanceExpr, subTree, vectorIndex, analysisCtx, context, selectOp);
+                annDistanceExpr, subTree, vectorIndex, analysisCtx, context);
 
         if (indexSearchOp == null) {
             System.err.println("Plan transformation not yet implemented");
@@ -844,9 +594,6 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         annDistanceExpr = null;
         typeEnvironment = null;
         queryDistanceMetric = null;
-        selectOp = null;
-        selectRef = null;
-        filterFieldNames = null;
         subTree.reset();
     }
 
