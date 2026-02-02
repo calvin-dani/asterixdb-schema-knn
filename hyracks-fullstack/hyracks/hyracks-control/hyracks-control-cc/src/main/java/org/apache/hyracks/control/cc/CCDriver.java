@@ -22,7 +22,6 @@ import static org.apache.hyracks.control.common.controllers.CCConfig.Option.APP_
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.concurrent.Semaphore;
 
 import org.apache.hyracks.api.application.ICCApplication;
 import org.apache.hyracks.control.common.config.ConfigManager;
@@ -58,7 +57,9 @@ public class CCDriver {
             ctx.start(logCfgFactory.getConfiguration(ctx, ConfigurationSource.NULL_SOURCE));
             ClusterControllerService ccService = new ClusterControllerService(ccConfig, application);
             ccService.start();
-            new Semaphore(0).acquire();
+            while (true) {
+                Thread.sleep(100000);
+            }
         } catch (CmdLineException e) {
             LOGGER.log(Level.DEBUG, "Exception parsing command line: " + Arrays.toString(args), e);
             System.exit(2);

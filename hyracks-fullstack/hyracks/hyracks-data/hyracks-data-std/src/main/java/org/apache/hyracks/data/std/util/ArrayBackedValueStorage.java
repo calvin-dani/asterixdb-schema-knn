@@ -29,7 +29,7 @@ import org.apache.hyracks.data.std.api.IValueReference;
 
 public class ArrayBackedValueStorage implements IMutableValueStorage, IPointable {
 
-    private GrowableArray data;
+    private final GrowableArray data;
 
     public ArrayBackedValueStorage(int size) {
         data = new GrowableArray(size);
@@ -37,13 +37,6 @@ public class ArrayBackedValueStorage implements IMutableValueStorage, IPointable
 
     public ArrayBackedValueStorage() {
         data = new GrowableArray();
-    }
-
-    public static void swap(ArrayBackedValueStorage serializedMetadata,
-            ArrayBackedValueStorage tempSerializedMetadata) {
-        GrowableArray temp = serializedMetadata.data;
-        serializedMetadata.data = tempSerializedMetadata.data;
-        tempSerializedMetadata.data = temp;
     }
 
     @Override

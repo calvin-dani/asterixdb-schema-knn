@@ -25,7 +25,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -44,7 +43,6 @@ public class RequestTracker implements IRequestTracker {
     private final Map<String, IClientRequest> runningRequests = new ConcurrentHashMap<>();
     private final Map<String, IClientRequest> clientIdRequests = new ConcurrentHashMap<>();
     private final Map<String, IClientRequest> completedRequests;
-    private final Map<String, IClientRequest> asyncRequests = new ConcurrentHashMap<>();
     private final ICcApplicationContext ccAppCtx;
     private final AtomicLong numRequests;
     private final AtomicLong numOfFailedRequests;
@@ -85,28 +83,15 @@ public class RequestTracker implements IRequestTracker {
     }
 
     @Override
-    public void trackAsyncOrDeferredRequest(IClientRequest request) {
-        asyncRequests.put(request.getId(), request);
-    }
-
-    @Override
-    public void removeAsyncOrDeferredRequest(String requestId) {
-        if (requestId != null) {
-            asyncRequests.remove(requestId);
-        }
-    }
-
-    public Optional<IClientRequest> getAsyncOrDeferredRequest(String requestId) {
-        return Optional.ofNullable(requestId).map(asyncRequests::get);
-    }
-
-    @Override
-    public boolean cancel(String requestId) throws HyracksDataException {
+    public void cancel(String requestId) throws HyracksDataException {
         final IClientRequest request = runningRequests.get(requestId);
         if (request == null) {
-            return false;
+            return;
         }
-        return cancel(request);
+        if (!request.isCancellable()) {
+            throw new IllegalStateException("Request " + request.getId() + " cannot be cancelled");
+        }
+        cancel(request);
     }
 
     @Override
@@ -128,12 +113,9 @@ public class RequestTracker implements IRequestTracker {
         return Collections.unmodifiableCollection(new ArrayList<>(completedRequests.values()));
     }
 
-    private boolean cancel(IClientRequest request) throws HyracksDataException {
-        boolean cancelled = request.cancel(ccAppCtx);
-        if (cancelled) {
-            untrack(request);
-        }
-        return cancelled;
+    private void cancel(IClientRequest request) throws HyracksDataException {
+        request.cancel(ccAppCtx);
+        untrack(request);
     }
 
     private void untrack(IClientRequest request) {

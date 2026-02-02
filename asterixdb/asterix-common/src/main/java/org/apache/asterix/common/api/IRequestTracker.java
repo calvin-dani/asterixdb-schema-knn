@@ -19,7 +19,6 @@
 package org.apache.asterix.common.api;
 
 import java.util.Collection;
-import java.util.Optional;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IJobLifecycleListener;
@@ -55,7 +54,7 @@ public interface IRequestTracker extends IJobLifecycleListener {
      * @param requestId
      * @throws HyracksDataException
      */
-    boolean cancel(String requestId) throws HyracksDataException;
+    void cancel(String requestId) throws HyracksDataException;
 
     /**
      * Completes the request with id {@code requestId}
@@ -93,27 +92,4 @@ public interface IRequestTracker extends IJobLifecycleListener {
      * @return the total number of failed requests
      */
     long getTotalNumberOfFailedRequests();
-
-    /**
-     * Starts tracking an asynchronous or deferred request
-     *
-     * @param request
-     */
-    void trackAsyncOrDeferredRequest(IClientRequest request);
-
-    /**
-     * Removes an asynchronous or deferred request from tracking
-     *
-     * @param requestId
-     */
-    void removeAsyncOrDeferredRequest(String requestId);
-
-    /**
-     * Gets an asynchronous or deferred request by {@code requestId}
-     *
-     * @param requestId
-     * @return an Optional of the client request
-     */
-    Optional<IClientRequest> getAsyncOrDeferredRequest(String requestId);
-
 }

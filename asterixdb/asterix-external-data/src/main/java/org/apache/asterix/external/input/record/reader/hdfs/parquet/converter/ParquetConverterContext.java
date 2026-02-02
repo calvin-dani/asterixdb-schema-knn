@@ -42,7 +42,6 @@ import org.apache.asterix.om.base.AMutableDateTime;
 import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.base.AMutableInt64;
 import org.apache.asterix.om.base.AMutableTime;
-import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.ATime;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
@@ -83,9 +82,6 @@ public class ParquetConverterContext extends ParserContext {
     @SuppressWarnings("unchecked")
     private final ISerializerDeserializer<ADateTime> datetimeSerDer =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADATETIME);
-    @SuppressWarnings("unchecked")
-    private final ISerializerDeserializer<ANull> nullSerDer =
-            SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ANULL);
 
     //Issued warnings
     private final List<Warning> warnings;
@@ -292,14 +288,6 @@ public class ParquetConverterContext extends ParserContext {
         try {
             mutableDateTime.setValue(timestamp);
             datetimeSerDer.serialize(mutableDateTime, output);
-        } catch (HyracksDataException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    public void serializeNull(DataOutput output) {
-        try {
-            nullSerDer.serialize(ANull.NULL, output);
         } catch (HyracksDataException e) {
             throw new IllegalStateException(e);
         }

@@ -46,7 +46,7 @@ public class LSMIndexCompactOperatorNodePushable extends AbstractOperatorNodePus
 
     @Override
     public void deinitialize() throws HyracksDataException {
-        Throwable failure = CleanupUtils.close(null, indexHelpers);
+        Throwable failure = CleanupUtils.close(indexHelpers, null);
         if (failure != null) {
             throw HyracksDataException.create(failure);
         }

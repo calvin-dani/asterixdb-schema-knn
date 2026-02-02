@@ -18,10 +18,10 @@
  */
 package org.apache.asterix.external.input.record.reader.azure.parquet;
 
-import static org.apache.asterix.external.util.azure.AzureConstants.HADOOP_AZURE_PROTOCOL;
-import static org.apache.asterix.external.util.azure.AzureUtils.configureAzureHdfsJobConf;
-import static org.apache.asterix.external.util.azure.blob.BlobUtils.buildClient;
-import static org.apache.asterix.external.util.azure.blob.BlobUtils.listBlobItems;
+import static org.apache.asterix.external.util.azure.blob_storage.AzureConstants.HADOOP_AZURE_BLOB_PROTOCOL;
+import static org.apache.asterix.external.util.azure.blob_storage.AzureUtils.buildAzureBlobClient;
+import static org.apache.asterix.external.util.azure.blob_storage.AzureUtils.configureAzureHdfsJobConf;
+import static org.apache.asterix.external.util.azure.blob_storage.AzureUtils.listBlobItems;
 
 import java.util.Collections;
 import java.util.List;
@@ -37,7 +37,6 @@ import org.apache.asterix.external.input.record.reader.abstracts.AbstractExterna
 import org.apache.asterix.external.util.ExternalDataConstants;
 import org.apache.asterix.external.util.ExternalDataPrefix;
 import org.apache.asterix.external.util.ExternalDataUtils;
-import org.apache.asterix.external.util.azure.AzureUtils;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.api.application.IServiceContext;
@@ -61,8 +60,8 @@ public class AzureBlobParquetReaderFactory extends HDFSDataSourceFactory {
         IApplicationContext appCtx = (IApplicationContext) serviceCtx.getApplicationContext();
 
         // get endpoint
-        BlobServiceClient blobServiceClient = buildClient(appCtx, configuration);
-        String endPoint = AzureUtils.extractEndPoint(blobServiceClient.getAccountUrl());
+        BlobServiceClient blobServiceClient = buildAzureBlobClient(appCtx, configuration);
+        String endPoint = extractEndPoint(blobServiceClient.getAccountUrl());
 
         // get include/exclude matchers
         IncludeExcludeMatcher includeExcludeMatcher = ExternalDataUtils.getIncludeExcludeMatchers(configuration);
@@ -122,14 +121,14 @@ public class AzureBlobParquetReaderFactory extends HDFSDataSourceFactory {
      * @param container container
      * @param filesOnly files
      * @param endPoint  endpoint
-     * @return Comma-delimited paths (e.g., "abfss://container@accountName.dfs.core.windows.net/file1.parquet,
-     * abfss://container@accountName.blob.core.windows.net/file2.parquet")
+     * @return Comma-delimited paths (e.g., "wasbs://container@accountName.blob.core.windows.net/file1.parquet,
+     * wasbs://container@accountName.blob.core.windows.net/file2.parquet")
      */
     private static String buildPathURIs(String container, List<BlobItem> filesOnly, String endPoint) {
         StringBuilder builder = new StringBuilder();
 
         if (!filesOnly.isEmpty()) {
-            appendFileURI(builder, container, endPoint, filesOnly.getFirst());
+            appendFileURI(builder, container, endPoint, filesOnly.get(0));
             for (int i = 1; i < filesOnly.size(); i++) {
                 builder.append(',');
                 appendFileURI(builder, container, endPoint, filesOnly.get(i));
@@ -139,8 +138,14 @@ public class AzureBlobParquetReaderFactory extends HDFSDataSourceFactory {
         return builder.toString();
     }
 
+    private static String extractEndPoint(String uri) {
+        //The URI is in the form http(s)://<accountName>.blob.core.windows.net
+        //We need to Remove the protocol (i.e., http(s)://) from the URI
+        return uri.substring(uri.indexOf("//") + "//".length());
+    }
+
     private static void appendFileURI(StringBuilder builder, String container, String endPoint, BlobItem file) {
-        builder.append(HADOOP_AZURE_PROTOCOL);
+        builder.append(HADOOP_AZURE_BLOB_PROTOCOL);
         builder.append("://");
         builder.append(container);
         builder.append('@');

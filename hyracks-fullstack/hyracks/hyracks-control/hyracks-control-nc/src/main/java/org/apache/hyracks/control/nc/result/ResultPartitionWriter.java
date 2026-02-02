@@ -58,8 +58,6 @@ public class ResultPartitionWriter implements IFrameWriter {
 
     private boolean failed = false;
 
-    private long resultCount;
-
     public ResultPartitionWriter(IHyracksTaskContext ctx, IResultPartitionManager manager, JobId jobId,
             ResultSetId rsId, boolean asyncMode, IResultMetadata metadata, int partition, int nPartitions,
             ResultMemoryManager resultMemoryManager, IWorkspaceFileFactory fileFactory, long maxReads) {
@@ -74,7 +72,6 @@ public class ResultPartitionWriter implements IFrameWriter {
         resultSetPartitionId = new ResultSetPartitionId(jobId, rsId, partition);
         resultState = new ResultState(resultSetPartitionId, asyncMode, ctx.getIoManager(), fileFactory,
                 ctx.getInitialFrameSize(), maxReads);
-        resultCount = 0;
     }
 
     public ResultState getResultState() {
@@ -121,7 +118,7 @@ public class ResultPartitionWriter implements IFrameWriter {
         }
         try {
             if (partitionRegistered) {
-                manager.reportPartitionWriteCompletion(jobId, resultSetId, partition, resultCount);
+                manager.reportPartitionWriteCompletion(jobId, resultSetId, partition);
             }
         } catch (HyracksException e) {
             throw HyracksDataException.create(e);
@@ -137,9 +134,5 @@ public class ResultPartitionWriter implements IFrameWriter {
         } catch (HyracksException e) {
             throw HyracksDataException.create(e);
         }
-    }
-
-    public void incrementResultCount() {
-        resultCount++;
     }
 }

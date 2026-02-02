@@ -28,7 +28,7 @@ import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.profiling.IOperatorStats;
 
-public class ProfiledPushRuntime extends ProfiledFrameWriter implements IProfiledPushRuntime {
+public class ProfiledPushRuntime extends ProfiledFrameWriter implements IPushRuntime {
 
     private final IPushRuntime wrapped;
     private final IOperatorStats stats;
@@ -45,16 +45,9 @@ public class ProfiledPushRuntime extends ProfiledFrameWriter implements IProfile
         this.last = last;
     }
 
-    public IOperatorStats getStats() {
-        return stats;
-    }
-
     @Override
-    public void computeTimings() {
-        //mainly to push through to subplans
-        if (wrapped instanceof IProfiledPushRuntime) {
-            ((IProfiledPushRuntime) wrapped).computeTimings();
-        }
+    public void close() throws HyracksDataException {
+        super.close();
         long ownTime = getTotalTime();
         //for micro union all. accumulate the time of each input into the counter.
         //then, on input 0, subtract the output from the accumulated time.
@@ -67,6 +60,10 @@ public class ProfiledPushRuntime extends ProfiledFrameWriter implements IProfile
             ownTime -= w.getTotalTime();
         }
         stats.getTimeCounter().set(ownTime);
+    }
+
+    public IOperatorStats getStats() {
+        return stats;
     }
 
     @Override

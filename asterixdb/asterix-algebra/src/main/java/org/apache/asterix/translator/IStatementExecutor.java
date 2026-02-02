@@ -42,6 +42,7 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.translator.CompiledStatements.ICompiledDmlStatement;
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.api.client.IClusterInfoCollector;
 import org.apache.hyracks.api.client.IHyracksClientConnection;
@@ -94,40 +95,14 @@ public interface IStatementExecutor {
     }
 
     class ResultMetadata implements Serializable {
-        private static final long serialVersionUID = 2L;
+        private static final long serialVersionUID = 1L;
 
-        private final List<ResultSetInfo> resultSets = new ArrayList<>();
+        private final List<Triple<JobId, ResultSetId, ARecordType>> resultSets = new ArrayList<>();
 
-        public List<ResultSetInfo> getResultSets() {
+        public List<Triple<JobId, ResultSetId, ARecordType>> getResultSets() {
             return resultSets;
         }
 
-    }
-
-    class ResultSetInfo implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private final JobId jobId;
-        private final ResultSetId resultSetId;
-        private final ARecordType recordType;
-
-        public ResultSetInfo(JobId jobId, ResultSetId resultSetId, ARecordType recordType) {
-            this.jobId = jobId;
-            this.resultSetId = resultSetId;
-            this.recordType = recordType;
-        }
-
-        public JobId getJobId() {
-            return jobId;
-        }
-
-        public ResultSetId getResultSetId() {
-            return resultSetId;
-        }
-
-        public ARecordType getRecordType() {
-            return recordType;
-        }
     }
 
     class Stats implements Serializable {

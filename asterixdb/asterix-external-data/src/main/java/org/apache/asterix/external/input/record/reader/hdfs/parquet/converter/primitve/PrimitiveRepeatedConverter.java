@@ -48,7 +48,7 @@ import org.apache.parquet.schema.PrimitiveType;
  * message schema {
  *   required group my_primitive_array (LIST) {
  *     repeated group list {
- *       optional binary element (STRING);
+ *       optional binary  (STRING);
  *     }
  *   }
  * }

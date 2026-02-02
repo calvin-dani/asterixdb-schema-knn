@@ -52,31 +52,27 @@ public class SchemaCheckerLazyVisitor implements ISchemaChecker,
     public ISchemaChecker.SchemaComparisonType visit(RecordLazyVisitablePointable pointable,
             ParquetSchemaTree.SchemaNode schemaNode) throws HyracksDataException {
         if (schemaNode.getType() == null) {
-            return SchemaComparisonType.GROWING;
+            return ISchemaChecker.SchemaComparisonType.GROWING;
         }
 
-        if (!(schemaNode.getType() instanceof ParquetSchemaTree.RecordType recordType)) {
+        if (!(schemaNode.getType() instanceof ParquetSchemaTree.RecordType)) {
             return ISchemaChecker.SchemaComparisonType.CONFLICTING;
         }
 
+        ParquetSchemaTree.RecordType recordType = (ParquetSchemaTree.RecordType) schemaNode.getType();
         ISchemaChecker.SchemaComparisonType schemaComparisonType = ISchemaChecker.SchemaComparisonType.EQUIVALENT;
-        int nonMissingChildren = 0;
+
         for (int i = 0; i < pointable.getNumberOfChildren(); i++) {
             pointable.nextChild();
             AbstractLazyVisitablePointable child = pointable.getChildVisitablePointable();
-            if (child.getTypeTag() == ATypeTag.MISSING) {
-                continue;
-            }
-            nonMissingChildren++;
             String childColumnName = fieldNamesDictionary.getOrCreateFieldNameIndex(pointable.getFieldName());
             ParquetSchemaTree.SchemaNode childType = recordType.getChildren().get(childColumnName);
             if (childType == null) {
-                return SchemaComparisonType.CONFLICTING;
+                schemaComparisonType =
+                        ISchemaChecker.max(schemaComparisonType, ISchemaChecker.SchemaComparisonType.GROWING);
+                continue;
             }
             schemaComparisonType = ISchemaChecker.max(schemaComparisonType, child.accept(this, childType));
-        }
-        if (nonMissingChildren != recordType.getChildren().size()) {
-            return SchemaComparisonType.CONFLICTING;
         }
         return schemaComparisonType;
     }
@@ -85,7 +81,7 @@ public class SchemaCheckerLazyVisitor implements ISchemaChecker,
     public ISchemaChecker.SchemaComparisonType visit(AbstractListLazyVisitablePointable pointable,
             ParquetSchemaTree.SchemaNode schemaNode) throws HyracksDataException {
         if (schemaNode.getType() == null) {
-            return SchemaComparisonType.GROWING;
+            return ISchemaChecker.SchemaComparisonType.GROWING;
         }
         if (!(schemaNode.getType() instanceof ParquetSchemaTree.ListType)) {
             return ISchemaChecker.SchemaComparisonType.CONFLICTING;
@@ -97,9 +93,6 @@ public class SchemaCheckerLazyVisitor implements ISchemaChecker,
         for (int i = 0; i < pointable.getNumberOfChildren(); i++) {
             pointable.nextChild();
             AbstractLazyVisitablePointable child = pointable.getChildVisitablePointable();
-            if (child.getTypeTag() == ATypeTag.MISSING) {
-                throw new HyracksDataException("Missing values are not allowed in lists for parquet printing.");
-            }
             if (listType.isEmpty()) {
                 schemaComparisonType =
                         ISchemaChecker.max(schemaComparisonType, ISchemaChecker.SchemaComparisonType.GROWING);
@@ -111,33 +104,22 @@ public class SchemaCheckerLazyVisitor implements ISchemaChecker,
     }
 
     @Override
-    public ISchemaChecker.SchemaComparisonType visit(FlatLazyVisitablePointable currentValue,
+    public ISchemaChecker.SchemaComparisonType visit(FlatLazyVisitablePointable pointable,
             ParquetSchemaTree.SchemaNode schemaNode) throws HyracksDataException {
-        // SchemaNode.getTypeTag can never be MISSING here
-        if (currentValue.getTypeTag() == ATypeTag.NULL) {
-            return SchemaComparisonType.EQUIVALENT;
-        }
         if (schemaNode.getType() == null) {
-            return SchemaComparisonType.GROWING;
-        }
-        if (!(schemaNode.getType() instanceof ParquetSchemaTree.FlatType inferredType)) {
-            return ISchemaChecker.SchemaComparisonType.CONFLICTING;
-        }
-
-        if (inferredType.getTypeTag() == currentValue.getTypeTag()) {
-            return ISchemaChecker.SchemaComparisonType.EQUIVALENT;
-        }
-        if (!inferredType.isCompatibleWith(currentValue.getTypeTag())) {
-            return ISchemaChecker.SchemaComparisonType.CONFLICTING;
-        }
-        if (inferredType.isStrictChildOf(currentValue.getTypeTag())) {
             return ISchemaChecker.SchemaComparisonType.GROWING;
         }
-        if (inferredType.isStrictParentOf(currentValue.getTypeTag())) {
-            return ISchemaChecker.SchemaComparisonType.EQUIVALENT;
+        if (!(schemaNode.getType() instanceof ParquetSchemaTree.FlatType)) {
+            return ISchemaChecker.SchemaComparisonType.CONFLICTING;
         }
 
-        return SchemaComparisonType.CONFLICTING;
+        ParquetSchemaTree.FlatType flatType = (ParquetSchemaTree.FlatType) schemaNode.getType();
+
+        if (!flatType.isCompatibleWith(pointable.getTypeTag())) {
+            return ISchemaChecker.SchemaComparisonType.CONFLICTING;
+        }
+
+        return ISchemaChecker.SchemaComparisonType.EQUIVALENT;
     }
 
     @Override

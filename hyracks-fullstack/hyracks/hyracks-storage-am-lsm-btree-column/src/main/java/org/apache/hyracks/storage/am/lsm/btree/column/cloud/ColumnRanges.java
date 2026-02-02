@@ -23,7 +23,6 @@ import static org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil.ge
 import static org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil.getColumnStartOffset;
 import static org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil.getNumberOfRemainingPages;
 
-import java.util.Arrays;
 import java.util.BitSet;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -85,7 +84,7 @@ public final class ColumnRanges {
      * @param leafFrame to compute the ranges for
      */
     public void reset(ColumnBTreeReadLeafFrame leafFrame) throws HyracksDataException {
-        reset(leafFrame, EMPTY, EMPTY, EMPTY, false);
+        reset(leafFrame, EMPTY, EMPTY, EMPTY);
     }
 
     /**
@@ -95,7 +94,7 @@ public final class ColumnRanges {
      * @param plan      eviction plan
      */
     public void reset(ColumnBTreeReadLeafFrame leafFrame, BitSet plan) throws HyracksDataException {
-        reset(leafFrame, plan, EMPTY, EMPTY, false);
+        reset(leafFrame, plan, EMPTY, EMPTY);
     }
 
     /**
@@ -107,7 +106,7 @@ public final class ColumnRanges {
      * @param cloudOnlyColumns locked columns that cannot be read from a local disk
      */
     public void reset(ColumnBTreeReadLeafFrame leafFrame, BitSet requestedColumns, BitSet evictableColumns,
-            BitSet cloudOnlyColumns, boolean unPinPageZeroSegments) throws HyracksDataException {
+            BitSet cloudOnlyColumns) throws HyracksDataException {
         try {
             // Set leafFrame
             this.leafFrame = leafFrame;
@@ -144,7 +143,6 @@ public final class ColumnRanges {
 
                 // Get start page ID (given the computed length above)
                 int startPageId = getColumnStartPageIndex(columnIndex);
-
                 // Get the number of pages (given the computed length above)
                 int numberOfPages = getColumnNumberOfPages(columnIndex);
 
@@ -169,10 +167,8 @@ public final class ColumnRanges {
             // to indicate the end
             columnsOrder[columnOrdinal] = -1;
         } finally {
-            if (unPinPageZeroSegments) {
-                //Unpin the not required segment pages
-                leafFrame.unPinNotRequiredPageZeroSegments();
-            }
+            //Unpin the not required segment pages
+            leafFrame.unPinNotRequiredPageZeroSegments();
         }
     }
 
@@ -217,7 +213,7 @@ public final class ColumnRanges {
      *
      * @param pageId page ID
      * @return true of the page should be read from the cloud, false otherwise
-     * @see #reset(ColumnBTreeReadLeafFrame, BitSet, BitSet, BitSet, boolean)
+     * @see #reset(ColumnBTreeReadLeafFrame, BitSet, BitSet, BitSet)
      */
     public boolean isCloudOnly(int pageId) {
         // Compute the relative page ID for this mega leaf node
@@ -255,15 +251,9 @@ public final class ColumnRanges {
         return leafFrame.getMegaLeafNodeNumberOfPages();
     }
 
-    public void pageZeroSegmentsInit(ColumnBTreeReadLeafFrame leafFrame) throws HyracksDataException {
-        this.leafFrame = leafFrame;
-        pageZeroId = leafFrame.getPageId();
-    }
-
     private void init() {
         int numberOfColumns = leafFrame.getNumberOfColumns();
         offsetColumnIndexPairs = LongArrays.ensureCapacity(offsetColumnIndexPairs, numberOfColumns + 1, 0);
-        Arrays.fill(offsetColumnIndexPairs, 0, numberOfColumns + 1, Long.MAX_VALUE);
         lengths = IntArrays.ensureCapacity(lengths, numberOfColumns, 0);
         columnsOrder = IntArrays.ensureCapacity(columnsOrder, numberOfColumns + 1, 0);
         nonEvictablePages.clear();

@@ -33,21 +33,18 @@ public class ReportResultPartitionWriteCompletionWork extends AbstractWork {
 
     private final int partition;
 
-    private final long resultCount;
-
     public ReportResultPartitionWriteCompletionWork(ClusterControllerService ccs, JobId jobId, ResultSetId rsId,
-            int partition, long resultCount) {
+            int partition) {
         this.ccs = ccs;
         this.jobId = jobId;
         this.rsId = rsId;
         this.partition = partition;
-        this.resultCount = resultCount;
     }
 
     @Override
     public void run() {
         try {
-            ccs.getResultDirectoryService().reportResultPartitionWriteCompletion(jobId, rsId, partition, resultCount);
+            ccs.getResultDirectoryService().reportResultPartitionWriteCompletion(jobId, rsId, partition);
         } catch (HyracksDataException e) {
             throw new RuntimeException(e);
         }

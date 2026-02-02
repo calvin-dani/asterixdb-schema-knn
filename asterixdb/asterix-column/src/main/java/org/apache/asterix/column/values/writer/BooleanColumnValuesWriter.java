@@ -89,13 +89,4 @@ public final class BooleanColumnValuesWriter extends AbstractColumnValuesWriter 
     protected ATypeTag getTypeTag() {
         return ATypeTag.BOOLEAN;
     }
-
-    @Override
-    public int getRequiredTemporaryBuffersCount() {
-        return requiredTemporaryBuffers(filtered);
-    }
-
-    public static int requiredTemporaryBuffers(boolean filtered) {
-        return 0;
-    }
 }

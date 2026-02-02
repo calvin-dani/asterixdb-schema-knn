@@ -85,36 +85,6 @@
       </compilation-unit>
     </test-case>
     <test-case FilePath="column">
-      <compilation-unit name="assembly/ASTERIXDB-3652-1">
-        <output-dir compare="Text">assembly/ASTERIXDB-3652-1</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
-      <compilation-unit name="assembly/ASTERIXDB-3652-2">
-        <output-dir compare="Text">assembly/ASTERIXDB-3652-2</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
-      <compilation-unit name="assembly/ASTERIXDB-3652-3">
-        <output-dir compare="Text">assembly/ASTERIXDB-3652-3</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
-      <compilation-unit name="assembly/ASTERIXDB-3652-4">
-        <output-dir compare="Text">assembly/ASTERIXDB-3652-4</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
-      <compilation-unit name="assembly/ASTERIXDB-3652-5">
-        <output-dir compare="Text">assembly/ASTERIXDB-3652-5</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
-      <compilation-unit name="assembly/missing-inner-array">
-        <output-dir compare="Text">assembly/missing-inner-array</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
       <compilation-unit name="filter/ASTERIXDB-3499">
         <output-dir compare="Text">filter/ASTERIXDB-3499</output-dir>
       </compilation-unit>
@@ -147,11 +117,6 @@
     <test-case FilePath="column">
       <compilation-unit name="io/merge/ASTERIXDB-3597">
         <output-dir compare="Text">io/merge/ASTERIXDB-3597</output-dir>
-      </compilation-unit>
-    </test-case>
-    <test-case FilePath="column">
-      <compilation-unit name="io/merge/ASTERIXDB-3601">
-        <output-dir compare="Text">io/merge/ASTERIXDB-3601</output-dir>
       </compilation-unit>
     </test-case>
     <test-case FilePath="column">

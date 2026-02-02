@@ -60,11 +60,6 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
  * Cursors must enforce the cursor state machine
  */
 public interface IIndexCursor extends IDestroyable {
-
-    default void print() {
-
-    }
-
     /**
      * Opens the cursor
      * if open succeeds, close must be called.

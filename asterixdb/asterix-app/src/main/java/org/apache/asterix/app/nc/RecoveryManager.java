@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.asterix.common.api.IDatasetLifecycleManager;
 import org.apache.asterix.common.api.INcApplicationContext;
@@ -60,7 +61,6 @@ import org.apache.asterix.common.transactions.ITransactionContext;
 import org.apache.asterix.common.transactions.ITransactionSubsystem;
 import org.apache.asterix.common.transactions.LogType;
 import org.apache.asterix.common.transactions.TxnId;
-import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.transaction.management.opcallbacks.AbstractIndexModificationOperationCallback;
 import org.apache.asterix.transaction.management.resource.PersistentLocalResourceRepository;
 import org.apache.asterix.transaction.management.service.logging.LogManager;
@@ -155,7 +155,7 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
     }
 
     @Override
-    public void startLocalRecovery(Partitions partitions) throws IOException, ACIDException {
+    public void startLocalRecovery(Set<Integer> partitions) throws IOException, ACIDException {
         state = SystemState.RECOVERING;
         LOGGER.info("starting recovery for partitions {}", partitions);
         Checkpoint systemCheckpoint = checkpointManager.getLatest();
@@ -175,7 +175,7 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
         replayPartitionsLogs(partitions, logMgr.getLogReader(true), lowWaterMarkLSN, true);
     }
 
-    public synchronized void replayPartitionsLogs(Partitions partitions, ILogReader logReader, long lowWaterMarkLSN,
+    public synchronized void replayPartitionsLogs(Set<Integer> partitions, ILogReader logReader, long lowWaterMarkLSN,
             boolean closeOnFlushRedo) throws IOException, ACIDException {
         try {
             Set<Long> winnerJobSet = startRecoverysAnalysisPhase(partitions, logReader, lowWaterMarkLSN);
@@ -186,7 +186,7 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
         }
     }
 
-    private synchronized Set<Long> startRecoverysAnalysisPhase(Partitions partitions, ILogReader logReader,
+    private synchronized Set<Long> startRecoverysAnalysisPhase(Set<Integer> partitions, ILogReader logReader,
             long lowWaterMarkLSN) throws IOException, ACIDException {
         int updateLogCount = 0;
         int entityCommitLogCount = 0;
@@ -274,8 +274,8 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
         jobEntityWinners.add(logRecord);
     }
 
-    private synchronized void startRecoveryRedoPhase(Partitions partitions, ILogReader logReader, long lowWaterMarkLSN,
-            Set<Long> winnerTxnSet, boolean closeOnFlushRedo) throws IOException, ACIDException {
+    private synchronized void startRecoveryRedoPhase(Set<Integer> partitions, ILogReader logReader,
+            long lowWaterMarkLSN, Set<Long> winnerTxnSet, boolean closeOnFlushRedo) throws IOException, ACIDException {
         int redoCount = 0;
         long txnId = 0;
 
@@ -491,20 +491,21 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
 
     private long getRemoteMinFirstLSN() throws HyracksDataException {
         // find the min first lsn of partitions that are replicated on this node
-        final Partitions allPartitions = localResourceRepository.getAllPartitions();
-        final Partitions masterPartitions = appCtx.getReplicaManager().getPartitions();
+        final Set<Integer> allPartitions = localResourceRepository.getAllPartitions();
+        final Set<Integer> masterPartitions = appCtx.getReplicaManager().getPartitions();
         allPartitions.removeAll(masterPartitions);
         return getPartitionsMinLSN(allPartitions);
     }
 
-    private long getPartitionsMinLSN(Partitions partitions) throws HyracksDataException {
+    private long getPartitionsMinLSN(Set<Integer> partitions) throws HyracksDataException {
         final IIndexCheckpointManagerProvider idxCheckpointMgrProvider = appCtx.getIndexCheckpointManagerProvider();
         long minRemoteLSN = Long.MAX_VALUE;
         for (Integer partition : partitions) {
             final List<DatasetResourceReference> partitionResources = localResourceRepository.getResources(resource -> {
                 DatasetLocalResource dsResource = (DatasetLocalResource) resource.getResource();
                 return dsResource.getPartition() == partition;
-            }, Partitions.singleton(partition)).values().stream().map(DatasetResourceReference::of).toList();
+            }, Collections.singleton(partition)).values().stream().map(DatasetResourceReference::of)
+                    .collect(Collectors.toList());
             for (DatasetResourceReference indexRef : partitionResources) {
                 try {
                     final IIndexCheckpointManager idxCheckpointMgr = idxCheckpointMgrProvider.get(indexRef);
@@ -523,14 +524,15 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
     }
 
     @Override
-    public long getPartitionsMaxLSN(Partitions partitions) throws HyracksDataException {
+    public long getPartitionsMaxLSN(Set<Integer> partitions) throws HyracksDataException {
         final IIndexCheckpointManagerProvider idxCheckpointMgrProvider = appCtx.getIndexCheckpointManagerProvider();
         long maxLSN = 0;
-        for (int partition : partitions) {
+        for (Integer partition : partitions) {
             final List<DatasetResourceReference> partitionResources = localResourceRepository.getResources(resource -> {
                 DatasetLocalResource dsResource = (DatasetLocalResource) resource.getResource();
                 return dsResource.getPartition() == partition;
-            }, Partitions.singleton(partition)).values().stream().map(DatasetResourceReference::of).toList();
+            }, Collections.singleton(partition)).values().stream().map(DatasetResourceReference::of)
+                    .collect(Collectors.toList());
             for (DatasetResourceReference indexRef : partitionResources) {
                 try {
                     final IIndexCheckpointManager idxCheckpointMgr = idxCheckpointMgrProvider.get(indexRef);
@@ -547,7 +549,7 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
     }
 
     @Override
-    public synchronized void replayReplicaPartitionLogs(Partitions partitions, boolean flush)
+    public synchronized void replayReplicaPartitionLogs(Set<Integer> partitions, boolean flush)
             throws HyracksDataException {
         //replay logs > minLSN that belong to these partitions
         try {
@@ -595,7 +597,7 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
         FileUtils.deleteQuietly(recoveryFolderPath.toFile());
     }
 
-    protected void cleanUp(Partitions partitions) throws HyracksDataException {
+    protected void cleanUp(Set<Integer> partitions) throws HyracksDataException {
         // the cleanup is currently done by PersistentLocalResourceRepository#clean
     }
 
@@ -655,7 +657,7 @@ public class RecoveryManager implements IRecoveryManager, ILifeCycleComponent {
         TxnEntityId loserEntity;
         List<Long> undoLSNSet = null;
         //get active partitions on this node
-        Partitions activePartitions = appCtx.getReplicaManager().getPartitions();
+        Set<Integer> activePartitions = appCtx.getReplicaManager().getPartitions();
         ILogReader logReader = logMgr.getLogReader(false);
         try {
             logReader.setPosition(firstLSN);

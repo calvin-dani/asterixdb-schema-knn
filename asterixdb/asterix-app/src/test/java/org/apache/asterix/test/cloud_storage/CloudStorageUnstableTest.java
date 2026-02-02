@@ -18,10 +18,6 @@
  */
 package org.apache.asterix.test.cloud_storage;
 
-import static org.apache.asterix.api.common.LocalCloudUtilAdobeMock.fillConfigTemplate;
-import static org.apache.asterix.test.cloud_storage.CloudStorageTest.CONFIG_FILE_TEMPLATE;
-import static org.apache.asterix.test.cloud_storage.CloudStorageTest.MOCK_SERVER_HOSTNAME_FRAGMENT;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -47,8 +43,6 @@ import org.junit.runners.MethodSorters;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
-import com.adobe.testing.s3mock.testcontainers.S3MockContainer;
-
 /**
  * Run tests in cloud deployment environment with simulated unstable connection
  */
@@ -72,9 +66,7 @@ public class CloudStorageUnstableTest {
     @BeforeClass
     public static void setUp() throws Exception {
         System.setProperty(CloudRetryableRequestUtil.CLOUD_UNSTABLE_MODE, "true");
-        S3MockContainer s3Mock = LocalCloudUtilAdobeMock.startS3CloudEnvironment(true, true);
-        fillConfigTemplate(MOCK_SERVER_HOSTNAME_FRAGMENT + s3Mock.getHttpServerPort(), CONFIG_FILE_TEMPLATE,
-                CONFIG_FILE_NAME);
+        LocalCloudUtilAdobeMock.startS3CloudEnvironment(true, true);
         TestExecutor testExecutor = new TestExecutor(DELTA_RESULT_PATH);
         testExecutor.executorId = "cloud";
         testExecutor.stripSubstring = "//DB:";

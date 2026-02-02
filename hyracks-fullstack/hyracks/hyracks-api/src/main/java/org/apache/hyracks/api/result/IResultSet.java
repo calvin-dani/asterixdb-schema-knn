@@ -23,7 +23,4 @@ import org.apache.hyracks.api.job.JobId;
 
 public interface IResultSet {
     IResultSetReader createReader(JobId jobId, ResultSetId resultSetId) throws HyracksDataException;
-
-    IResultSetReader createReader(JobId jobId, ResultSetId resultSetId, int partition) throws HyracksDataException;
-
 }

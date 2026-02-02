@@ -21,25 +21,25 @@ package org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
 import org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil;
+import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexBulkLoader;
-import org.apache.hyracks.storage.common.IComponentMetadata;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 
 public class LSMColumnIndexBulkloader extends LSMIndexBulkLoader {
     private final IColumnMetadata columnMetadata;
+    private final IComponentMetadata componentMetadata;
 
     public LSMColumnIndexBulkloader(IIndexBulkLoader bulkLoader, IColumnMetadata columnMetadata,
-            IComponentMetadata componentMetadata, IComponentStatsAccumulator statsAccumulator) {
-        super(bulkLoader, componentMetadata, statsAccumulator);
+            IComponentMetadata componentMetadata) {
+        super(bulkLoader);
         this.columnMetadata = columnMetadata;
+        this.componentMetadata = componentMetadata;
     }
 
     @Override
     public void end() throws HyracksDataException {
         ColumnUtil.putColumnsMetadataValue(columnMetadata.serializeColumnsMetadata(), componentMetadata);
         super.end();
-        columnMetadata.swapSerializedColumnsMetadata();
     }
 
     @Override

@@ -18,27 +18,21 @@
  */
 package org.apache.asterix.column.assembler;
 
-import java.util.List;
-
 import org.apache.asterix.column.assembler.value.MissingValueGetter;
 import org.apache.asterix.column.bytes.stream.in.AbstractBytesInputStream;
 import org.apache.asterix.column.values.IColumnValuesReader;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 public class EndOfRepeatedGroupAssembler extends AbstractPrimitiveValueAssembler {
-    private final List<IColumnValuesReader> readers;
+    //    private final List<ArrayValueAssembler> arrays;
     private final ArrayValueAssembler arrayAssembler;
-    private final int numDelimiters;
-    private int delimiterIndex;
+    private final int delimiterIndex;
     private EndOfRepeatedGroupAssembler previousGroup;
 
-    EndOfRepeatedGroupAssembler(List<IColumnValuesReader> readers, ArrayValueAssembler arrayAssembler,
-            int numDelimiters) {
-        super(readers.get(0).getLevel(), new AssemblerInfo(), readers.get(0), MissingValueGetter.INSTANCE);
-        this.readers = readers;
+    EndOfRepeatedGroupAssembler(IColumnValuesReader reader, ArrayValueAssembler arrayAssembler, int delimiterIndex) {
+        super(reader.getLevel(), new AssemblerInfo(), reader, MissingValueGetter.INSTANCE);
         this.arrayAssembler = arrayAssembler;
-        this.numDelimiters = numDelimiters;
-        this.delimiterIndex = readers.get(0).getNumberOfDelimiters() - numDelimiters;
+        this.delimiterIndex = delimiterIndex;
         previousGroup = null;
     }
 
@@ -47,26 +41,8 @@ public class EndOfRepeatedGroupAssembler extends AbstractPrimitiveValueAssembler
         // NoOp
     }
 
-    private IColumnValuesReader getNonMissingReader(int tupleIndex) {
-        IColumnValuesReader nonMissingReader = null;
-        for (IColumnValuesReader r : readers) {
-            if (!r.isColumnMissingForCurrentTuple(tupleIndex)) {
-                nonMissingReader = r;
-                break;
-            }
-        }
-        if (nonMissingReader == null) {
-            return readers.get(0); // all are missing, return the first one
-        }
-        return nonMissingReader;
-    }
-
     @Override
-    public int next(int tupleIndex, AssemblerState state) throws HyracksDataException {
-        if (reader.isColumnMissingForCurrentTuple(tupleIndex)) {
-            reader = getNonMissingReader(tupleIndex);
-            this.delimiterIndex = reader.getNumberOfDelimiters() - numDelimiters;
-        }
+    public int next(AssemblerState state) throws HyracksDataException {
         // Get the current delimiter index from the reader
         int delimiterIndex = reader.getDelimiterIndex();
         /*
@@ -78,9 +54,6 @@ public class EndOfRepeatedGroupAssembler extends AbstractPrimitiveValueAssembler
             if (arrayAssembler.isDelegate()) {
                 // Yes it is a delegate, end the arrayAssembler to signal to the parent assembler to finalize
                 arrayAssembler.end();
-            } else {
-                // since the current assembled values are for a higher nesting level, we need to clear the state
-                arrayAssembler.clearStateOnEnd();
             }
             // Move ot the next assembler
             return NEXT_ASSEMBLER;

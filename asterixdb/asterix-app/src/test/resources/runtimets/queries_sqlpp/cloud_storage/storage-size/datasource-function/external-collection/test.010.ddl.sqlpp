@@ -26,8 +26,12 @@ CREATE COLLECTION testCollection
 PRIMARY KEY (id: int);
 
 CREATE TYPE test AS open {};
-CREATE EXTERNAL DATASET testExternalCollection(test) USING %adapter% (
-%template%,
+CREATE EXTERNAL DATASET testExternalCollection(test) USING S3 (
+("accessKeyId"="dummyAccessKey"),
+("secretAccessKey"="dummySecretKey"),
+("sessionToken"="dummySessionToken"),
+("region"="us-west-2"),
+("serviceEndpoint"="http://127.0.0.1:8001"),
 ("container"="playground"),
 ("definition"="json-data/reviews/single-line/json"),
 ("format"="json")

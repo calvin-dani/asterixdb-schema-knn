@@ -24,7 +24,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.om.functions.BuiltinFunctions;
@@ -64,16 +63,6 @@ public class ConsolidateProjectionAndFilterExpressionsProcessor extends Abstract
         Collection<List<ScanDefineDescriptor>> scanDescriptors =
                 pushdownContext.getDatasetToScanDefinitionDescriptors().values();
         for (List<ScanDefineDescriptor> descriptors : scanDescriptors) {
-            changed |= consolidateSameScans(descriptors);
-        }
-        return changed;
-    }
-
-    private boolean consolidateSameScans(List<ScanDefineDescriptor> scanDefineDescriptors) throws AlgebricksException {
-        Collection<List<ScanDefineDescriptor>> sameScans = scanDefineDescriptors.stream()
-                .collect(Collectors.groupingBy(descriptor -> descriptor.getOperator().getOperatorTag())).values();
-        boolean changed = false;
-        for (List<ScanDefineDescriptor> descriptors : sameScans) {
             changed |= consolidate(descriptors);
         }
         return changed;

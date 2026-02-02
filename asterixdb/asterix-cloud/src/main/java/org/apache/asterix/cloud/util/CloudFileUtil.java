@@ -49,6 +49,7 @@ public class CloudFileUtil {
         // First get the set of local files
         Set<FileReference> localFiles = ioManager.list(partitionPath);
         Iterator<FileReference> localFilesIter = localFiles.iterator();
+        LOGGER.info("Cleaning partition {}.", partitionPath.getRelativePath());
 
         // Reconcile local files and cloud files
         while (localFilesIter.hasNext()) {
@@ -63,7 +64,7 @@ public class CloudFileUtil {
                  * Delete local files that do not exist in cloud storage (the ground truth for valid files), or files
                  * that has not been downloaded completely.
                  */
-                logDeleteFile(file, path);
+                logDeleteFile(file);
                 localFilesIter.remove();
                 ioManager.delete(file);
             } else {
@@ -83,9 +84,9 @@ public class CloudFileUtil {
         }
     }
 
-    private static void logDeleteFile(FileReference fileReference, CloudFile path) {
+    private static void logDeleteFile(FileReference fileReference) {
         LOGGER.info(
                 "Deleting {} from the local cache as {} either doesn't exist in the cloud or it wasn't downloaded completely",
-                fileReference, path);
+                fileReference, fileReference.getRelativePath());
     }
 }

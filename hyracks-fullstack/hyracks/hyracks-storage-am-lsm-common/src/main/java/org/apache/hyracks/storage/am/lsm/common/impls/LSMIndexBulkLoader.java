@@ -18,27 +18,18 @@
  */
 package org.apache.hyracks.storage.am.lsm.common.impls;
 
-import static org.apache.hyracks.storage.am.lsm.common.impls.DiskComponentMetadata.STATS_KEY;
-
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleWriter;
-import org.apache.hyracks.storage.common.IComponentMetadata;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 
 public class LSMIndexBulkLoader implements IChainedComponentBulkLoader {
-    private final IComponentStatsAccumulator statsAccumulator;
     private final IIndexBulkLoader bulkLoader;
-    protected final IComponentMetadata componentMetadata;
 
-    public LSMIndexBulkLoader(IIndexBulkLoader bulkLoader, IComponentMetadata componentMetadata,
-            IComponentStatsAccumulator statsAccumulator) {
+    public LSMIndexBulkLoader(IIndexBulkLoader bulkLoader) {
         this.bulkLoader = bulkLoader;
-        this.statsAccumulator = statsAccumulator;
-        this.componentMetadata = componentMetadata;
     }
 
     @Override
@@ -67,7 +58,6 @@ public class LSMIndexBulkLoader implements IChainedComponentBulkLoader {
 
     @Override
     public void end() throws HyracksDataException {
-        componentMetadata.put(STATS_KEY, statsAccumulator.serializeComponentStatsMetadata());
         bulkLoader.end();
     }
 

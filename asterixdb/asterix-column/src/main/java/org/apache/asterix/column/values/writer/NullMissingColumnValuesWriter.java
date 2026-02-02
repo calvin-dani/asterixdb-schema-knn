@@ -104,13 +104,4 @@ public class NullMissingColumnValuesWriter extends AbstractColumnValuesWriter {
     public RunLengthIntArray getDefinitionLevelsIntArray() {
         return defLevelsIntArray;
     }
-
-    @Override
-    public int getRequiredTemporaryBuffersCount() {
-        return requiredTemporaryBuffers(false);
-    }
-
-    public static int requiredTemporaryBuffers(boolean filtered) {
-        return 0;
-    }
 }

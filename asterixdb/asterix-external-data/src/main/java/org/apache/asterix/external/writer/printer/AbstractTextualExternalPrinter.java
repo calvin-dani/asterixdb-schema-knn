@@ -49,11 +49,6 @@ public abstract class AbstractTextualExternalPrinter implements IExternalPrinter
     }
 
     @Override
-    public void newFile() {
-        printer.initNewBatch();
-    }
-
-    @Override
     public void newStream(OutputStream outputStream) throws HyracksDataException {
         if (printStream != null) {
             close();

@@ -18,11 +18,12 @@
  */
 package org.apache.asterix.app.nc.task;
 
+import java.util.Set;
+
 import org.apache.asterix.common.api.INCLifecycleTask;
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.dataflow.DatasetLocalResource;
 import org.apache.asterix.common.metadata.MetadataIndexImmutableProperties;
-import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.transaction.management.resource.PersistentLocalResourceRepository;
 import org.apache.hyracks.api.control.CcId;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -42,9 +43,9 @@ public class LocalStorageCleanupTask implements INCLifecycleTask {
         INcApplicationContext appContext = (INcApplicationContext) cs.getApplicationContext();
         PersistentLocalResourceRepository localResourceRepository =
                 (PersistentLocalResourceRepository) appContext.getLocalResourceRepository();
-        localResourceRepository.deleteCorruptedResources();
         deleteInvalidMetadataIndexes(localResourceRepository);
-        final Partitions nodePartitions = appContext.getReplicaManager().getPartitions();
+        final Set<Integer> nodePartitions = appContext.getReplicaManager().getPartitions();
+        localResourceRepository.deleteCorruptedResources();
         INcApplicationContext appCtx = (INcApplicationContext) cs.getApplicationContext();
         if (appCtx.isCloudDeployment() && nodePartitions.contains(metadataPartitionId)) {
             appCtx.getTransactionSubsystem().getTransactionManager().rollbackMetadataTransactionsWithoutWAL();

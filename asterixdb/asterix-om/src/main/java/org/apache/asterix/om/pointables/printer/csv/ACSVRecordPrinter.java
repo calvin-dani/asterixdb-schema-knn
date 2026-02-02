@@ -52,6 +52,7 @@ public class ACSVRecordPrinter extends ARecordPrinter {
     private final boolean header;
     private final String recordDelimiter;
     private final Map<String, ATypeTag> recordSchemaDetails = new HashMap<>();
+    private boolean firstRecord;
     private List<String> expectedFieldNames;
     private List<IAType> expectedFieldTypes;
 
@@ -61,6 +62,7 @@ public class ACSVRecordPrinter extends ARecordPrinter {
         this.warningCollector = warningCollector;
         this.header = header;
         this.schema = schema;
+        this.firstRecord = true;
         this.recordDelimiter = recordDelimiter;
         if (schema != null) {
             this.expectedFieldNames = Arrays.asList(schema.getFieldNames());
@@ -69,32 +71,35 @@ public class ACSVRecordPrinter extends ARecordPrinter {
     }
 
     @Override
-    public void printRecord(ARecordVisitablePointable recordAccessor, PrintStream ps, IPrintVisitor visitor,
-            boolean firstRecord) throws HyracksDataException {
+    public void printRecord(ARecordVisitablePointable recordAccessor, PrintStream ps, IPrintVisitor visitor)
+            throws HyracksDataException {
         // backward compatibility - no schema provided, print it as is from recordAccessor
         if (schema == null) {
             super.printRecord(recordAccessor, ps, visitor);
         } else {
-            printSchemaFullRecord(recordAccessor, ps, visitor, firstRecord);
+            printSchemaFullRecord(recordAccessor, ps, visitor);
         }
     }
 
-    private void printSchemaFullRecord(ARecordVisitablePointable recordAccessor, PrintStream ps, IPrintVisitor visitor,
-            boolean firstRecord) throws HyracksDataException {
+    private void printSchemaFullRecord(ARecordVisitablePointable recordAccessor, PrintStream ps, IPrintVisitor visitor)
+            throws HyracksDataException {
         // check the schema for the record
         // try producing the record into the record of expected schema
         if (isValidSchema(recordAccessor)) {
             nameVisitorArg.first = ps;
             itemVisitorArg.first = ps;
-
-            if (!firstRecord) {
-                ps.print(recordDelimiter);
-            } else if (header) {
-                // it's first record and header is true
+            if (header && firstRecord) {
                 printHeader(recordAccessor, ps, visitor);
-                ps.print(recordDelimiter);
+                firstRecord = false;
             }
 
+            // add record delimiter
+            // by default the separator between the header and the records is "\n"
+            if (firstRecord) {
+                firstRecord = false;
+            } else {
+                ps.print(recordDelimiter);
+            }
             final List<IVisitablePointable> fieldNames = recordAccessor.getFieldNames();
             final List<IVisitablePointable> fieldValues = recordAccessor.getFieldValues();
 

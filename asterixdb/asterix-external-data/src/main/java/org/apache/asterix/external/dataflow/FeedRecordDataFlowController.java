@@ -252,8 +252,6 @@ public class FeedRecordDataFlowController<T> extends AbstractFeedDataFlowControl
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw HyracksDataException.create(e);
-            } finally {
-                dataParser.close();
             }
             return true;
         }

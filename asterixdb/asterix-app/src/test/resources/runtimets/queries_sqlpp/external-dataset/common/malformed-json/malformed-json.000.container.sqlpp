@@ -17,4 +17,4 @@
  * under the License.
  */
 // create container with data
-malformed malformed-data data/json/duplicate-fields.json
+playground malformed-data data/json/duplicate-fields.json

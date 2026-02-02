@@ -21,27 +21,20 @@ package org.apache.asterix.external.input.record.reader.aws.delta;
 import org.apache.hadoop.conf.Configuration;
 
 import io.delta.kernel.defaults.engine.DefaultEngine;
-import io.delta.kernel.defaults.engine.fileio.FileIO;
-import io.delta.kernel.defaults.engine.hadoopio.HadoopFileIO;
-import io.delta.kernel.engine.ParquetHandler;
+import io.delta.kernel.engine.ExpressionHandler;
 
 public class DeltaEngine extends DefaultEngine {
 
-    private final FileIO fileIO;
-    private final Configuration conf;
+    protected DeltaEngine(Configuration configuration) {
+        super(configuration);
+    }
 
-    protected DeltaEngine(FileIO fileIO, Configuration conf) {
-        super(fileIO);
-        this.fileIO = fileIO;
-        this.conf = conf;
+    @Override
+    public ExpressionHandler getExpressionHandler() {
+        return new DeltaExpressionHandler();
     }
 
     public static DeltaEngine create(Configuration configuration) {
-        return new DeltaEngine(new HadoopFileIO(configuration), configuration);
+        return new DeltaEngine(configuration);
     }
-
-    public ParquetHandler getParquetHandler() {
-        return new DeltaParquetHandler(this.fileIO, this.conf);
-    }
-
 }

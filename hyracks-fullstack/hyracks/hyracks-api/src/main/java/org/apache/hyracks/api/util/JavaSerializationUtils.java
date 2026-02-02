@@ -28,15 +28,12 @@ import java.io.ObjectStreamClass;
 import java.io.Serializable;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
-import java.util.Map;
 
+import org.apache.hyracks.api.comm.DefaultJavaSerializationProvider;
 import org.apache.hyracks.api.comm.IJavaSerializationProvider;
-import org.apache.hyracks.api.comm.ReplacementsAwareJavaSerializationProvider;
-import org.apache.hyracks.util.ThrowingIOFunction;
 
 public class JavaSerializationUtils {
-    private static final ReplacementsAwareJavaSerializationProvider serProvider =
-            ReplacementsAwareJavaSerializationProvider.INSTANCE;
+    private static IJavaSerializationProvider serProvider = DefaultJavaSerializationProvider.INSTANCE;
 
     private JavaSerializationUtils() {
     }
@@ -92,6 +89,10 @@ public class JavaSerializationUtils {
         return Class.forName(className);
     }
 
+    public static void setSerializationProvider(IJavaSerializationProvider serProvider) {
+        JavaSerializationUtils.serProvider = serProvider;
+    }
+
     public static IJavaSerializationProvider getSerializationProvider() {
         return serProvider;
     }
@@ -105,7 +106,7 @@ public class JavaSerializationUtils {
     }
 
     private static class ClassLoaderObjectInputStream extends ObjectInputStream {
-        private final ClassLoader classLoader;
+        private ClassLoader classLoader;
 
         protected ClassLoaderObjectInputStream(InputStream in, ClassLoader classLoader)
                 throws IOException, SecurityException {
@@ -119,7 +120,7 @@ public class JavaSerializationUtils {
         }
 
         @Override
-        protected Class<?> resolveProxyClass(String[] interfaces) throws ClassNotFoundException {
+        protected Class<?> resolveProxyClass(String[] interfaces) throws IOException, ClassNotFoundException {
             ClassLoader nonPublicLoader = null;
             boolean hasNonPublicInterface = false;
 
@@ -144,30 +145,6 @@ public class JavaSerializationUtils {
             } catch (IllegalArgumentException e) {
                 throw new ClassNotFoundException(null, e);
             }
-        }
-    }
-
-    public static Map<Class<?>, ThrowingIOFunction<Object, Object>> getReplacements() {
-        return serProvider.getReplacements();
-    }
-
-    public static <T> void registerReplacement(Class<T> clazz, ThrowingIOFunction<? super T, ?> replacementFunction) {
-        serProvider.registerReplacement(clazz, object -> replacementFunction.process(clazz.cast(object)));
-    }
-
-    public static class SerializableExceptionProxy extends Throwable {
-        private static final long serialVersionUID = 1L;
-        private final String type;
-
-        public SerializableExceptionProxy(Throwable t) {
-            super(ExceptionUtils.getMessageOrToString(t));
-            this.type = t.getClass().getName();
-            setStackTrace(t.getStackTrace());
-        }
-
-        @Override
-        public String toString() {
-            return type + ": " + getMessage();
         }
     }
 }

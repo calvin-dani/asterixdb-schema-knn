@@ -29,7 +29,6 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
-import org.apache.hyracks.dataflow.common.utils.TaskUtil;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITupleFilter;
@@ -37,19 +36,14 @@ import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.util.ResourceReleaseUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
-import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 
 public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
 
-    private static final Logger LOGGER = LogManager.getLogger();
     protected final IHyracksTaskContext ctx;
-    private final boolean sampleLoader;
     protected final float fillFactor;
     protected final boolean verifyInput;
     protected final long numElementsHint;
@@ -68,17 +62,12 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
     protected ITupleFilter tupleFilter;
     protected FrameTupleReference frameTuple;
     private boolean failed = false;
-    private long openDuration;
-    private long nextFrameDuration;
-    private long closeDuration;
 
     public IndexBulkLoadOperatorNodePushable(IIndexDataflowHelperFactory indexHelperFactory, IHyracksTaskContext ctx,
             int partition, int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, RecordDescriptor recDesc, ITupleFilterFactory tupleFilterFactory,
-            ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap, boolean sampleLoader)
-            throws HyracksDataException {
+            ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap) throws HyracksDataException {
         this.ctx = ctx;
-        this.sampleLoader = sampleLoader;
         this.partitions = partitionsMap[partition];
         this.tuplePartitioner = partitionerFactory.createPartitioner(ctx);
         this.storagePartitionId2Index = new Int2IntOpenHashMap();
@@ -101,7 +90,6 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
 
     @Override
     public void open() throws HyracksDataException {
-        long start = System.nanoTime();
         accessor = new FrameTupleAccessor(recDesc);
         for (int i = 0; i < indexHelpers.length; i++) {
             indexHelpersOpen[i] = true;
@@ -119,12 +107,10 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
         } catch (Exception e) {
             throw HyracksDataException.create(e);
         }
-        openDuration = System.nanoTime() - start;
     }
 
     @Override
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-        long start = System.nanoTime();
         accessor.reset(buffer);
         int tupleCount = accessor.getTupleCount();
         for (int i = 0; i < tupleCount; i++) {
@@ -141,12 +127,10 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
         }
 
         FrameUtils.flushFrame(buffer, writer);
-        nextFrameDuration += System.nanoTime() - start;
     }
 
     @Override
     public void close() throws HyracksDataException {
-        long start = System.nanoTime();
         try {
             closeBulkLoaders();
         } catch (Throwable th) {
@@ -155,17 +139,7 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
             try {
                 closeIndexes(indexes, indexHelpers, indexHelpersOpen);
             } finally {
-                try {
-                    writer.close();
-                } finally {
-                    closeDuration = System.nanoTime() - start;
-                    if (sampleLoader || TaskUtil.get("SAMPLE_OPERATION_IS_GOING", ctx) != null) {
-                        LOGGER.debug("StatsLogging: IndexBulkLoadOperatorNodePushable_Open_Time: {}ns", openDuration);
-                        LOGGER.debug("StatsLogging: IndexBulkLoadOperatorNodePushable_NextFrame_Time: {}ns",
-                                nextFrameDuration);
-                        LOGGER.debug("StatsLogging: IndexBulkLoadOperatorNodePushable_Close_Time: {}ns", closeDuration);
-                    }
-                }
+                writer.close();
             }
         }
     }
@@ -183,7 +157,7 @@ public class IndexBulkLoadOperatorNodePushable extends AbstractUnaryInputUnaryOu
 
     protected void initializeBulkLoader(IIndex index, int indexId) throws HyracksDataException {
         bulkLoaders[indexId] = index.createBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
-                NoOpPageWriteCallback.INSTANCE, NoOpStatsAccumulator.INSTANCE);
+                NoOpPageWriteCallback.INSTANCE);
     }
 
     private void closeBulkLoaders() throws HyracksDataException {

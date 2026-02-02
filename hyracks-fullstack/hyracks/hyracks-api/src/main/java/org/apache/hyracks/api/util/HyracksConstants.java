@@ -29,8 +29,6 @@ public class HyracksConstants {
     public static final String INDEX_CURSOR_STATS = "INDEX_CURSOR_STATS";
 
     public static final String TUPLE_PROJECTOR = "TUPLE_PROJECTOR";
-    public static final String SAMPLE_CARDINALITY = "SAMPLE_CARDINALITY";
-    public static final String SAMPLE_SEED = "SAMPLE_SEED";
 
     public static final String ATOMIC_OP_CONTEXT = "ATOMIC_OP_CONTEXT";
 

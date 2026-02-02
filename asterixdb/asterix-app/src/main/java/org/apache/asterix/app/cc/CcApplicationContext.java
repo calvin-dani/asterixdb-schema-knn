@@ -24,7 +24,8 @@ import java.io.IOException;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
-import org.apache.asterix.app.external.ExternalStatsTracker;
+import org.apache.asterix.app.external.ExternalCredentialsCache;
+import org.apache.asterix.app.external.ExternalCredentialsCacheUpdater;
 import org.apache.asterix.app.result.ResultReader;
 import org.apache.asterix.common.api.IConfigValidator;
 import org.apache.asterix.common.api.IConfigValidatorFactory;
@@ -56,7 +57,8 @@ import org.apache.asterix.common.context.IStorageComponentProvider;
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
 import org.apache.asterix.common.dataflow.IDataPartitioningProvider;
 import org.apache.asterix.common.external.IAdapterFactoryService;
-import org.apache.asterix.common.external.IExternalStatsTracker;
+import org.apache.asterix.common.external.IExternalCredentialsCache;
+import org.apache.asterix.common.external.IExternalCredentialsCacheUpdater;
 import org.apache.asterix.common.metadata.IMetadataBootstrap;
 import org.apache.asterix.common.metadata.IMetadataLockUtil;
 import org.apache.asterix.common.replication.INcLifecycleCoordinator;
@@ -91,31 +93,31 @@ import org.apache.hyracks.util.NetworkUtil;
  */
 public class CcApplicationContext implements ICcApplicationContext {
 
-    private final ICCServiceContext ccServiceCtx;
-    private final IStorageComponentProvider storageComponentProvider;
-    private final IGlobalRecoveryManager globalRecoveryManager;
-    private final IResourceIdManager resourceIdManager;
-    private final CompilerProperties compilerProperties;
-    private final ExternalProperties externalProperties;
-    private final MetadataProperties metadataProperties;
-    private final StorageProperties storageProperties;
-    private final TransactionProperties txnProperties;
-    private final ActiveProperties activeProperties;
-    private final BuildProperties buildProperties;
-    private final ReplicationProperties replicationProperties;
-    private final ExtensionProperties extensionProperties;
-    private final MessagingProperties messagingProperties;
-    private final NodeProperties nodeProperties;
+    private ICCServiceContext ccServiceCtx;
+    private IStorageComponentProvider storageComponentProvider;
+    private IGlobalRecoveryManager globalRecoveryManager;
+    private IResourceIdManager resourceIdManager;
+    private CompilerProperties compilerProperties;
+    private ExternalProperties externalProperties;
+    private MetadataProperties metadataProperties;
+    private StorageProperties storageProperties;
+    private TransactionProperties txnProperties;
+    private ActiveProperties activeProperties;
+    private BuildProperties buildProperties;
+    private ReplicationProperties replicationProperties;
+    private ExtensionProperties extensionProperties;
+    private MessagingProperties messagingProperties;
+    private NodeProperties nodeProperties;
     private final CloudProperties cloudProperties;
-    private final Supplier<IMetadataBootstrap> metadataBootstrapSupplier;
+    private Supplier<IMetadataBootstrap> metadataBootstrapSupplier;
     private volatile HyracksConnection hcc;
     private volatile ResultSet resultSet;
-    private final Object extensionManager;
-    private final INcLifecycleCoordinator ftStrategy;
-    private final IJobLifecycleListener activeLifeCycleListener;
-    private final IMetadataLockManager mdLockManager;
-    private final IMetadataLockUtil mdLockUtil;
-    private final IClusterStateManager clusterStateManager;
+    private Object extensionManager;
+    private INcLifecycleCoordinator ftStrategy;
+    private IJobLifecycleListener activeLifeCycleListener;
+    private IMetadataLockManager mdLockManager;
+    private IMetadataLockUtil mdLockUtil;
+    private IClusterStateManager clusterStateManager;
     private final INodeJobTracker nodeJobTracker;
     private final ITxnIdFactory txnIdFactory;
     private final ICompressionManager compressionManager;
@@ -129,7 +131,8 @@ public class CcApplicationContext implements ICcApplicationContext {
     private final IOManager ioManager;
     private final INamespacePathResolver namespacePathResolver;
     private final INamespaceResolver namespaceResolver;
-    private final IExternalStatsTracker externalStatsTracker;
+    private final IExternalCredentialsCache externalCredentialsCache;
+    private final IExternalCredentialsCacheUpdater externalCredentialsCacheUpdater;
 
     public CcApplicationContext(ICCServiceContext ccServiceCtx, HyracksConnection hcc,
             Supplier<IMetadataBootstrap> metadataBootstrapSupplier, IGlobalRecoveryManager globalRecoveryManager,
@@ -180,7 +183,8 @@ public class CcApplicationContext implements ICcApplicationContext {
         this.globalTxManager = globalTxManager;
         this.ioManager = ioManager;
         dataPartitioningProvider = DataPartitioningProvider.create(this);
-        externalStatsTracker = new ExternalStatsTracker();
+        externalCredentialsCache = new ExternalCredentialsCache(this);
+        externalCredentialsCacheUpdater = new ExternalCredentialsCacheUpdater(this);
     }
 
     @Override
@@ -421,7 +425,12 @@ public class CcApplicationContext implements ICcApplicationContext {
     }
 
     @Override
-    public IExternalStatsTracker getExternalStatsTracker() {
-        return externalStatsTracker;
+    public IExternalCredentialsCache getExternalCredentialsCache() {
+        return externalCredentialsCache;
+    }
+
+    @Override
+    public IExternalCredentialsCacheUpdater getExternalCredentialsCacheUpdater() {
+        return externalCredentialsCacheUpdater;
     }
 }

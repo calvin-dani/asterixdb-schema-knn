@@ -74,11 +74,6 @@ public class TxnIdBlockRequest implements ICcAddressedMessage {
     }
 
     @Override
-    public boolean isWhispered() {
-        return true;
-    }
-
-    @Override
     public String toString() {
         return TxnIdBlockRequest.class.getSimpleName();
     }

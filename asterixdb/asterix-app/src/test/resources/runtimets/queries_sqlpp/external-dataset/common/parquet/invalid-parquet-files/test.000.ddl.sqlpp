@@ -28,7 +28,6 @@ CREATE TYPE ParquetType as {
 CREATE EXTERNAL DATASET ParquetDataset(ParquetType) USING %adapter%
 (
   %template%,
-  %additional_Properties%
   ("container"="playground"),
   ("definition"="json-data/reviews/single-line/json"),
   ("format" = "parquet")

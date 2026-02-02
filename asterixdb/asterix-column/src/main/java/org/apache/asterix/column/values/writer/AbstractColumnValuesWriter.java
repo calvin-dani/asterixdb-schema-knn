@@ -46,7 +46,6 @@ public abstract class AbstractColumnValuesWriter implements IColumnValuesWriter 
     protected final AbstractColumnFilterWriter filterWriter;
     protected final ParquetRunLengthBitPackingHybridEncoder definitionLevels;
     protected final int level;
-    protected final boolean filtered;
 
     private final int columnIndex;
     private final boolean collection;
@@ -61,7 +60,6 @@ public abstract class AbstractColumnValuesWriter implements IColumnValuesWriter 
         nullBitMask = ColumnValuesUtil.getNullMask(level);
         int width = ColumnValuesUtil.getBitWidth(level);
         definitionLevels = new ParquetRunLengthBitPackingHybridEncoder(width);
-        this.filtered = filtered;
         this.filterWriter = filtered ? createFilter() : NoOpColumnFilterWriter.INSTANCE;
     }
 

@@ -46,9 +46,7 @@ import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
 import org.apache.hyracks.api.dataflow.IConnectorDescriptor;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ITupleMultiPartitionComputerFactory;
-import org.apache.hyracks.api.job.HyracksJobProperty;
 import org.apache.hyracks.api.job.IConnectorDescriptorRegistry;
-import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.dataflow.common.data.partition.range.FieldRangeIntersectPartitionComputerFactory;
 import org.apache.hyracks.dataflow.common.data.partition.range.RangeMap;
 import org.apache.hyracks.dataflow.common.data.partition.range.StaticRangeMapSupplier;
@@ -136,11 +134,6 @@ public class PartialBroadcastRangeIntersectExchangePOperator extends AbstractExc
             i++;
         }
         return new Triple<>(startFields, endFields, comps);
-    }
-
-    @Override
-    protected void setJobSpecAnnotation(JobSpecification spec) {
-        spec.setProperty(HyracksJobProperty.RESULT_SET_ORDERED, true);
     }
 
     @Override

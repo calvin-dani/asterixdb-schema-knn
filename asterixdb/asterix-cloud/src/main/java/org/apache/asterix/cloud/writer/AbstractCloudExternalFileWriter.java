@@ -79,7 +79,6 @@ abstract class AbstractCloudExternalFileWriter implements IExternalFileWriter {
 
     @Override
     public final boolean newFile(String directory, String fileName) throws HyracksDataException {
-        printer.newFile();
         String fullPath = directory + fileName;
         if (checkAndWarnExceedingMaxLength(fullPath)) {
             return false;

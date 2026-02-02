@@ -96,9 +96,6 @@ public interface ILSMIndex extends IIndex {
 
     public void scanDiskComponents(ILSMIndexOperationContext ctx, IIndexCursor cursor) throws HyracksDataException;
 
-    public void scanDiskComponentsForSample(ILSMIndexOperationContext ctx, IIndexCursor cursor)
-            throws HyracksDataException;
-
     /**
      * Create a flush operation.
      * This is an atomic operation. If an exception is thrown, no partial effect is left

@@ -34,7 +34,6 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
-import software.amazon.awssdk.services.s3.model.DeleteBucketRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
@@ -43,7 +42,7 @@ public class LocalCloudUtil {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private static final int MOCK_SERVER_PORT = 8001;
-    public static final String MOCK_SERVER_ENDPOINT = "http://127.0.0.1:" + MOCK_SERVER_PORT;
+    public static final String MOCK_SERVER_HOSTNAME = "http://127.0.0.1:" + MOCK_SERVER_PORT;
     public static final String CLOUD_STORAGE_BUCKET = "cloud-storage-container";
     public static final String STORAGE_DUMMY_FILE = "storage/dummy.txt";
     public static final String MOCK_SERVER_REGION = "us-west-2";
@@ -69,16 +68,20 @@ public class LocalCloudUtil {
         if (cleanStart) {
             FileUtils.deleteQuietly(new File(MOCK_FILE_BACKEND));
         }
-        stopS3MockServer();
         // Starting S3 mock server to be used instead of real S3 server
         LOGGER.info("Starting S3 mock server");
         // Use file backend for debugging/inspection
         s3MockServer = new S3Mock.Builder().withPort(MOCK_SERVER_PORT).withFileBackend(MOCK_FILE_BACKEND).build();
-        s3MockServer.start();
+        stopS3MockServer();
+        try {
+            s3MockServer.start();
+        } catch (Exception ex) {
+            // it might already be started, do nothing
+        }
         LOGGER.info("S3 mock server started successfully");
 
         S3ClientBuilder builder = S3Client.builder();
-        URI endpoint = URI.create(MOCK_SERVER_ENDPOINT); // endpoint pointing to S3 mock server
+        URI endpoint = URI.create(MOCK_SERVER_HOSTNAME); // endpoint pointing to S3 mock server
         builder.region(Region.of(MOCK_SERVER_REGION)).credentialsProvider(AnonymousCredentialsProvider.create())
                 .endpointOverride(endpoint);
         S3Client client = builder.build();
@@ -102,22 +105,6 @@ public class LocalCloudUtil {
         return s3MockServer;
     }
 
-    public static void recreateBucket(String bucketName, S3Client client) {
-        String verb = "Created";
-        try {
-            client.deleteBucket(DeleteBucketRequest.builder().bucket(bucketName).build());
-            verb = "Recreated";
-        } catch (Exception e) {
-            // ignore any failure
-        }
-        try {
-            client.createBucket(CreateBucketRequest.builder().bucket(bucketName).build());
-            LOGGER.info("{} bucket {}", verb, bucketName);
-        } finally {
-            client.close();
-        }
-    }
-
     public static void stopS3MockServer() {
         shutdownSilently();
         // since they are running on same port, we need to shut down other mock server as well
@@ -131,7 +118,6 @@ public class LocalCloudUtil {
             } catch (Exception ex) {
                 // do nothing
             }
-            s3MockServer = null;
         }
     }
 }

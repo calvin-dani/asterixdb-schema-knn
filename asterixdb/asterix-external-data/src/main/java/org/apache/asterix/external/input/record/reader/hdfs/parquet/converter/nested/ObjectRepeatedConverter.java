@@ -18,8 +18,6 @@
  */
 package org.apache.asterix.external.input.record.reader.hdfs.parquet.converter.nested;
 
-import static org.apache.asterix.runtime.evaluators.functions.PointableHelper.NULL_REF;
-
 import java.io.DataOutput;
 import java.io.IOException;
 
@@ -58,9 +56,9 @@ import org.apache.parquet.schema.PrimitiveType;
  *
  * Instead of:
  * message arrow_schema {
- *   required group my_group_list (LIST) {
+ *   required group myGroupArray (LIST) {
  *     repeated group list {
- *       optional group element {
+ *       optional group  {
  *         optional binary hello (STRING);
  *         optional binary foo (STRING);
  *       }
@@ -79,14 +77,10 @@ public class ObjectRepeatedConverter extends AbstractComplexConverter {
      * {@link IExternalFilterValueEmbedder} decides whether the object should be ignored entirely
      */
     private boolean ignore = false;
-    private final GroupType parquetType;
-    private final boolean[] isValueAdded;
 
     public ObjectRepeatedConverter(AbstractComplexConverter parent, String stringFieldName, int index,
             GroupType parquetType, ParquetConverterContext context) throws IOException {
         super(parent, stringFieldName, index, parquetType, context);
-        this.parquetType = parquetType;
-        isValueAdded = new boolean[parquetType.getFieldCount()];
     }
 
     @Override
@@ -100,31 +94,12 @@ public class ObjectRepeatedConverter extends AbstractComplexConverter {
         } else {
             ignore = checkValueEmbedder(valueEmbedder);
         }
-        for (int i = 0; i < parquetType.getFieldCount(); i++) {
-            isValueAdded[i] = false;
-        }
     }
 
     @Override
     public void end() {
         closeDirectRepeatedChildren();
         if (!ignore) {
-            IExternalFilterValueEmbedder valueEmbedder = context.getValueEmbedder();
-            for (int i = 0; i < parquetType.getFieldCount(); i++) {
-                if (!isValueAdded[i]) {
-                    String childFieldName = parquetType.getFieldName(i);
-                    try {
-                        if (valueEmbedder.shouldEmbed(childFieldName, ATypeTag.NULL)) {
-                            recordBuilder.addField(context.getSerializedFieldName(childFieldName),
-                                    valueEmbedder.getEmbeddedValue());
-                        } else {
-                            recordBuilder.addField(context.getSerializedFieldName(childFieldName), NULL_REF);
-                        }
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            }
             writeToList();
             context.getValueEmbedder().exitObject();
         }
@@ -192,9 +167,6 @@ public class ObjectRepeatedConverter extends AbstractComplexConverter {
         }
         IExternalFilterValueEmbedder valueEmbedder = context.getValueEmbedder();
         IValueReference fieldName = value.getFieldName();
-        String fieldNameStr = value.getStringFieldName();
-        int fieldIndex = parquetType.getFieldIndex(fieldNameStr);
-        isValueAdded[fieldIndex] = true;
         try {
             if (valueEmbedder.shouldEmbed(value.getStringFieldName(), value.getTypeTag())) {
                 recordBuilder.addField(fieldName, valueEmbedder.getEmbeddedValue());

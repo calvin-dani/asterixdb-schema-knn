@@ -32,7 +32,6 @@ import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hyracks.api.util.IoUtil;
 import org.apache.parquet.avro.AvroParquetWriter;
@@ -134,9 +133,8 @@ public class DeltaTableGenerator {
                 writer.write(record);
             }
 
-            FileSystem fs = FileSystem.getLocal(conf);
+            long size = writer.getDataSize();
             writer.close();
-            long size = fs.getFileStatus(path).getLen();
 
             List<Action> actions = List.of(new AddFile("firstFile.parquet", new HashMap<>(), size,
                     System.currentTimeMillis(), true, null, null));
@@ -156,8 +154,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileSecondSnapshotRecords) {
                 writer2.write(record);
             }
+            long size2 = writer2.getDataSize();
             writer2.close();
-            long size2 = fs.getFileStatus(path2).getLen();
             AddFile addFile = new AddFile("firstFile.parquet", new HashMap<>(), size, System.currentTimeMillis(), true,
                     null, null);
             RemoveFile removeFile = addFile.remove();
@@ -203,9 +201,8 @@ public class DeltaTableGenerator {
                 writer.write(record);
             }
 
-            FileSystem fs = FileSystem.getLocal(conf);
+            long size = writer.getDataSize();
             writer.close();
-            long size = fs.getFileStatus(path).getLen();
 
             List<Action> actions = List.of(new AddFile("firstFile.parquet", new HashMap<>(), size,
                     System.currentTimeMillis(), true, null, null));
@@ -227,8 +224,8 @@ public class DeltaTableGenerator {
                 writer2.write(record);
             }
 
+            long size2 = writer2.getDataSize();
             writer2.close();
-            long size2 = fs.getFileStatus(path2).getLen();
 
             List<Action> actions2 = List.of(new AddFile("secondFile.parquet", new HashMap<>(), size2,
                     System.currentTimeMillis(), true, null, null));
@@ -255,9 +252,9 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileFirstSnapshotRecords) {
                 writer.write(record);
             }
-            FileSystem fs = FileSystem.getLocal(conf);
+
+            long size = writer.getDataSize();
             writer.close();
-            long size = fs.getFileStatus(path).getLen();
 
             List<Action> actions = List.of(new AddFile("firstFile.parquet", new HashMap<>(), size,
                     System.currentTimeMillis(), true, null, null));
@@ -328,9 +325,8 @@ public class DeltaTableGenerator {
                 writer.write(record);
             }
 
-            FileSystem fs = FileSystem.getLocal(conf);
+            long size = writer.getDataSize();
             writer.close();
-            long size = fs.getFileStatus(path).getLen();
 
             List<Action> actions = List.of(new AddFile("firstFile.parquet", new HashMap<>(), size,
                     System.currentTimeMillis(), true, null, null));
@@ -352,8 +348,8 @@ public class DeltaTableGenerator {
                     writer2.write(record);
                 }
 
+                long size2 = writer2.getDataSize();
                 writer2.close();
-                long size2 = fs.getFileStatus(path2).getLen();
 
                 List<Action> actions2 = List.of(new AddFile("File" + i + ".parquet", new HashMap<>(), size2,
                         System.currentTimeMillis(), true, null, null));
@@ -430,9 +426,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileFirstSnapshotRecords) {
                 writer.write(record);
             }
-            FileSystem fs = FileSystem.getLocal(conf);
+            long size = writer.getDataSize();
             writer.close();
-            long size = fs.getFileStatus(path).getLen();
 
             Path path2 = new Path(DELTA_PARTITIONED_TABLE, "secondFile.parquet");
             ParquetWriter<GenericData.Record> writer2 =
@@ -440,8 +435,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileSecondSnapshotRecords) {
                 writer2.write(record);
             }
+            long size2 = writer2.getDataSize();
             writer2.close();
-            long size2 = fs.getFileStatus(path2).getLen();
 
             Path path3 = new Path(DELTA_PARTITIONED_TABLE, "thirdFile.parquet");
             ParquetWriter<GenericData.Record> writer3 =
@@ -449,8 +444,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileThirdSnapshotRecords) {
                 writer3.write(record);
             }
+            long size3 = writer3.getDataSize();
             writer3.close();
-            long size3 = fs.getFileStatus(path3).getLen();
 
             Path path4 = new Path(DELTA_PARTITIONED_TABLE, "fourthFile.parquet");
             ParquetWriter<GenericData.Record> writer4 =
@@ -458,8 +453,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileFourthSnapshotRecords) {
                 writer4.write(record);
             }
+            long size4 = writer4.getDataSize();
             writer4.close();
-            long size4 = fs.getFileStatus(path4).getLen();
 
             DeltaLog log = DeltaLog.forTable(conf, DELTA_PARTITIONED_TABLE);
             OptimisticTransaction txn = log.startTransaction();
@@ -562,9 +557,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileFirstSnapshotRecords) {
                 writer.write(record);
             }
-            FileSystem fs = FileSystem.getLocal(conf);
+            long size = writer.getDataSize();
             writer.close();
-            long size = fs.getFileStatus(path).getLen();
 
             Path path2 = new Path(DELTA_TIMESTAMP_PARTITIONED_TABLE, "secondFile.parquet");
             ParquetWriter<GenericData.Record> writer2 =
@@ -572,8 +566,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileSecondSnapshotRecords) {
                 writer2.write(record);
             }
+            long size2 = writer2.getDataSize();
             writer2.close();
-            long size2 = fs.getFileStatus(path2).getLen();
 
             Path path3 = new Path(DELTA_TIMESTAMP_PARTITIONED_TABLE, "thirdFile.parquet");
             ParquetWriter<GenericData.Record> writer3 =
@@ -581,8 +575,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileThirdSnapshotRecords) {
                 writer3.write(record);
             }
+            long size3 = writer3.getDataSize();
             writer3.close();
-            long size3 = fs.getFileStatus(path3).getLen();
 
             Path path4 = new Path(DELTA_TIMESTAMP_PARTITIONED_TABLE, "fourthFile.parquet");
             ParquetWriter<GenericData.Record> writer4 =
@@ -590,8 +584,8 @@ public class DeltaTableGenerator {
             for (GenericData.Record record : fileFourthSnapshotRecords) {
                 writer4.write(record);
             }
+            long size4 = writer4.getDataSize();
             writer4.close();
-            long size4 = fs.getFileStatus(path4).getLen();
 
             DeltaLog log = DeltaLog.forTable(conf, DELTA_TIMESTAMP_PARTITIONED_TABLE);
             OptimisticTransaction txn = log.startTransaction();

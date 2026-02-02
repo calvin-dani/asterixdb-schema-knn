@@ -39,7 +39,6 @@ import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnBufferProvider;
-import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.ColumnProjectorType;
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.IntPairUtil;
 import org.apache.hyracks.storage.am.lsm.btree.column.error.ColumnarValueException;
 
@@ -52,8 +51,6 @@ public class SparseColumnMultiPageZeroReader extends AbstractColumnMultiPageZero
     private final int maxNumberOfColumnsInAPage;
     private final BitSet pageZeroSegmentsPages;
     private final Int2IntOpenHashMap columnIndexToRelativeColumnIndex;
-    private final VoidPointable offsetPointable;
-    private final BitSet presentColumnsIndices;
 
     private int maxColumnIndexInZerothSegment;
     private int numberOfColumnInZerothSegment;
@@ -61,9 +58,10 @@ public class SparseColumnMultiPageZeroReader extends AbstractColumnMultiPageZero
     private int headerSize;
     private ByteBuffer pageZeroBuf;
 
+    private final VoidPointable offsetPointable;
+
     public SparseColumnMultiPageZeroReader(int bufferCapacity) {
         super();
-        presentColumnsIndices = new BitSet();
         zerothSegmentReader = new SparseColumnPageZeroReader();
         this.pageZeroSegmentsPages = new BitSet();
         this.maxNumberOfColumnsInAPage =
@@ -79,19 +77,19 @@ public class SparseColumnMultiPageZeroReader extends AbstractColumnMultiPageZero
     }
 
     @Override
-    public void reset(ByteBuffer pageZeroBuf, ColumnProjectorType projectorType) {
+    public void reset(ByteBuffer pageZeroBuf) {
         this.pageZeroBuf = pageZeroBuf;
         numberOfPageZeroSegments = pageZeroBuf.getInt(NUMBER_OF_PAGE_ZERO_SEGMENTS_OFFSET);
         numberOfColumnInZerothSegment = pageZeroBuf.getInt(MAX_COLUMNS_IN_ZEROTH_SEGMENT);
         maxColumnIndexInZerothSegment = pageZeroBuf.getInt(MAX_COLUMNS_INDEX_IN_ZEROTH_SEGMENT_OFFSET);
         headerSize = MAX_COLUMNS_INDEX_IN_ZEROTH_SEGMENT_OFFSET + numberOfPageZeroSegments * Integer.BYTES;
-        zerothSegmentReader.reset(pageZeroBuf, projectorType,
-                Math.min(numberOfColumnInZerothSegment, getNumberOfPresentColumns()), headerSize);
+        zerothSegmentReader.reset(pageZeroBuf, Math.min(numberOfColumnInZerothSegment, getNumberOfPresentColumns()),
+                headerSize);
         columnIndexToRelativeColumnIndex.clear();
     }
 
     @Override
-    public void reset(ByteBuffer pageZeroBuf, ColumnProjectorType projectorType, int headerSize) {
+    public void reset(ByteBuffer pageZeroBuf, int headerSize) {
         throw new UnsupportedOperationException("This method is not supported for multi-page zero readers.");
     }
 
@@ -279,30 +277,20 @@ public class SparseColumnMultiPageZeroReader extends AbstractColumnMultiPageZero
     }
 
     @Override
-    public void setPresentColumnsIndices() {
-        presentColumnsIndices.clear();
-        int numberOfPresentColumns = getNumberOfPresentColumns();
-        if (numberOfPresentColumns == 0) {
-            return;
-        }
+    public void getAllColumns(BitSet presentColumns) {
         int columnOffsetStart = headerSize;
-        for (int i = 0; i < Math.min(numberOfPresentColumns, numberOfColumnInZerothSegment); i++) {
+        for (int i = 0; i < Math.min(getNumberOfPresentColumns(), numberOfColumnInZerothSegment); i++) {
             int columnIndex = pageZeroBuf.getInt(columnOffsetStart);
-            presentColumnsIndices.set(columnIndex);
+            presentColumns.set(columnIndex);
             columnOffsetStart += SparseColumnPageZeroWriter.COLUMN_OFFSET_SIZE;
         }
-        if (numberOfPresentColumns > numberOfColumnInZerothSegment) {
+        if (getNumberOfPresentColumns() > numberOfColumnInZerothSegment) {
             // read the rest of the columns from the segment stream
             int columnsInLastSegment = getNumberOfPresentColumns() - numberOfColumnInZerothSegment
                     - (numberOfPageZeroSegments - 2) * maxNumberOfColumnsInAPage;
-            segmentBuffers.readAllColumns(presentColumnsIndices, numberOfPageZeroSegments, maxNumberOfColumnsInAPage,
+            segmentBuffers.readAllColumns(presentColumns, numberOfPageZeroSegments, maxNumberOfColumnsInAPage,
                     columnsInLastSegment);
         }
-    }
-
-    @Override
-    public void getAllColumns(BitSet presentColumns) {
-        presentColumns.or(presentColumnsIndices);
     }
 
     @Override

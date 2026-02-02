@@ -18,8 +18,6 @@
  */
 package org.apache.asterix.test.cloud_storage;
 
-import static org.apache.asterix.api.common.LocalCloudUtilAdobeMock.fillConfigTemplate;
-import static org.apache.asterix.test.cloud_storage.CloudStorageTest.MOCK_SERVER_HOSTNAME_FRAGMENT;
 import static org.apache.asterix.test.runtime.ExternalPythonFunctionIT.setNcEndpoints;
 
 import java.util.Collection;
@@ -27,7 +25,6 @@ import java.util.List;
 
 import org.apache.asterix.api.common.LocalCloudUtilAdobeMock;
 import org.apache.asterix.common.config.GlobalConfig;
-import org.apache.asterix.test.common.TestConstants;
 import org.apache.asterix.test.common.TestExecutor;
 import org.apache.asterix.test.runtime.LangExecutionUtil;
 import org.apache.asterix.testframework.context.TestCaseContext;
@@ -45,8 +42,6 @@ import org.junit.runners.MethodSorters;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
 
-import com.adobe.testing.s3mock.testcontainers.S3MockContainer;
-
 /**
  * Run tests in cloud deployment environment
  */
@@ -59,9 +54,8 @@ public class CloudPythonTest {
     private final TestCaseContext tcCtx;
     private static final String SUITE_TESTS = "testsuite_it_python.xml";
     private static final String ONLY_TESTS = "testsuite_cloud_storage_only.xml";
+    private static final String CONFIG_FILE_NAME = "src/test/resources/cc-cloud-storage.conf";
     private static final String DELTA_RESULT_PATH = "results_cloud";
-    public static final String CONFIG_FILE_TEMPLATE = "src/test/resources/cc-cloud-storage.conf.ftl";
-    public static final String CONFIG_FILE = "target/cc-cloud-storage.conf";
     private static final String EXCLUDED_TESTS = "MP";
 
     public CloudPythonTest(TestCaseContext tcCtx) {
@@ -70,23 +64,18 @@ public class CloudPythonTest {
 
     @BeforeClass
     public static void setUp() throws Exception {
-        S3MockContainer s3Mock = LocalCloudUtilAdobeMock.startS3CloudEnvironment(true);
-        fillConfigTemplate(MOCK_SERVER_HOSTNAME_FRAGMENT + s3Mock.getHttpServerPort(), CONFIG_FILE_TEMPLATE,
-                CONFIG_FILE);
-        System.setProperty(TestConstants.S3_SERVICE_ENDPOINT_KEY,
-                MOCK_SERVER_HOSTNAME_FRAGMENT + s3Mock.getHttpServerPort());
+        LocalCloudUtilAdobeMock.startS3CloudEnvironment(true);
         TestExecutor testExecutor = new TestExecutor(DELTA_RESULT_PATH);
         testExecutor.executorId = "cloud";
         testExecutor.stripSubstring = "//DB:";
-        LangExecutionUtil.setUp(CONFIG_FILE, testExecutor);
+        LangExecutionUtil.setUp(CONFIG_FILE_NAME, testExecutor);
         setNcEndpoints(testExecutor);
-        System.setProperty(GlobalConfig.CONFIG_FILE_PROPERTY, CONFIG_FILE);
+        System.setProperty(GlobalConfig.CONFIG_FILE_PROPERTY, CONFIG_FILE_NAME);
     }
 
     @AfterClass
     public static void tearDown() throws Exception {
         LangExecutionUtil.tearDown();
-        LocalCloudUtilAdobeMock.shutdownSilently();
     }
 
     @Parameters(name = "CloudPythonTest {index}: {0}")

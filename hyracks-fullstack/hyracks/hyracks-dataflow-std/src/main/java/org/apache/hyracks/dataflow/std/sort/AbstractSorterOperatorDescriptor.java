@@ -38,7 +38,6 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
-import org.apache.hyracks.dataflow.common.utils.TaskUtil;
 import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
@@ -90,15 +89,9 @@ public abstract class AbstractSorterOperatorDescriptor extends AbstractOperatorD
     public static class SortTaskState extends AbstractStateObject {
         List<GeneratedRunFileReader> generatedRunFileReaders;
         ISorter sorter;
-        private boolean sampleLoader;
 
         SortTaskState(JobId jobId, TaskId taskId) {
             super(jobId, taskId);
-        }
-
-        SortTaskState(JobId jobId, TaskId taskId, boolean sampleLoader) {
-            super(jobId, taskId);
-            this.sampleLoader = sampleLoader;
         }
     }
 
@@ -131,9 +124,8 @@ public abstract class AbstractSorterOperatorDescriptor extends AbstractOperatorD
 
                 @Override
                 public void close() throws HyracksDataException {
-                    SortTaskState state =
-                            new SortTaskState(ctx.getJobletContext().getJobId(), new TaskId(getActivityId(), partition),
-                                    TaskUtil.get("SAMPLE_OPERATION_IS_GOING", ctx) != null);
+                    SortTaskState state = new SortTaskState(ctx.getJobletContext().getJobId(),
+                            new TaskId(getActivityId(), partition));
                     runGen.close();
                     state.generatedRunFileReaders = runGen.getRuns();
                     state.sorter = runGen.getSorter();
@@ -177,9 +169,6 @@ public abstract class AbstractSorterOperatorDescriptor extends AbstractOperatorD
                 public void initialize() throws HyracksDataException {
                     SortTaskState state = (SortTaskState) ctx
                             .getStateObject(new TaskId(new ActivityId(getOperatorId(), SORT_ACTIVITY_ID), partition));
-                    if (state.sampleLoader) {
-                        TaskUtil.put("SAMPLE_OPERATION_IS_GOING", true, ctx);
-                    }
                     List<GeneratedRunFileReader> runs = state.generatedRunFileReaders;
                     ISorter sorter = state.sorter;
                     IBinaryComparator[] comparators = new IBinaryComparator[comparatorFactories.length];

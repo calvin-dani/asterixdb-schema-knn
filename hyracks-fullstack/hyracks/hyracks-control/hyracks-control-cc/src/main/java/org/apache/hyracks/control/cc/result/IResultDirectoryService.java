@@ -37,17 +37,13 @@ public interface IResultDirectoryService extends IJobLifecycleListener, IResultM
     public void init(ExecutorService executor, IJobResultCallback callback);
 
     public void registerResultPartitionLocation(JobId jobId, ResultSetId rsId, IResultMetadata metadata,
-            boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress, String nodeId)
+            boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress)
             throws HyracksDataException;
 
-    public void reportResultPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition, long resultCount)
+    public void reportResultPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition)
             throws HyracksDataException;
-
-    public void reportResultPartitionConsumed(JobId jobId, ResultSetId rsId, int partition) throws HyracksDataException;
 
     public void reportJobFailure(JobId jobId, List<Exception> exceptions);
-
-    public void reportJobTimeout(JobId jobId);
 
     public Status getResultStatus(JobId jobId, ResultSetId rsId) throws HyracksDataException;
 

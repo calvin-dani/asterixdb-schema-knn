@@ -30,7 +30,6 @@ f2: string
 drop dataset test if exists;
 CREATE EXTERNAL DATASET test(test) USING %adapter% (
 %template%,
-%additional_Properties%
 ("container"="include-exclude"),
 ("definition"="mixed-data/reviews/"),
 ("format"="tsv"),

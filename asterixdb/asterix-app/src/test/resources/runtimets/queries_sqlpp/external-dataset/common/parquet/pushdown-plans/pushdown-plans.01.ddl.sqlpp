@@ -34,7 +34,6 @@ CREATE TYPE ParquetType as {
 CREATE EXTERNAL DATASET ParquetDataset1(ParquetType) USING %adapter%
 (
   %template%,
-  %additional_Properties%
   ("container"="playground"),
   ("definition"="parquet-data/reviews"),
   ("include"="*dummy_tweet.parquet"),
@@ -44,7 +43,6 @@ CREATE EXTERNAL DATASET ParquetDataset1(ParquetType) USING %adapter%
 CREATE EXTERNAL DATASET ParquetDataset2(ParquetType) USING %adapter%
 (
   %template%,
-  %additional_Properties%
   ("container"="playground"),
   ("definition"="parquet-data/reviews"),
   ("include"="*dummy_tweet.parquet"),
