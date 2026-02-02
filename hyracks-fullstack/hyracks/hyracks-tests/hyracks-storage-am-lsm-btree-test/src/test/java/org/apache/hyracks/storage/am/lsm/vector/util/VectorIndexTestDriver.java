@@ -36,7 +36,8 @@ import org.junit.Test;
 public abstract class VectorIndexTestDriver {
 
     // Define the 24 leaf centroids (c10 ~ c33) - shared between methods
-    private static final double[][] LEAF_CENTROIDS = {
+    // Protected for subclass access (e.g., insert tests that need to generate records near centroids)
+    protected static final double[][] LEAF_CENTROIDS = {
             // Cluster 2.1: c10, c11, c12
             { 20.0, 30.0, 20.0 }, { 20.0, 20.0, 30.0 }, { 35.0, 25.0, 25.0 },
             // Cluster 2.2: c13, c14, c15
@@ -127,8 +128,7 @@ public abstract class VectorIndexTestDriver {
         // Generate 100 records for each leaf centroid (c10 ~ c33)
         List<List<ITupleReference>> dataRecords = generateDataRecords();
 
-        runTest(centroidSerdes, dataRecordSerdes, centroids, numClustersPerLevel, centroidsPerCluster, 3,
-                dataRecords);
+        runTest(centroidSerdes, dataRecordSerdes, centroids, numClustersPerLevel, centroidsPerCluster, 3, dataRecords);
     }
 
     /**

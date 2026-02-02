@@ -182,12 +182,12 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
         List<List<Integer>> centroidsPerCluster = (List<List<Integer>>) parameters.getOrDefault("centroidsPerCluster",
                 Arrays.asList(Arrays.asList(1, 1, 1, 1, 1), Arrays.asList(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)));
         int maxEntriesPerPage = (Integer) parameters.getOrDefault("maxEntriesPerPage", 100);
-//        LOGGER.info("VCTreeStaticStructureLoader parameters:");
-//        LOGGER.info("  - numLevels: {}", numLevels);
-//        LOGGER.info("  - clustersPerLevel: {}", clustersPerLevel);
-//        LOGGER.info("  - centroidsPerCluster: {}", centroidsPerCluster);
-//        LOGGER.info("  - maxEntriesPerPage: {}", maxEntriesPerPage);
-//        LOGGER.info("  - fillFactor: {}", fillFactor);
+        //        LOGGER.info("VCTreeStaticStructureLoader parameters:");
+        //        LOGGER.info("  - numLevels: {}", numLevels);
+        //        LOGGER.info("  - clustersPerLevel: {}", clustersPerLevel);
+        //        LOGGER.info("  - centroidsPerCluster: {}", centroidsPerCluster);
+        //        LOGGER.info("  - maxEntriesPerPage: {}", maxEntriesPerPage);
+        //        LOGGER.info("  - fillFactor: {}", fillFactor);
         try {
             // Create VCTreeStaticStructureLoader with real structure
             IIndexBulkLoader ssbuilder = getIndex().createStaticStructureBulkLoader(numLevels, clustersPerLevel,

@@ -23,12 +23,9 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMHarness;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
-import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor;
-import org.apache.hyracks.storage.am.vector.impls.VectorAnnPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursor;
-import org.apache.hyracks.storage.common.ISearchPredicate;
 
 /**
  * LSM Vector Clustering Tree Index Accessor.
@@ -64,17 +61,6 @@ public class LSMVCTreeIndexAccessor extends LSMTreeIndexAccessor {
     }
 
     /**
-     * Creates an ANN search cursor for approximate nearest neighbor queries.
-     *
-     * @param exclusive whether the cursor should be exclusive
-     * @return ANN search cursor
-     * @throws HyracksDataException if cursor creation fails
-     */
-    public IIndexCursor createAnnSearchCursor(boolean exclusive) throws HyracksDataException {
-        return lsmVCTree.createAnnSearchCursor((AbstractLSMIndexOperationContext) ctx);
-    }
-
-    /**
      * Creates a blocked cursor for optimized search with bidirectional traversal
      * and triangle inequality termination.
      *
@@ -84,38 +70,5 @@ public class LSMVCTreeIndexAccessor extends LSMTreeIndexAccessor {
      */
     public IIndexCursor createBlockedSearchCursor(boolean exclusive) throws HyracksDataException {
         return lsmVCTree.createBlockedSearchCursor(ctx);
-    }
-
-    /**
-     * Perform search with automatic cursor selection based on predicate type.
-     * If the predicate is a VectorAnnPredicate, uses ANN cursor; otherwise uses standard cursor.
-     * 
-     * @param cursor the cursor to use for search
-     * @param searchPred the search predicate
-     * @throws HyracksDataException if search fails
-     */
-    @Override
-    public void search(IIndexCursor cursor, ISearchPredicate searchPred) throws HyracksDataException {
-        if (searchPred instanceof VectorAnnPredicate) {
-            // Ensure we're using the right cursor type for ANN search
-            if (!(cursor instanceof LSMVCTreeAnnCursor)) {
-                throw new IllegalArgumentException(
-                        "VectorAnnPredicate requires LSMVCTreeAnnCursor, got: " + cursor.getClass().getSimpleName());
-            }
-        }
-        super.search(cursor, searchPred);
-    }
-
-    /**
-     * Convenience method for ANN search that creates the appropriate cursor and performs the search.
-     * 
-     * @param annPredicate the ANN search predicate
-     * @return ANN search cursor with results
-     * @throws HyracksDataException if search fails
-     */
-    public IIndexCursor searchAnn(VectorAnnPredicate annPredicate) throws HyracksDataException {
-        IIndexCursor annCursor = createAnnSearchCursor(false);
-        search(annCursor, annPredicate);
-        return annCursor;
     }
 }

@@ -34,6 +34,7 @@ import java.util.TreeSet;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -42,7 +43,6 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeser
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
-import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.storage.am.common.CheckTuple;
 import org.apache.hyracks.storage.am.common.IIndexTestContext;
 import org.apache.hyracks.storage.am.common.TestOperationCallback;
@@ -232,10 +232,9 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      */
     private void printTupleResults(List<ITupleReference> results) throws HyracksDataException {
         // Field serializers matching the raw tuple format
-        ISerializerDeserializer[] fieldSerdes = {
-                DoubleSerializerDeserializer.INSTANCE,      // Field 0: distance (raw double)
-                IntegerSerializerDeserializer.INSTANCE,     // Field 1: centroidId (raw int)
-                new UTF8StringSerializerDeserializer()      // Field 2: primary_key
+        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE, // Field 0: distance (raw double)
+                IntegerSerializerDeserializer.INSTANCE, // Field 1: centroidId (raw int)
+                new UTF8StringSerializerDeserializer() // Field 2: primary_key
         };
 
         for (ITupleReference tuple : results) {
@@ -245,7 +244,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 int centroidId = (Integer) values[1];
                 String primaryKey = (String) values[2];
 
-                System.out.println(" Record: pk='" + primaryKey + "', centroidId=" + centroidId + ", distance=" + distance);
+                System.out.println(
+                        " Record: pk='" + primaryKey + "', centroidId=" + centroidId + ", distance=" + distance);
             } catch (Exception e) {
                 LOGGER.error("Failed to deserialize tuple: {}", e.getMessage());
             }
@@ -300,8 +300,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                     results.add(tuple);
                 }
 
-                LOGGER.info("Top-K Search: Found {} records for query vector [{}, {}, {}] with K={}",
-                        results.size(), queryVector[0], queryVector[1], queryVector[2], k);
+                LOGGER.info("Top-K Search: Found {} records for query vector [{}, {}, {}] with K={}", results.size(),
+                        queryVector[0], queryVector[1], queryVector[2], k);
 
                 // Validate we got the expected number of results
                 // c10 cluster has 100 records, so we should get exactly 100 results
@@ -331,9 +331,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      */
     private int extractCentroidIdFromTuple(ITupleReference tuple) throws HyracksDataException {
         // Field serializers - only need first two fields to extract centroidId
-        ISerializerDeserializer[] fieldSerdes = {
-                DoubleSerializerDeserializer.INSTANCE,  // Field 0: distance (raw double)
-                IntegerSerializerDeserializer.INSTANCE  // Field 1: centroidId (raw int)
+        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE, // Field 0: distance (raw double)
+                IntegerSerializerDeserializer.INSTANCE // Field 1: centroidId (raw int)
         };
         Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
         return (Integer) values[1];
@@ -406,8 +405,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                     results.add(tuple);
                 }
 
-                LOGGER.info("Optimized Search: Found {} records for query vector {} with K={}",
-                        results.size(), Arrays.toString(queryVector), k);
+                LOGGER.info("Optimized Search: Found {} records for query vector {} with K={}", results.size(),
+                        Arrays.toString(queryVector), k);
 
                 // Print PKs immediately for debugging
                 System.err.println("[optimizedSearch] Results PKs:");
@@ -417,8 +416,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                     double dxc = extractDistanceFromTuple(tuple);
                     double[] vec = extractVectorFromOptimizedTuple(tuple);
                     double dqx = computeEuclideanDistance(queryVector, vec);
-                    System.err.println(String.format("  [%d] pk=%s, D(x,C)=%.2f, D(q,x)=%.2f, vec=%s",
-                            i, pk, dxc, dqx, Arrays.toString(vec)));
+                    System.err.println(String.format("  [%d] pk=%s, D(x,C)=%.2f, D(q,x)=%.2f, vec=%s", i, pk, dxc, dqx,
+                            Arrays.toString(vec)));
                 }
 
                 // Validate we got the expected number of results
@@ -428,15 +427,24 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 printOptimizedSearchResults(results, queryVector);
 
                 // Validate expected primary keys are in results (if provided)
-                if (expectedPKs != null && !expectedPKs.isEmpty()) {
-                    List<String> actualPKs = new ArrayList<>();
-                    for (ITupleReference tuple : results) {
-                        actualPKs.add(extractPrimaryKeyFromOptimizedTuple(tuple));
-                    }
+                List<String> actualPKs = new ArrayList<>();
+                for (ITupleReference tuple : results) {
+                    actualPKs.add(extractPrimaryKeyFromOptimizedTuple(tuple));
+                }
 
+                if (expectedPKs != null && !expectedPKs.isEmpty()) {
                     for (String expectedPK : expectedPKs) {
                         assertTrue("Expected " + expectedPK + " in results, but got: " + actualPKs,
                                 actualPKs.contains(expectedPK));
+                    }
+                }
+
+                // Validate excluded primary keys are NOT in results (for delete tests)
+                List<String> excludedPKs = ctx.getExcludedPrimaryKeys();
+                if (excludedPKs != null && !excludedPKs.isEmpty()) {
+                    for (String excludedPK : excludedPKs) {
+                        assertFalse("Deleted " + excludedPK + " should NOT be in results, but got: " + actualPKs,
+                                actualPKs.contains(excludedPK));
                     }
                 }
 
@@ -446,6 +454,124 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 cursor.close();
             }
         } finally {
+            cursor.destroy();
+        }
+    }
+
+    /**
+     * Insert records into the memory component using the index accessor.
+     *
+     * @param ctx Test context with active index
+     * @param insertRecords Records grouped by cluster, tuple format: <vector, primary_key>
+     * @return Number of records inserted
+     */
+    public int insertRecordsIntoMemoryComponent(AbstractVectorTreeTestContext ctx,
+            List<List<ITupleReference>> insertRecords) throws Exception {
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE));
+
+        int insertedCount = 0;
+        for (List<ITupleReference> clusterRecords : insertRecords) {
+            for (ITupleReference tuple : clusterRecords) {
+                accessor.insert(tuple);
+                insertedCount++;
+            }
+        }
+
+        LOGGER.info("Inserted {} records via accessor", insertedCount);
+        return insertedCount;
+    }
+
+    /**
+     * Delete records from the index using the index accessor.
+     * Delete tuple format: <vector, primary_key> (same as insert).
+     *
+     * @param ctx Test context with active index
+     * @param deleteTuples Tuples to delete, format: <vector, primary_key>
+     * @return Number of records deleted
+     */
+    public int deleteRecordsFromIndex(AbstractVectorTreeTestContext ctx, List<ITupleReference> deleteTuples)
+            throws Exception {
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE));
+
+        int deletedCount = 0;
+        for (ITupleReference tuple : deleteTuples) {
+            accessor.delete(tuple);
+            deletedCount++;
+        }
+
+        LOGGER.info("Deleted {} records via accessor", deletedCount);
+        return deletedCount;
+    }
+
+    /**
+     * Verify records by scanning with LSMVCTreeSearchCursor (regular, non-optimized).
+     * Checks that records from both disk (bulk-loaded, "pk_2d_" or "pk_opt_" prefix)
+     * and memory (inserted, "pk_ins_" prefix) components are found.
+     *
+     * @param ctx Test context with active index
+     * @param queryVector Query vector for search
+     * @param k Number of results to retrieve
+     */
+    public void verifyRecordsWithSearch(AbstractVectorTreeTestContext ctx, double[] queryVector, int k)
+            throws Exception {
+
+        // Create query tuple
+        ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
+        queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
+        ArrayTupleReference queryTuple = new ArrayTupleReference();
+        queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
+
+        // Set up predicate
+        VectorPointPredicate predicate = new VectorPointPredicate();
+        predicate.setQueryTuple(queryTuple);
+        predicate.setQueryFieldIndex(0);
+        predicate.setDistanceMetric("euclidean");
+        predicate.setK(k);
+
+        // Create accessor with vector accessor factory
+        IndexAccessParameters iap =
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
+        IIndexCursor cursor = accessor.createSearchCursor(false);
+
+        try {
+            accessor.search(cursor, predicate);
+
+            List<String> foundPKs = new ArrayList<>();
+            int bulkLoadCount = 0;
+            int insertCount = 0;
+
+            while (cursor.hasNext()) {
+                cursor.next();
+                ITupleReference tuple = cursor.getTuple();
+                String pk = extractPrimaryKeyFromOptimizedTuple(tuple);
+                foundPKs.add(pk);
+
+                if (pk.startsWith("pk_ins_")) {
+                    insertCount++;
+                } else {
+                    bulkLoadCount++;
+                }
+            }
+
+            LOGGER.info("Search returned {} total records: {} bulk-loaded, {} inserted", foundPKs.size(), bulkLoadCount,
+                    insertCount);
+
+            // Verify we got records from both components
+            assertTrue("Should find bulk-loaded records", bulkLoadCount > 0);
+            assertTrue("Should find inserted records", insertCount > 0);
+
+            int sampleSize = Math.min(10, foundPKs.size());
+            LOGGER.info("Sample of found PKs: {}", foundPKs.subList(0, sampleSize));
+
+        } finally {
+            cursor.close();
             cursor.destroy();
         }
     }
@@ -469,8 +595,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
             // Compute actual D(q, x)
             double dqx = computeEuclideanDistance(queryVector, vector);
 
-            LOGGER.info("  [{}] pk={}, D(x,C)={}, D(q,x)={}, vector={}",
-                    i, pk, dxc, dqx, Arrays.toString(vector));
+            LOGGER.info("  [{}] pk={}, D(x,C)={}, D(q,x)={}, vector={}", i, pk, dxc, dqx, Arrays.toString(vector));
         }
     }
 
@@ -488,10 +613,9 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      * Tuple format: <distance, centroid_id, vector, primary_key>
      */
     private double[] extractVectorFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
-        ISerializerDeserializer[] fieldSerdes = {
-                DoubleSerializerDeserializer.INSTANCE,      // Field 0: distance
-                IntegerSerializerDeserializer.INSTANCE,     // Field 1: centroidId
-                DoubleArraySerializerDeserializer.INSTANCE  // Field 2: vector
+        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE, // Field 0: distance
+                IntegerSerializerDeserializer.INSTANCE, // Field 1: centroidId
+                DoubleArraySerializerDeserializer.INSTANCE // Field 2: vector
         };
         Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
         return (double[]) values[2];
@@ -501,12 +625,11 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
      * Extract primary_key (field 3) from optimized search tuple.
      * Tuple format: <distance, centroid_id, vector, primary_key>
      */
-    private String extractPrimaryKeyFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
-        ISerializerDeserializer[] fieldSerdes = {
-                DoubleSerializerDeserializer.INSTANCE,      // Field 0: distance
-                IntegerSerializerDeserializer.INSTANCE,     // Field 1: centroidId
+    public String extractPrimaryKeyFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
+        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE, // Field 0: distance
+                IntegerSerializerDeserializer.INSTANCE, // Field 1: centroidId
                 DoubleArraySerializerDeserializer.INSTANCE, // Field 2: vector
-                new UTF8StringSerializerDeserializer()      // Field 3: primary_key
+                new UTF8StringSerializerDeserializer() // Field 3: primary_key
         };
         Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
         return (String) values[3];

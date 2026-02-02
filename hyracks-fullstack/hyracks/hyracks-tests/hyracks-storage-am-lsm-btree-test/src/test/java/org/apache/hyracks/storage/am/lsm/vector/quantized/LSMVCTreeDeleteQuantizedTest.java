@@ -152,7 +152,8 @@ public class LSMVCTreeDeleteQuantizedTest extends OptimizedSearchTestDriver {
      * These are the two closest records to query [5,0,0].
      */
     private List<ITupleReference> get3DDeleteTuples() throws Exception {
-        return generateDeleteTuples(new double[][] { { 5.0, 0.0, 0.0 }, { 6.0, 0.0, 0.0 } },
+        return generateDeleteTuples(
+                new double[][] { { 5.0, 0.0, 0.0 }, { 6.0, 0.0, 0.0 } },
                 new String[] { "pk_opt_5", "pk_opt_6" });
     }
 
@@ -165,7 +166,8 @@ public class LSMVCTreeDeleteQuantizedTest extends OptimizedSearchTestDriver {
      * - pk_2d_c4_46: Ring 12 (d=2.4), +y direction → [25, 25+2.4] = [25, 27.4]
      */
     private List<ITupleReference> get2DDeleteTuples() throws Exception {
-        return generateDeleteTuples(new double[][] { { 27.6, 25.0 }, { 25.0, 27.4 } },
+        return generateDeleteTuples(
+                new double[][] { { 27.6, 25.0 }, { 25.0, 27.4 } },
                 new String[] { "pk_2d_c4_48", "pk_2d_c4_46" });
     }
 
