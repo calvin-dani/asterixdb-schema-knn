@@ -61,7 +61,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
  */
 public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
     private static final long serialVersionUID = 3L;
-    
+
     private final String quantizationKey;
     private final RecordDescriptor inputRecDesc;
     private final FileSplit[] datasetFileSplits;
@@ -78,13 +78,12 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
-            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions)
-            throws HyracksDataException {
+            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         RecordDescriptor inputRecordDescriptor = recordDescProvider.getInputRecordDescriptor(getActivityId(), 0);
         // Pass the FileSplit for this partition - FileReference will be resolved in close() using IIOManager
         FileSplit fileSplit = datasetFileSplits[partition];
-        return new QuantizationConstantsSinkNodePushable(ctx, inputRecordDescriptor, quantizationKey, 
-                fileSplit, indexName);
+        return new QuantizationConstantsSinkNodePushable(ctx, inputRecordDescriptor, quantizationKey, fileSplit,
+                indexName);
     }
 
     private static class QuantizationConstantsSinkNodePushable extends AbstractUnaryInputSinkOperatorNodePushable {
@@ -148,13 +147,13 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
 
                 // Check type tag
                 ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(fieldData[fieldStart]);
-                
+
                 // Handle SYSTEM_NULL (empty dataset case)
                 if (typeTag == ATypeTag.SYSTEM_NULL || typeTag == ATypeTag.NULL || typeTag == ATypeTag.MISSING) {
                     System.err.println("[QuantizationConstantsSink] Received " + typeTag + " - empty dataset");
                     return null;
                 }
-                
+
                 if (typeTag != ATypeTag.BINARY) {
                     throw HyracksDataException.create(new IOException("Expected BINARY type, got: " + typeTag));
                 }
@@ -163,19 +162,17 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
                 // Similar to how RangeMap's SortForwardOperatorDescriptor handles binary data
                 ByteArrayPointable pointable = new ByteArrayPointable();
                 pointable.set(fieldData, fieldStart + 1, fieldLength - 1); // Skip type tag
-                
+
                 // Get content start offset (after length prefix) and content length (24 bytes)
                 int contentStartOffset = pointable.getContentStartOffset();
                 int contentLength = pointable.getContentLength();
-                
-                System.err.println("[QuantizationConstantsSink] Binary content: startOffset=" + contentStartOffset + 
-                        ", contentLength=" + contentLength + ", expected=24");
-                
+
+                System.err.println("[QuantizationConstantsSink] Binary content: startOffset=" + contentStartOffset
+                        + ", contentLength=" + contentLength + ", expected=24");
+
                 // Create stream from the actual content bytes (skipping length prefix)
-                ByteArrayInputStream constantsBais = new ByteArrayInputStream(
-                    pointable.getByteArray(),
-                    contentStartOffset,
-                    contentLength);
+                ByteArrayInputStream constantsBais =
+                        new ByteArrayInputStream(pointable.getByteArray(), contentStartOffset, contentLength);
                 DataInput constantsIn = new DataInputStream(constantsBais);
 
                 // Deserialize QuantizationConstants from the content bytes
@@ -187,8 +184,8 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
                 float confidenceInterval = FloatSerializerDeserializer.read(constantsIn);
                 int sampleCount = IntegerSerializerDeserializer.read(constantsIn);
 
-                System.err.println("[QuantizationConstantsSink] Extracted: minQ=" + minQ + ", maxQ=" + maxQ + 
-                        ", alpha=" + alpha + ", bits=" + bits + ", sampleCount=" + sampleCount);
+                System.err.println("[QuantizationConstantsSink] Extracted: minQ=" + minQ + ", maxQ=" + maxQ + ", alpha="
+                        + alpha + ", bits=" + bits + ", sampleCount=" + sampleCount);
                 return new QuantizationConstants(minQ, maxQ, alpha, bits, confidenceInterval, sampleCount);
             } catch (IOException e) {
                 throw HyracksDataException.create(e);
@@ -198,28 +195,31 @@ public class QuantizationConstantsSinkOperatorDescriptor extends AbstractSingleA
         @Override
         public void close() throws HyracksDataException {
             if (quantizationConstants == null) {
-                System.err.println("[QuantizationConstantsSink] WARNING: No quantization constants computed (empty dataset or no samples)");
+                System.err.println(
+                        "[QuantizationConstantsSink] WARNING: No quantization constants computed (empty dataset or no samples)");
             } else {
                 // Write quantization constants to sidecar file for retrieval by subsequent jobs
                 IIOManager ioManager = ctx.getIoManager();
-                
+
                 // Resolve FileReference from FileSplit using IIOManager (must be done here, not in createPushRuntime)
                 // The FileSplit points to the PRIMARY INDEX path: .../datasetName/rebalanceCount/datasetName
                 // We need to go up 2 levels to get the actual DATASET directory: .../datasetName
                 FileReference primaryIndexDir = fileSplit.getFileReference(ioManager);
-                FileReference rebalanceDir = primaryIndexDir.getParent();  // .../datasetName/rebalanceCount
-                FileReference datasetDir = rebalanceDir.getParent();       // .../datasetName
-                
+                FileReference rebalanceDir = primaryIndexDir.getParent(); // .../datasetName/rebalanceCount
+                FileReference datasetDir = rebalanceDir.getParent(); // .../datasetName
+
                 System.err.println("[QuantizationConstantsSink] Writing quantization constants to sidecar file");
-                System.err.println("[QuantizationConstantsSink] Primary index dir: " + primaryIndexDir.getAbsolutePath());
+                System.err
+                        .println("[QuantizationConstantsSink] Primary index dir: " + primaryIndexDir.getAbsolutePath());
                 System.err.println("[QuantizationConstantsSink] Dataset dir: " + datasetDir.getAbsolutePath());
                 System.err.println("[QuantizationConstantsSink] Index name: " + indexName);
-                
+
                 QuantizationConstantsFileManager.write(ioManager, datasetDir, indexName, quantizationConstants);
-                
-                System.err.println("[QuantizationConstantsSink] Successfully wrote sidecar file: " + quantizationConstants);
+
+                System.err.println(
+                        "[QuantizationConstantsSink] Successfully wrote sidecar file: " + quantizationConstants);
             }
-            
+
             // Also store in TaskUtil for backward compatibility (within same job)
             TaskUtil.put(quantizationKey, quantizationConstants, ctx);
         }

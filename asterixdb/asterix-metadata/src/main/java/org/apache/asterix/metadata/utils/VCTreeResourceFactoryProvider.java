@@ -143,8 +143,8 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
             // The sidecar file is written by Job 0.5 (quantization computation) and is located at:
             // dataset_dir/.quantization_<indexName>
             String indexName = index.getIndexName();
-            System.err.println("[VCTreeResourceFactoryProvider] Creating factory with indexName=" + indexName + 
-                    " for sidecar file lookup");
+            System.err.println("[VCTreeResourceFactoryProvider] Creating factory with indexName=" + indexName
+                    + " for sidecar file lookup");
 
             return new LSMVCTreeLocalResourceFactory(storageManager, typeTraits, cmpFactories, filterTypeTraits,
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,

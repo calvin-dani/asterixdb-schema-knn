@@ -80,8 +80,8 @@ public class QuantizationConstantsFileManager {
      * @param qc The quantization constants to write
      * @throws HyracksDataException if writing fails
      */
-    public static void write(IIOManager ioManager, FileReference datasetDir, String indexName,
-            QuantizationConstants qc) throws HyracksDataException {
+    public static void write(IIOManager ioManager, FileReference datasetDir, String indexName, QuantizationConstants qc)
+            throws HyracksDataException {
         FileReference file = getFileReference(datasetDir, indexName);
         LOGGER.info("Writing quantization constants to: " + file.getAbsolutePath());
 
@@ -96,7 +96,7 @@ public class QuantizationConstantsFileManager {
             dos.writeFloat(qc.getConfidenceInterval());
             dos.writeInt(qc.getSampleCount());
             dos.flush();
-            
+
             // Write to file using IIOManager.overwrite()
             ioManager.overwrite(file, baos.toByteArray());
             LOGGER.info("Successfully wrote quantization constants: " + qc);
@@ -129,7 +129,7 @@ public class QuantizationConstantsFileManager {
         try {
             // Read all bytes using IIOManager.readAllBytes()
             byte[] data = ioManager.readAllBytes(file);
-            
+
             // Deserialize from byte array
             ByteArrayInputStream bais = new ByteArrayInputStream(data);
             DataInputStream dis = new DataInputStream(bais);
@@ -140,8 +140,8 @@ public class QuantizationConstantsFileManager {
             float confidenceInterval = dis.readFloat();
             int sampleCount = dis.readInt();
 
-            QuantizationConstants qc = new QuantizationConstants(minQ, maxQ, alpha, bits, confidenceInterval,
-                    sampleCount);
+            QuantizationConstants qc =
+                    new QuantizationConstants(minQ, maxQ, alpha, bits, confidenceInterval, sampleCount);
             LOGGER.info("Successfully read quantization constants: " + qc);
             return qc;
         } catch (IOException e) {

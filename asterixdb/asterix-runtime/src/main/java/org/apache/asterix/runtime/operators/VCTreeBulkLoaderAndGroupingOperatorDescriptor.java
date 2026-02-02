@@ -697,13 +697,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 System.err.println("READ: Resource type: " + vcResource.getClass().getName());
 
-                // Read quantization parameters using reflection (fields are protected)
-                Integer bits = getFieldValue(vcResource, "bits", Integer.class);
-                Float confidenceInterval = getFieldValue(vcResource, "confidenceInterval", Float.class);
-                Float minQuantile = getFieldValue(vcResource, "minQuantile", Float.class);
-                Float maxQuantile = getFieldValue(vcResource, "maxQuantile", Float.class);
-                Float alpha = getFieldValue(vcResource, "alpha", Float.class);
-                Integer sampleCount = getFieldValue(vcResource, "sampleCount", Integer.class);
+                // Read quantization parameters using public getter methods
+                Integer bits = vcResource.getBits();
+                Float confidenceInterval = vcResource.getConfidenceInterval();
+                Float minQuantile = vcResource.getMinQuantile();
+                Float maxQuantile = vcResource.getMaxQuantile();
+                Float alpha = vcResource.getAlpha();
+                Integer sampleCount = vcResource.getSampleCount();
 
                 // DEBUG: Log what we read
                 System.err.println("READ: Raw values from resource - bits: " + bits + ", alpha: " + alpha + ", minQ: "
@@ -711,8 +711,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         + sampleCount);
 
                 // Use defaults if any required parameter is missing
-                if (bits == null || confidenceInterval == null || minQuantile == null || maxQuantile == null
-                        || alpha == null) {
+                if (!vcResource.hasQuantizationParams()) {
                     System.err.println("WARNING: Some quantization parameters missing in metadata, using defaults");
                     return createDefaultQuantizationParams(vectorDimension);
                 }
@@ -748,20 +747,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     10.0f, // maxQuantile
                     6.35f // alpha: (127)/(10.0-(-10.0)) = 6.35
             );
-        }
-
-        /**
-         * Helper method to get field value using reflection.
-         */
-        @SuppressWarnings("unchecked")
-        private <T> T getFieldValue(Object obj, String fieldName, Class<T> fieldType) {
-            try {
-                java.lang.reflect.Field field = obj.getClass().getDeclaredField(fieldName);
-                field.setAccessible(true);
-                return (T) field.get(obj);
-            } catch (Exception e) {
-                return null; // Return null if field not accessible
-            }
         }
 
         /**

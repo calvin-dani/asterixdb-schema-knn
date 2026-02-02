@@ -37,6 +37,7 @@ import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
+import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
@@ -47,7 +48,6 @@ import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
@@ -83,8 +83,7 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
 
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
-            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions)
-            throws HyracksDataException {
+            IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
         RecordDescriptor inputRecordDescriptor = recordDescProvider.getInputRecordDescriptor(getActivityId(), 0);
         return new VectorComponentExtractorNodePushable(ctx, inputRecordDescriptor, vectorFieldEvalFactory);
     }
@@ -139,19 +138,22 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 byte[] data = vectorFieldValue.getByteArray();
                 int offset = vectorFieldValue.getStartOffset();
                 if (vectorFieldValue.getLength() == 0) {
-                    System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": empty vector field, skipping");
+                    System.err.println(
+                            "[VectorComponentExtractor] nextFrame() - tuple " + i + ": empty vector field, skipping");
                     continue;
                 }
 
                 ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
                 if (typeTag == ATypeTag.MISSING || typeTag == ATypeTag.NULL || typeTag == ATypeTag.SYSTEM_NULL) {
-                    System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": null/missing vector, skipping");
+                    System.err.println(
+                            "[VectorComponentExtractor] nextFrame() - tuple " + i + ": null/missing vector, skipping");
                     continue;
                 }
 
                 // Check if it's a list type (required for vector)
                 if (!typeTag.isListType()) {
-                    System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": not a list type (typeTag=" + typeTag + "), skipping");
+                    System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i
+                            + ": not a list type (typeTag=" + typeTag + "), skipping");
                     continue;
                 }
 
@@ -159,7 +161,8 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 listAccessor.reset(data, offset);
                 ATypeTag itemTypeTag = listAccessor.getItemType();
                 int listSize = listAccessor.size();
-                System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": extracting " + listSize + " components from embedding (itemTypeTag=" + itemTypeTag + ")");
+                System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": extracting " + listSize
+                        + " components from embedding (itemTypeTag=" + itemTypeTag + ")");
 
                 for (int j = 0; j < listSize; j++) {
                     try {
@@ -169,13 +172,15 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                         // Extract numeric value (coerce to double)
                         double componentValue = extractNumericValue(tempVal, itemTypeTag);
                         if (Double.isNaN(componentValue)) {
-                            System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ", component " + j + ": NaN value, skipping");
+                            System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ", component "
+                                    + j + ": NaN value, skipping");
                             continue; // Skip invalid values
                         }
 
                         totalComponentsExtracted++;
                         if (j < 3 || j == listSize - 1) {
-                            System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ", component " + j + "/" + listSize + ": extracted value=" + componentValue);
+                            System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ", component "
+                                    + j + "/" + listSize + ": extracted value=" + componentValue);
                         }
 
                         // Emit tuple with serialized double value (tag | value format)
@@ -197,17 +202,18 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                             appender.reset(new VSizeFrame(ctx), true);
                             if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                                     tupleBuilder.getSize())) {
-                                throw HyracksDataException.create(
-                                        new IOException("Tuple too large to fit in frame"));
+                                throw HyracksDataException.create(new IOException("Tuple too large to fit in frame"));
                             }
                         }
                     } catch (IOException e) {
                         throw HyracksDataException.create(e);
                     }
                 }
-                System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": extracted " + listSize + " components total");
+                System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": extracted " + listSize
+                        + " components total");
             }
-            System.err.println("[VectorComponentExtractor] nextFrame() - frame complete: extracted " + totalComponentsExtracted + " total components from " + tupleCount + " input tuples");
+            System.err.println("[VectorComponentExtractor] nextFrame() - frame complete: extracted "
+                    + totalComponentsExtracted + " total components from " + tupleCount + " input tuples");
         }
 
         /**
@@ -226,7 +232,8 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 double value = getValueFromTag(typeTag, data, offset);
                 return value;
             } else {
-                System.err.println("[VectorComponentExtractor] extractNumericValue() - invalid type: " + derivedTypeTag);
+                System.err
+                        .println("[VectorComponentExtractor] extractNumericValue() - invalid type: " + derivedTypeTag);
                 return Double.NaN; // Invalid type
             }
         }

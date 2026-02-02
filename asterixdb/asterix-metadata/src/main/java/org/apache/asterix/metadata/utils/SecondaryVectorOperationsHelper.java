@@ -44,8 +44,14 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.aggregates.std.QuantizationConstantsAggregateDescriptor;
-import org.apache.asterix.runtime.operators.*;
+import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
+import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
+import org.apache.asterix.runtime.operators.QuantileCalculatorOperatorDescriptor;
+import org.apache.asterix.runtime.operators.QuantizationConstantsSinkOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
+import org.apache.asterix.runtime.operators.VectorComponentExtractorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraint;
@@ -54,7 +60,6 @@ import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.core.jobgen.impl.ConnectorPolicyAssignmentPolicy;
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
-import org.apache.hyracks.algebricks.data.INormalizedKeyComputerFactoryProvider;
 import org.apache.hyracks.algebricks.data.ISerializerDeserializerProvider;
 import org.apache.hyracks.algebricks.data.ITypeTraitProvider;
 import org.apache.hyracks.algebricks.runtime.base.IAggregateEvaluatorFactory;
@@ -65,7 +70,12 @@ import org.apache.hyracks.algebricks.runtime.operators.aggreg.SimpleAlgebricksAc
 import org.apache.hyracks.algebricks.runtime.operators.base.SinkRuntimeFactory;
 import org.apache.hyracks.algebricks.runtime.operators.meta.AlgebricksMetaOperatorDescriptor;
 import org.apache.hyracks.api.dataflow.IOperatorDescriptor;
-import org.apache.hyracks.api.dataflow.value.*;
+import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
+import org.apache.hyracks.api.dataflow.value.IBinaryHashFunctionFactory;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
+import org.apache.hyracks.api.dataflow.value.ITypeTraits;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
@@ -551,9 +561,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         return spec;
     }
 
-
-
-
     /**
      * Builds job spec to calculate quantization constants from ANALYZE sample index.
      *
@@ -610,7 +617,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         }
 
         ARecordType sourceType = itemType;
-//        ARecordType enforcedType = enforcedItemType;
+        //        ARecordType enforcedType = enforcedItemType;
 
         Pair<IAType, Boolean> keyTypePair =
                 Index.getNonNullableOpenFieldType(index, vectorFieldType, vectorFieldName, sourceType);
@@ -672,7 +679,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // The sample index already contains the ANALYZE samples, so we just need to scan all of them
         int sampleCardinalityPerPartition = Integer.MAX_VALUE; // Scan all samples
         long sampleSeed = 0; // Not used when scanning existing sample index
-        System.err.println("Sample scan: cardinalityPerPartition=" + sampleCardinalityPerPartition + ", seed=" + sampleSeed);
+        System.err.println(
+                "Sample scan: cardinalityPerPartition=" + sampleCardinalityPerPartition + ", seed=" + sampleSeed);
 
         IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
                 sampleCardinalityPerPartition, sampleSeed, projectorFactory);
@@ -691,7 +699,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
         int recordColumn = dataset.getDatasetType() == DatasetType.INTERNAL ? numPrimaryKeys : 0;
         IScalarEvaluatorFactory vectorFieldEvalFactory = createFieldAccessor(itemType, recordColumn, vectorFieldName);
-        System.err.println("Vector field accessor: recordColumn=" + recordColumn + ", vectorFieldName=" + vectorFieldName);
+        System.err.println(
+                "Vector field accessor: recordColumn=" + recordColumn + ", vectorFieldName=" + vectorFieldName);
 
         // Record descriptor for flattened components (single double value per tuple)
         IDataFormat format = metadataProvider.getDataFormat();
@@ -728,14 +737,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 (QuantizationConstantsAggregateDescriptor) QuantizationConstantsAggregateDescriptor.FACTORY
                         .createFunctionDescriptor();
         aggDescriptor.setImmutableStates(confidenceInterval, bits);
-        System.err.println("Aggregate descriptor created with states: confidenceInterval=" + confidenceInterval + ", bits=" + bits);
+        System.err.println("Aggregate descriptor created with states: confidenceInterval=" + confidenceInterval
+                + ", bits=" + bits);
 
         IAggregateEvaluatorFactory localAggFactory = aggDescriptor.createAggregateEvaluatorFactory(aggArgs);
         System.err.println("Local aggregate factory created");
 
         // No grouping fields - collect all values into single aggregate (groupAll)
         int[] groupFields = new int[0];
-        
+
         // Get frames limit for group by operator
         int framesLimit = OptimizationConfUtil.getGroupByNumFrames(
                 metadataProvider.getApplicationContext().getCompilerProperties(), metadataProvider.getConfig(),
@@ -747,14 +757,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Use PreclusteredGroupOperatorDescriptor for in-memory aggregation (no external sort, no merge phase)
         IBinaryComparatorFactory[] comparatorFactories = new IBinaryComparatorFactory[0]; // Empty for groupAll
-        targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories, 
-                localAggFactoryDesc, aggOutputRecordDesc, true, framesLimit); // groupAll=true
+        targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories, localAggFactoryDesc,
+                aggOutputRecordDesc, true, framesLimit); // groupAll=true
         // Local aggregate runs on all partitions (same as sample partition constraint)
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, samplePartitionConstraint);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
         System.err.println("✓ Connected: VectorComponentExtractor → LocalAggregate (PreclusteredGroup)");
-        System.err.println("Local aggregate: collecting all component values per partition (in-memory, no external sort)");
+        System.err.println(
+                "Local aggregate: collecting all component values per partition (in-memory, no external sort)");
 
         // Step 4: Exchange -> Global aggregate
         System.err.println("--- STEP 4: Creating global aggregate ---");
@@ -767,47 +778,48 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new IAggregateEvaluatorFactory[] { globalAggFactory }, groupFields);
 
         // Use PreclusteredGroupOperatorDescriptor for in-memory aggregation (no external sort, no merge phase)
-        targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories, 
-                globalAggFactoryDesc, aggOutputRecordDesc, true, framesLimit); // groupAll=true
-        
+        targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories, globalAggFactoryDesc,
+                aggOutputRecordDesc, true, framesLimit); // groupAll=true
+
         // Get single partition constraint - use first location from cluster
         AlgebricksAbsolutePartitionConstraint clusterLocations =
                 metadataProvider.getApplicationContext().getClusterStateManager().getNodeSortedClusterLocations();
         AlgebricksAbsolutePartitionConstraint singlePartitionConstraint =
                 new AlgebricksAbsolutePartitionConstraint(new String[] { clusterLocations.getLocations()[0] });
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, singlePartitionConstraint);
-        
+
         // Use MToNPartitioningConnectorDescriptor with OnePartitionComputerFactory to route all tuples to partition 0
         spec.connect(new MToNPartitioningConnectorDescriptor(spec, new OnePartitionComputerFactory()), sourceOp, 0,
                 targetOp, 0);
         sourceOp = targetOp;
         System.err.println("✓ Connected: LocalAggregate → GlobalAggregate (via MToN with OnePartitionComputer)");
-        System.err.println("Global aggregate: computing quantiles and alpha from all partitions on single node (in-memory, no external sort)");
+        System.err.println(
+                "Global aggregate: computing quantiles and alpha from all partitions on single node (in-memory, no external sort)");
 
         // Step 5: Broadcast to all partitions -> Sink operator - write quantization constants to sidecar files
         // The sidecar file must be written to ALL partitions because Job 1's IndexBuilder runs on all partitions
         // and each partition's LSMVCTreeLocalResource reads from its own partition directory
         System.err.println("--- STEP 5: Creating broadcast and sink operators ---");
         String quantizationKey = java.util.UUID.randomUUID().toString();
-        
+
         // Get dataset partitioning properties for writing sidecar file
         // The sink will write to the dataset directory (not the index directory, which doesn't exist yet)
         PartitioningProperties datasetPartitioningProperties = metadataProvider.getPartitioningProperties(dataset);
-        org.apache.hyracks.api.io.FileSplit[] datasetFileSplits = 
+        org.apache.hyracks.api.io.FileSplit[] datasetFileSplits =
                 datasetPartitioningProperties.getSplitsProvider().getFileSplits();
         AlgebricksPartitionConstraint datasetPartitionConstraint = datasetPartitioningProperties.getConstraints();
         System.err.println("Dataset file splits for sidecar file: " + datasetFileSplits.length);
-        
+
         targetOp = new QuantizationConstantsSinkOperatorDescriptor(spec, quantizationKey, aggOutputRecordDesc,
                 datasetFileSplits, index.getIndexName());
         // Sink runs on ALL partitions to write sidecar file to each partition's dataset directory
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, datasetPartitionConstraint);
         // Use broadcast connector to replicate the quantization constants from single partition to all partitions
-        spec.connect(new org.apache.hyracks.dataflow.std.connectors.MToNBroadcastConnectorDescriptor(spec), 
-                sourceOp, 0, targetOp, 0);
+        spec.connect(new org.apache.hyracks.dataflow.std.connectors.MToNBroadcastConnectorDescriptor(spec), sourceOp, 0,
+                targetOp, 0);
         System.err.println("✓ Connected: GlobalAggregate → (broadcast) → QuantizationConstantsSink");
-        System.err.println("Sink: writing quantization constants to sidecar files on all " + 
-                datasetFileSplits.length + " partitions");
+        System.err.println("Sink: writing quantization constants to sidecar files on all " + datasetFileSplits.length
+                + " partitions");
 
         spec.addRoot(targetOp);
         spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
@@ -816,7 +828,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("*** QUANTIZATION METADATA JOB: COMPLETE ***");
         System.err.println("==========================================");
         System.err.println("Pipeline: SampleScan → VectorExtract → LocalAgg → GlobalAgg → Sink");
-         return spec;
+        return spec;
     }
 
     @Override

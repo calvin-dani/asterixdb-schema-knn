@@ -56,7 +56,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
 
     private static final long serialVersionUID = 2L;
     private static final Logger LOGGER = Logger.getLogger(LSMVCTreeLocalResource.class.getName());
-    
+
     /** Prefix for quantization sidecar files: .quantization_<indexName> */
     public static final String QUANTIZATION_FILE_PREFIX = ".quantization_";
 
@@ -64,7 +64,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
     protected final int[] vectorFields;
     protected final int[] filterFields;
     protected final boolean atomic;
-    
+
     // Index name for locating sidecar file (optional, only set during index creation)
     protected final String indexName;
 
@@ -101,7 +101,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic, String indexName,
-            Float confidenceInterval, Float minQuantile, Float maxQuantile, Float alpha, Integer bits, 
+            Float confidenceInterval, Float minQuantile, Float maxQuantile, Float alpha, Integer bits,
             Integer sampleCount) {
         super(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
@@ -122,13 +122,13 @@ public class LSMVCTreeLocalResource extends LsmResource {
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
             int[] vectorFields, int[] filterFields, boolean atomic) throws HyracksDataException {
-        this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null, 
+        this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null,
                 null);
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-            int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval, 
-            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) 
+            int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval,
+            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount)
             throws HyracksDataException {
         super(registry, json);
         this.vectorDimensions = vectorDimensions;
@@ -149,12 +149,12 @@ public class LSMVCTreeLocalResource extends LsmResource {
         IIOManager ioManager = storageManager.getIoManager(ncServiceCtx);
         NCConfig storageConfig = ((NodeControllerService) ncServiceCtx.getControllerService()).getConfiguration();
         FileReference fileRef = ioManager.resolve(path);
-        
+
         // Try to read quantization constants from sidecar file if not already set
         if (minQuantile == null && indexName != null) {
             tryReadQuantizationSidecarFile(ioManager, fileRef);
         }
-        
+
         List<IVirtualBufferCache> virtualBufferCaches = vbcProvider.getVirtualBufferCaches(ncServiceCtx, fileRef);
         ioOpCallbackFactory.initialize(ncServiceCtx, this);
         pageWriteCallbackFactory.initialize(ncServiceCtx, this);
@@ -168,7 +168,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
                 null, // filterHelper
                 durable, metadataPageManagerFactory, atomic, null);
     }
-    
+
     /**
      * Tries to read quantization constants from a sidecar file.
      * The sidecar file is located in the dataset directory (parent of index directory).
@@ -182,36 +182,37 @@ public class LSMVCTreeLocalResource extends LsmResource {
             // Get dataset directory (parent of rebalance directory)
             // Index path: storage/partition_X/<namespace>/<datasetName>/<rebalanceCount>/<indexName>
             // Dataset path: storage/partition_X/<namespace>/<datasetName>
-            FileReference rebalanceDir = indexFileRef.getParent();   // .../datasetName/rebalanceCount
-            FileReference datasetDir = rebalanceDir.getParent();     // .../datasetName
-            
+            FileReference rebalanceDir = indexFileRef.getParent(); // .../datasetName/rebalanceCount
+            FileReference datasetDir = rebalanceDir.getParent(); // .../datasetName
+
             // Construct sidecar file path: .quantization_<indexName>
             String sidecarFileName = QUANTIZATION_FILE_PREFIX + indexName;
             FileReference sidecarFile = datasetDir.getChild(sidecarFileName);
-            
+
             LOGGER.info("[LSMVCTreeLocalResource] Looking for sidecar file: " + sidecarFile.getAbsolutePath());
-            
+
             if (!ioManager.exists(sidecarFile)) {
-                LOGGER.info("[LSMVCTreeLocalResource] Sidecar file not found, index will be created without quantization");
+                LOGGER.info(
+                        "[LSMVCTreeLocalResource] Sidecar file not found, index will be created without quantization");
                 return;
             }
-            
+
             // Read the sidecar file using IIOManager.readAllBytes()
             byte[] data = ioManager.readAllBytes(sidecarFile);
             ByteArrayInputStream bais = new ByteArrayInputStream(data);
             DataInputStream dis = new DataInputStream(bais);
-            
+
             this.minQuantile = dis.readFloat();
             this.maxQuantile = dis.readFloat();
             this.alpha = dis.readFloat();
             this.bits = dis.readInt();
             this.confidenceInterval = dis.readFloat();
             this.sampleCount = dis.readInt();
-            
-            LOGGER.info("[LSMVCTreeLocalResource] Read quantization constants from sidecar file: " +
-                    "minQ=" + minQuantile + ", maxQ=" + maxQuantile + ", alpha=" + alpha + 
-                    ", bits=" + bits + ", sampleCount=" + sampleCount);
-            
+
+            LOGGER.info("[LSMVCTreeLocalResource] Read quantization constants from sidecar file: " + "minQ="
+                    + minQuantile + ", maxQ=" + maxQuantile + ", alpha=" + alpha + ", bits=" + bits + ", sampleCount="
+                    + sampleCount);
+
             // Delete the sidecar file after reading (cleanup)
             try {
                 ioManager.delete(sidecarFile);
@@ -219,7 +220,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
             } catch (Exception e) {
                 LOGGER.warning("[LSMVCTreeLocalResource] Failed to delete sidecar file: " + e.getMessage());
             }
-            
+
         } catch (IOException e) {
             LOGGER.warning("[LSMVCTreeLocalResource] Error reading sidecar file: " + e.getMessage());
             // Continue without quantization - not a fatal error
@@ -276,7 +277,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
         int[] filterFields =
                 json.has("filterFields") ? OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class) : null;
         boolean atomic = json.has("atomic") ? json.get("atomic").asBoolean() : false;
-        
+
         // indexName is only used during index creation, not needed after persistence
         String indexName = json.has("indexName") ? json.get("indexName").asText() : null;
 
@@ -320,5 +321,104 @@ public class LSMVCTreeLocalResource extends LsmResource {
             return defaultValue;
         }
         return node.asInt();
+    }
+
+    // ==================== Public Getter Methods for Quantization Parameters ====================
+
+    /**
+     * Gets the confidence interval used for quantization.
+     * @return The confidence interval, or null if not set
+     */
+    public Float getConfidenceInterval() {
+        return confidenceInterval;
+    }
+
+    /**
+     * Gets the minimum quantile value used for quantization.
+     * @return The minimum quantile, or null if not set
+     */
+    public Float getMinQuantile() {
+        return minQuantile;
+    }
+
+    /**
+     * Gets the maximum quantile value used for quantization.
+     * @return The maximum quantile, or null if not set
+     */
+    public Float getMaxQuantile() {
+        return maxQuantile;
+    }
+
+    /**
+     * Gets the alpha value used for quantization scaling.
+     * @return The alpha value, or null if not set
+     */
+    public Float getAlpha() {
+        return alpha;
+    }
+
+    /**
+     * Gets the number of bits used for quantization.
+     * @return The bits value, or null if not set
+     */
+    public Integer getBits() {
+        return bits;
+    }
+
+    /**
+     * Gets the sample count used to compute quantization parameters.
+     * @return The sample count, or null if not set
+     */
+    public Integer getSampleCount() {
+        return sampleCount;
+    }
+
+    /**
+     * Gets the vector dimensions for this index.
+     * @return The number of dimensions in the vectors
+     */
+    public int getVectorDimensions() {
+        return vectorDimensions;
+    }
+
+    /**
+     * Gets the vector field indices.
+     * @return Array of field indices that contain vector data
+     */
+    public int[] getVectorFields() {
+        return vectorFields;
+    }
+
+    /**
+     * Gets the filter field indices.
+     * @return Array of field indices used for filtering
+     */
+    public int[] getFilterFields() {
+        return filterFields;
+    }
+
+    /**
+     * Checks if the index is atomic.
+     * @return true if the index is atomic, false otherwise
+     */
+    public boolean isAtomic() {
+        return atomic;
+    }
+
+    /**
+     * Gets the index name.
+     * @return The index name, or null if not set
+     */
+    public String getIndexName() {
+        return indexName;
+    }
+
+    /**
+     * Checks if quantization parameters are available.
+     * @return true if all required quantization parameters are set
+     */
+    public boolean hasQuantizationParams() {
+        return bits != null && confidenceInterval != null && minQuantile != null && maxQuantile != null
+                && alpha != null;
     }
 }

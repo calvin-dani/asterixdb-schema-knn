@@ -2025,22 +2025,26 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             // Four-job pattern for vector indexes with quantization
             if (index.getIndexType() == IndexType.VECTOR) {
                 // VECTOR INDEX: Four Jobs
-                
+
                 // JOB 0.5: Calculate quantization constants from ANALYZE sample index
                 // The quantization constants are written to a sidecar file in the dataset directory
                 // which is then read by LSMVCTreeLocalResource in Job 1
                 try {
-                    spec = IndexUtil.buildSecondaryIndexQuantizationMetadataJobSpec(ds, index, metadataProvider, sourceLoc);
+                    spec = IndexUtil.buildSecondaryIndexQuantizationMetadataJobSpec(ds, index, metadataProvider,
+                            sourceLoc);
                     if (spec != null) {
                         System.err.println("[QueryTranslator] Running Job 0.5: quantization constants computation");
                         runJob(hcc, spec, jobFlags);
-                        System.err.println("[QueryTranslator] Job 0.5 completed - sidecar file written to dataset directory");
+                        System.err.println(
+                                "[QueryTranslator] Job 0.5 completed - sidecar file written to dataset directory");
                     } else {
-                        System.err.println("[QueryTranslator] Job 0.5 spec was null - no ANALYZE sample index available");
+                        System.err
+                                .println("[QueryTranslator] Job 0.5 spec was null - no ANALYZE sample index available");
                     }
                 } catch (CompilationException e) {
                     // No sample index available - proceed without quantization
-                    System.err.println("[QueryTranslator] No ANALYZE sample available for quantization: " + e.getMessage());
+                    System.err.println(
+                            "[QueryTranslator] No ANALYZE sample available for quantization: " + e.getMessage());
                 } catch (Exception e) {
                     System.err.println("[QueryTranslator] Exception during Job 0.5: " + e.getMessage());
                     e.printStackTrace();
@@ -6278,7 +6282,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
     }
 
     private static List<IOperatorStats> runJob(IHyracksClientConnection hcc, JobSpecification jobSpec,
-                                               EnumSet<JobFlag> jobFlags, List<String> statOperatorNames) throws Exception {
+            EnumSet<JobFlag> jobFlags, List<String> statOperatorNames) throws Exception {
         Pair<JobId, List<IOperatorStats>> p = JobUtils.runJobIfActive(hcc, jobSpec, jobFlags, true, statOperatorNames);
         return p.second;
     }

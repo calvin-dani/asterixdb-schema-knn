@@ -42,7 +42,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
     protected final int vectorDimensions;
     protected final int[] vectorFields;
     protected final boolean atomic;
-    
+
     // Index name for locating quantization sidecar file
     protected final String indexName;
 
