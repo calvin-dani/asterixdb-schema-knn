@@ -142,14 +142,6 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         if (dataset.getDatasetType() == DatasetType.INTERNAL) {
             AsterixVirtualBufferCacheProvider vbcProvider =
                     new AsterixVirtualBufferCacheProvider(dataset.getDatasetId());
-
-            // Pass index name to factory so LSMVCTreeLocalResource can read quantization sidecar file
-            // The sidecar file is written by Job 0.5 (quantization computation) and is located at:
-            // dataset_dir/.quantization_<indexName>
-            String indexName = index.getIndexName();
-            System.err.println("[VCTreeResourceFactoryProvider] Creating factory with indexName=" + indexName
-                    + " for sidecar file lookup");
-
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
                     new AOrderedListVectorBinaryAccessorFactory();
@@ -161,7 +153,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields,indexName);
+                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields);
         } else {
             return null;
         }

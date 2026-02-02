@@ -451,7 +451,7 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
     public static final class VectorIndexDetails extends AbstractIndexDetails {
 
-        private static final long serialVersionUID = 2L;
+        private static final long serialVersionUID = 1L;
 
         private final List<String> keyFieldNames;
 
@@ -475,29 +475,10 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         private final AdmObjectNode withObjectNode;
 
-        // Quantization parameters (computed from ANALYZE sample during index creation)
-        private final Float quantizationMinQ;
-        private final Float quantizationMaxQ;
-        private final Float quantizationAlpha;
-        private final Integer quantizationBits;
-        private final Float quantizationConfidenceInterval;
-        private final Integer quantizationSampleCount;
-
         public VectorIndexDetails(List<String> keyFieldNames, List<List<String>> includeFieldNames,
                 List<Integer> includeFieldSourceIndicators, List<IAType> includeFieldTypes,
                 boolean overrideKeyFieldTypes, OptionalBoolean excludeUnknownKey, OptionalBoolean castDefaultNull,
                 String castDatetimeFormat, String castDateFormat, String castTimeFormat, AdmObjectNode withObjectNode) {
-            this(keyFieldNames, includeFieldNames, includeFieldSourceIndicators, includeFieldTypes,
-                    overrideKeyFieldTypes, excludeUnknownKey, castDefaultNull, castDatetimeFormat, castDateFormat,
-                    castTimeFormat, withObjectNode, null, null, null, null, null, null);
-        }
-
-        public VectorIndexDetails(List<String> keyFieldNames, List<List<String>> includeFieldNames,
-                List<Integer> includeFieldSourceIndicators, List<IAType> includeFieldTypes,
-                boolean overrideKeyFieldTypes, OptionalBoolean excludeUnknownKey, OptionalBoolean castDefaultNull,
-                String castDatetimeFormat, String castDateFormat, String castTimeFormat, AdmObjectNode withObjectNode,
-                Float quantizationMinQ, Float quantizationMaxQ, Float quantizationAlpha, Integer quantizationBits,
-                Float quantizationConfidenceInterval, Integer quantizationSampleCount) {
             this.keyFieldNames = keyFieldNames;
             this.overrideKeyFieldTypes = overrideKeyFieldTypes;
             this.excludeUnknownKey = excludeUnknownKey.isEmpty() ? null : excludeUnknownKey.get();
@@ -509,12 +490,6 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             this.includeFieldTypes = includeFieldTypes;
             this.includeFieldSourceIndicators = includeFieldSourceIndicators;
             this.withObjectNode = withObjectNode;
-            this.quantizationMinQ = quantizationMinQ;
-            this.quantizationMaxQ = quantizationMaxQ;
-            this.quantizationAlpha = quantizationAlpha;
-            this.quantizationBits = quantizationBits;
-            this.quantizationConfidenceInterval = quantizationConfidenceInterval;
-            this.quantizationSampleCount = quantizationSampleCount;
         }
 
         @Override
@@ -556,35 +531,6 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         public AdmObjectNode getWithObjectNode() {
             return withObjectNode;
-        }
-
-        // Quantization parameter getters
-        public Float getQuantizationMinQ() {
-            return quantizationMinQ;
-        }
-
-        public Float getQuantizationMaxQ() {
-            return quantizationMaxQ;
-        }
-
-        public Float getQuantizationAlpha() {
-            return quantizationAlpha;
-        }
-
-        public Integer getQuantizationBits() {
-            return quantizationBits;
-        }
-
-        public Float getQuantizationConfidenceInterval() {
-            return quantizationConfidenceInterval;
-        }
-
-        public Integer getQuantizationSampleCount() {
-            return quantizationSampleCount;
-        }
-
-        public boolean hasQuantizationConstants() {
-            return quantizationMinQ != null && quantizationMaxQ != null && quantizationAlpha != null;
         }
 
         @Override

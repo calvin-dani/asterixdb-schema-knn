@@ -229,7 +229,6 @@ import org.apache.asterix.runtime.aggregates.std.LocalVarAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalVarPopAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.MaxAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.MinAggregateDescriptor;
-import org.apache.asterix.runtime.aggregates.std.QuantizationConstantsAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.RangeMapAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SkewnessAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SqlAvgAggregateDescriptor;
@@ -745,7 +744,6 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(GlobalStddevAggregateDescriptor.FACTORY);
         fc.add(LocalSamplingAggregateDescriptor.FACTORY);
         fc.add(RangeMapAggregateDescriptor.FACTORY);
-        fc.add(QuantizationConstantsAggregateDescriptor.FACTORY);
         fc.add(StddevPopAggregateDescriptor.FACTORY);
         fc.add(LocalStddevPopAggregateDescriptor.FACTORY);
         fc.add(IntermediateStddevPopAggregateDescriptor.FACTORY);

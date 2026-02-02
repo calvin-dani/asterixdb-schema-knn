@@ -143,9 +143,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
-        this.reconciledOutputCount = 0;
-        this.nprobe = 10;
-        this.epsilon = 0.3;
+
         // Extract nprobe and epsilon from search predicate
         this.nprobe = extractNprobe(searchPred);
         double epsilon = extractEpsilon(searchPred);

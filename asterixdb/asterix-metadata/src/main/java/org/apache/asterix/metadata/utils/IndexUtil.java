@@ -233,13 +233,6 @@ public class IndexUtil {
         return secondaryIndexHelper.buildStaticStructureJobSpec();
     }
 
-    public static JobSpecification buildSecondaryIndexQuantizationMetadataJobSpec(Dataset dataset, Index index,
-            MetadataProvider metadataProvider, SourceLocation sourceLoc) throws AlgebricksException {
-        ISecondaryIndexOperationsHelper secondaryIndexHelper =
-                SecondaryIndexOperationsHelper.createIndexOperationsHelper(dataset, index, metadataProvider, sourceLoc);
-        return secondaryIndexHelper.buildQuantizationMetadataJobSpec();
-    }
-
     /**
      * Binds a job event listener to the job specification.
      *
