@@ -46,6 +46,7 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
     protected final BulkLoadUsage usage;
 
     protected final int datasetId;
+    private boolean sampleLoader;
 
     // Static structure parameters for Vector Clustering Tree
     protected final Integer numLevels;
@@ -82,6 +83,18 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
         this.maxEntriesPerPage = maxEntriesPerPage;
     }
 
+    public LSMIndexBulkLoadOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
+            int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, IIndexDataflowHelperFactory indexHelperFactory,
+            IIndexDataflowHelperFactory primaryIndexHelperFactory, BulkLoadUsage usage, int datasetId,
+            ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap,
+            boolean sampleLoader) {
+        this(spec, outRecDesc, fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
+                indexHelperFactory, primaryIndexHelperFactory, usage, datasetId, tupleFilterFactory, partitionerFactory,
+                partitionsMap, null, null, null, null);
+        this.sampleLoader = sampleLoader;
+    }
+
     @Override
     public IOperatorNodePushable createPushRuntime(IHyracksTaskContext ctx,
             IRecordDescriptorProvider recordDescProvider, int partition, int nPartitions) throws HyracksDataException {
@@ -89,6 +102,6 @@ public class LSMIndexBulkLoadOperatorDescriptor extends TreeIndexBulkLoadOperato
                 fieldPermutation, fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex,
                 recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0), usage, datasetId,
                 tupleFilterFactory, partitionerFactory, partitionsMap, numLevels, clustersPerLevel, centroidsPerCluster,
-                maxEntriesPerPage);
+                maxEntriesPerPage, sampleLoader);
     }
 }

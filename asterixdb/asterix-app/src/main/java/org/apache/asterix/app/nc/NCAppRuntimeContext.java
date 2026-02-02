@@ -26,14 +26,12 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 
 import org.apache.asterix.active.ActiveManager;
-import org.apache.asterix.app.external.ExternalCredentialsCache;
-import org.apache.asterix.app.external.ExternalCredentialsCacheUpdater;
+import org.apache.asterix.app.external.ExternalStatsTracker;
 import org.apache.asterix.app.result.ResultReader;
 import org.apache.asterix.cloud.CloudConfigurator;
 import org.apache.asterix.cloud.LocalPartitionBootstrapper;
@@ -65,8 +63,7 @@ import org.apache.asterix.common.context.DatasetLifecycleManager;
 import org.apache.asterix.common.context.DiskWriteRateLimiterProvider;
 import org.apache.asterix.common.context.GlobalVirtualBufferCache;
 import org.apache.asterix.common.context.IStorageComponentProvider;
-import org.apache.asterix.common.external.IExternalCredentialsCache;
-import org.apache.asterix.common.external.IExternalCredentialsCacheUpdater;
+import org.apache.asterix.common.external.IExternalStatsTracker;
 import org.apache.asterix.common.library.ILibraryManager;
 import org.apache.asterix.common.replication.IReplicationChannel;
 import org.apache.asterix.common.replication.IReplicationManager;
@@ -78,6 +75,7 @@ import org.apache.asterix.common.transactions.IRecoveryManager;
 import org.apache.asterix.common.transactions.IRecoveryManager.SystemState;
 import org.apache.asterix.common.transactions.IRecoveryManagerFactory;
 import org.apache.asterix.common.transactions.ITransactionSubsystem;
+import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.external.library.ExternalLibraryManager;
 import org.apache.asterix.file.StorageComponentProvider;
 import org.apache.asterix.metadata.MetadataManager;
@@ -117,11 +115,14 @@ import org.apache.hyracks.storage.am.lsm.common.impls.GreedyScheduler;
 import org.apache.hyracks.storage.common.ILocalResourceRepository;
 import org.apache.hyracks.storage.common.buffercache.BufferCache;
 import org.apache.hyracks.storage.common.buffercache.ClockPageReplacementStrategy;
+import org.apache.hyracks.storage.common.buffercache.ColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.DefaultDiskCachedPageAllocator;
 import org.apache.hyracks.storage.common.buffercache.DelayPageCleanerPolicy;
+import org.apache.hyracks.storage.common.buffercache.FreeColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICacheMemoryAllocator;
+import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IDiskCachedPageAllocator;
 import org.apache.hyracks.storage.common.buffercache.IPageCleanerPolicy;
 import org.apache.hyracks.storage.common.buffercache.IPageReplacementStrategy;
@@ -145,6 +146,7 @@ import org.apache.logging.log4j.Logger;
 
 public class NCAppRuntimeContext implements INcApplicationContext {
     private static final Logger LOGGER = LogManager.getLogger();
+    public static final long INVALID_BUFFER_POOL_MAX_MEMORY = 0;
 
     private ILSMMergePolicyFactory metadataMergePolicyFactory;
     private final INCServiceContext ncServiceContext;
@@ -162,6 +164,7 @@ public class NCAppRuntimeContext implements INcApplicationContext {
     private ExecutorService threadExecutor;
     private IDatasetLifecycleManager datasetLifecycleManager;
     private IBufferCache bufferCache;
+    private IColumnBufferPool columnBufferPool;
     private IVirtualBufferCache virtualBufferCache;
     private ITransactionSubsystem txnSubsystem;
     private IMetadataNode metadataNodeStub;
@@ -190,8 +193,7 @@ public class NCAppRuntimeContext implements INcApplicationContext {
     private final INamespacePathResolver namespacePathResolver;
     private final INamespaceResolver namespaceResolver;
     private IDiskCacheMonitoringService diskCacheService;
-    protected IExternalCredentialsCache externalCredentialsCache;
-    protected IExternalCredentialsCacheUpdater externalCredentialsCacheUpdater;
+    private final IExternalStatsTracker externalStatsTracker;
 
     public NCAppRuntimeContext(INCServiceContext ncServiceContext, NCExtensionManager extensionManager,
             IPropertiesFactory propertiesFactory, INamespaceResolver namespaceResolver,
@@ -216,8 +218,7 @@ public class NCAppRuntimeContext implements INcApplicationContext {
         cacheManager = new CacheManager();
         this.namespacePathResolver = namespacePathResolver;
         this.namespaceResolver = namespaceResolver;
-        this.externalCredentialsCache = new ExternalCredentialsCache(this);
-        this.externalCredentialsCacheUpdater = new ExternalCredentialsCacheUpdater(this);
+        externalStatsTracker = new ExternalStatsTracker();
     }
 
     @Override
@@ -291,7 +292,7 @@ public class NCAppRuntimeContext implements INcApplicationContext {
                         txnSubsystem.getLogManager(), virtualBufferCache, indexCheckpointManagerProvider, lockNotifier);
         localResourceRepository.setDatasetLifecycleManager(datasetLifecycleManager);
         final String nodeId = getServiceContext().getNodeId();
-        final Set<Integer> nodePartitions = metadataProperties.getNodePartitions(nodeId);
+        final Partitions nodePartitions = metadataProperties.getNodePartitions(nodeId);
         replicaManager = new ReplicaManager(this, nodePartitions);
         isShuttingdown = false;
         activeManager = new ActiveManager(threadExecutor, getServiceContext().getNodeId(),
@@ -325,6 +326,16 @@ public class NCAppRuntimeContext implements INcApplicationContext {
                     fileInfoMap, defaultContext);
         }
 
+        if (storageProperties.getColumnBufferPoolMaxMemory() <= INVALID_BUFFER_POOL_MAX_MEMORY) {
+            LOGGER.info("Using FreeColumnBufferPool since column buffer pool max memory is {}",
+                    storageProperties.getColumnBufferSize());
+            this.columnBufferPool = new FreeColumnBufferPool();
+        } else {
+            this.columnBufferPool = new ColumnBufferPool(storageProperties.getColumnBufferSize(),
+                    storageProperties.getColumnBufferPoolMaxSize(), storageProperties.getColumnBufferPoolMaxMemory(),
+                    storageProperties.getColumnBufferAcquireTimeout());
+        }
+
         if (cloudConfigurator != null) {
             diskCacheService =
                     cloudConfigurator.createDiskCacheMonitoringService(getServiceContext(), bufferCache, fileInfoMap);
@@ -347,6 +358,7 @@ public class NCAppRuntimeContext implements INcApplicationContext {
         ILifeCycleComponentManager lccm = getServiceContext().getLifeCycleComponentManager();
         lccm.register((ILifeCycleComponent) virtualBufferCache);
         lccm.register((ILifeCycleComponent) bufferCache);
+        lccm.register(columnBufferPool);
         /*
          * LogManager must be stopped after RecoveryManager, DatasetLifeCycleManager, and ReplicationManager
          * to process any logs that might be generated during stopping these components
@@ -402,6 +414,11 @@ public class NCAppRuntimeContext implements INcApplicationContext {
     @Override
     public IBufferCache getBufferCache() {
         return bufferCache;
+    }
+
+    @Override
+    public IColumnBufferPool getColumnBufferPool() {
+        return columnBufferPool;
     }
 
     @Override
@@ -753,18 +770,13 @@ public class NCAppRuntimeContext implements INcApplicationContext {
         return partitionBootstrapper;
     }
 
+    @Override
+    public IExternalStatsTracker getExternalStatsTracker() {
+        return externalStatsTracker;
+    }
+
     private int getResourceIdBlockSize() {
         return isCloudDeployment() ? storageProperties.getStoragePartitionsCount()
                 : ncServiceContext.getIoManager().getIODevices().size();
-    }
-
-    @Override
-    public IExternalCredentialsCache getExternalCredentialsCache() {
-        return externalCredentialsCache;
-    }
-
-    @Override
-    public IExternalCredentialsCacheUpdater getExternalCredentialsCacheUpdater() {
-        return externalCredentialsCacheUpdater;
     }
 }

@@ -200,7 +200,7 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             IIndexBulkLoader ssbuilder = getIndex().createStaticStructureBulkLoader(numLevels, clustersPerLevel,
                     centroidsPerCluster, maxEntriesPerPage, callback);
             // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
-            return new LSMIndexBulkLoader(ssbuilder);
+            return new LSMIndexBulkLoader(ssbuilder, getMetadata(), getStatsAccumulator());
 
         } catch (Exception e) {
             //            System.err.println("ERROR: Failed to create VCTreeStaticStructureLoader: " + e.getMessage());
@@ -269,7 +269,7 @@ public class LSMVCTreeDiskComponent extends AbstractLSMDiskComponent {
             IIndexBulkLoader builder = getIndex().createComponentBulkLoader(NoOpPageWriteCallback.INSTANCE,
                     staticAccessor, dataFrameSerdes);
             // Wrap VCTreeStaticStructureLoader in LSMIndexBulkLoader to implement IChainedComponentBulkLoader
-            return new LSMIndexBulkLoader(builder);
+            return new LSMIndexBulkLoader(builder,getMetadata(),getStatsAccumulator());
 
         } catch (Exception e) {
             System.err.println("ERROR: Failed to create VCTreeStaticStructureLoader: " + e.getMessage());

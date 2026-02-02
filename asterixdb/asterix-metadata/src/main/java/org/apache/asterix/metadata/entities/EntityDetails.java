@@ -46,6 +46,8 @@ public class EntityDetails {
     private final DataverseName dataverseName;
     private final String entityName;
     private final EntityType entityType;
+    // The name of the dataset, only applicable for index entities.
+    private String datasetName;
     // The number of arguments that the function accepts. Relevant only for function entity.
     private int functionArity;
 
@@ -58,11 +60,14 @@ public class EntityDetails {
 
     private EntityDetails(String databaseName, DataverseName dataverseName, String entityName, EntityType entityType,
             int functionArity) {
-        this.databaseName = databaseName;
-        this.dataverseName = dataverseName;
-        this.entityName = entityName;
-        this.entityType = entityType;
+        this(databaseName, dataverseName, entityName, entityType);
         this.functionArity = functionArity;
+    }
+
+    private EntityDetails(String databaseName, DataverseName dataverseName, String datasetName, String entityName,
+            EntityType entityType) {
+        this(databaseName, dataverseName, entityName, entityType);
+        this.datasetName = datasetName;
     }
 
     public static EntityDetails newDatabase(String databaseName) {
@@ -87,21 +92,20 @@ public class EntityDetails {
         String functionName = fs.getName();
         Integer functionArity = fs.getArity();
         DataverseName dataverseName = fs.getDataverseName();
-        String functionNameWithArity = getFunctionNameWithArity(functionName, functionArity);
         if (isBuiltInFunc) {
-            return new EntityDetails(databaseName, dataverseName, functionNameWithArity, EntityType.BUILT_IN_FUNCTION,
+            return new EntityDetails(databaseName, dataverseName, functionName, EntityType.BUILT_IN_FUNCTION,
                     functionArity);
         }
-        return new EntityDetails(databaseName, dataverseName, functionNameWithArity, EntityType.FUNCTION,
-                functionArity);
+        return new EntityDetails(databaseName, dataverseName, functionName, EntityType.FUNCTION, functionArity);
     }
 
     public static EntityDetails newSynonym(String databaseName, DataverseName dataverseName, String synonymName) {
         return new EntityDetails(databaseName, dataverseName, synonymName, EntityType.SYNONYM);
     }
 
-    public static EntityDetails newIndex(String databaseName, DataverseName dataverseName, String indexName) {
-        return new EntityDetails(databaseName, dataverseName, indexName, EntityType.INDEX);
+    public static EntityDetails newIndex(String databaseName, DataverseName dataverseName, String datasetName,
+            String indexName) {
+        return new EntityDetails(databaseName, dataverseName, datasetName, indexName, EntityType.INDEX);
     }
 
     public static EntityDetails newExtension(String extensionName) {
@@ -126,6 +130,10 @@ public class EntityDetails {
 
     public int getFunctionArity() {
         return functionArity;
+    }
+
+    public String getDatasetName() {
+        return datasetName;
     }
 
     public static boolean isBuiltinFunctionSignature(FunctionSignature fs) {

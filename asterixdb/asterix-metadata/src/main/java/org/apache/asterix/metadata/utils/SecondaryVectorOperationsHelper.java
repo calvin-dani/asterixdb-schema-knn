@@ -121,11 +121,33 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ITupleProjectorFactory projectorFactory =
                 IndexUtil.createPrimaryIndexScanTupleProjectorFactory(dataset.getDatasetFormatInfo(),
                         indexDetails.getIndexExpectedType(), itemType, metaType, numPrimaryKeys);
-        // dummy key provider -> primary index scan
+
+        // ============ SAMPLING INSTEAD OF FULL TABLE SCAN ============
+        // Extract sampling parameters from WITH clause
+        AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
+        int sampleSize = (withObjectNodeForSampling != null)
+                ? withObjectNodeForSampling.getOptionalInt("sample_size", 10000) : 10000;
+        long sampleSeed = (withObjectNodeForSampling != null)
+                ? (long) withObjectNodeForSampling.getOptionalDouble("sample_seed", System.currentTimeMillis())
+                : System.currentTimeMillis();
+
+        // Calculate per-partition sample size
+        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
+        int numPartitions = partitioningProperties.getNumberOfPartitions();
+        int sampleCardinalityPerPartition = Math.max(1, sampleSize / numPartitions);
+
+        // dummy key provider -> sample scan (replacing full primary index scan)
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
-        IOperatorDescriptor targetOp =
-                DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
+        IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
+                sampleCardinalityPerPartition, sampleSeed, projectorFactory);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
+
+        // ============ ORIGINAL FULL TABLE SCAN (COMMENTED OUT) ============
+        // // dummy key provider -> primary index scan
+        // IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
+        // IOperatorDescriptor targetOp =
+        //         DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
+        // spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         //        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
 

@@ -158,7 +158,7 @@ public class KmeansOperationsHelper implements ISecondaryIndexOperationsHelper {
         itemType = (ARecordType) metadataProvider.findType(dataset.getItemTypeDatabaseName(),
                 dataset.getItemTypeDataverseName(), dataset.getItemTypeName());
         metaType = DatasetUtil.getMetaType(metadataProvider, dataset);
-        itemType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(itemType, metaType, dataset);
+        itemType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(itemType, dataset);
 
         numPrimaryKeys = dataset.getPrimaryKeys().size();
         if (dataset.getDatasetType() == DatasetConfig.DatasetType.INTERNAL) {

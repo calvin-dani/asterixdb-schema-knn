@@ -59,10 +59,10 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
     private final int maxNumberOfTuples;
     private final IColumnValuesWriter[] primaryKeyWriters;
     private final int maxLeafNodeSize;
+    protected final IColumnPageZeroWriterFlavorSelector pageZeroWriterFlavorSelector;
     protected final BitSet presentColumnsIndexes;
 
     protected int primaryKeysEstimatedSize;
-    protected final IColumnPageZeroWriterFlavorSelector pageZeroWriterFlavorSelector;
 
     public FlushColumnTupleWriter(FlushColumnMetadata columnMetadata, int pageSize, int maxNumberOfTuples,
             double tolerance, int maxLeafNodeSize, IColumnWriteContext writeContext) {
@@ -200,6 +200,12 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
         writer.close();
     }
 
+    @Override
+    public final void abort() {
+        // this call will reset the writers, releasing the 0th buffer back to the pool
+        columnMetadata.close();
+    }
+
     public void updateColumnMetadataForCurrentTuple(ITupleReference tuple) throws HyracksDataException {
         // Execution can reach here in case of Load statements
         // and the type of tuple in that case is PermutingFrameTupleReference
@@ -213,6 +219,11 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
         pointable.set(tuple.getFieldData(recordFieldId), tuple.getFieldStart(recordFieldId),
                 tuple.getFieldLength(recordFieldId));
         transformerForCurrentTuple.transform(pointable);
+    }
+
+    @Override
+    public void resetTemporaryBufferForCurrentTuple() {
+        columnMetadataWithCurrentTuple.resetBufferCount();
     }
 
     @Override
@@ -234,12 +245,14 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
         finalizer.finalizeBatchColumns(columnMetadata, presentColumnsIndexes, pageZeroWriter);
 
         //assertion logging
-        int presentColumnsCount = presentColumnsIndexes.cardinality();
-        int beforeTransformColumnCount = transformerForCurrentTuple.getBeforeTransformColumnsCount();
-        int currentTupleColumnsCount = transformerForCurrentTuple.getNumberOfVisitedColumnsInBatch();
-        if (beforeTransformColumnCount != presentColumnsCount || currentTupleColumnsCount != presentColumnsCount) {
-            LOGGER.debug("mismatch in column counts: beforeTransform={}, currentTuple={}, expected={}",
-                    beforeTransformColumnCount, currentTupleColumnsCount, presentColumnsCount);
+        if (LOGGER.isTraceEnabled()) {
+            int presentColumnsCount = presentColumnsIndexes.cardinality();
+            int beforeTransformColumnCount = transformerForCurrentTuple.getBeforeTransformColumnsCount();
+            int currentTupleColumnsCount = transformerForCurrentTuple.getNumberOfVisitedColumnsInBatch();
+            if (beforeTransformColumnCount != presentColumnsCount || currentTupleColumnsCount != presentColumnsCount) {
+                LOGGER.trace("mismatch in column counts: beforeTransform={}, currentTuple={}, expected={}",
+                        beforeTransformColumnCount, currentTupleColumnsCount, presentColumnsCount);
+            }
         }
 
         writer.setPageZeroWriter(pageZeroWriter, toIndexArray(presentColumnsIndexes), numberOfColumns);
@@ -251,6 +264,11 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
         transformer.resetStringLengths();
         transformerForCurrentTuple.reset();
         presentColumnsIndexes.clear();
+    }
+
+    @Override
+    public byte getWriterFlag() {
+        return pageZeroWriterFlavorSelector.getWriterFlag();
     }
 
     public static int[] toIndexArray(BitSet bitSet) {
@@ -271,5 +289,12 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
 
     protected void writeMeta(LSMBTreeTupleReference btreeTuple) throws HyracksDataException {
         //NoOp
+    }
+
+    @Override
+    public int getRequiredTemporaryBuffersCountIncludingCurrentTuple() {
+        int requiredBuffers = columnMetadata.getRequiredTemporaryBuffersCount()
+                + columnMetadataWithCurrentTuple.getRequiredTemporaryBuffersCountForCurrentTuple();
+        return requiredBuffers;
     }
 }

@@ -29,8 +29,7 @@ import org.apache.asterix.common.config.NodeProperties;
 import org.apache.asterix.common.config.ReplicationProperties;
 import org.apache.asterix.common.config.StorageProperties;
 import org.apache.asterix.common.config.TransactionProperties;
-import org.apache.asterix.common.external.IExternalCredentialsCache;
-import org.apache.asterix.common.external.IExternalCredentialsCacheUpdater;
+import org.apache.asterix.common.external.IExternalStatsTracker;
 import org.apache.hyracks.api.application.IServiceContext;
 import org.apache.hyracks.api.client.IHyracksClientConnection;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -109,13 +108,5 @@ public interface IApplicationContext {
 
     INamespacePathResolver getNamespacePathResolver();
 
-    /**
-     * @return external credentials cache
-     */
-    IExternalCredentialsCache getExternalCredentialsCache();
-
-    /**
-     * @return external credentials cache updater
-     */
-    IExternalCredentialsCacheUpdater getExternalCredentialsCacheUpdater();
+    IExternalStatsTracker getExternalStatsTracker();
 }

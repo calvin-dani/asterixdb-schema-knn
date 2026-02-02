@@ -55,6 +55,7 @@ import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
+import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -168,7 +169,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
+            throws HyracksDataException {
         //        return new VCTreeBulkLoader(fillFactor, verifyInput, callback, this);
         throw new UnsupportedOperationException();
     }
@@ -1205,7 +1207,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
 
         // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findCloseCentroidsLevelWise(bufferCache, getFileId(), rootPage,
+        return VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(bufferCache, getFileId(), rootPage,
                 getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
     }
 
