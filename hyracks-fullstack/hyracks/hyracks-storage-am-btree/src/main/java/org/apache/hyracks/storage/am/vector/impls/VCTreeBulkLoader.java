@@ -165,7 +165,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
      */
 
     private int extractCentroidId(ITupleReference tuple) throws HyracksDataException {
-        return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1) + 1);
+        return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1));
     }
 
     /**

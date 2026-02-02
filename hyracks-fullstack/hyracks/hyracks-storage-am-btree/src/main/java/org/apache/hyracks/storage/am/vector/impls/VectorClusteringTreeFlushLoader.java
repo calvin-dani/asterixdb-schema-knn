@@ -42,7 +42,7 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
 
     public void copyPage(ICachedPage sourcePage) throws HyracksDataException {
         // Copy page from source to target
-        int targetPageId = freePageManager.takePage(metaFrame);
+        int targetPageId = freePageManager.takePage(metaFrame) - 1;
         ICachedPage targetPage =
                 bufferCache.confiscatePage(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), targetPageId));
         // Copy entire page content

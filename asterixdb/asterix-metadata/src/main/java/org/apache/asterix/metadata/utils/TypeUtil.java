@@ -464,8 +464,14 @@ public class TypeUtil {
                 throw new CompilationException(ErrorCode.COMPILATION_ERROR,
                         "Indexing an open field is only supported on the record part");
             }
+            // Skip type enforcement for include fields with ANY type (when loaded from metadata)
+            // Include fields already exist in the schema, so they don't need type enforcement
+            IAType includeFieldType = includeFieldTypes.get(i);
+            if (includeFieldType.getTypeTag() == ATypeTag.ANY) {
+                continue;
+            }
             enforcedTypeBuilder.reset(enforcedRecordType, includeFieldNames.get(i),
-                    Collections.nCopies(includeFieldNames.get(i).size(), false), includeFieldTypes.get(i),
+                    Collections.nCopies(includeFieldNames.get(i).size(), false), includeFieldType,
                     vectorIndexDetails.getCastDefaultNull().getOrElse(false));
             validateRecord(enforcedRecordType);
             enforcedRecordType = enforcedTypeBuilder.build();

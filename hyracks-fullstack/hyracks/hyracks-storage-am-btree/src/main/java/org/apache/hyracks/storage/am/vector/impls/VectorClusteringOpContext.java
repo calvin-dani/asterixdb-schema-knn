@@ -53,7 +53,7 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
     private final ITreeIndexFrameFactory interiorFrameFactory;
     private final ITreeIndexFrameFactory leafFrameFactory;
     private final ITreeIndexFrameFactory metadataFrameFactory;
-    private final ITreeIndexFrameFactory dataFrameFactory;
+    private ITreeIndexFrameFactory dataFrameFactory; // Mutable for LSMBTree-style frame switching
     private final IPageManager freePageManager;
     private final ITreeIndexMetadataFrame metaFrame;
     private final int vectorDimensions;
@@ -234,5 +234,19 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
 
     public void setMetadataPageId(long metadataPageId) {
         this.metadataPageId = metadataPageId;
+    }
+
+    /**
+     * Sets the data frame (LSMBTree pattern for insert/delete mode switching).
+     */
+    public void setDataFrame(IVectorClusteringDataFrame dataFrame) {
+        this.dataFrame = dataFrame;
+    }
+
+    /**
+     * Sets the data frame factory (LSMBTree pattern for insert/delete mode switching).
+     */
+    public void setDataFrameFactory(ITreeIndexFrameFactory dataFrameFactory) {
+        this.dataFrameFactory = dataFrameFactory;
     }
 }

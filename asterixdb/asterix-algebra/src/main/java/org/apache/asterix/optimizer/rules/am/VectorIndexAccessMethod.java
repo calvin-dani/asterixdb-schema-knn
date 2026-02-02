@@ -21,7 +21,11 @@ package org.apache.asterix.optimizer.rules.am;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.asterix.common.annotations.AbstractExpressionAnnotationWithIndexNames;
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
@@ -39,16 +43,23 @@ import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalExpression;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.base.IOptimizationContext;
+import org.apache.hyracks.algebricks.core.algebra.base.LogicalExpressionTag;
+import org.apache.hyracks.algebricks.core.algebra.base.LogicalOperatorTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCallExpression;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IAlgebricksConstantValue;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IVariableTypeEnvironment;
+import org.apache.hyracks.algebricks.core.algebra.expressions.ScalarFunctionCallExpression;
+import org.apache.hyracks.algebricks.core.algebra.expressions.VariableReferenceExpression;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractDataSourceOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractLogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AssignOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.LimitOperator;
+import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperator;
+import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOperator;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorManipulationUtil;
+import org.apache.hyracks.algebricks.rewriter.rules.InlineVariablesRule;
 
 /**
  * Access method for vector indexes.
@@ -200,11 +211,12 @@ public class VectorIndexAccessMethod implements IAccessMethod {
     public ILogicalOperator createIndexSearchPlan(Mutable<ILogicalOperator> limitRef,
             Mutable<ILogicalOperator> orderRef, AbstractFunctionCallExpression annDistanceExpr,
             OptimizableOperatorSubTree subTree, Index chosenIndex, AccessMethodAnalysisContext analysisCtx,
-            IOptimizationContext context) throws AlgebricksException {
+            IOptimizationContext context, SelectOperator selectOp) throws AlgebricksException {
 
         System.err.println("=== VectorIndexAccessMethod.createIndexSearchPlan CALLED ===");
         System.err.println("Dataset: " + subTree.getDataset().getDatasetName());
         System.err.println("Vector Index: " + chosenIndex.getIndexName());
+        System.err.println("SelectOp present: " + (selectOp != null));
 
         // Get dataset metadata
         Dataset dataset = subTree.getDataset();
@@ -262,14 +274,29 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         boolean isIndexOnlyPlan = false;
 
         // Create UNNEST-MAP operator for vector index search
-        // This returns: <vector_field, pk> from the index
+        // This returns: <pk> from the index (vector embeddings skipped to save memory)
         ILogicalOperator secondaryIndexUnnestOp =
                 AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType, metaRecordType, chosenIndex,
                         assignSearchKeys, jobGenParams, context, false, false, isIndexOnlyPlan, null);
 
+        // Handle filter pushdown for INCLUDE fields
+        // If there's a SELECT operator with filter on INCLUDE fields, we:
+        // 1. Add INCLUDE field variables to the UnnestMapOperator output
+        // 2. Rewrite the selectCondition to use these new variables
+        // 3. Set the selectCondition on the UnnestMapOperator
+        // This allows ITupleFilterFactory to be created in VectorSearchPOperator
+        boolean filterPushdownApplied = false;
+        if (selectOp != null && secondaryIndexUnnestOp instanceof UnnestMapOperator) {
+            UnnestMapOperator vectorUnnestMap = (UnnestMapOperator) secondaryIndexUnnestOp;
+            filterPushdownApplied = addIncludeFieldsAndSetSelectCondition(vectorUnnestMap, selectOp, chosenIndex,
+                    recordType, subTree, context);
+        }
+
         // Update type environment to register variables produced by vector index search
-        // (e.g., $32 = primary keys). This is critical so downstream operators can use these variables.
-        context.computeAndSetTypeEnvironmentForOperator(secondaryIndexUnnestOp);
+        // Only do this if filter pushdown wasn't applied (which already handles type env)
+        if (!filterPushdownApplied) {
+            context.computeAndSetTypeEnvironmentForOperator(secondaryIndexUnnestOp);
+        }
 
         // Add primary index lookup to get full record
         // This uses the PKs returned from vector index to fetch complete records
@@ -444,7 +471,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
     /**
      * Checks if two distance metrics are compatible (same canonical form).
-     * 
+     *
      * @param metric1 First distance metric
      * @param metric2 Second distance metric
      * @return true if metrics are compatible, false otherwise
@@ -453,5 +480,306 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         String normalized1 = normalizeDistanceMetric(metric1);
         String normalized2 = normalizeDistanceMetric(metric2);
         return normalized1.equals(normalized2);
+    }
+
+    /**
+     * Adds INCLUDE field variables to the vector index UnnestMapOperator and sets up
+     * the selectCondition for filter pushdown.
+     *
+     * This method follows the PushLimitIntoPrimarySearchRule pattern:
+     * 1. Clones the selectCondition from SelectOperator
+     * 2. Uses InlineVariablesVisitor to inline ASSIGN variables into the expression
+     * 3. After inlining, the expression uses variables already in the type environment
+     * 4. Adds INCLUDE field variables to UnnestMapOperator output for physical layer mapping
+     * 5. Sets the INLINED selectCondition on the UnnestMapOperator
+     *
+     * The key insight is that we DON'T create new variable references in the selectCondition.
+     * Instead, we inline the expression so it uses the record variable from DataSourceScan,
+     * which IS in the input type environment and passes type checking.
+     *
+     * At physical layer, VectorIndexFilterSchema maps field-access expressions to the
+     * correct physical tuple positions.
+     *
+     * @param vectorUnnestMap The vector index UnnestMapOperator
+     * @param selectOp The SELECT operator containing the filter condition
+     * @param chosenIndex The vector index with INCLUDE fields
+     * @param recordType The record type of the dataset
+     * @param subTree The subtree for resolving variable references
+     * @param context The optimization context
+     * @return true if filter pushdown was applied, false otherwise
+     */
+    private boolean addIncludeFieldsAndSetSelectCondition(UnnestMapOperator vectorUnnestMap, SelectOperator selectOp,
+            Index chosenIndex, ARecordType recordType, OptimizableOperatorSubTree subTree, IOptimizationContext context)
+            throws AlgebricksException {
+
+        // Get INCLUDE field names from vector index
+        Index.VectorIndexDetails vectorDetails = (Index.VectorIndexDetails) chosenIndex.getIndexDetails();
+        List<List<String>> includeFieldNames = vectorDetails.getIncludeFieldNames();
+
+        if (includeFieldNames == null || includeFieldNames.isEmpty()) {
+            System.err.println("=== No INCLUDE fields in vector index, skipping filter pushdown ===");
+            return false;
+        }
+
+        System.err.println("=== Vector index has INCLUDE fields: " + includeFieldNames + " ===");
+
+        // Clone the selectCondition
+        ILogicalExpression selectCondition = selectOp.getCondition().getValue();
+        MutableObject<ILogicalExpression> selectConditionRef = new MutableObject<>(selectCondition.cloneExpression());
+
+        // Get variables used in the select condition
+        Set<LogicalVariable> selectedVariables = new HashSet<>();
+        selectConditionRef.getValue().getUsedVariables(selectedVariables);
+
+        System.err.println("=== Select condition uses variables: " + selectedVariables + " ===");
+
+        // Following PushLimitIntoPrimarySearchRule pattern: inline variables from ASSIGN operators
+        // This replaces variable references with their field-access expressions
+        ILogicalOperator child = selectOp.getInputs().get(0).getValue();
+        InlineVariablesRule.InlineVariablesVisitor inlineVisitor = null;
+        Map<LogicalVariable, ILogicalExpression> varAssignRhs = null;
+
+        for (; child.getOperatorTag() == LogicalOperatorTag.ASSIGN; child = child.getInputs().get(0).getValue()) {
+            if (varAssignRhs == null) {
+                varAssignRhs = new HashMap<>();
+            } else {
+                varAssignRhs.clear();
+            }
+            AssignOperator assignOp = (AssignOperator) child;
+            extractInlinableVariablesFromAssign(assignOp, selectedVariables, varAssignRhs);
+
+            if (!varAssignRhs.isEmpty()) {
+                if (inlineVisitor == null) {
+                    inlineVisitor = new InlineVariablesRule.InlineVariablesVisitor(varAssignRhs, null);
+                    inlineVisitor.setContext(context);
+                    inlineVisitor.setOperator(selectOp);
+                }
+                if (!inlineVisitor.transform(selectConditionRef)) {
+                    break;
+                }
+                selectedVariables.clear();
+                selectConditionRef.getValue().getUsedVariables(selectedVariables);
+                System.err.println("=== After inlining, condition uses variables: " + selectedVariables + " ===");
+            }
+        }
+
+        System.err.println("=== Inlined selectCondition: " + selectConditionRef.getValue() + " ===");
+
+        // Check that all filter fields are in the INCLUDE list
+        // Build mapping: field name -> include field index
+        Map<String, Integer> fieldNameToIncludeIndex = new HashMap<>();
+        for (int i = 0; i < includeFieldNames.size(); i++) {
+            List<String> fieldPath = includeFieldNames.get(i);
+            String fieldName = fieldPath.get(fieldPath.size() - 1);
+            fieldNameToIncludeIndex.put(fieldName, i);
+        }
+
+        // Extract field names used in the filter condition
+        Set<String> filterFieldNames = new HashSet<>();
+        extractFieldNamesFromExpression(selectConditionRef.getValue(), recordType, filterFieldNames);
+        System.err.println("=== Filter uses fields: " + filterFieldNames + " ===");
+
+        // Verify all filter fields are in the INCLUDE list
+        for (String fieldName : filterFieldNames) {
+            if (!fieldNameToIncludeIndex.containsKey(fieldName)) {
+                System.err.println("=== Field " + fieldName + " is not in INCLUDE list, skipping filter pushdown ===");
+                return false;
+            }
+        }
+
+        // FILTER PUSHDOWN DISABLED
+        // We cannot set selectCondition on VECTOR_INDEX_UNNEST because:
+        // 1. The inlined expression references $row (record variable from DataSourceScan)
+        // 2. $row is produced by PRIMARY_INDEX_UNNEST which is ABOVE VECTOR_INDEX_UNNEST
+        // 3. computeInputTypeEnvironment() only looks at CHILDREN (below), not PARENTS (above)
+        // 4. Therefore $row is not in VECTOR_INDEX_UNNEST's input type environment
+        // 5. SetClosedRecordConstructorsRule fails with "Could not infer type for variable '$row'"
+        //
+        // See VECTOR_INDEX_FILTER_PUSHDOWN_TYPE_INFERENCE_ISSUE.md for detailed analysis.
+        //
+        // Future solution: Bypass the Algebricks type system by passing filter info
+        // through VectorJobGenParams and creating TupleFilter directly at physical layer.
+        System.err.println("=== Filter pushdown DISABLED due to type inference issue ===");
+        System.err.println("=== All filter fields are in INCLUDE list, but cannot set selectCondition ===");
+        return false;
+    }
+
+    /**
+     * Extracts inlinable variables from an AssignOperator.
+     * Following PushLimitIntoPrimarySearchRule pattern.
+     */
+    private void extractInlinableVariablesFromAssign(AssignOperator assignOp, Set<LogicalVariable> includeVariables,
+            Map<LogicalVariable, ILogicalExpression> outVarExprs) {
+        List<LogicalVariable> vars = assignOp.getVariables();
+        List<Mutable<ILogicalExpression>> exprs = assignOp.getExpressions();
+        for (int i = 0, ln = vars.size(); i < ln; i++) {
+            LogicalVariable var = vars.get(i);
+            if (includeVariables.contains(var)) {
+                outVarExprs.put(var, exprs.get(i).getValue());
+            }
+        }
+    }
+
+    /**
+     * Extracts field names from field-access expressions in the given expression.
+     */
+    private void extractFieldNamesFromExpression(ILogicalExpression expr, ARecordType recordType,
+            Set<String> fieldNames) {
+        if (expr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
+            AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) expr;
+
+            // Check for field-access-by-name
+            if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_NAME)) {
+                if (funcExpr.getArguments().size() >= 2) {
+                    ILogicalExpression fieldNameExpr = funcExpr.getArguments().get(1).getValue();
+                    String fieldName = AccessMethodUtils.getStringConstant(new MutableObject<>(fieldNameExpr));
+                    if (fieldName != null) {
+                        fieldNames.add(fieldName);
+                    }
+                }
+            }
+            // Check for field-access-by-index
+            else if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_INDEX)) {
+                if (funcExpr.getArguments().size() >= 2) {
+                    ILogicalExpression fieldIndexExpr = funcExpr.getArguments().get(1).getValue();
+                    Integer fieldIndex = AccessMethodUtils.getInt32Constant(new MutableObject<>(fieldIndexExpr));
+                    if (fieldIndex != null && recordType != null) {
+                        String[] fieldNamesArray = recordType.getFieldNames();
+                        if (fieldIndex >= 0 && fieldIndex < fieldNamesArray.length) {
+                            fieldNames.add(fieldNamesArray[fieldIndex]);
+                        }
+                    }
+                }
+            }
+
+            // Recursively process arguments
+            for (Mutable<ILogicalExpression> arg : funcExpr.getArguments()) {
+                extractFieldNamesFromExpression(arg.getValue(), recordType, fieldNames);
+            }
+        }
+    }
+
+    /**
+     * Collects mappings from field names to the variables that represent them in the filter.
+     * Traces through ASSIGN operators to find field name -> variable mappings.
+     */
+    private void collectFieldVariableMappings(ILogicalExpression expr, OptimizableOperatorSubTree subTree,
+            Map<String, LogicalVariable> fieldNameToVar) {
+
+        if (expr.getExpressionTag() == LogicalExpressionTag.VARIABLE) {
+            // Variable reference - trace back to find field name
+            VariableReferenceExpression varRef = (VariableReferenceExpression) expr;
+            LogicalVariable var = varRef.getVariableReference();
+            String fieldName = findFieldNameForVariable(var, subTree);
+            if (fieldName != null) {
+                fieldNameToVar.put(fieldName, var);
+            }
+        } else if (expr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
+            // Recurse into function arguments
+            AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) expr;
+            for (Mutable<ILogicalExpression> argRef : funcExpr.getArguments()) {
+                collectFieldVariableMappings(argRef.getValue(), subTree, fieldNameToVar);
+            }
+        }
+    }
+
+    /**
+     * Finds the field name that a variable represents by tracing through ASSIGN operators.
+     */
+    private String findFieldNameForVariable(LogicalVariable var, OptimizableOperatorSubTree subTree) {
+        // Search assigns for the variable definition
+        for (AbstractLogicalOperator op : subTree.getAssignsAndUnnests()) {
+            if (op.getOperatorTag() == LogicalOperatorTag.ASSIGN) {
+                AssignOperator assignOp = (AssignOperator) op;
+                List<LogicalVariable> assignVars = assignOp.getVariables();
+                List<Mutable<ILogicalExpression>> assignExprs = assignOp.getExpressions();
+
+                for (int i = 0; i < assignVars.size(); i++) {
+                    if (assignVars.get(i).equals(var)) {
+                        // Found the assignment - extract field name
+                        ILogicalExpression assignExpr = assignExprs.get(i).getValue();
+                        return extractFieldNameFromExpression(assignExpr, subTree);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extracts field name from a field access expression.
+     * Handles both field-access-by-name and field-access-by-index.
+     */
+    private String extractFieldNameFromExpression(ILogicalExpression expr, OptimizableOperatorSubTree subTree) {
+        if (expr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
+            AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) expr;
+
+            // Check for field-access-by-name
+            if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_NAME)) {
+                // Second argument is the field name
+                if (funcExpr.getArguments().size() >= 2) {
+                    ILogicalExpression fieldNameExpr = funcExpr.getArguments().get(1).getValue();
+                    return AccessMethodUtils.getStringConstant(new MutableObject<>(fieldNameExpr));
+                }
+            }
+
+            // Check for field-access-by-index
+            if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.FIELD_ACCESS_BY_INDEX)) {
+                // Second argument is the field index
+                if (funcExpr.getArguments().size() >= 2) {
+                    ILogicalExpression fieldIndexExpr = funcExpr.getArguments().get(1).getValue();
+                    Integer fieldIndex = AccessMethodUtils.getInt32Constant(new MutableObject<>(fieldIndexExpr));
+                    if (fieldIndex != null && subTree != null && subTree.getRecordType() != null) {
+                        String[] fieldNames = subTree.getRecordType().getFieldNames();
+                        if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
+                            String fieldName = fieldNames[fieldIndex];
+                            System.err.println("=== Resolved field-access-by-index in filter: index " + fieldIndex
+                                    + " -> field '" + fieldName + "' ===");
+                            return fieldName;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Rewrites an expression by replacing old variables with new variables.
+     */
+    private ILogicalExpression rewriteExpressionWithNewVariables(ILogicalExpression expr,
+            Map<LogicalVariable, LogicalVariable> oldToNewVarMapping) {
+
+        if (expr.getExpressionTag() == LogicalExpressionTag.VARIABLE) {
+            VariableReferenceExpression varRef = (VariableReferenceExpression) expr;
+            LogicalVariable oldVar = varRef.getVariableReference();
+
+            if (oldToNewVarMapping.containsKey(oldVar)) {
+                // Replace with new variable
+                LogicalVariable newVar = oldToNewVarMapping.get(oldVar);
+                VariableReferenceExpression newVarRef = new VariableReferenceExpression(newVar);
+                newVarRef.setSourceLocation(varRef.getSourceLocation());
+                return newVarRef;
+            }
+            return expr.cloneExpression();
+
+        } else if (expr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
+            AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) expr;
+            List<Mutable<ILogicalExpression>> newArgs = new ArrayList<>();
+
+            for (Mutable<ILogicalExpression> argRef : funcExpr.getArguments()) {
+                ILogicalExpression newArg = rewriteExpressionWithNewVariables(argRef.getValue(), oldToNewVarMapping);
+                newArgs.add(new MutableObject<>(newArg));
+            }
+
+            ScalarFunctionCallExpression newFuncExpr =
+                    new ScalarFunctionCallExpression(funcExpr.getFunctionInfo(), newArgs);
+            newFuncExpr.setSourceLocation(funcExpr.getSourceLocation());
+            return newFuncExpr;
+
+        } else {
+            // For other expression types (constants, etc.), just clone
+            return expr.cloneExpression();
+        }
     }
 }
