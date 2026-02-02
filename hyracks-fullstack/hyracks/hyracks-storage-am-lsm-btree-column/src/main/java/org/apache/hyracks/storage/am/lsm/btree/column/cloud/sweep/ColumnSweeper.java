@@ -202,7 +202,6 @@ public final class ColumnSweeper {
                             }
                         }
                     }
-                    segmentPagesTempHolder.clear();
                     context.unpin(page0, bcOpCtx);
                 }
             }

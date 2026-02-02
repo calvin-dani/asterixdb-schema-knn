@@ -19,21 +19,22 @@
 package org.apache.asterix.app.nc.task;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Set;
 
 import org.apache.asterix.common.api.INCLifecycleTask;
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.exceptions.ACIDException;
-import org.apache.asterix.common.utils.Partitions;
 import org.apache.hyracks.api.control.CcId;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.service.IControllerService;
 
 public class LocalRecoveryTask implements INCLifecycleTask {
 
-    private static final long serialVersionUID = 2L;
-    private final Partitions partitions;
+    private static final long serialVersionUID = 1L;
+    private final Set<Integer> partitions;
 
-    public LocalRecoveryTask(Partitions partitions) {
+    public LocalRecoveryTask(Set<Integer> partitions) {
         this.partitions = partitions;
     }
 
@@ -51,6 +52,7 @@ public class LocalRecoveryTask implements INCLifecycleTask {
 
     @Override
     public String toString() {
-        return "{ \"class\" : \"" + getClass().getSimpleName() + "\", \"partitions\" : " + partitions + " }";
+        return "{ \"class\" : \"" + getClass().getSimpleName() + "\", \"partitions\" : "
+                + Arrays.toString(partitions.toArray()) + " }";
     }
 }

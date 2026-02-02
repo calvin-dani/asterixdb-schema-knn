@@ -67,7 +67,7 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
             throws HyracksDataException {
         this(indexDataflowHelperFactory, priamryIndexDataflowHelperFactory, ctx, partition, fieldPermutation,
                 fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, recDesc, usage, datasetId,
-                tupleFilterFactory, partitionerFactory, partitionsMap, null, null, null, null, false);
+                tupleFilterFactory, partitionerFactory, partitionsMap, null, null, null, null);
     }
 
     public LSMIndexBulkLoadOperatorNodePushable(IIndexDataflowHelperFactory indexDataflowHelperFactory,
@@ -76,9 +76,9 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
             boolean checkIfEmptyIndex, RecordDescriptor recDesc, BulkLoadUsage usage, int datasetId,
             ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap,
             Integer numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster,
-            Integer maxEntriesPerPage, boolean sampleLoader) throws HyracksDataException {
+            Integer maxEntriesPerPage) throws HyracksDataException {
         super(indexDataflowHelperFactory, ctx, partition, fieldPermutation, fillFactor, verifyInput, numElementsHint,
-                checkIfEmptyIndex, recDesc, tupleFilterFactory, partitionerFactory, partitionsMap, sampleLoader);
+                checkIfEmptyIndex, recDesc, tupleFilterFactory, partitionerFactory, partitionsMap);
 
         if (priamryIndexDataflowHelperFactory != null) {
             primaryIndexHelpers = new IIndexDataflowHelper[partitions.length];

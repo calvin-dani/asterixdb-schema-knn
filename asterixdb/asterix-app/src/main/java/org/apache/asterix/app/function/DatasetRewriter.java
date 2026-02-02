@@ -44,7 +44,6 @@ import org.apache.asterix.om.functions.IFunctionToDataSourceRewriter;
 import org.apache.asterix.om.typecomputer.base.IResultTypeComputer;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
-import org.apache.asterix.om.utils.ConstantExpressionUtil;
 import org.apache.asterix.optimizer.rules.UnnestToDataScanRule;
 import org.apache.asterix.optimizer.rules.util.EquivalenceClassUtils;
 import org.apache.commons.lang3.mutable.Mutable;
@@ -82,13 +81,6 @@ public class DatasetRewriter implements IFunctionToDataSourceRewriter, IResultTy
 
         MetadataProvider metadataProvider = (MetadataProvider) context.getMetadataProvider();
         Dataset dataset = fetchDataset(metadataProvider, f);
-        // is the sample name present?
-        Boolean isSample = f.getArguments().size() > 4
-                ? ConstantExpressionUtil.getBooleanConstant(f.getArguments().get(4).get()) : null;
-        String sampleIndexName = null;
-        if (isSample != null && isSample) {
-            sampleIndexName = FunctionUtil.getStringConstant(f.getArguments().get(4));
-        }
         List<LogicalVariable> variables = new ArrayList<>();
         switch (dataset.getDatasetType()) {
             case INTERNAL:
@@ -109,12 +101,7 @@ public class DatasetRewriter implements IFunctionToDataSourceRewriter, IResultTy
 
         DataSourceId dsid =
                 new DataSourceId(dataset.getDatabaseName(), dataset.getDataverseName(), dataset.getDatasetName());
-        DataSource dataSource;
-        if (sampleIndexName != null) {
-            dataSource = metadataProvider.findSampleDataSource(dsid, sampleIndexName);
-        } else {
-            dataSource = metadataProvider.findDataSource(dsid);
-        }
+        DataSource dataSource = metadataProvider.findDataSource(dsid);
         boolean hasMeta = dataSource.hasMeta();
         if (hasMeta) {
             variables.add(context.newVar());
@@ -163,7 +150,6 @@ public class DatasetRewriter implements IFunctionToDataSourceRewriter, IResultTy
         Dataset dataset = fetchDataset(metadata, datasetFnCall);
         IAType type = metadata.findType(dataset.getItemTypeDatabaseName(), dataset.getItemTypeDataverseName(),
                 dataset.getItemTypeName());
-        type = ((MetadataProvider) mp).findTypeForDatasetWithoutType(type, dataset);
         if (type == null) {
             throw new CompilationException(ErrorCode.COMPILATION_ERROR, datasetFnCall.getSourceLocation(),
                     "No type for " + dataset() + " " + dataset.getDatasetName());

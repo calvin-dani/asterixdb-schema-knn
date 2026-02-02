@@ -19,9 +19,8 @@
 
 package org.apache.asterix.cloud.clients.azure.blobstorage;
 
-import static org.apache.asterix.external.util.azure.blob.BlobUtils.disableSslVerify;
+import static org.apache.asterix.cloud.clients.azure.blobstorage.AzBlobStorageClientConfig.DELETE_BATCH_SIZE;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
@@ -32,6 +31,7 @@ import java.nio.ReadOnlyBufferException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -51,70 +51,57 @@ import org.apache.asterix.cloud.clients.profiler.IRequestProfilerLimiter;
 import org.apache.asterix.cloud.clients.profiler.RequestLimiterNoOpProfiler;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.exceptions.RuntimeDataException;
-import org.apache.asterix.external.util.azure.AzureConstants;
+import org.apache.asterix.external.util.azure.blob_storage.AzureConstants;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.control.nc.io.IOManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.azure.core.http.netty.NettyAsyncHttpClientBuilder;
 import com.azure.core.http.rest.PagedIterable;
+import com.azure.core.http.rest.Response;
 import com.azure.core.util.BinaryData;
-import com.azure.storage.blob.BlobAsyncClient;
 import com.azure.storage.blob.BlobClient;
-import com.azure.storage.blob.BlobContainerAsyncClient;
 import com.azure.storage.blob.BlobContainerClient;
-import com.azure.storage.blob.BlobServiceAsyncClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
-import com.azure.storage.blob.models.AccessTier;
+import com.azure.storage.blob.batch.BlobBatchClient;
+import com.azure.storage.blob.batch.BlobBatchClientBuilder;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.BlobListDetails;
 import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.ListBlobsOptions;
-import com.azure.storage.blob.options.BlobParallelUploadOptions;
 import com.azure.storage.common.StorageSharedKeyCredential;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.netty.http.client.HttpClient;
-
 public class AzBlobStorageCloudClient implements ICloudClient {
-
     private static final String BUCKET_ROOT_PATH = "";
     public static final String AZURITE_ENDPOINT = "http://127.0.0.1:15055/devstoreaccount1/";
     private static final String AZURITE_ACCOUNT_NAME = "devstoreaccount1";
     private static final String AZURITE_ACCOUNT_KEY =
             "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
+    private static final int SUCCESS_RESPONSE_CODE = 202;
     private final ICloudGuardian guardian;
     private final BlobContainerClient blobContainerClient;
-    private final BlobContainerAsyncClient blobContainerAsyncClient;
     private final AzBlobStorageClientConfig config;
     private final IRequestProfilerLimiter profiler;
+    private final BlobBatchClient blobBatchClient;
     private static final Logger LOGGER = LogManager.getLogger();
-    private final AccessTier accessTier;
 
     public AzBlobStorageCloudClient(AzBlobStorageClientConfig config, ICloudGuardian guardian) {
-        this(config, buildClient(config), buildAsyncClient(config), guardian);
+        this(config, buildClient(config), guardian);
     }
 
     public AzBlobStorageCloudClient(AzBlobStorageClientConfig config, BlobServiceClient blobServiceClient,
-            BlobServiceAsyncClient asyncBlobServiceClient, ICloudGuardian guardian) {
+            ICloudGuardian guardian) {
         this.blobContainerClient = blobServiceClient.getBlobContainerClient(config.getBucket());
-        this.blobContainerAsyncClient = asyncBlobServiceClient.getBlobContainerAsyncClient(config.getBucket());
         this.config = config;
         this.guardian = guardian;
-        this.accessTier = config.getAccessTier();
         long profilerInterval = config.getProfilerLogInterval();
         AzureRequestRateLimiter limiter = new AzureRequestRateLimiter(config);
         if (profilerInterval > 0) {
@@ -123,6 +110,7 @@ public class AzBlobStorageCloudClient implements ICloudClient {
             profiler = new RequestLimiterNoOpProfiler(limiter);
         }
         guardian.setCloudClient(this);
+        blobBatchClient = new BlobBatchClientBuilder(blobContainerClient.getServiceClient()).buildClient();
     }
 
     @Override
@@ -138,7 +126,7 @@ public class AzBlobStorageCloudClient implements ICloudClient {
     @Override
     public ICloudWriter createWriter(String bucket, String path, IWriteBufferProvider bufferProvider) {
         ICloudBufferedWriter bufferedWriter = new AzBlobStorageBufferedWriter(blobContainerClient, profiler, guardian,
-                bucket, config.getPrefix() + path, config.getAccessTier());
+                bucket, config.getPrefix() + path);
         return new CloudResettableInputStream(bufferedWriter, bufferProvider);
     }
 
@@ -186,10 +174,9 @@ public class AzBlobStorageCloudClient implements ICloudClient {
         BlobRange blobRange = new BlobRange(offset, rem);
         downloadBlob(blobClient, blobStream, blobRange);
         readBlobStreamIntoBuffer(buffer, blobStream);
-        if (buffer.remaining() != 0) {
+        if (buffer.remaining() != 0)
             throw new IllegalStateException("Expected buffer remaining = 0, found: " + buffer.remaining());
-        }
-        return ((int) rem);
+        return ((int) rem - buffer.remaining());
     }
 
     private void readBlobStreamIntoBuffer(ByteBuffer buffer, ByteArrayOutputStream byteArrayOutputStream)
@@ -248,10 +235,9 @@ public class AzBlobStorageCloudClient implements ICloudClient {
     public void write(String bucket, String path, byte[] data) {
         guardian.checkWriteAccess(bucket, path);
         profiler.objectWrite();
+        BinaryData binaryData = BinaryData.fromBytes(data);
         BlobClient blobClient = blobContainerClient.getBlobClient(config.getPrefix() + path);
-        BlobParallelUploadOptions options =
-                new BlobParallelUploadOptions(new ByteArrayInputStream(data)).setTier(accessTier);
-        blobClient.uploadWithResponse(options, null, null);
+        blobClient.upload(binaryData, true);
     }
 
     @Override
@@ -263,48 +249,62 @@ public class AzBlobStorageCloudClient implements ICloudClient {
         profiler.objectCopy();
         guardian.checkWriteAccess(bucket, destPath.getRelativePath());
         BlobClient destBlobClient = blobContainerClient.getBlobClient(destPath.getFile().getPath());
-        destBlobClient.beginCopy(srcBlobUrl, null, accessTier, null, null, null, null);
-    }
-
-    @Override
-    public void deleteObject(String bucket, String path) throws HyracksDataException {
-        try {
-            if (path.isEmpty()) {
-                return;
-            }
-            guardian.checkWriteAccess(bucket, path);
-            profiler.objectDelete();
-            BlobClient blobClient = blobContainerClient.getBlobClient(config.getPrefix() + path);
-            blobClient.delete();
-        } catch (Exception ex) {
-            throw HyracksDataException.create(ex);
-        }
+        destBlobClient.beginCopy(srcBlobUrl, null);
     }
 
     @Override
     public void deleteObjects(String bucket, Collection<String> paths) throws HyracksDataException {
         if (paths.isEmpty())
             return;
-
-        List<Mono<Boolean>> deleteMonos = new ArrayList<>();
-        for (String path : paths) {
-            if (path != null && !path.isEmpty()) {
-                BlobAsyncClient blobAsyncClient =
-                        blobContainerAsyncClient.getBlobAsyncClient(config.getPrefix() + path);
-                deleteMonos.add(blobAsyncClient.deleteIfExists());
+        Set<BlobItem> blobsToDelete = getBlobsMatchingThesePaths(paths);
+        List<String> blobURLs = getBlobURLs(blobsToDelete);
+        if (blobURLs.isEmpty())
+            return;
+        Collection<List<String>> batchedBlobURLs = getBatchedBlobURLs(blobURLs);
+        for (List<String> batch : batchedBlobURLs) {
+            PagedIterable<Response<Void>> responses = blobBatchClient.deleteBlobs(batch, null);
+            Iterator<String> deletePathIter = paths.iterator();
+            String deletedPath = null;
+            try {
+                for (Response<Void> response : responses) {
+                    deletedPath = deletePathIter.next();
+                    // The response.getStatusCode() method returns:
+                    // - 202 (Accepted) if the delete operation is successful
+                    // - exception if the delete operation fails
+                    int statusCode = response.getStatusCode();
+                    if (statusCode != SUCCESS_RESPONSE_CODE) {
+                        LOGGER.warn("Failed to delete blob: {} with status code: {} while deleting {}", deletedPath,
+                                statusCode, paths.toString());
+                    }
+                }
+            } catch (BlobStorageException e) {
+                throw new RuntimeDataException(ErrorCode.CLOUD_IO_FAILURE, e, "DELETE", deletedPath, paths.toString());
             }
         }
+    }
 
-        if (deleteMonos.isEmpty()) {
-            return;
+    private Collection<List<String>> getBatchedBlobURLs(List<String> blobURLs) {
+        int startIdx = 0;
+        Collection<List<String>> batchedBLOBURLs = new ArrayList<>();
+        Iterator<String> iterator = blobURLs.iterator();
+        while (iterator.hasNext()) {
+            List<String> batch = new ArrayList<>();
+            while (startIdx < DELETE_BATCH_SIZE && iterator.hasNext()) {
+                batch.add(iterator.next());
+                startIdx++;
+            }
+            batchedBLOBURLs.add(batch);
+            startIdx = 0;
         }
+        return batchedBLOBURLs;
+    }
 
-        try {
-            Flux.fromIterable(deleteMonos).flatMap(mono -> mono, config.getRequestsMaxPendingHttpConnections()).then()
-                    .block();
-        } catch (Exception ex) {
-            throw new RuntimeDataException(ErrorCode.CLOUD_IO_FAILURE, "DELETE", ex, paths.toString());
-        }
+    private Set<BlobItem> getBlobsMatchingThesePaths(Collection<String> paths) {
+        List<String> pathWithPrefix =
+                paths.stream().map(path -> config.getPrefix() + path).collect(Collectors.toList());
+        PagedIterable<BlobItem> blobItems = blobContainerClient.listBlobs();
+        return blobItems.stream().filter(blobItem -> pathWithPrefix.contains(blobItem.getName()))
+                .collect(Collectors.toSet());
     }
 
     @Override
@@ -346,7 +346,7 @@ public class AzBlobStorageCloudClient implements ICloudClient {
     }
 
     @Override
-    public boolean isEmptyPrefix(String bucket, String path) {
+    public boolean isEmptyPrefix(String bucket, String path) throws HyracksDataException {
         profiler.objectsList();
         ListBlobsOptions listBlobsOptions = new ListBlobsOptions().setPrefix(config.getPrefix() + path);
         //MAX_VALUE below represents practically no timeout
@@ -356,7 +356,7 @@ public class AzBlobStorageCloudClient implements ICloudClient {
 
     @Override
     public IParallelDownloader createParallelDownloader(String bucket, IOManager ioManager) {
-        return new AzureParallelDownloader(ioManager, blobContainerAsyncClient, profiler, config);
+        return new AzureParallelDownloader(ioManager, blobContainerClient, profiler, config);
     }
 
     @Override
@@ -398,63 +398,32 @@ public class AzBlobStorageCloudClient implements ICloudClient {
     }
 
     private static BlobServiceClient buildClient(AzBlobStorageClientConfig config) {
-        BlobServiceClientBuilder blobServiceClientBuilder = getBlobServiceClientBuilder(config);
-        return blobServiceClientBuilder.buildClient();
-    }
-
-    private static BlobServiceAsyncClient buildAsyncClient(AzBlobStorageClientConfig config) {
-        BlobServiceClientBuilder blobServiceClientBuilder = getBlobServiceClientBuilder(config);
-        return blobServiceClientBuilder.buildAsyncClient();
-    }
-
-    private static BlobServiceClientBuilder getBlobServiceClientBuilder(AzBlobStorageClientConfig config) {
         BlobServiceClientBuilder blobServiceClientBuilder = new BlobServiceClientBuilder();
         blobServiceClientBuilder.endpoint(getEndpoint(config));
         blobServiceClientBuilder.httpLogOptions(AzureConstants.HTTP_LOG_OPTIONS);
         configCredentialsToAzClient(blobServiceClientBuilder, config);
-
-        // Disable SSL verification if the config property is set
-        if (config.isStorageDisableSSLVerify()) {
-            try {
-                // Create SSL context that trusts all certificates
-                SslContext sslContext =
-                        SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-
-                // Create a base Reactor Netty HttpClient with SSL verification disabled
-                HttpClient baseHttpClient = HttpClient.create().secure(sslSpec -> sslSpec.sslContext(sslContext));
-
-                // Configure the Azure HTTP client with the base client
-                blobServiceClientBuilder.httpClient(new NettyAsyncHttpClientBuilder(baseHttpClient).build());
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to disable SSL verification", e);
-            }
-        }
-        boolean disableSslVerify = config.isStorageDisableSSLVerify();
-        if (disableSslVerify) {
-            disableSslVerify(blobServiceClientBuilder);
-        }
-
-        return blobServiceClientBuilder;
+        return blobServiceClientBuilder.buildClient();
     }
 
     private static void configCredentialsToAzClient(BlobServiceClientBuilder builder,
             AzBlobStorageClientConfig config) {
-        String storageAccount = System.getenv("AZURE_STORAGE_ACCOUNT");
-        String storageKey = System.getenv("AZURE_STORAGE_KEY");
-
-        if (storageAccount != null && storageKey != null) {
-            builder.credential(new StorageSharedKeyCredential(storageAccount, storageKey));
-        } else if (config.isAnonymousAuth()) {
-            // TODO(mblow): this mapping anonymous auth -> Azurite default account (hack) should be removed ASAP
-            builder.credential(new StorageSharedKeyCredential(AZURITE_ACCOUNT_NAME, AZURITE_ACCOUNT_KEY));
+        if (config.isAnonymousAuth()) {
+            StorageSharedKeyCredential creds =
+                    new StorageSharedKeyCredential(AZURITE_ACCOUNT_NAME, AZURITE_ACCOUNT_KEY);
+            builder.credential(creds);
         } else {
             builder.credential(config.createCredentialsProvider());
         }
     }
 
     private static String getEndpoint(AzBlobStorageClientConfig config) {
-        // TODO(mblow): this mapping anonymous auth -> Azurite default endpoint (hack) should be removed ASAP
         return config.isAnonymousAuth() ? AZURITE_ENDPOINT + config.getBucket()
                 : config.getEndpoint() + "/" + config.getBucket();
+    }
+
+    private List<String> getBlobURLs(Set<BlobItem> blobs) {
+        final String blobURLPrefix = blobContainerClient.getBlobContainerUrl() + "/";
+        return blobs.stream().map(BlobItem::getName).map(blobName -> blobURLPrefix + blobName)
+                .collect(Collectors.toList());
     }
 }

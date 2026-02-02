@@ -19,9 +19,12 @@
 package org.apache.asterix.app.nc;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -31,7 +34,6 @@ import org.apache.asterix.common.replication.IPartitionReplica;
 import org.apache.asterix.common.storage.IReplicaManager;
 import org.apache.asterix.common.storage.ReplicaIdentifier;
 import org.apache.asterix.common.transactions.IRecoveryManager;
-import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.replication.api.PartitionReplica;
 import org.apache.asterix.transaction.management.resource.PersistentLocalResourceRepository;
 import org.apache.hyracks.api.client.NodeStatus;
@@ -42,9 +44,6 @@ import org.apache.hyracks.util.annotations.ThreadSafe;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-
 @ThreadSafe
 public class ReplicaManager implements IReplicaManager {
     private static final Logger LOGGER = LogManager.getLogger();
@@ -53,17 +52,17 @@ public class ReplicaManager implements IReplicaManager {
     /**
      * the partitions to which the current node is master
      */
-    private final Int2ObjectMap<PartitionSyncLock> partitions = new Int2ObjectOpenHashMap<>();
+    private final Map<Integer, Object> partitions = new HashMap<>();
     /**
      * current replicas
      */
     private final Map<ReplicaIdentifier, PartitionReplica> replicas = new HashMap<>();
-    private final Partitions nodeOriginatedPartitions = new Partitions();
+    private final Set<Integer> nodeOriginatedPartitions = new HashSet<>();
 
-    public ReplicaManager(INcApplicationContext appCtx, Partitions partitions) {
+    public ReplicaManager(INcApplicationContext appCtx, Set<Integer> partitions) {
         this.appCtx = appCtx;
-        for (int partition : partitions) {
-            this.partitions.put(partition, new PartitionSyncLock());
+        for (Integer partition : partitions) {
+            this.partitions.put(partition, new Object());
         }
         setNodeOriginatedPartitions(appCtx);
     }
@@ -110,15 +109,15 @@ public class ReplicaManager implements IReplicaManager {
     }
 
     @Override
-    public synchronized Partitions getPartitions() {
-        return new Partitions(partitions.keySet()).unmodifiable();
+    public synchronized Set<Integer> getPartitions() {
+        return Collections.unmodifiableSet(partitions.keySet());
     }
 
     @Override
-    public synchronized void setActivePartitions(Partitions activePartitions) {
+    public synchronized void setActivePartitions(Set<Integer> activePartitions) {
         partitions.clear();
-        for (int partition : activePartitions) {
-            partitions.put(partition, new PartitionSyncLock());
+        for (Integer partition : activePartitions) {
+            partitions.put(partition, new Object());
         }
     }
 
@@ -133,9 +132,9 @@ public class ReplicaManager implements IReplicaManager {
         if (!appCtx.isCloudDeployment()) {
             localResourceRepository.cleanup(partition);
             final IRecoveryManager recoveryManager = appCtx.getTransactionSubsystem().getRecoveryManager();
-            recoveryManager.replayReplicaPartitionLogs(Stream.of(partition).collect(Partitions.collector()), true);
+            recoveryManager.replayReplicaPartitionLogs(Stream.of(partition).collect(Collectors.toSet()), true);
         }
-        partitions.put(partition, new PartitionSyncLock());
+        partitions.put(partition, new Object());
     }
 
     @Override
@@ -152,8 +151,8 @@ public class ReplicaManager implements IReplicaManager {
     }
 
     @Override
-    public synchronized PartitionSyncLock getPartitionSyncLock(int partition) {
-        PartitionSyncLock syncLock = partitions.get(partition);
+    public synchronized Object getPartitionSyncLock(int partition) {
+        Object syncLock = partitions.get(partition);
         if (syncLock == null) {
             throw new IllegalStateException("partition " + partition + " is not active on this node");
         }
@@ -188,7 +187,7 @@ public class ReplicaManager implements IReplicaManager {
     }
 
     private void setNodeOriginatedPartitions(INcApplicationContext appCtx) {
-        Partitions nodePartitions =
+        Set<Integer> nodePartitions =
                 appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
         nodeOriginatedPartitions.addAll(nodePartitions);
     }

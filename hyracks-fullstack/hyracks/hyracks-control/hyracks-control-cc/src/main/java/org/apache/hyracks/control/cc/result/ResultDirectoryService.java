@@ -31,7 +31,6 @@ import org.apache.hyracks.api.comm.NetworkAddress;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.exceptions.HyracksException;
-import org.apache.hyracks.api.job.HyracksJobProperty;
 import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.api.job.JobStatus;
@@ -84,11 +83,7 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
         if (jobResultLocations.get(jobId) != null) {
             throw HyracksDataException.create(ErrorCode.MORE_THAN_ONE_RESULT, jobId);
         }
-        Boolean partitionsOrdered = (Boolean) spec.getProperty(HyracksJobProperty.RESULT_SET_ORDERED);
-        if (partitionsOrdered == null) {
-            partitionsOrdered = false;
-        }
-        jobResultLocations.put(jobId, new JobResultInfo(new ResultJobRecord(partitionsOrdered), null));
+        jobResultLocations.put(jobId, new JobResultInfo(new ResultJobRecord(), null));
     }
 
     @Override
@@ -106,8 +101,6 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
             }
             resultJobRecord.finish();
             jobResultCallback.completed(jobId, resultJobRecord);
-        } else {
-            reportJobFailure(jobId, exceptions);
         }
     }
 
@@ -126,7 +119,7 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
 
     @Override
     public synchronized void registerResultPartitionLocation(JobId jobId, ResultSetId rsId, IResultMetadata metadata,
-            boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress, String nodeId)
+            boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress)
             throws HyracksDataException {
         ResultJobRecord djr = getNonNullResultJobRecord(jobId);
         djr.setResultSetMetaData(rsId, metadata, nPartitions);
@@ -134,7 +127,6 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
 
         record.setNetworkAddress(networkAddress);
         record.setEmpty(emptyResult);
-        record.setNodeId(nodeId);
         record.start();
 
         final JobResultInfo jobResultInfo = jobResultLocations.get(jobId);
@@ -154,24 +146,11 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
     }
 
     @Override
-    public synchronized void reportResultPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition,
-            long resultCount) throws HyracksDataException {
-        ResultJobRecord djr = getNonNullResultJobRecord(jobId);
-        djr.getDirectoryRecord(partition).writeEOS();
-        djr.getDirectoryRecord(partition).setResultCount(resultCount);
-        djr.updateState();
-        notifyAll();
-    }
-
-    @Override
-    public synchronized void reportResultPartitionConsumed(JobId jobId, ResultSetId rsId, int partition)
+    public synchronized void reportResultPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition)
             throws HyracksDataException {
         ResultJobRecord djr = getNonNullResultJobRecord(jobId);
-        djr.getDirectoryRecord(partition).readEOS();
+        djr.getDirectoryRecord(partition).writeEOS();
         djr.updateState();
-        if (djr.consumed()) {
-            sweep(jobId);
-        }
         notifyAll();
     }
 
@@ -193,14 +172,6 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
     }
 
     @Override
-    public synchronized void reportJobTimeout(JobId jobId) {
-        ResultJobRecord rjr = getResultJobRecord(jobId);
-        if (rjr != null) {
-            rjr.timeout();
-        }
-    }
-
-    @Override
     public synchronized ResultJobRecord.Status getResultStatus(JobId jobId, ResultSetId rsId)
             throws HyracksDataException {
         return getNonNullResultJobRecord(jobId).getStatus();
@@ -208,11 +179,7 @@ public class ResultDirectoryService extends AbstractResultManager implements IRe
 
     @Override
     public synchronized IResultMetadata getResultMetadata(JobId jobId, ResultSetId rsId) throws HyracksDataException {
-        ResultSetMetaData resultSetMetaData = getNonNullResultJobRecord(jobId).getResultSetMetaData();
-        if (resultSetMetaData == null) {
-            throw HyracksDataException.create(ErrorCode.NO_RESULT_SET, jobId);
-        }
-        return resultSetMetaData.getMetadata();
+        return getNonNullResultJobRecord(jobId).getResultSetMetaData().getMetadata();
     }
 
     @Override

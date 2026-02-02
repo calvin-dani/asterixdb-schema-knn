@@ -219,15 +219,6 @@ public class APIFramework {
             Map<VarIdentifier, IAObject> externalVars, IResponsePrinter printer, IWarningCollector warningCollector,
             IRequestParameters requestParameters, EnumSet<JobFlag> runtimeFlags)
             throws AlgebricksException, ACIDException {
-        return compileQuery(clusterInfoCollector, metadataProvider, query, varCounter, outputDatasetName, output,
-                statement, externalVars, printer, warningCollector, requestParameters, runtimeFlags, null);
-    }
-
-    public JobSpecification compileQuery(IClusterInfoCollector clusterInfoCollector, MetadataProvider metadataProvider,
-            Query query, int varCounter, String outputDatasetName, SessionOutput output, ICompiledStatement statement,
-            Map<VarIdentifier, IAObject> externalVars, IResponsePrinter printer, IWarningCollector warningCollector,
-            IRequestParameters requestParameters, EnumSet<JobFlag> runtimeFlags, ResultMetadata resultMetadata)
-            throws AlgebricksException, ACIDException {
 
         try {
             // establish facts
@@ -248,9 +239,7 @@ public class APIFramework {
             metadataProvider.setTxnId(txnId);
             ILangExpressionToPlanTranslator t =
                     translatorFactory.createExpressionToPlanTranslator(metadataProvider, varCounter, externalVars);
-            if (resultMetadata == null) {
-                resultMetadata = new ResultMetadata(output.config().fmt());
-            }
+            ResultMetadata resultMetadata = new ResultMetadata(output.config().fmt());
             ILogicalPlan plan = isLoad || isCopy ? t.translateCopyOrLoad((ICompiledDmlStatement) statement)
                     : t.translate(query, outputDatasetName, statement, resultMetadata);
 

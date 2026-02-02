@@ -21,20 +21,15 @@ package org.apache.hyracks.storage.am.btree.api;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.btree.impls.RangePredicate;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 
 public interface IBTreeInteriorFrame extends IBTreeFrame {
-    int getChildPageId(RangePredicate pred) throws HyracksDataException;
+    public int getChildPageId(RangePredicate pred) throws HyracksDataException;
 
-    int getLeftmostChildPageId();
+    public int getLeftmostChildPageId();
 
-    int getRightmostChildPageId();
+    public int getRightmostChildPageId();
 
-    void setRightmostChildPageId(int pageId);
+    public void setRightmostChildPageId(int pageId);
 
-    int getRightLeafOffset();
-
-    ITreeIndexTupleReference getTupleRef();
-
-    void deleteGreatest();
+    public void deleteGreatest();
 }

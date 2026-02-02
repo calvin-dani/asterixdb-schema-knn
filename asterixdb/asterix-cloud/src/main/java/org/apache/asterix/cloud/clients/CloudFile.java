@@ -47,20 +47,21 @@ public final class CloudFile {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof CloudFile other)) {
+        if (!(obj instanceof CloudFile)) {
             return false;
         }
 
+        CloudFile other = (CloudFile) obj;
         return path.equals(other.path) && compareSize(other.size);
     }
 
     @Override
     public String toString() {
-        return path + '[' + size + ']';
+        return path;
     }
 
     private boolean compareSize(long otherSize) {
-        // Compare sizes if both sizes are not ignored
+        // Compare sizes iff both sizes are not ignored
         return size == otherSize || size == IGNORED_SIZE || otherSize == IGNORED_SIZE;
     }
 

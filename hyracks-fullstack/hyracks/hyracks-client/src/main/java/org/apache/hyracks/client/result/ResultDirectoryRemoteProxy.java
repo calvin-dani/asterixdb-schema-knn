@@ -60,9 +60,4 @@ public class ResultDirectoryRemoteProxy implements IResultDirectory {
                 new HyracksClientInterfaceFunctions.GetResultMetadataFunction(jobId, rsId);
         return (IResultMetadata) rpci.call(ipcHandle, grmf);
     }
-
-    @Override
-    public void releaseResult(JobId jobId, ResultSetId rsId) {
-
-    }
 }

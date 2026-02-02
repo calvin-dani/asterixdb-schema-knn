@@ -94,6 +94,7 @@ public class PushdownContext {
             scanDefDesc = new ScanDefineDescriptor(scopes.size(), dataset, pkList, recordVariable, metaVariable,
                     scanOperator);
         }
+        new ScanDefineDescriptor(scopes.size(), dataset, pkList, recordVariable, metaVariable, scanOperator);
         defineChain.put(recordVariable, scanDefDesc);
         useChain.put(recordVariable, new ArrayList<>());
         if (metaVariable != null) {
@@ -148,7 +149,7 @@ public class PushdownContext {
             if (defineDescriptor == null) {
                 // Log to track any definition that we may have missed
                 LOGGER.warn("Variable {} is not defined", variable);
-                continue;
+                return;
             }
 
             List<UseDescriptor> uses = useChain.get(variable);

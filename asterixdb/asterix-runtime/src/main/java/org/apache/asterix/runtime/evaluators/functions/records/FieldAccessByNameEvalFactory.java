@@ -126,20 +126,4 @@ public class FieldAccessByNameEvalFactory implements IScalarEvaluatorFactory {
             }
         };
     }
-
-    public IScalarEvaluatorFactory getRecordEvalFactory() {
-        return recordEvalFactory;
-    }
-
-    public IScalarEvaluatorFactory getFldNameEvalFactory() {
-        return fldNameEvalFactory;
-    }
-
-    public SourceLocation getSourceLoc() {
-        return sourceLoc;
-    }
-
-    public FunctionIdentifier getFunID() {
-        return funID;
-    }
 }

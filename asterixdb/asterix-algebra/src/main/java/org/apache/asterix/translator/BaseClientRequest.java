@@ -50,32 +50,20 @@ public abstract class BaseClientRequest implements IClientRequest {
     }
 
     @Override
-    public synchronized boolean cancel(ICcApplicationContext appCtx) throws HyracksDataException {
+    public synchronized void cancel(ICcApplicationContext appCtx) throws HyracksDataException {
         if (complete) {
-            // it should also be true that the request has already been untracked by the RequestTracker
-            return false;
+            return;
         }
         if (cancellable) {
             complete();
             state = State.CANCELLED;
             doCancel(appCtx);
-            return true;
         }
-        return false;
     }
 
     @Override
     public synchronized void markCancellable() {
         cancellable = true;
-    }
-
-    @Override
-    public synchronized boolean markUncancellable() {
-        if (state == State.CANCELLED) {
-            return false;
-        }
-        cancellable = false;
-        return true;
     }
 
     @Override

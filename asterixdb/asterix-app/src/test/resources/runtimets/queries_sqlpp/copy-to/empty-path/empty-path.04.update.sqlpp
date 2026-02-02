@@ -23,7 +23,6 @@ TO %adapter%
 PATH ()
 WITH {
     %template_colons%,
-    %additionalProperties%
     "container":"emptybucket1",
     "format":"json"
 };
@@ -33,7 +32,6 @@ TO %adapter%
 PATH ("")
 WITH {
     %template_colons%,
-    %additionalProperties%
     "container":"emptybucket2",
     "format":"json"
 };

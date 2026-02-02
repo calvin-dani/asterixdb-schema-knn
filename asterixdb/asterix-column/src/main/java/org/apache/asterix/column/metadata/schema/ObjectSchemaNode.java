@@ -49,6 +49,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
     private final Int2IntMap fieldNameIndexToChildIndexMap;
     private final List<AbstractSchemaNode> children;
     private IntUnaryOperator nextIndex;
+    private boolean isEmptyObject = false;
 
     public ObjectSchemaNode() {
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
@@ -80,10 +81,9 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
             FlushColumnMetadata columnMetadata) throws HyracksDataException {
         int numberOfChildren = children.size();
         int fieldNameIndex = columnMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
-        boolean previouslyMissing = isEmptyMissingObject();
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, nextIndex.apply(fieldNameIndex));
         AbstractSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
-        AbstractSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag, previouslyMissing);
+        AbstractSchemaNode newChild = columnMetadata.getOrCreateChild(currentChild, childTypeTag);
         if (currentChild == null) {
             children.add(childIndex, newChild);
             fieldNameIndexToChildIndexMap.put(fieldNameIndex, childIndex);
@@ -110,15 +110,11 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         if (!children.isEmpty()) {
             return null;
         }
-
-        AbstractSchemaNode emptyChild = columnMetadata.getOrCreateChild(null, ATypeTag.MISSING, false);
+        isEmptyObject = true;
+        AbstractSchemaNode emptyChild = columnMetadata.getOrCreateChild(null, ATypeTag.MISSING);
         addChild(DUMMY_FIELD_NAME_INDEX, emptyChild);
         nextIndex = this::emptyColumnIndex;
         return emptyChild;
-    }
-
-    public boolean isEmptyMissingObject() {
-        return children.size() == 1 && fieldNameIndexToChildIndexMap.containsKey(DUMMY_FIELD_NAME_INDEX);
     }
 
     public AbstractSchemaNode getChild(int fieldNameIndex) {
@@ -220,6 +216,11 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         nextIndex = this::nextIndex;
         fieldNameIndexToChildIndexMap.remove(DUMMY_FIELD_NAME_INDEX);
         fieldNameIndexToChildIndexMap.put(fieldNameIndex, 0);
+        isEmptyObject = false;
         return 0;
+    }
+
+    public boolean isEmptyObject() {
+        return isEmptyObject;
     }
 }

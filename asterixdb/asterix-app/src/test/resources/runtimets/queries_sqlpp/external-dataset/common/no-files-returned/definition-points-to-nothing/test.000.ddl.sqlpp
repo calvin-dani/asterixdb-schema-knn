@@ -29,7 +29,6 @@ create type test as open {
 drop dataset test if exists;
 CREATE EXTERNAL DATASET test(test) USING %adapter% (
 %template%,
-%additional_Properties%
 ("container"="include-exclude"),
 ("definition"="point-to-nothing"),
 ("format"="json"),

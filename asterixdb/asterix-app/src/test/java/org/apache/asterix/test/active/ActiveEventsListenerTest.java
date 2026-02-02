@@ -150,7 +150,8 @@ public class ActiveEventsListenerTest {
         nodeControllers[0] = new TestNodeControllerActor(nodes[0], clusterController);
         nodeControllers[1] = new TestNodeControllerActor(nodes[1], clusterController);
         listener = new TestEventsListener(clusterController, nodeControllers, jobIdFactory, entityId,
-                new ArrayList<>(allDatasets), statementExecutor, appCtx, hcc, locations, InfiniteRetryPolicy::new);
+                new ArrayList<>(allDatasets), statementExecutor, appCtx, hcc, locations,
+                x -> new CountRetryPolicy(1000));
         users = new TestUserActor[3];
         users[0] = newUser("Till", appCtx);
         users[1] = newUser("Mike", appCtx);
@@ -1543,7 +1544,7 @@ public class ActiveEventsListenerTest {
             AlgebricksAbsolutePartitionConstraint locations = new AlgebricksAbsolutePartitionConstraint(nodes);
             additionalListeners[i] = listener = new TestEventsListener(clusterController, nodeControllers, jobIdFactory,
                     entityId, new ArrayList<>(allDatasets), statementExecutor, ccAppCtx, hcc, locations,
-                    InfiniteRetryPolicy::new);
+                    x -> new CountRetryPolicy(1000));
         }
         Action suspension = users[0].suspendAllActivities(handler);
         suspension.sync();

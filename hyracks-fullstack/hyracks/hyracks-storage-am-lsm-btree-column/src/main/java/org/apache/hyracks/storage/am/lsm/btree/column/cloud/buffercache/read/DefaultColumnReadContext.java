@@ -76,15 +76,6 @@ public final class DefaultColumnReadContext implements IColumnReadContext {
     }
 
     @Override
-    public ICachedPage pinNext(ColumnBTreeReadLeafFrame leafFrame, long nextPageDiskPageId, IBufferCache bufferCache)
-            throws HyracksDataException {
-        bufferCache.unpin(leafFrame.getPage());
-        ICachedPage nextPage = bufferCache.pin(nextPageDiskPageId);
-        leafFrame.setPage(nextPage);
-        return nextPage;
-    }
-
-    @Override
     public void preparePageZeroSegments(ColumnBTreeReadLeafFrame leafFrame, IBufferCache bufferCache, int fileId)
             throws HyracksDataException {
         // NoOp

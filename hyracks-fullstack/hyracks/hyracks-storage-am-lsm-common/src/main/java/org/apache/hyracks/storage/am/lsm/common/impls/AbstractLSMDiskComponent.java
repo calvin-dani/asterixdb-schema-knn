@@ -40,7 +40,6 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
 
     private static final Logger LOGGER = LogManager.getLogger();
 
-    private final ComponentStatsAccumulator statsAccumulator;
     private final DiskComponentMetadata metadata;
     private final ArrayBackedValueStorage buffer = new ArrayBackedValueStorage(Long.BYTES);
 
@@ -54,7 +53,6 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
         super(lsmIndex, filter);
         state = ComponentState.READABLE_UNWRITABLE;
         metadata = new DiskComponentMetadata(mdPageManager);
-        statsAccumulator = new ComponentStatsAccumulator();
     }
 
     @Override
@@ -227,8 +225,8 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
 
     protected IChainedComponentBulkLoader createIndexBulkLoader(float fillFactor, boolean verifyInput,
             long numElementsHint, boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        return new LSMIndexBulkLoader(getIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint,
-                checkIfEmptyIndex, callback, getStatsAccumulator()), getMetadata(), getStatsAccumulator());
+        return new LSMIndexBulkLoader(
+                getIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, callback));
     }
 
     /**
@@ -255,10 +253,6 @@ public abstract class AbstractLSMDiskComponent extends AbstractLSMComponent impl
 
         callback.initialize(chainedBulkLoader);
         return chainedBulkLoader;
-    }
-
-    public ComponentStatsAccumulator getStatsAccumulator() {
-        return statsAccumulator;
     }
 
     @Override

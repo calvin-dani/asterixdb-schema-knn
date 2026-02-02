@@ -71,11 +71,13 @@ public class MetadataManagerUtil {
      * internal details.
      *
      * @param itemType     record type of the dataset
+     * @param metaItemType record type of the meta part of the dataset
      * @param dataset      the actual dataset
      * @return type computed from primary keys if dataset without type spec, otherwise the original itemType itself
      * @throws AlgebricksException AlgebricksException
      */
-    public static IAType findTypeForDatasetWithoutType(IAType itemType, Dataset dataset) throws AlgebricksException {
+    public static IAType findTypeForDatasetWithoutType(IAType itemType, IAType metaItemType, Dataset dataset)
+            throws AlgebricksException {
         if (dataset.getDatasetType() == DatasetConfig.DatasetType.INTERNAL) {
             InternalDatasetDetails dsDetails = (InternalDatasetDetails) dataset.getDatasetDetails();
             if (dsDetails.isDatasetWithoutTypeSpecification()) {
@@ -224,38 +226,6 @@ public class MetadataManagerUtil {
         return lookupSourceInMetadata(clusterStateManager, mdTxnCtx, id);
     }
 
-    public static SampleDataSource findSampleDataSource(IClusterStateManager clusterStateManager,
-            MetadataTransactionContext mdTxnCtx, String sampleIndexName, DataSourceId id) throws AlgebricksException {
-        Dataset dataset = findDataset(mdTxnCtx, id.getDatabaseName(), id.getDataverseName(), id.getDatasourceName());
-        if (dataset == null) {
-            //TODO(DB): include database
-            throw new AsterixException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, id.getDatasourceName(),
-                    id.getDataverseName());
-        }
-        byte datasourceType;
-        switch (dataset.getDatasetType()) {
-            case INTERNAL:
-                datasourceType = DataSource.Type.INTERNAL_DATASET;
-                break;
-            case EXTERNAL:
-                datasourceType = DataSource.Type.EXTERNAL_DATASET;
-                break;
-            default:
-                //TODO(DB): include database
-                throw new AsterixException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, id.getDatasourceName(),
-                        id.getDataverseName());
-        }
-
-        IAType itemType = findType(mdTxnCtx, dataset.getItemTypeDatabaseName(), dataset.getItemTypeDataverseName(),
-                dataset.getItemTypeName());
-        IAType metaItemType = findType(mdTxnCtx, dataset.getMetaItemTypeDatabaseName(),
-                dataset.getMetaItemTypeDataverseName(), dataset.getMetaItemTypeName());
-        itemType = findTypeForDatasetWithoutType(itemType, dataset);
-
-        INodeDomain domain = findNodeDomain(clusterStateManager, mdTxnCtx, dataset.getNodeGroupName());
-        return new SampleDataSource(dataset, sampleIndexName, itemType, metaItemType, domain);
-    }
-
     public static DataSource lookupSourceInMetadata(IClusterStateManager clusterStateManager,
             MetadataTransactionContext mdTxnCtx, DataSourceId id) throws AlgebricksException {
         Dataset dataset = findDataset(mdTxnCtx, id.getDatabaseName(), id.getDataverseName(), id.getDatasourceName());
@@ -282,7 +252,7 @@ public class MetadataManagerUtil {
                 dataset.getItemTypeName());
         IAType metaItemType = findType(mdTxnCtx, dataset.getMetaItemTypeDatabaseName(),
                 dataset.getMetaItemTypeDataverseName(), dataset.getMetaItemTypeName());
-        itemType = findTypeForDatasetWithoutType(itemType, dataset);
+        itemType = findTypeForDatasetWithoutType(itemType, metaItemType, dataset);
 
         INodeDomain domain = findNodeDomain(clusterStateManager, mdTxnCtx, dataset.getNodeGroupName());
         return new DatasetDataSource(id, dataset, itemType, metaItemType, datasourceType, dataset.getDatasetDetails(),

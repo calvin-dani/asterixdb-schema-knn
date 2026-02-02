@@ -44,7 +44,6 @@ import org.apache.hyracks.control.common.ipc.CCNCFunctions.RegisterPartitionRequ
 import org.apache.hyracks.control.common.ipc.CCNCFunctions.RegisterResultPartitionLocationFunction;
 import org.apache.hyracks.control.common.ipc.CCNCFunctions.ReportDeployedJobSpecFailureFunction;
 import org.apache.hyracks.control.common.ipc.CCNCFunctions.ReportProfileFunction;
-import org.apache.hyracks.control.common.ipc.CCNCFunctions.ReportResultPartitionConsumedFunction;
 import org.apache.hyracks.control.common.ipc.CCNCFunctions.ReportResultPartitionWriteCompletionFunction;
 import org.apache.hyracks.control.common.ipc.CCNCFunctions.SendApplicationMessageFunction;
 import org.apache.hyracks.control.common.ipc.CCNCFunctions.ShutdownResponseFunction;
@@ -142,24 +141,16 @@ public class ClusterControllerRemoteProxy implements IClusterController {
 
     @Override
     public void registerResultPartitionLocation(JobId jobId, ResultSetId rsId, IResultMetadata metadata,
-            boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress, String nodeId)
-            throws Exception {
+            boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress) throws Exception {
         RegisterResultPartitionLocationFunction fn = new RegisterResultPartitionLocationFunction(jobId, rsId, metadata,
-                emptyResult, partition, nPartitions, networkAddress, nodeId);
+                emptyResult, partition, nPartitions, networkAddress);
         ipcHandle.send(-1, fn, null);
     }
 
     @Override
-    public void reportResultPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition, long resultCount)
-            throws Exception {
+    public void reportResultPartitionWriteCompletion(JobId jobId, ResultSetId rsId, int partition) throws Exception {
         ReportResultPartitionWriteCompletionFunction fn =
-                new ReportResultPartitionWriteCompletionFunction(jobId, rsId, partition, resultCount);
-        ipcHandle.send(-1, fn, null);
-    }
-
-    @Override
-    public void reportResultPartitionConsumed(JobId jobId, ResultSetId rsId, int partition) throws Exception {
-        ReportResultPartitionConsumedFunction fn = new ReportResultPartitionConsumedFunction(jobId, rsId, partition);
+                new ReportResultPartitionWriteCompletionFunction(jobId, rsId, partition);
         ipcHandle.send(-1, fn, null);
     }
 

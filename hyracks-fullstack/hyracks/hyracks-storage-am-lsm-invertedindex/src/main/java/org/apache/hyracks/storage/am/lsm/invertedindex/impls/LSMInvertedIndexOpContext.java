@@ -25,6 +25,7 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingTupleReference;
+import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
@@ -53,7 +54,8 @@ public class LSMInvertedIndexOpContext extends AbstractLSMIndexOperationContext 
     public LSMInvertedIndexOpContext(ILSMIndex index, List<ILSMMemoryComponent> mutableComponents,
             IIndexAccessParameters iap, int[] invertedIndexFields, int[] filterFields,
             IBinaryComparatorFactory[] filterComparatorFactories, ITracer tracer) throws HyracksDataException {
-        super(index, invertedIndexFields, filterFields, filterComparatorFactories, iap, tracer);
+        super(index, invertedIndexFields, filterFields, filterComparatorFactories, iap.getSearchOperationCallback(),
+                (IExtendedModificationOperationCallback) iap.getModificationCallback(), tracer);
         mutableInvIndexAccessors = new IInvertedIndexAccessor[mutableComponents.size()];
         deletedKeysBTreeAccessors = new IIndexAccessor[mutableComponents.size()];
         for (int i = 0; i < mutableComponents.size(); i++) {

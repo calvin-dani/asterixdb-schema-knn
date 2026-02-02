@@ -71,7 +71,6 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.api.LSMOperationType;
 import org.apache.hyracks.storage.am.lsm.common.cloud.DefaultIndexDiskCacheManager;
 import org.apache.hyracks.storage.am.lsm.common.cloud.IIndexDiskCacheManager;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -421,12 +420,6 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
     }
 
     @Override
-    public void scanDiskComponentsForSample(ILSMIndexOperationContext ctx, IIndexCursor cursor)
-            throws HyracksDataException {
-        throw HyracksDataException.create(ErrorCode.DISK_COMPONENT_SCAN_NOT_ALLOWED_FOR_SECONDARY_INDEX);
-    }
-
-    @Override
     public ILSMIOOperation createFlushOperation(ILSMIndexOperationContext ctx) throws HyracksDataException {
         ILSMMemoryComponent flushingComponent = getCurrentMemoryComponent();
         if (flushingComponent.getWriterCount() > 0) {
@@ -573,10 +566,7 @@ public abstract class AbstractLSMIndex implements ILSMIndex {
 
     @Override
     public final IIndexBulkLoader createBulkLoader(float fillLevel, boolean verifyInput, long numElementsHint,
-            // Bro, this seems like an ill interface, as I'm forced to put statsAccumulator even if I don't use it
-            // in case of LSMDiskComponent, it will be populated later.
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
-            throws HyracksDataException {
+            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
         return createBulkLoader(fillLevel, verifyInput, numElementsHint, checkIfEmptyIndex, Collections.emptyMap());
     }
 

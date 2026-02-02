@@ -40,7 +40,6 @@ public class LSMBTreeCursorInitialState implements ICursorInitialState {
     private ISearchOperationCallback searchCallback;
     private List<ILSMComponent> operationalComponents;
     private boolean isDiskComponentScan;
-    private boolean isScanForSamples;
 
     public LSMBTreeCursorInitialState(ITreeIndexFrameFactory leafFrameFactory, MultiComparator cmp,
             MultiComparator bloomFilterCmp, ILSMHarness lsmHarness, ISearchPredicate predicate,
@@ -51,10 +50,6 @@ public class LSMBTreeCursorInitialState implements ICursorInitialState {
         this.lsmHarness = lsmHarness;
         this.searchCallback = searchCallback;
         this.predicate = predicate;
-        this.operationalComponents = operationalComponents;
-    }
-
-    public void setOperationalComponents(List<ILSMComponent> operationalComponents) {
         this.operationalComponents = operationalComponents;
     }
 
@@ -110,7 +105,6 @@ public class LSMBTreeCursorInitialState implements ICursorInitialState {
     // make the cursor initial state re-usable
     public void reset(ISearchPredicate predicate, List<ILSMComponent> operationalComponents) {
         isDiskComponentScan = false;
-        isScanForSamples = false;
         this.predicate = predicate;
         this.operationalComponents = operationalComponents;
     }
@@ -121,13 +115,5 @@ public class LSMBTreeCursorInitialState implements ICursorInitialState {
 
     public boolean isDiskComponentScan() {
         return isDiskComponentScan;
-    }
-
-    public boolean isScanForSamples() {
-        return isScanForSamples;
-    }
-
-    public void setScanForSamples(boolean isScanForSamples) {
-        this.isScanForSamples = isScanForSamples;
     }
 }

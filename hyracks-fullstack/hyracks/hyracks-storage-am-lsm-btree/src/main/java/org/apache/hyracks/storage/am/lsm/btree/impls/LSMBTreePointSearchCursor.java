@@ -165,7 +165,6 @@ public class LSMBTreePointSearchCursor extends EnforcedIndexCursor implements IL
             nextHasBeenCalled = false;
             foundTuple = false;
             hashComputed = false;
-            foundIn = -1;
         } finally {
             if (lsmHarness != null) {
                 lsmHarness.endSearch(opCtx);
@@ -226,7 +225,6 @@ public class LSMBTreePointSearchCursor extends EnforcedIndexCursor implements IL
         nextHasBeenCalled = false;
         foundTuple = false;
         hashComputed = false;
-        foundIn = -1;
     }
 
     protected BTreeAccessor createAccessor(LSMComponentType type, BTree btree, int i) throws HyracksDataException {

@@ -39,7 +39,6 @@ import org.apache.hyracks.algebricks.core.algebra.base.ILogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.base.IOptimizationContext;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalExpressionTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalOperatorTag;
-import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCallExpression;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IAlgebricksConstantValue;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IVariableTypeEnvironment;
@@ -50,7 +49,6 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractLogi
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.GroupByOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.InnerJoinOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.LeftOuterJoinOperator;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperator;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorManipulationUtil;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
 
@@ -346,18 +344,7 @@ public class IntroduceJoinAccessMethodRule extends AbstractIntroduceAccessMethod
                     // Connect the after-join operators to the index subtree root before this rewrite. This also avoids
                     // performing the secondary index validation step twice.
                     ILogicalOperator lastAfterJoinOp = afterJoinRefs.get(afterJoinRefs.size() - 1).getValue();
-                    IAlgebricksConstantValue leftOuterMissingValue =
-                            isLeftOuterJoin ? ((LeftOuterJoinOperator) joinOp).getMissingValue() : null;
-                    LogicalVariable newMissingNullPlaceHolderVar = null;
-                    SelectOperator topSelectOp =
-                            isLeftOuterJoin ? new SelectOperator(joinOp.getCondition(), leftOuterMissingValue,
-                                    newMissingNullPlaceHolderVar) : new SelectOperator(joinOp.getCondition());
-                    topSelectOp.setSourceLocation(joinOp.getSourceLocation());
-                    topSelectOp.getInputs().add(joinOp.getInputs().get(1));
-                    topSelectOp.setExecutionMode(AbstractLogicalOperator.ExecutionMode.LOCAL);
-                    context.computeAndSetTypeEnvironmentForOperator(topSelectOp);
-                    OperatorManipulationUtil.substituteOpInInput(lastAfterJoinOp, joinOp,
-                            new MutableObject<>(topSelectOp));
+                    OperatorManipulationUtil.substituteOpInInput(lastAfterJoinOp, joinOp, joinOp.getInputs().get(1));
                     context.computeAndSetTypeEnvironmentForOperator(lastAfterJoinOp);
                     return true;
                 }

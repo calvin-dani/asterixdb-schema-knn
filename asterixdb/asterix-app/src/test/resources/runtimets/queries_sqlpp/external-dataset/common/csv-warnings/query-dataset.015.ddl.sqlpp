@@ -22,7 +22,6 @@ USE test;
 DROP DATASET ds2 IF EXISTS;
 CREATE EXTERNAL DATASET ds2(t3) USING %adapter% (
 %template%,
-%additional_Properties%
 ("container"="playground"),
 ("definition"="data_dir"),
 ("format"="CSV"),

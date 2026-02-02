@@ -113,8 +113,6 @@ public abstract class AbstractInternalRequestMessage implements ICcAddressedMess
             messageBroker.sendApplicationMessageToNC(responseMsg, nodeRequestId);
         } catch (Exception e) {
             LOGGER.log(Level.WARN, e.toString(), e);
-            responseMsg.setError(new Exception(e.getMessage()));
-            messageBroker.sendMessageQuietly(responseMsg, nodeRequestId);
         }
 
     }

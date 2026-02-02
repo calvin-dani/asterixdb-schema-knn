@@ -461,10 +461,6 @@
     </dependency>
     <dependency>
       <groupId>software.amazon.awssdk</groupId>
-      <artifactId>glue</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>software.amazon.awssdk</groupId>
       <artifactId>regions</artifactId>
     </dependency>
     <dependency>
@@ -474,10 +470,6 @@
     <dependency>
       <groupId>software.amazon.awssdk</groupId>
       <artifactId>s3-transfer-manager</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>software.amazon.awssdk</groupId>
-      <artifactId>apache-client</artifactId>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
@@ -587,12 +579,12 @@
     <dependency>
       <groupId>io.delta</groupId>
       <artifactId>delta-kernel-api</artifactId>
-      <version>4.0.0</version>
+      <version>3.2.1</version>
     </dependency>
     <dependency>
       <groupId>io.delta</groupId>
       <artifactId>delta-kernel-defaults</artifactId>
-      <version>4.0.0</version>
+      <version>3.2.1</version>
       <exclusions>
         <exclusion>
           <groupId>org.apache.hadoop</groupId>
@@ -603,15 +595,6 @@
           <artifactId>hadoop-client-runtime</artifactId>
         </exclusion>
       </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>com.fasterxml.jackson.datatype</groupId>
-      <artifactId>jackson-datatype-jdk8</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.hadoop</groupId>
-      <artifactId>hadoop-client-runtime</artifactId>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>io.delta</groupId>

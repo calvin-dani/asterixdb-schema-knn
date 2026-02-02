@@ -33,6 +33,4 @@ public interface IResultSetReader {
      * @return the result metadata
      */
     IResultMetadata getResultMetadata();
-
-    ResultDirectoryRecord[] getResultRecords() throws HyracksDataException;
 }

@@ -33,7 +33,6 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.io.IODeviceHandle;
-import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentIdGenerator;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
@@ -92,8 +91,7 @@ public class LSMIOOperationCallbackTest extends TestCase {
         Map<String, Object> flushMap = new HashMap<>();
         flushMap.put(LSMIOOperationCallback.KEY_FLUSH_LOG_LSN, flushLsn);
         flushMap.put(LSMIOOperationCallback.KEY_NEXT_COMPONENT_ID, nextComponentId);
-        ILSMIndexAccessor firstAccessor = new TestLSMIndexAccessor(
-                new TestLSMIndexOperationContext(mockIndex, NoOpIndexAccessParameters.INSTANCE));
+        ILSMIndexAccessor firstAccessor = new TestLSMIndexAccessor(new TestLSMIndexOperationContext(mockIndex));
         firstAccessor.getOpContext().setParameters(flushMap);
         IODeviceHandle mockIoDevice = Mockito.mock(IODeviceHandle.class);
         Mockito.when(mockIoDevice.getMount()).thenReturn(new File(getIndexPath()));
@@ -111,10 +109,7 @@ public class LSMIOOperationCallbackTest extends TestCase {
         flushMap = new HashMap<>();
         flushMap.put(LSMIOOperationCallback.KEY_FLUSH_LOG_LSN, flushLsn);
         flushMap.put(LSMIOOperationCallback.KEY_NEXT_COMPONENT_ID, nextComponentId);
-        // create a custom IndexAccessParameters to pass in the sampleCardinality parameter
-        // maynot be needed if we just reuse the IOperationContext's parameters map
-        ILSMIndexAccessor secondAccessor = new TestLSMIndexAccessor(
-                new TestLSMIndexOperationContext(mockIndex, NoOpIndexAccessParameters.INSTANCE));
+        ILSMIndexAccessor secondAccessor = new TestLSMIndexAccessor(new TestLSMIndexOperationContext(mockIndex));
         secondAccessor.getOpContext().setParameters(flushMap);
         FileReference secondTarget = new FileReference(mockIoDevice, getComponentFileName());
         LSMComponentFileReferences secondFiles =
@@ -193,8 +188,7 @@ public class LSMIOOperationCallbackTest extends TestCase {
             Map<String, Object> flushMap = new HashMap<>();
             flushMap.put(LSMIOOperationCallback.KEY_FLUSH_LOG_LSN, flushLsn);
             flushMap.put(LSMIOOperationCallback.KEY_NEXT_COMPONENT_ID, expectedId);
-            ILSMIndexAccessor accessor = new TestLSMIndexAccessor(
-                    new TestLSMIndexOperationContext(mockIndex, NoOpIndexAccessParameters.INSTANCE));
+            ILSMIndexAccessor accessor = new TestLSMIndexAccessor(new TestLSMIndexOperationContext(mockIndex));
             accessor.getOpContext().setParameters(flushMap);
             FileReference target = new FileReference(mockIoDevice, getComponentFileName());
             LSMComponentFileReferences files = new LSMComponentFileReferences(target, target, target);

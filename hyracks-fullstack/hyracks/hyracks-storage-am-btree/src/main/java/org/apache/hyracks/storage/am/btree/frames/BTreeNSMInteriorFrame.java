@@ -64,11 +64,6 @@ public class BTreeNSMInteriorFrame extends TreeIndexNSMFrame implements IBTreeIn
     }
 
     @Override
-    public ITreeIndexTupleReference getTupleRef() {
-        return frameTuple;
-    }
-
-    @Override
     public void initBuffer(byte level) {
         super.initBuffer(level);
         buf.putInt(RIGHT_LEAF_OFFSET, -1);
@@ -403,11 +398,6 @@ public class BTreeNSMInteriorFrame extends TreeIndexNSMFrame implements IBTreeIn
         ITreeIndexTupleReference tuple = tupleWriter.createTupleReference();
         tuple.setFieldCount(cmp.getKeyFieldCount());
         return tuple;
-    }
-
-    @Override
-    public int getRightLeafOffset() {
-        return buf.getInt(RIGHT_LEAF_OFFSET);
     }
 
     // For debugging.

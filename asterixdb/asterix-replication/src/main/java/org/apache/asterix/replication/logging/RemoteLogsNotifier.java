@@ -19,10 +19,12 @@
 package org.apache.asterix.replication.logging;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.dataflow.DatasetLocalResource;
@@ -30,7 +32,6 @@ import org.apache.asterix.common.storage.DatasetResourceReference;
 import org.apache.asterix.common.storage.IIndexCheckpointManager;
 import org.apache.asterix.common.storage.IIndexCheckpointManagerProvider;
 import org.apache.asterix.common.transactions.LogType;
-import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.replication.messaging.ReplicationProtocol;
 import org.apache.asterix.transaction.management.resource.PersistentLocalResourceRepository;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -89,9 +90,9 @@ class RemoteLogsNotifier implements Runnable {
             return dls.getDatasetId() == datasetId && dls.getPartition() == resourcePartition;
         };
         final Map<Long, LocalResource> resources =
-                localResourceRep.getResources(replicaIndexesPredicate, Partitions.singleton(resourcePartition));
+                localResourceRep.getResources(replicaIndexesPredicate, Collections.singleton(resourcePartition));
         final List<DatasetResourceReference> replicaIndexesRef =
-                resources.values().stream().map(DatasetResourceReference::of).toList();
+                resources.values().stream().map(DatasetResourceReference::of).collect(Collectors.toList());
         for (DatasetResourceReference replicaIndexRef : replicaIndexesRef) {
             final IIndexCheckpointManager indexCheckpointManager = indexCheckpointManagerProvider.get(replicaIndexRef);
             synchronized (indexCheckpointManager) {

@@ -30,9 +30,7 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.SequencedSet;
 
 import org.apache.asterix.app.external.ExternalUDFLibrarian;
 import org.apache.asterix.app.external.IExternalUDFLibrarian;
@@ -56,7 +54,7 @@ public class LangExecutionUtil {
 
     private static final boolean cleanupOnStart = true;
     private static final boolean cleanupOnStop = true;
-    private static final SequencedSet<String> badTestCases = new LinkedHashSet<>();
+    private static final List<String> badTestCases = new ArrayList<>();
     private static TestExecutor testExecutor;
 
     private static ExternalUDFLibrarian librarian;

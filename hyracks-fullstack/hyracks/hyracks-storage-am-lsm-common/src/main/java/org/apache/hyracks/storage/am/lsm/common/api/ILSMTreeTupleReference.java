@@ -25,4 +25,5 @@ public interface ILSMTreeTupleReference extends ITreeIndexTupleReference {
 
     byte ANTIMATTER_BIT_OFFSET = 7;
 
+    public boolean isAntimatter();
 }

@@ -36,7 +36,6 @@ import org.apache.hyracks.control.cc.work.RegisterPartitionAvailibilityWork;
 import org.apache.hyracks.control.cc.work.RegisterPartitionRequestWork;
 import org.apache.hyracks.control.cc.work.RegisterResultPartitionLocationWork;
 import org.apache.hyracks.control.cc.work.ReportProfilesWork;
-import org.apache.hyracks.control.cc.work.ReportResultPartitionConsumedWork;
 import org.apache.hyracks.control.cc.work.ReportResultPartitionWriteCompletionWork;
 import org.apache.hyracks.control.cc.work.TaskCompleteWork;
 import org.apache.hyracks.control.cc.work.TaskFailureWork;
@@ -120,19 +119,13 @@ class ClusterControllerIPCI implements IIPCI {
                 ccs.getWorkQueue()
                         .schedule(new RegisterResultPartitionLocationWork(ccs, rrplf.getJobId(), rrplf.getResultSetId(),
                                 rrplf.getMetadata(), rrplf.getEmptyResult(), rrplf.getPartition(),
-                                rrplf.getNPartitions(), rrplf.getNetworkAddress(), rrplf.getNodeId()));
+                                rrplf.getNPartitions(), rrplf.getNetworkAddress()));
                 break;
             case REPORT_RESULT_PARTITION_WRITE_COMPLETION:
                 CCNCFunctions.ReportResultPartitionWriteCompletionFunction rrpwc =
                         (CCNCFunctions.ReportResultPartitionWriteCompletionFunction) fn;
                 ccs.getWorkQueue().schedule(new ReportResultPartitionWriteCompletionWork(ccs, rrpwc.getJobId(),
-                        rrpwc.getResultSetId(), rrpwc.getPartition(), rrpwc.getResultCount()));
-                break;
-            case REPORT_RESULT_PARTITION_CONSUMED:
-                CCNCFunctions.ReportResultPartitionConsumedFunction rrpc =
-                        (CCNCFunctions.ReportResultPartitionConsumedFunction) fn;
-                ccs.getWorkQueue().schedule(new ReportResultPartitionConsumedWork(ccs, rrpc.getJobId(),
-                        rrpc.getResultSetId(), rrpc.getPartition()));
+                        rrpwc.getResultSetId(), rrpwc.getPartition()));
                 break;
             case SEND_APPLICATION_MESSAGE:
                 CCNCFunctions.SendApplicationMessageFunction rsf = (CCNCFunctions.SendApplicationMessageFunction) fn;

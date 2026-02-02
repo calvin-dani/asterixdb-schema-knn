@@ -32,7 +32,6 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.impls.NodeFrontier;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
@@ -49,21 +48,18 @@ public class BTreeNSMBulkLoader extends AbstractTreeIndexBulkLoader {
     private static final Logger LOGGER = LogManager.getLogger();
     protected final ISplitKey splitKey;
     protected final boolean verifyInput;
-    protected final IComponentStatsAccumulator statsAccumulator;
     private final int maxTupleSize;
 
-    public BTreeNSMBulkLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback, ITreeIndex index,
-            IComponentStatsAccumulator statsAccumulator) throws HyracksDataException {
+    public BTreeNSMBulkLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback, ITreeIndex index)
+            throws HyracksDataException {
         this(fillFactor, verifyInput, callback, index, index.getLeafFrameFactory().createFrame(),
-                DefaultBufferCacheWriteContext.INSTANCE, statsAccumulator);
+                DefaultBufferCacheWriteContext.INSTANCE);
     }
 
     protected BTreeNSMBulkLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback, ITreeIndex index,
-            ITreeIndexFrame leafFrame, IBufferCacheWriteContext writeContext,
-            IComponentStatsAccumulator statsAccumulator) throws HyracksDataException {
+            ITreeIndexFrame leafFrame, IBufferCacheWriteContext writeContext) throws HyracksDataException {
         super(fillFactor, callback, index, leafFrame, writeContext);
         this.verifyInput = verifyInput;
-        this.statsAccumulator = statsAccumulator;
         splitKey = new BTreeSplitKey(tupleWriter.createTupleReference());
         splitKey.getTuple().setFieldCount(cmp.getKeyFieldCount());
         maxTupleSize = ((BTree) index).maxTupleSize;
@@ -72,7 +68,6 @@ public class BTreeNSMBulkLoader extends AbstractTreeIndexBulkLoader {
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
         try {
-            statsAccumulator.account(tuple);
             int tupleSize = Math.max(leafFrame.getBytesRequiredToWriteTuple(tuple),
                     interiorFrame.getBytesRequiredToWriteTuple(tuple));
             NodeFrontier leafFrontier = nodeFrontiers.get(0);

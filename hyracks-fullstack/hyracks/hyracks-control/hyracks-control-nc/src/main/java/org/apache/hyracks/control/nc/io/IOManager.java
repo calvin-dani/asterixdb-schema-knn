@@ -433,7 +433,7 @@ public class IOManager implements IIOManager {
     }
 
     @Override
-    public FileReference resolve(String path) {
+    public FileReference resolve(String path) throws HyracksDataException {
         return new FileReference(deviceComputer.resolve(path, getIODevices()), path);
     }
 

@@ -20,6 +20,8 @@ package org.apache.hyracks.api.io;
 
 import java.util.List;
 
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+
 /**
  * Resolves the device destination for a file from its relative path
  */
@@ -33,6 +35,6 @@ public interface IFileDeviceResolver {
      *            a relative file path.
      * @return the resident IO device of the file.
      */
-    IODeviceHandle resolve(String relativePath, List<IODeviceHandle> devices);
+    IODeviceHandle resolve(String relativePath, List<IODeviceHandle> devices) throws HyracksDataException;
 
 }

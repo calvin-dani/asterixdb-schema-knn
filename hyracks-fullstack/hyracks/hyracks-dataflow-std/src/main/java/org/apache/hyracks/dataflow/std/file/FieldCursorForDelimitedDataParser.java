@@ -74,12 +74,11 @@ public class FieldCursorForDelimitedDataParser {
 
     private final char quote; //the quote character
     private final char fieldDelimiter; //the delimiter
-    private final boolean qouteCheckNeeded;
 
     private final char escape;
 
     public FieldCursorForDelimitedDataParser(Reader in, char fieldDelimiter, char quote, char escape,
-            IWarningCollector warningCollector, Supplier<String> dataSourceName, boolean qouteCheckNeeded) {
+            IWarningCollector warningCollector, Supplier<String> dataSourceName) {
         this.warnings = warningCollector;
         this.dataSourceName = dataSourceName;
         this.in = in;
@@ -104,7 +103,6 @@ public class FieldCursorForDelimitedDataParser {
         containsEscapedQuotes = false;
         lineCount = 1;
         fieldCount = 0;
-        this.qouteCheckNeeded = qouteCheckNeeded;
     }
 
     public char[] getBuffer() {
@@ -190,30 +188,27 @@ public class FieldCursorForDelimitedDataParser {
                             // this may or may not be an escape. the next character must be a quote for it to be.
                             lastEscapePosition = p;
                         }
-                        if (qouteCheckNeeded) {
-                            if (ch == quote) {
-                                boolean couldBeEscapedQuote =
-                                        lastEscapePosition == p - 1 && lastEscapedQuotePosition != p - 1;
-                                if (quote == escape) {
-                                    startedQuote = true;
-                                    // check two quotes in a row that aren't at the start of a field if quote is escape, e.g. ""
-                                    if (couldBeEscapedQuote && start != p - 1) {
-                                        lastEscapedQuotePosition = p;
-                                    }
-                                } else {
-                                    if (couldBeEscapedQuote) {
-                                        lastEscapedQuotePosition = p;
-                                    }
+                        if (ch == quote) {
+                            boolean couldBeEscapedQuote =
+                                    lastEscapePosition == p - 1 && lastEscapedQuotePosition != p - 1;
+                            if (quote == escape) {
+                                startedQuote = true;
+                                // check two quotes in a row that aren't at the start of a field if quote is escape, e.g. ""
+                                if (couldBeEscapedQuote && start != p - 1) {
+                                    lastEscapedQuotePosition = p;
                                 }
-                                lastQuotePosition = p;
-                            } else if (ch == fieldDelimiter) {
-                                if (startedQuote && lastQuotePosition == p - 1 && lastEscapedQuotePosition != p - 1) {
-                                    startedQuote = false;
-                                    lastDelimiterPosition = p;
+                            } else {
+                                if (couldBeEscapedQuote) {
+                                    lastEscapedQuotePosition = p;
                                 }
                             }
-                        }
-                        if (ch == '\n' && !startedQuote) {
+                            lastQuotePosition = p;
+                        } else if (ch == fieldDelimiter) {
+                            if (startedQuote && lastQuotePosition == p - 1 && lastEscapedQuotePosition != p - 1) {
+                                startedQuote = false;
+                                lastDelimiterPosition = p;
+                            }
+                        } else if (ch == '\n' && !startedQuote) {
                             start = p + 1;
                             state = State.EOR;
                             lastDelimiterPosition = p;
@@ -329,7 +324,7 @@ public class FieldCursorForDelimitedDataParser {
                         }
                     }
                     char ch = buffer[p];
-                    if (ch == quote && qouteCheckNeeded) {
+                    if (ch == quote) {
                         // If this is first quote in the field, then it needs to be placed in the beginning.
                         if (!startedQuote) {
                             if (p == start) {

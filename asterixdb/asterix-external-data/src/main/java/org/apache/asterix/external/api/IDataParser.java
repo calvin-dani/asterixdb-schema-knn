@@ -18,7 +18,6 @@
  */
 package org.apache.asterix.external.api;
 
-import java.io.Closeable;
 import java.io.DataOutput;
 
 import org.apache.asterix.builders.IARecordBuilder;
@@ -38,18 +37,14 @@ import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
-public interface IDataParser extends Closeable {
-    @Override
-    default void close() {
-        // Default no-op
-    }
+public interface IDataParser {
 
     /*
      * The following two static methods are expensive. right now, they are used by RSSFeeds and
      * Twitter feed
      * TODO: Get rid of them
      */
-    static void writeRecord(AMutableRecord record, DataOutput dataOutput, IARecordBuilder recordBuilder)
+    public static void writeRecord(AMutableRecord record, DataOutput dataOutput, IARecordBuilder recordBuilder)
             throws HyracksDataException {
         ArrayBackedValueStorage fieldValue = new ArrayBackedValueStorage();
         int numFields = record.getType().getFieldNames().length;
@@ -63,7 +58,7 @@ public interface IDataParser extends Closeable {
     }
 
     @SuppressWarnings("unchecked")
-    static void writeObject(IAObject obj, DataOutput dataOutput) throws HyracksDataException {
+    public static void writeObject(IAObject obj, DataOutput dataOutput) throws HyracksDataException {
         switch (obj.getType().getTypeTag()) {
             case OBJECT: {
                 IARecordBuilder recordBuilder = new RecordBuilder();
@@ -110,7 +105,7 @@ public interface IDataParser extends Closeable {
         }
     }
 
-    static <T> void toBytes(T serializable, ArrayBackedValueStorage buffer, ISerializerDeserializer<T> serde)
+    public static <T> void toBytes(T serializable, ArrayBackedValueStorage buffer, ISerializerDeserializer<T> serde)
             throws HyracksDataException {
         buffer.reset();
         DataOutput out = buffer.getDataOutput();

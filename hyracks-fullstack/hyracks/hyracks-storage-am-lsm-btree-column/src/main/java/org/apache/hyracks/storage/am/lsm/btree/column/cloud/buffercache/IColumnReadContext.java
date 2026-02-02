@@ -43,25 +43,6 @@ public interface IColumnReadContext extends IBufferCacheReadContext {
     ICachedPage pinNext(ColumnBTreeReadLeafFrame leafFrame, IBufferCache bufferCache, int fileId)
             throws HyracksDataException;
 
-    /**
-     * Pin the next specified Mega-leaf node
-     * Notes:
-     * - This method is responsible for unpinning the previous pageZero of the leafFrame as well as any other pages
-     * @param leafFrame             leaf frame used
-     * @param nextPageDiskPageId    next mega-leaf node disk page ID
-     * @param bufferCache           buffer cache
-     * @return                      the pageZero of the next mega-leaf nodes
-     */
-    ICachedPage pinNext(ColumnBTreeReadLeafFrame leafFrame, long nextPageDiskPageId, IBufferCache bufferCache)
-            throws HyracksDataException;
-
-    /**
-     * Pin the extra segments of the page zero
-     * These page segments are used to store the column offsets.
-     * @param leafFrame
-     * @param bufferCache
-     * @param fileId
-     */
     void preparePageZeroSegments(ColumnBTreeReadLeafFrame leafFrame, IBufferCache bufferCache, int fileId)
             throws HyracksDataException;
 

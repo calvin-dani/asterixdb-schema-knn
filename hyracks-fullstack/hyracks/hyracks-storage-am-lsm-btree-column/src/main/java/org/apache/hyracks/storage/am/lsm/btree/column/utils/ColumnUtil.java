@@ -24,7 +24,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.IColumnTupleProjector;
-import org.apache.hyracks.storage.common.IComponentMetadata;
+import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 
 public class ColumnUtil {
@@ -41,11 +41,6 @@ public class ColumnUtil {
     public static void putColumnsMetadataValue(IValueReference columnsMetadataValue, IComponentMetadata dest)
             throws HyracksDataException {
         READER_WRITER.writeMetadata(columnsMetadataValue, dest);
-    }
-
-    public static void putColumnsMetadataStats(IValueReference columnsMetadataStats, IComponentMetadata dest)
-            throws HyracksDataException {
-        READER_WRITER.writeColumnStats(columnsMetadataStats, dest);
     }
 
     public static int getColumnPageIndex(int columnOffset, int pageSize) {

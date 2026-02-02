@@ -450,7 +450,7 @@ public abstract class IndexSearchOperatorNodePushable extends AbstractUnaryInput
         this.stats = stats;
     }
 
-    protected void searchPartition(int tupleCount) throws Exception {
+    private void searchPartition(int tupleCount) throws Exception {
         for (int i = 0; i < tupleCount && !finished; i++) {
             int storagePartition = tuplePartitioner.partition(accessor, i);
             int pIdx = storagePartitionId2Index.get(storagePartition);
@@ -461,7 +461,7 @@ public abstract class IndexSearchOperatorNodePushable extends AbstractUnaryInput
         }
     }
 
-    protected void searchAllPartitions(int tupleCount) throws Exception {
+    private void searchAllPartitions(int tupleCount) throws Exception {
         for (int p = 0; p < partitions.length; p++) {
             for (int i = 0; i < tupleCount && !finished; i++) {
                 resetSearchPredicate(i);

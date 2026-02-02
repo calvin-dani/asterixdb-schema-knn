@@ -44,13 +44,13 @@ final class PrimitiveValueAssembler extends AbstractPrimitiveValueAssembler {
     }
 
     @Override
-    public int next(int tupleIndex, AssemblerState state) throws HyracksDataException {
+    public int next(AssemblerState state) throws HyracksDataException {
         // Do not call next on PK readers as they are maintained by the cursor
         if (!primaryKey && !reader.next()) {
             throw createException();
-        } else if (reader.isNull()) {
+        } else if (reader.isNull() && (isDelegate() || reader.getLevel() + 1 == level)) {
             addNullToAncestor(reader.getLevel());
-        } else if (reader.isMissing()) {
+        } else if (reader.isMissing() && isDelegate() && reader.getLevel() < level) {
             addMissingToAncestor(reader.getLevel());
         } else if (reader.isValue()) {
             addValueToParent();

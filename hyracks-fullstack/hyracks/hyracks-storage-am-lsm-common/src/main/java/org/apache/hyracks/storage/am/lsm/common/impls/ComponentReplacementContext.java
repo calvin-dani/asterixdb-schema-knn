@@ -259,9 +259,4 @@ public class ComponentReplacementContext implements ILSMIndexOperationContext {
     public Map<String, Object> getParameters() {
         throw new UnsupportedOperationException();
     }
-
-    @Override
-    public <T> T getIndexAccessParameter(String key, Class<T> clazz) {
-        throw new UnsupportedOperationException();
-    }
 }

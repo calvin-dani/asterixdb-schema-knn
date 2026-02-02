@@ -93,7 +93,6 @@ public class CCNCFunctions {
         REGISTER_PARTITION_REQUEST,
         REGISTER_RESULT_PARTITION_LOCATION,
         REPORT_RESULT_PARTITION_WRITE_COMPLETION,
-        REPORT_RESULT_PARTITION_CONSUMED,
 
         NODE_REGISTRATION_RESULT,
         START_TASKS,
@@ -609,10 +608,8 @@ public class CCNCFunctions {
 
         private NetworkAddress networkAddress;
 
-        private String nodeId;
-
         public RegisterResultPartitionLocationFunction(JobId jobId, ResultSetId rsId, IResultMetadata metadata,
-                boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress, String nodeId) {
+                boolean emptyResult, int partition, int nPartitions, NetworkAddress networkAddress) {
             this.jobId = jobId;
             this.rsId = rsId;
             this.metadata = metadata;
@@ -620,7 +617,6 @@ public class CCNCFunctions {
             this.partition = partition;
             this.nPartitions = nPartitions;
             this.networkAddress = networkAddress;
-            this.nodeId = nodeId;
         }
 
         @Override
@@ -655,10 +651,6 @@ public class CCNCFunctions {
         public NetworkAddress getNetworkAddress() {
             return networkAddress;
         }
-
-        public String getNodeId() {
-            return nodeId;
-        }
     }
 
     public static class ReportResultPartitionWriteCompletionFunction extends Function {
@@ -670,56 +662,15 @@ public class CCNCFunctions {
 
         private final int partition;
 
-        private final long resultCount;
-
-        public ReportResultPartitionWriteCompletionFunction(JobId jobId, ResultSetId rsId, int partition,
-                long resultCount) {
+        public ReportResultPartitionWriteCompletionFunction(JobId jobId, ResultSetId rsId, int partition) {
             this.jobId = jobId;
             this.rsId = rsId;
             this.partition = partition;
-            this.resultCount = resultCount;
         }
 
         @Override
         public FunctionId getFunctionId() {
             return FunctionId.REPORT_RESULT_PARTITION_WRITE_COMPLETION;
-        }
-
-        public JobId getJobId() {
-            return jobId;
-        }
-
-        public ResultSetId getResultSetId() {
-            return rsId;
-        }
-
-        public int getPartition() {
-            return partition;
-        }
-
-        public long getResultCount() {
-            return resultCount;
-        }
-    }
-
-    public static class ReportResultPartitionConsumedFunction extends Function {
-        private static final long serialVersionUID = 1L;
-
-        private final JobId jobId;
-
-        private final ResultSetId rsId;
-
-        private final int partition;
-
-        public ReportResultPartitionConsumedFunction(JobId jobId, ResultSetId rsId, int partition) {
-            this.jobId = jobId;
-            this.rsId = rsId;
-            this.partition = partition;
-        }
-
-        @Override
-        public FunctionId getFunctionId() {
-            return FunctionId.REPORT_RESULT_PARTITION_CONSUMED;
         }
 
         public JobId getJobId() {

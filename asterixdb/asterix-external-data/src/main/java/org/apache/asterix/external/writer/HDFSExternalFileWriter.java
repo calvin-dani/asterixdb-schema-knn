@@ -88,7 +88,6 @@ public class HDFSExternalFileWriter implements IExternalFileWriter {
 
     @Override
     public boolean newFile(String directory, String fileName) throws HyracksDataException {
-        printer.newFile();
         directory = HDFSUtils.updateRootPath(directory, true);
         Path path = new Path(directory, "." + fileName);
         try {

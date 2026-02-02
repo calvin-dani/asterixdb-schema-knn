@@ -63,7 +63,7 @@ public class BTreePartitionSearchOperatorNodePushable extends BTreeSearchOperato
         }
     }
 
-    protected void searchPartition(int tupleCount) throws Exception {
+    private void searchPartition(int tupleCount) throws Exception {
         if (pIdx >= 0 && pIdx < cursors.length) {
             for (int i = 0; i < tupleCount && !finished; i++) {
                 resetSearchPredicate(i);

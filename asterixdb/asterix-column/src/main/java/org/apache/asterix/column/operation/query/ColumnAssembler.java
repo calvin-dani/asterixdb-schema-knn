@@ -81,11 +81,10 @@ public final class ColumnAssembler {
         int index = 0;
         while (index < assemblers.length) {
             AbstractPrimitiveValueAssembler assembler = assemblers[index];
-            assembler.notifyCurrentTuple(tupleIndex);
             int groupIndex;
 
             try {
-                groupIndex = assembler.next(tupleIndex, state);
+                groupIndex = assembler.next(state);
             } catch (ColumnarValueException e) {
                 appendInformation(e);
                 throw e;

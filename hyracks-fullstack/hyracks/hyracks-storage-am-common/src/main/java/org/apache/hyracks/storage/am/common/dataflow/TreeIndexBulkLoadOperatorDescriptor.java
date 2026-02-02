@@ -67,6 +67,6 @@ public class TreeIndexBulkLoadOperatorDescriptor extends AbstractSingleActivityO
         return new IndexBulkLoadOperatorNodePushable(indexHelperFactory, ctx, partition, fieldPermutation, fillFactor,
                 verifyInput, numElementsHint, checkIfEmptyIndex,
                 recordDescProvider.getInputRecordDescriptor(this.getActivityId(), 0), tupleFilterFactory,
-                partitionerFactory, partitionsMap, false);
+                partitionerFactory, partitionsMap);
     }
 }

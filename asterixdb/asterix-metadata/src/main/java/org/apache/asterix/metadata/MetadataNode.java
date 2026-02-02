@@ -72,7 +72,6 @@ import org.apache.asterix.common.api.IDatasetLifecycleManager;
 import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.dataflow.LSMIndexUtil;
-import org.apache.asterix.common.exceptions.ACIDException;
 import org.apache.asterix.common.exceptions.AsterixException;
 import org.apache.asterix.common.exceptions.MetadataException;
 import org.apache.asterix.common.exceptions.NoOpWarningCollector;
@@ -1448,17 +1447,6 @@ public class MetadataNode implements IMetadataNode {
             return results;
         } catch (HyracksDataException e) {
             throw new AsterixException(METADATA_ERROR, e, e.getMessage());
-        }
-    }
-
-    @Override
-    public boolean isActive(TxnId txnId) {
-        // TODO(mblow): avoid using exceptions for control flow
-        try {
-            transactionSubsystem.getTransactionManager().getTransactionContext(txnId);
-            return true;
-        } catch (ACIDException ignore) {
-            return false;
         }
     }
 

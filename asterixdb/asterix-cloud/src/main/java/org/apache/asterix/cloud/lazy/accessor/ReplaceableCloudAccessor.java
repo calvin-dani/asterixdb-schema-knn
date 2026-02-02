@@ -28,7 +28,6 @@ import org.apache.asterix.cloud.bulk.IBulkOperationCallBack;
 import org.apache.asterix.cloud.clients.CloudFile;
 import org.apache.asterix.cloud.clients.ICloudClient;
 import org.apache.asterix.cloud.lazy.IParallelCacher;
-import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.asterix.common.utils.StoragePathUtil;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -43,13 +42,13 @@ import org.apache.logging.log4j.Logger;
  */
 public class ReplaceableCloudAccessor extends AbstractLazyAccessor {
     private static final Logger LOGGER = LogManager.getLogger();
-    private final Partitions partitions;
+    private final Set<Integer> partitions;
     private final ILazyAccessorReplacer replacer;
     protected final IParallelCacher cacher;
     private final IBulkOperationCallBack deleteCallBack;
 
     public ReplaceableCloudAccessor(ICloudClient cloudClient, String bucket, IOManager localIoManager,
-            Partitions partitions, ILazyAccessorReplacer replacer, IParallelCacher cacher) {
+            Set<Integer> partitions, ILazyAccessorReplacer replacer, IParallelCacher cacher) {
         super(cloudClient, bucket, localIoManager);
         this.partitions = partitions;
         this.replacer = replacer;

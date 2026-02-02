@@ -118,8 +118,7 @@ public class RecoveryTask {
         }
     }
 
-    protected Void doRecover(IRetryPolicy policy)
-            throws AlgebricksException, InterruptedException, HyracksDataException {
+    protected Void doRecover(IRetryPolicy policy) throws AlgebricksException, InterruptedException {
         LOGGER.log(level, "Actual Recovery task has started");
         Exception failure;
         long prevSuspendCount;

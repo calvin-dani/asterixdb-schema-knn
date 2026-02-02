@@ -149,11 +149,6 @@ public class DummyColumnValuesWriter implements IColumnValuesWriter {
     }
 
     @Override
-    public int getRequiredTemporaryBuffersCount() {
-        return 0;
-    }
-
-    @Override
     public RunLengthIntArray getDefinitionLevelsIntArray() {
         return definitionLevels;
     }

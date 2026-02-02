@@ -64,7 +64,7 @@ public class VCTreeBulkLoadOperatorNodePushable extends LSMIndexBulkLoadOperator
         super(indexDataflowHelperFactory, priamryIndexDataflowHelperFactory, ctx, partition, fieldPermutation,
                 fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, recDesc, usage, datasetId,
                 tupleFilterFactory, partitionerFactory, partitionsMap, numLevels, clustersPerLevel, centroidsPerCluster,
-                maxEntriesPerPage, false);
+                maxEntriesPerPage);
     }
 
     @Override

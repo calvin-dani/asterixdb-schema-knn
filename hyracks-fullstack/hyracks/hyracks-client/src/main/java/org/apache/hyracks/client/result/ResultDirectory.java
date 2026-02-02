@@ -67,11 +67,6 @@ public class ResultDirectory implements IResultDirectory, Closeable {
     }
 
     @Override
-    public void releaseResult(JobId jobId, ResultSetId rsId) {
-
-    }
-
-    @Override
     public void close() throws IOException {
         ipc.stop();
     }

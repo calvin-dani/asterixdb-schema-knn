@@ -50,8 +50,6 @@ import org.apache.asterix.cloud.clients.profiler.IRequestProfilerLimiter;
 import org.apache.asterix.cloud.clients.profiler.RequestLimiterNoOpProfiler;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.exceptions.RuntimeDataException;
-import org.apache.asterix.external.util.aws.AwsUtils;
-import org.apache.asterix.external.util.aws.AwsUtils.CloseableAwsClients;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.util.IoUtil;
@@ -65,7 +63,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.http.SdkHttpClient;
@@ -76,7 +73,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.Delete;
-import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -93,7 +89,6 @@ import software.amazon.awssdk.utils.AttributeMap;
 public final class S3CloudClient implements ICloudClient {
     private static final Logger LOGGER = LogManager.getLogger();
     private final S3ClientConfig config;
-    private final CloseableAwsClients awsClients;
     private final S3Client s3Client;
     private final ICloudGuardian guardian;
     private final IRequestProfilerLimiter profiler;
@@ -103,10 +98,9 @@ public final class S3CloudClient implements ICloudClient {
         this(config, buildClient(config), guardian);
     }
 
-    public S3CloudClient(S3ClientConfig config, CloseableAwsClients awsClients, ICloudGuardian guardian) {
+    public S3CloudClient(S3ClientConfig config, S3Client s3Client, ICloudGuardian guardian) {
         this.config = config;
-        this.awsClients = awsClients;
-        this.s3Client = (S3Client) awsClients.getConsumingClient();
+        this.s3Client = s3Client;
         this.guardian = guardian;
         this.writeBufferSize = config.getWriteBufferSize();
         long profilerInterval = config.getProfilerLogInterval();
@@ -244,22 +238,6 @@ public final class S3CloudClient implements ICloudClient {
     }
 
     @Override
-    public void deleteObject(String bucket, String path) throws HyracksDataException {
-        try {
-            if (path.isEmpty()) {
-                return;
-            }
-            guardian.checkWriteAccess(bucket, path);
-            profiler.objectDelete();
-            DeleteObjectRequest request =
-                    DeleteObjectRequest.builder().bucket(bucket).key(config.getPrefix() + path).build();
-            s3Client.deleteObject(request);
-        } catch (Exception ex) {
-            throw HyracksDataException.create(ex);
-        }
-    }
-
-    @Override
     public void deleteObjects(String bucket, Collection<String> paths) throws HyracksDataException {
         if (paths.isEmpty()) {
             return;
@@ -329,11 +307,7 @@ public final class S3CloudClient implements ICloudClient {
 
     @Override
     public IParallelDownloader createParallelDownloader(String bucket, IOManager ioManager) {
-        S3ClientConfig.S3ParallelDownloaderClientType parallelDownloaderClientType = config.getParallelDownloaderClientType();
-        return switch (parallelDownloaderClientType) {
-            case CRT, ASYNC -> new S3ParallelDownloader(bucket, ioManager, config, profiler);
-            case SYNC -> new S3SyncDownloader(bucket, ioManager, config, profiler);
-        };
+        return new S3ParallelDownloader(bucket, ioManager, config, profiler);
     }
 
     @Override
@@ -353,7 +327,7 @@ public final class S3CloudClient implements ICloudClient {
 
     @Override
     public void close() {
-        AwsUtils.closeClients(awsClients);
+        s3Client.close();
     }
 
     @Override
@@ -368,11 +342,9 @@ public final class S3CloudClient implements ICloudClient {
         return new S3BufferedWriter(s3Client, profiler, guardian, bucket, config.getPrefix() + path);
     }
 
-    public static CloseableAwsClients buildClient(S3ClientConfig config) {
-        CloseableAwsClients awsClients = new CloseableAwsClients();
+    private static S3Client buildClient(S3ClientConfig config) {
         S3ClientBuilder builder = S3Client.builder();
-        AwsCredentialsProvider credentialsProvider = config.createCredentialsProvider();
-        builder.credentialsProvider(credentialsProvider);
+        builder.credentialsProvider(config.createCredentialsProvider());
         builder.region(Region.of(config.getRegion()));
         builder.forcePathStyle(config.isForcePathStyle());
 
@@ -389,10 +361,6 @@ public final class S3CloudClient implements ICloudClient {
             customHttpConfigBuilder.put(SdkHttpConfigurationOption.CONNECTION_ACQUIRE_TIMEOUT,
                     Duration.ofSeconds(config.getRequestsHttpConnectionAcquireTimeout()));
         }
-        if (config.getS3ReadTimeoutInSeconds() > 0) {
-            customHttpConfigBuilder.put(SdkHttpConfigurationOption.READ_TIMEOUT,
-                    Duration.ofSeconds(config.getS3ReadTimeoutInSeconds()));
-        }
         if (config.getEndpoint() != null && !config.getEndpoint().isEmpty()) {
             builder.endpointOverride(URI.create(config.getEndpoint()));
         }
@@ -401,10 +369,7 @@ public final class S3CloudClient implements ICloudClient {
         }
         SdkHttpClient httpClient = ApacheHttpClient.builder().buildWithDefaults(customHttpConfigBuilder.build());
         builder.httpClient(httpClient);
-
-        awsClients.setConsumingClient(builder.build());
-        awsClients.setCredentialsProvider(credentialsProvider);
-        return awsClients;
+        return builder.build();
     }
 
     private Set<CloudFile> filterAndGet(List<S3Object> contents, FilenameFilter filter) {

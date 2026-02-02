@@ -28,7 +28,6 @@ import org.apache.hyracks.dataflow.common.data.normalizers.ByteArrayNormalizedKe
 import org.apache.hyracks.dataflow.common.data.normalizers.DoubleNormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.FloatNormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.Integer64NormalizedKeyComputerFactory;
-import org.apache.hyracks.dataflow.common.data.normalizers.Integer8NormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.IntegerNormalizedKeyComputerFactory;
 import org.apache.hyracks.dataflow.common.data.normalizers.UTF8StringNormalizedKeyComputerFactory;
 
@@ -44,8 +43,6 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
         IAType type = (IAType) typeInfo;
         if (ascending) {
             switch (type.getTypeTag()) {
-                case TINYINT:
-                    return new AWrappedAscNormalizedKeyComputerFactory(new Integer8NormalizedKeyComputerFactory());
                 case DATE:
                 case TIME:
                 case YEARMONTHDURATION:
@@ -70,8 +67,6 @@ public class NormalizedKeyComputerFactoryProvider implements INormalizedKeyCompu
             }
         } else {
             switch (type.getTypeTag()) {
-                case TINYINT:
-                    return new AWrappedDescNormalizedKeyComputerFactory(new Integer8NormalizedKeyComputerFactory());
                 case DATE:
                 case TIME:
                 case YEARMONTHDURATION:

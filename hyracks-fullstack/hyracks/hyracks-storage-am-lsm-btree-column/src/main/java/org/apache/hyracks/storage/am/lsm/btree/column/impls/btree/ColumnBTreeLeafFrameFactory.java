@@ -27,7 +27,6 @@ import org.apache.hyracks.storage.am.lsm.btree.column.api.AbstractColumnTupleRea
 import org.apache.hyracks.storage.am.lsm.btree.column.api.AbstractColumnTupleReaderWriterFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.AbstractColumnTupleWriter;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
-import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.ColumnProjectorType;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.IColumnProjectionInfo;
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.buffercache.IColumnWriteContext;
 
@@ -64,7 +63,6 @@ public class ColumnBTreeLeafFrameFactory implements ITreeIndexFrameFactory {
     public ColumnBTreeReadLeafFrame createReadFrame(IColumnProjectionInfo columnProjectionInfo) {
         ITreeIndexTupleWriter rowTupleWriter = rowTupleWriterFactory.createTupleWriter();
         AbstractColumnTupleReader columnTupleReader = columnTupleWriterFactory.createColumnReader(columnProjectionInfo);
-        ColumnProjectorType projectorType = columnProjectionInfo.getProjectorType();
-        return new ColumnBTreeReadLeafFrame(rowTupleWriter, columnTupleReader, projectorType);
+        return new ColumnBTreeReadLeafFrame(rowTupleWriter, columnTupleReader);
     }
 }

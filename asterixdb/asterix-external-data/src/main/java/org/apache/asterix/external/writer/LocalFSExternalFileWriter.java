@@ -56,7 +56,6 @@ final class LocalFSExternalFileWriter implements IExternalFileWriter {
 
     @Override
     public boolean newFile(String directory, String fileName) throws HyracksDataException {
-        printer.newFile();
         try {
             File parentDirectory = new File(directory);
             File currentFile = new File(parentDirectory, fileName);

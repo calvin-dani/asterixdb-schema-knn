@@ -39,7 +39,6 @@ import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnBufferProvider;
-import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.ColumnProjectorType;
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.IntPairUtil;
 import org.apache.hyracks.storage.am.lsm.btree.column.error.ColumnarValueException;
 
@@ -54,7 +53,6 @@ public class DefaultColumnMultiPageZeroReader extends AbstractColumnMultiPageZer
     private int zerothSegmentMaxColumns;
     private int numberOfPageZeroSegments; // includes the zeroth segment
     private ByteBuffer pageZeroBuf;
-    private int numberOfColumns;
 
     private final VoidPointable offsetPointable;
 
@@ -73,17 +71,16 @@ public class DefaultColumnMultiPageZeroReader extends AbstractColumnMultiPageZer
     }
 
     @Override
-    public void reset(ByteBuffer pageZeroBuf, ColumnProjectorType projectorType) {
+    public void reset(ByteBuffer pageZeroBuf) {
         this.pageZeroBuf = pageZeroBuf;
         zerothSegmentMaxColumns = pageZeroBuf.getInt(MAX_COLUMNS_IN_ZEROTH_SEGMENT);
-        zerothSegmentReader.reset(pageZeroBuf, projectorType,
-                Math.min(zerothSegmentMaxColumns, getNumberOfPresentColumns()), headerSize);
+        zerothSegmentReader.reset(pageZeroBuf, Math.min(zerothSegmentMaxColumns, getNumberOfPresentColumns()),
+                headerSize);
         numberOfPageZeroSegments = pageZeroBuf.getInt(NUMBER_OF_PAGE_ZERO_SEGMENTS_OFFSET);
-        numberOfColumns = pageZeroBuf.getInt(NUMBER_OF_COLUMNS_OFFSET);
     }
 
     @Override
-    public void reset(ByteBuffer pageZeroBuf, ColumnProjectorType projectorType, int headerSize) {
+    public void reset(ByteBuffer pageZeroBuf, int headerSize) {
         throw new UnsupportedOperationException("This method should not be called for multi-page readers.");
     }
 
@@ -223,8 +220,7 @@ public class DefaultColumnMultiPageZeroReader extends AbstractColumnMultiPageZer
 
     @Override
     public void getAllColumns(BitSet presentColumns) {
-        //Don't ask for pageZeroBuf.getInt(NUMBER_OF_COLUMNS_OFFSET) here, as the cursor might have been closed.
-        //and the cached page might have been recycled.
+        int numberOfColumns = getNumberOfPresentColumns();
         presentColumns.set(0, numberOfColumns);
     }
 
@@ -249,7 +245,7 @@ public class DefaultColumnMultiPageZeroReader extends AbstractColumnMultiPageZer
         if (numberOfColumns > zerothSegmentMaxColumns) {
             // read the rest of the columns from the segment stream
             currentColumnIndex = segmentBuffers.readOffset(offsetColumnIndexPairs, zerothSegmentMaxColumns,
-                    maxNumberOfColumnsInAPage, currentColumnIndex, numberOfColumns);
+                    maxNumberOfColumnsInAPage, currentColumnIndex);
         }
         return currentColumnIndex;
     }
@@ -280,10 +276,6 @@ public class DefaultColumnMultiPageZeroReader extends AbstractColumnMultiPageZer
         }
 
         return pageZeroSegmentsPages;
-    }
-
-    @Override
-    public void setPresentColumnsIndices() {
     }
 
     @Override

@@ -54,7 +54,6 @@ import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
-import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -712,7 +711,6 @@ public class BTree extends AbstractTreeIndex {
                         ctx.getCursorInitialState().setOriginialKeyComparator(ctx.getCmp());
                         ctx.getCursorInitialState().setPage(node);
                         ctx.getCursorInitialState().setPageId(pageId);
-                        ctx.getCursorInitialState().setRootPageId(rootPage);
                         ctx.getCursor().open(ctx.getCursorInitialState(), ctx.getPred());
                         break;
                     }
@@ -896,11 +894,6 @@ public class BTree extends AbstractTreeIndex {
             btree.diskOrderScan(cursor, ctx);
         }
 
-        @Override
-        public void diskSampleScan(IIndexCursor cursor) throws HyracksDataException {
-            throw new UnsupportedOperationException("Disk sample scan is not supported for BTree.");
-        }
-
         // TODO: Ideally, this method should not exist. But we need it for
         // the changing the leafFrame and leafFrameFactory of the op context for
         // the LSM-BTree to work correctly.
@@ -990,9 +983,8 @@ public class BTree extends AbstractTreeIndex {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
-            throws HyracksDataException {
-        return new BTreeNSMBulkLoader(fillFactor, verifyInput, callback, this, statsAccumulator);
+            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+        return new BTreeNSMBulkLoader(fillFactor, verifyInput, callback, this);
     }
 
     @SuppressWarnings("rawtypes")
