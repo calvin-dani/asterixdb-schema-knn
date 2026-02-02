@@ -40,6 +40,7 @@ import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
+import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
 import org.apache.hyracks.storage.common.compression.NoOpCompressorDecompressorFactory;
 import org.apache.hyracks.util.trace.ITracer;
 import org.junit.Assert;
@@ -294,7 +295,7 @@ public class LSMBTreeSearchOperationCallbackTest extends AbstractSearchOperation
             }
 
             IIndexBulkLoader bulkloader = index.createBulkLoader(1.0f, false, end - begin, true,
-                    harness.getPageWriteCallbackFactory().createPageWriteCallback());
+                    harness.getPageWriteCallbackFactory().createPageWriteCallback(), NoOpStatsAccumulator.INSTANCE);
             for (int i = begin; i <= end; i++) {
                 TupleUtils.createIntegerTuple(builder, tuple, i);
                 bulkloader.add(tuple);

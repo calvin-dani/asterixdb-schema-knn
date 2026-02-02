@@ -22,11 +22,13 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 
 public class DiskComponentMetadata implements IComponentMetadata {
 
     private final IMetadataPageManager mdpManager;
+    public static final MutableArrayValueReference STATS_KEY = new MutableArrayValueReference("STATS".getBytes());
 
     public DiskComponentMetadata(IMetadataPageManager mdpManager) {
         this.mdpManager = mdpManager;

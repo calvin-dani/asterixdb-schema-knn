@@ -412,9 +412,8 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         return MetadataManagerUtil.findTypeEntity(mdTxnCtx, database, dataverseName, typeName);
     }
 
-    public IAType findTypeForDatasetWithoutType(IAType recordType, IAType metaRecordType, Dataset dataset)
-            throws AlgebricksException {
-        return MetadataManagerUtil.findTypeForDatasetWithoutType(recordType, metaRecordType, dataset);
+    public IAType findTypeForDatasetWithoutType(IAType recordType, Dataset dataset) throws AlgebricksException {
+        return MetadataManagerUtil.findTypeForDatasetWithoutType(recordType, dataset);
     }
 
     public IAType findType(String database, DataverseName dataverseName, String typeName) throws AlgebricksException {
@@ -448,6 +447,10 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
     @Override
     public DataSource findDataSource(DataSourceId id) throws AlgebricksException {
         return MetadataManagerUtil.findDataSource(appCtx.getClusterStateManager(), mdTxnCtx, id);
+    }
+
+    public SampleDataSource findSampleDataSource(DataSourceId id, String sampleIndex) throws AlgebricksException {
+        return MetadataManagerUtil.findSampleDataSource(appCtx.getClusterStateManager(), mdTxnCtx, sampleIndex, id);
     }
 
     public DataSource lookupSourceInMetadata(DataSourceId aqlId) throws AlgebricksException {
@@ -750,6 +753,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         if (isIndexOnlyPlan) {
             ARecordType recType = (ARecordType) findType(dataset.getItemTypeDatabaseName(),
                     dataset.getItemTypeDataverseName(), dataset.getItemTypeName());
+            recType = (ARecordType) findTypeForDatasetWithoutType(recType, dataset);
             List<List<String>> secondaryKeyFields = secondaryIndexDetails.getKeyFieldNames();
             List<IAType> secondaryKeyTypes = secondaryIndexDetails.getKeyFieldTypes();
             Pair<IAType, Boolean> keyTypePair = Index.getNonNullableOpenFieldType(secondaryIndex,
@@ -2108,6 +2112,14 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
     public List<Index> getSecondaryIndexes(Dataset ds) throws AlgebricksException {
         return getDatasetIndexes(ds.getDatabaseName(), ds.getDataverseName(), ds.getDatasetName()).stream()
                 .filter(idx -> idx.isSecondaryIndex() && !idx.isSampleIndex()).collect(Collectors.toList());
+    }
+
+    /**
+     * Returns true if the dataset has any (non-samples) secondary index.
+     */
+    public boolean hasSecondaryIndexes(Dataset ds) throws AlgebricksException {
+        return getDatasetIndexes(ds.getDatabaseName(), ds.getDataverseName(), ds.getDatasetName()).stream()
+                .anyMatch(idx -> idx.isSecondaryIndex() && !idx.isSampleIndex());
     }
 
     public LockList getLocks() {

@@ -19,22 +19,22 @@
 package org.apache.asterix.test.common;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.asterix.test.common.TestConstants.REMOVE_PLACEHOLDERS_PATTERN;
+import static org.apache.asterix.test.common.TestConstants.S3_ACCESS_KEY_ID_DEFAULT;
+import static org.apache.asterix.test.common.TestConstants.S3_REGION_DEFAULT;
+import static org.apache.asterix.test.common.TestConstants.S3_SECRET_ACCESS_KEY_DEFAULT;
 import static org.apache.asterix.test.common.TestConstants.Azure.ACCOUNT_KEY_PLACEHOLDER;
 import static org.apache.asterix.test.common.TestConstants.Azure.ACCOUNT_NAME_PLACEHOLDER;
 import static org.apache.asterix.test.common.TestConstants.Azure.AZURITE_ACCOUNT_KEY_DEFAULT;
 import static org.apache.asterix.test.common.TestConstants.Azure.AZURITE_ACCOUNT_NAME_DEFAULT;
 import static org.apache.asterix.test.common.TestConstants.Azure.BLOB_ENDPOINT_DEFAULT;
 import static org.apache.asterix.test.common.TestConstants.Azure.BLOB_ENDPOINT_PLACEHOLDER;
-import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_CERTIFICATE_DEFAULT;
-import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_CERTIFICATE_PASSWORD_DEFAULT;
-import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_CERTIFICATE_PASSWORD_PLACEHOLDER;
-import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_CERTIFICATE_PLACEHOLDER;
 import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_ID_DEFAULT;
 import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_ID_PLACEHOLDER;
 import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_SECRET_DEFAULT;
 import static org.apache.asterix.test.common.TestConstants.Azure.CLIENT_SECRET_PLACEHOLDER;
-import static org.apache.asterix.test.common.TestConstants.Azure.MANAGED_IDENTITY_ID_DEFAULT;
-import static org.apache.asterix.test.common.TestConstants.Azure.MANAGED_IDENTITY_ID_PLACEHOLDER;
+import static org.apache.asterix.test.common.TestConstants.Azure.MANAGED_IDENTITY_DEFAULT;
+import static org.apache.asterix.test.common.TestConstants.Azure.MANAGED_IDENTITY_PLACEHOLDER;
 import static org.apache.asterix.test.common.TestConstants.Azure.SAS_TOKEN_PLACEHOLDER;
 import static org.apache.asterix.test.common.TestConstants.Azure.TEMPLATE;
 import static org.apache.asterix.test.common.TestConstants.Azure.TEMPLATE_DEFAULT;
@@ -74,6 +74,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -84,6 +85,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Queue;
+import java.util.SequencedSet;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -173,6 +175,7 @@ import org.apache.logging.log4j.Logger;
 import org.junit.Assert;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -190,6 +193,12 @@ public class TestExecutor {
      * Static variables
      */
     protected static final Logger LOGGER = LogManager.getLogger();
+
+    static {
+        StreamReadConstraints.overrideDefaultStreamReadConstraints(
+                StreamReadConstraints.builder().maxStringLength(Integer.MAX_VALUE).build());
+    }
+
     private static final ObjectMapper OM = new ObjectMapper();
     private static final ObjectWriter OBJECT_WRITER = OM.writer();
     private static final ObjectReader JSON_NODE_READER = OM.readerFor(JsonNode.class);
@@ -279,6 +288,7 @@ public class TestExecutor {
     protected String deltaPath = null;
     public String stripSubstring = null;
     public String executorId = null;
+    private String s3mockTemplate = null;
 
     public TestExecutor() {
         this(Collections.singletonList(
@@ -711,6 +721,20 @@ public class TestExecutor {
 
     // For tests where you simply want the byte-for-byte output.
     private static void writeOutputToFile(File actualFile, InputStream resultStream) throws Exception {
+        ensureParentDir(actualFile);
+        try (FileOutputStream out = new FileOutputStream(actualFile)) {
+            IOUtils.copy(resultStream, out);
+        }
+    }
+
+    private static void writeOutputToFile(File actualFile, String content) throws Exception {
+        ensureParentDir(actualFile);
+        try (FileOutputStream out = new FileOutputStream(actualFile)) {
+            IOUtils.write(content, out, UTF_8);
+        }
+    }
+
+    private static void ensureParentDir(File actualFile) {
         final File parentDir = actualFile.getParentFile();
         if (!parentDir.isDirectory()) {
             if (parentDir.exists()) {
@@ -718,9 +742,6 @@ public class TestExecutor {
             } else if (!parentDir.mkdirs()) {
                 LOGGER.warn("Unable to create actual file parent dir: " + parentDir);
             }
-        }
-        try (FileOutputStream out = new FileOutputStream(actualFile)) {
-            IOUtils.copy(resultStream, out);
         }
     }
 
@@ -915,6 +936,7 @@ public class TestExecutor {
             str = strip(str, stripSubstring);
         }
 
+        str = removeLeftoverExternalPlaceholders(str);
         HttpUriRequest method = jsonEncoded ? constructPostMethodJson(str, uri, "statement", params)
                 : constructPostMethodUrl(str, uri, "statement", params);
         // Set accepted output response type
@@ -930,6 +952,10 @@ public class TestExecutor {
             checkResponse(response, responseCodeValidator);
         }
         return response.getEntity().getContent();
+    }
+
+    private String removeLeftoverExternalPlaceholders(String str) {
+        return REMOVE_PLACEHOLDERS_PATTERN.matcher(str).replaceAll("");
     }
 
     public InputStream executeQueryService(String str, TestFileContext ctx, OutputFormat fmt, URI uri,
@@ -1611,30 +1637,40 @@ public class TestExecutor {
             resultStream = ResultExtractor.extractStatus(resultStream, UTF_8);
         }
         if (handleVar != null) {
-            String handle = ResultExtractor.extractHandle(resultStream, UTF_8);
+            String result = IOUtils.toString(resultStream, UTF_8);
+            String handle = ResultExtractor.extractHandle(result);
             if (handle != null) {
                 variableCtx.put(handleVar, handle);
+                writeOutputToFile(actualResultFile, result);
+                matchExpectedResult(testFile, expectedResultFile, actualResultFile, resultStream, queryCount,
+                        numResultFiles, compare, statement);
             } else {
                 throw new Exception("no handle for test " + testFile.toString());
             }
         } else if (saveResponseVar != null) {
             variableCtx.put(saveResponseVar, IOUtils.toString(resultStream, UTF_8));
         } else {
-            if (expectedResultFile == null) {
-                if (testFile.getName().startsWith(DIAGNOSE)) {
-                    LOGGER.info("Diagnostic output: {}", IOUtils.toString(resultStream, UTF_8));
-                } else {
-                    LOGGER.info("Unexpected output: {}", IOUtils.toString(resultStream, UTF_8));
-                    Assert.fail("no result file for " + testFile + "; queryCount: " + queryCount + ", filectxs.size: "
-                            + numResultFiles);
-                }
-            } else {
-                writeOutputToFile(actualResultFile, resultStream);
-                runScriptAndCompareWithResult(testFile, expectedResultFile, actualResultFile, compare, UTF_8,
-                        statement);
-            }
+            writeOutputToFile(actualResultFile, resultStream);
+            matchExpectedResult(testFile, expectedResultFile, actualResultFile, resultStream, queryCount,
+                    numResultFiles, compare, statement);
         }
         queryCount.increment();
+    }
+
+    private void matchExpectedResult(File testFile, File expectedResultFile, File actualResultFile,
+            InputStream resultStream, MutableInt queryCount, int numResultFiles, ComparisonEnum compare,
+            String statement) throws Exception {
+        if (expectedResultFile == null) {
+            if (testFile.getName().startsWith(DIAGNOSE)) {
+                LOGGER.info("Diagnostic output: {}", IOUtils.toString(resultStream, UTF_8));
+            } else {
+                LOGGER.info("Unexpected output: {}", IOUtils.toString(resultStream, UTF_8));
+                Assert.fail("no result file for " + testFile + "; queryCount: " + queryCount + ", filectxs.size: "
+                        + numResultFiles);
+            }
+        } else {
+            runScriptAndCompareWithResult(testFile, expectedResultFile, actualResultFile, compare, UTF_8, statement);
+        }
     }
 
     protected Charset getResponseCharset(File expectedResultFile) {
@@ -2126,7 +2162,7 @@ public class TestExecutor {
             codes.add(Integer.parseInt(m.group(1)));
         }
         if (codes.isEmpty()) {
-            return code -> code == HttpStatus.SC_OK;
+            return code -> code == HttpStatus.SC_OK || code == HttpStatus.SC_ACCEPTED;
         } else {
             return codes::contains;
         }
@@ -2419,21 +2455,7 @@ public class TestExecutor {
             // For adapter placeholder, it means we have a template to replace
             if (placeholder.getName().equals("adapter")) {
                 str = str.replace("%adapter%", placeholder.getValue());
-
-                // Early terminate if there are no template place holders to replace
-                if (noTemplateRequired(str)) {
-                    continue;
-                }
-
-                if (placeholder.getValue().equalsIgnoreCase("S3")) {
-                    str = applyS3Substitution(str, placeholders);
-                } else if (placeholder.getValue().equalsIgnoreCase("AzureBlob")) {
-                    str = applyAzureSubstitution(str, placeholders);
-                } else if (placeholder.getValue().equalsIgnoreCase("GCS")) {
-                    str = applyGCSSubstitution(str, placeholders);
-                } else if (placeholder.getValue().equalsIgnoreCase("HDFS")) {
-                    str = applyHDFSSubstitution(str, placeholders);
-                }
+                str = applyAdapterSubstitution(str, placeholder.getValue(), placeholders);
             } else {
                 // Any other place holders, just replace with the value
                 str = str.replace("%" + placeholder.getName() + "%", placeholder.getValue());
@@ -2444,14 +2466,25 @@ public class TestExecutor {
         str = str.replace(ACCOUNT_NAME_PLACEHOLDER, AZURITE_ACCOUNT_NAME_DEFAULT);
         str = str.replace(ACCOUNT_KEY_PLACEHOLDER, AZURITE_ACCOUNT_KEY_DEFAULT);
         str = str.replace(SAS_TOKEN_PLACEHOLDER, sasToken);
-        str = str.replace(MANAGED_IDENTITY_ID_PLACEHOLDER, MANAGED_IDENTITY_ID_DEFAULT);
+        str = str.replace(MANAGED_IDENTITY_PLACEHOLDER, MANAGED_IDENTITY_DEFAULT);
         str = str.replace(CLIENT_ID_PLACEHOLDER, CLIENT_ID_DEFAULT);
         str = str.replace(CLIENT_SECRET_PLACEHOLDER, CLIENT_SECRET_DEFAULT);
-        str = str.replace(CLIENT_CERTIFICATE_PLACEHOLDER, CLIENT_CERTIFICATE_DEFAULT);
-        str = str.replace(CLIENT_CERTIFICATE_PASSWORD_PLACEHOLDER, CLIENT_CERTIFICATE_PASSWORD_DEFAULT);
         str = str.replace(TENANT_ID_PLACEHOLDER, TENANT_ID_DEFAULT);
         str = replaceExternalEndpoint(str);
 
+        return str;
+    }
+
+    protected String applyAdapterSubstitution(String str, String adapter, List<Placeholder> placeholders) {
+        if (adapter.equalsIgnoreCase("S3")) {
+            str = applyS3Substitution(str, placeholders);
+        } else if (adapter.equalsIgnoreCase("AzureBlob") || adapter.equalsIgnoreCase("AzureDatalake")) {
+            str = applyAzureSubstitution(str, placeholders);
+        } else if (adapter.equalsIgnoreCase("GCS")) {
+            str = applyGCSSubstitution(str, placeholders);
+        } else if (adapter.equalsIgnoreCase("HDFS")) {
+            str = applyHDFSSubstitution(str, placeholders);
+        }
         return str;
     }
 
@@ -2494,16 +2527,28 @@ public class TestExecutor {
             str = setS3TemplateDefault(str);
         }
 
-        // Set to default if not replaced
-        if (isReplaced && !hasRegion) {
-            str = str.replace(TestConstants.S3_REGION_PLACEHOLDER, TestConstants.S3_REGION_DEFAULT);
-        }
-
-        if (isReplaced && !hasServiceEndpoint) {
-            str = str.replace(TestConstants.S3_SERVICE_ENDPOINT_PLACEHOLDER, TestConstants.S3_SERVICE_ENDPOINT_DEFAULT);
-        }
+        str = str.replace(TestConstants.S3_REGION_PLACEHOLDER, getS3RegionDefault());
+        str = str.replace(TestConstants.S3_SERVICE_ENDPOINT_PLACEHOLDER, getS3ServiceEndpointDefault());
+        str = str.replace(TestConstants.S3_ACCESS_KEY_ID_PLACEHOLDER, getS3AccessKeyIdDefault());
+        str = str.replace(TestConstants.S3_SECRET_ACCESS_KEY_PLACEHOLDER, getS3SecretAccessKeyDefault());
 
         return str;
+    }
+
+    protected String getS3AccessKeyIdDefault() {
+        return TestConstants.S3_ACCESS_KEY_ID_DEFAULT;
+    }
+
+    protected String getS3SecretAccessKeyDefault() {
+        return TestConstants.S3_SECRET_ACCESS_KEY_DEFAULT;
+    }
+
+    protected String getS3ServiceEndpointDefault() {
+        return TestConstants.S3_SERVICE_ENDPOINT_DEFAULT;
+    }
+
+    protected String getS3RegionDefault() {
+        return TestConstants.S3_REGION_DEFAULT;
     }
 
     protected String setS3Template(String str) {
@@ -2512,7 +2557,14 @@ public class TestExecutor {
 
     protected String setS3TemplateDefault(String str) {
         if (str.contains("%template%")) {
-            return str.replace("%template%", TestConstants.S3_TEMPLATE_DEFAULT);
+            String s3mockEndpoint = System.getProperty(TestConstants.S3_SERVICE_ENDPOINT_KEY);
+            if (s3mockEndpoint != null && s3mockTemplate == null) {
+                s3mockTemplate = "(\"accessKeyId\"=\"" + S3_ACCESS_KEY_ID_DEFAULT + "\"),\n" + "(\"secretAccessKey\"=\""
+                        + S3_SECRET_ACCESS_KEY_DEFAULT + "\"),\n" + "(\"region\"=\"" + S3_REGION_DEFAULT + "\"),\n"
+                        + "(\"serviceEndpoint\"=\"" + s3mockEndpoint + "\")";
+            }
+            return str.replace("%template%",
+                    s3mockTemplate == null ? TestConstants.S3_TEMPLATE_DEFAULT : s3mockTemplate);
         } else {
             return str.replace("%template_colons%", TestConstants.S3_TEMPLATE_DEFAULT_NO_PARENTHESES_WITH_COLONS);
         }
@@ -2710,15 +2762,36 @@ public class TestExecutor {
         return stripLineComments(stripJavaComments(statement));
     }
 
-    public void cleanup(String testCase, List<String> badtestcases) throws Exception {
+    public final void cleanup(String testCase, SequencedSet<String> badtestcases) throws Exception {
+        cleanup(testCase, badtestcases, false);
+    }
+
+    public void cleanup(String testCase, SequencedSet<String> badtestcases, boolean skipClusterCleanup)
+            throws Exception {
+        if (skipClusterCleanup) {
+            return;
+        }
         try {
             List<Pair<String, DataverseName>> toBeDropped = new ArrayList<>();
             listUserDefinedDataverses(toBeDropped);
             if (!toBeDropped.isEmpty()) {
                 badtestcases.add(testCase);
-                LOGGER.info("Last test left some garbage. Dropping dataverses: " + StringUtils.join(toBeDropped, ','));
+                LOGGER.info("Last test leaked scopes. Dropping scopes: {}",
+                        toBeDropped.stream()
+                                .map(pair -> (pair.getFirst() == null ? "" : (pair.getFirst() + SqlppStatementUtil.DOT))
+                                        + pair.getSecond().getCanonicalForm())
+                                .collect(Collectors.joining(", ", "[", "]")));
+                // TODO(mblow): consider that dataverses can have references from views in other dataverses
                 for (Pair<String, DataverseName> dv : toBeDropped) {
                     dropDataverse(dv);
+                }
+            }
+            List<String> databases = listUserDefinedDatabases();
+            if (!databases.isEmpty()) {
+                LOGGER.info("Last test leaked databases. Dropping databases: " + databases);
+                badtestcases.add(testCase);
+                for (String db : databases) {
+                    dropDatabase(db);
                 }
             }
         } catch (Throwable th) {
@@ -2750,6 +2823,25 @@ public class TestExecutor {
         }
     }
 
+    protected List<String> listUserDefinedDatabases() throws Exception {
+        String query = "select value(DatabaseName) from Metadata.`Database` where Creator.Name != \"@sys\"";
+        URI uri = getEndpoint(Servlets.QUERY_SERVICE);
+        try {
+            InputStream resultStream = executeQueryService(query, OutputFormat.CLEAN_JSON, uri,
+                    constructQueryParameters(query, OutputFormat.CLEAN_JSON, new ArrayList<Parameter>()), false,
+                    StandardCharsets.UTF_8, code -> code == HttpStatus.SC_OK, false);
+            JsonNode result = extractResult(IOUtils.toString(resultStream, UTF_8));
+            List<String> databases = new ArrayList<>();
+            for (int i = 0; i < result.size(); i++) {
+                databases.add(result.get(i).asText());
+            }
+            return databases;
+        } catch (Exception e) {
+            // assuming databases are not enabled in this cluster
+            return Collections.emptyList();
+        }
+    }
+
     protected void dropDataverse(Pair<String, DataverseName> dv) throws Exception {
         StringBuilder dropStatement = new StringBuilder();
         dropStatement.append("drop dataverse ");
@@ -2765,8 +2857,18 @@ public class TestExecutor {
         ResultExtractor.extract(resultStream, UTF_8, OutputFormat.CLEAN_JSON);
     }
 
-    protected void listDatasets(DataverseName dataverseName, List<Pair<String, DatasetConfig.DatasetType>> outDatasets)
-            throws Exception {
+    protected void dropDatabase(String db) throws Exception {
+        StringBuilder dropStatement = new StringBuilder();
+        dropStatement.append("DROP DATABASE ");
+        SqlppStatementUtil.enclose(dropStatement, db);
+        dropStatement.append(";");
+        InputStream resultStream = executeQueryService(dropStatement.toString(), getEndpoint(Servlets.QUERY_SERVICE),
+                OutputFormat.CLEAN_JSON, UTF_8);
+        ResultExtractor.extract(resultStream, UTF_8, OutputFormat.CLEAN_JSON);
+    }
+
+    protected void listDatasets(DataverseName dataverseName,
+            Collection<Pair<String, DatasetConfig.DatasetType>> outDatasets) throws Exception {
         String query = "select d.DatasetName, d.DatasetType from Metadata.`Dataset` d where d.DataverseName = '"
                 + dataverseName.getCanonicalForm() + "'";
         InputStream resultStream = executeQueryService(query, getEndpoint(Servlets.QUERY_SERVICE),

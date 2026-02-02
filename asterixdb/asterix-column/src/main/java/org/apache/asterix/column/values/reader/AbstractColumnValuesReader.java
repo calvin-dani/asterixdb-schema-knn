@@ -60,6 +60,10 @@ abstract class AbstractColumnValuesReader implements IColumnValuesReader {
     private boolean nullLevel;
     private boolean allMissing;
 
+    private int previousTupleIndex;
+    private int currentTupleIndex;
+    private boolean firstValueForCurrentTuple;
+
     // For logging purposes only
     private int numberOfEncounteredMissing;
     private int numberOfEncounteredNull;
@@ -74,6 +78,7 @@ abstract class AbstractColumnValuesReader implements IColumnValuesReader {
         currentDefinitionLevels = definitionLevels.get(maxLevel);
         valuesStream = primaryKey ? new ByteBufferInputStream() : new MultiByteBufferInputStream();
         this.primaryKey = primaryKey;
+        this.previousTupleIndex = -1;
     }
 
     final void nextLevel() throws HyracksDataException {
@@ -89,6 +94,13 @@ abstract class AbstractColumnValuesReader implements IColumnValuesReader {
             nullLevel = ColumnValuesUtil.isNull(nullBitMask, actualLevel);
             //Clear the null bit to allow repeated value readers determine the correct delimiter for null values
             level = ColumnValuesUtil.clearNullBit(nullBitMask, actualLevel);
+            if (currentTupleIndex != previousTupleIndex) {
+                // We are at the first value for the current tuple
+                firstValueForCurrentTuple = true;
+                previousTupleIndex = currentTupleIndex;
+            } else {
+                firstValueForCurrentTuple = false;
+            }
 
             // For logging purposes only
             numberOfEncounteredMissing += isMissing() ? 1 : 0;
@@ -101,6 +113,27 @@ abstract class AbstractColumnValuesReader implements IColumnValuesReader {
             ex.addSuppressed(e);
             throw ex;
         }
+    }
+
+    @Override
+    public boolean isColumnMissingForCurrentTuple(int tupleIndex) {
+        return allMissing || missingColumnForCurrentTuple(tupleIndex);
+    }
+
+    private boolean missingColumnForCurrentTuple(int tupleIndex) {
+        // A column is considered missing for the current tuple if:
+        // 1- The level is 0 (indicating that there are no values present for this column)
+        // 2- This is the first value for the current tuple (to avoid false positives in repeated structures)
+        // 3- The previous tuple index matches the current tuple
+
+        // The last condition ensures that we are correctly checking for the same tuple index.
+        // and not using the "firstValueForCurrentTuple" from previous tuple.
+        return (level == 0 && firstValueForCurrentTuple && previousTupleIndex == tupleIndex);
+    }
+
+    @Override
+    public void registerCurrentTuple(int tupleIndex) {
+        currentTupleIndex = tupleIndex;
     }
 
     abstract void resetValues();
@@ -118,9 +151,11 @@ abstract class AbstractColumnValuesReader implements IColumnValuesReader {
         }
         allMissing = false;
         try {
-            int actualLevel = BytesUtils.readZigZagVarInt(in);
-            maxLevel = ColumnValuesUtil.clearNullBit(nullBitMask, actualLevel);
-            nullBitMask = ColumnValuesUtil.getNullMask(actualLevel);
+            previousTupleIndex = -1;
+            firstValueForCurrentTuple = false;
+
+            maxLevel = BytesUtils.readZigZagVarInt(in);
+            nullBitMask = ColumnValuesUtil.getNullMask(maxLevel);
 
             currentDefinitionLevels = definitionLevels.get(maxLevel);
             if (currentDefinitionLevels == null) {
@@ -162,7 +197,9 @@ abstract class AbstractColumnValuesReader implements IColumnValuesReader {
 
     @Override
     public final boolean isMissing() {
-        return !isDelimiter() && level < maxLevel;
+        // After clearing the nullBitMask, a level less than maxLevel may incorrectly be considered missing.
+        // This is because the nullBitMask can affect the interpretation of the level value.
+        return !isDelimiter() && !nullLevel && level < maxLevel;
     }
 
     @Override

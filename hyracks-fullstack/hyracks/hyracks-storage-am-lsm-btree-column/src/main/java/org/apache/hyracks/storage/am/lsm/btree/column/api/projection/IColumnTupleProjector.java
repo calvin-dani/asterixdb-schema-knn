@@ -20,7 +20,7 @@ package org.apache.hyracks.storage.am.lsm.btree.column.api.projection;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 import org.apache.hyracks.storage.common.projection.ITupleProjector;
 
 /**

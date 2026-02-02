@@ -30,12 +30,15 @@ public interface IResultPartitionManager extends IResultManager {
     void registerResultPartitionLocation(JobId jobId, ResultSetId rsId, int partition, int nPartitions,
             IResultMetadata metadata, boolean emptyResult) throws HyracksException;
 
-    void reportPartitionWriteCompletion(JobId jobId, ResultSetId resultSetId, int partition) throws HyracksException;
+    void reportPartitionWriteCompletion(JobId jobId, ResultSetId resultSetId, int partition, long resultCount)
+            throws HyracksException;
+
+    void reportPartitionConsumed(JobId jobId, ResultSetId rsId, int partition) throws HyracksException;
 
     void initializeResultPartitionReader(JobId jobId, ResultSetId resultSetId, int partition, IFrameWriter noc)
             throws HyracksException;
 
-    void removePartition(JobId jobId, ResultSetId resultSetId, int partition);
+    void removePartition(JobId jobId, ResultSetId resultSetId, int partition) throws HyracksException;
 
     void abortReader(JobId jobId);
 

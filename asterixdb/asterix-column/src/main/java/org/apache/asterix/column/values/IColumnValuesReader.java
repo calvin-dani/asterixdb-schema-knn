@@ -150,4 +150,21 @@ public interface IColumnValuesReader extends Comparable<IColumnValuesReader> {
      * @param node container for the reader's information
      */
     void appendReaderInformation(ObjectNode node);
+
+    /**
+     * There can be two cases when a column is missing for tuple:
+     * 1. column is not at all present in the leaf
+     * 2. column is present in the leaf, but for this tuple it was missing
+     * @param tupleIndex
+     * @return
+     */
+    boolean isColumnMissingForCurrentTuple(int tupleIndex);
+
+    /**
+     * Registers the current tuple index. This index is used to determine
+     * whether the value being read is the first value associated with
+     * the given tuple.
+     * @param tupleIndex
+     */
+    void registerCurrentTuple(int tupleIndex);
 }

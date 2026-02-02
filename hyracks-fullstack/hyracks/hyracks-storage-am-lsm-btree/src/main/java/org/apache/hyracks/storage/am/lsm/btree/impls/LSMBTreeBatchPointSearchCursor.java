@@ -19,19 +19,24 @@
 
 package org.apache.hyracks.storage.am.lsm.btree.impls;
 
+import java.util.BitSet;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.impls.BTree.BTreeAccessor;
 import org.apache.hyracks.storage.am.btree.impls.BatchPredicate;
+import org.apache.hyracks.storage.am.btree.impls.BatchPredicateWithKeys;
+import org.apache.hyracks.storage.am.common.api.ILSMIndexBatchPointCursor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent.LSMComponentType;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.common.ISearchPredicate;
 
 /**
  * This cursor performs point searches for each batch of search keys.
  * Assumption: the search keys must be sorted into the increasing order.
  */
-public class LSMBTreeBatchPointSearchCursor extends LSMBTreePointSearchCursor {
+public class LSMBTreeBatchPointSearchCursor extends LSMBTreePointSearchCursor implements ILSMIndexBatchPointCursor {
 
     public LSMBTreeBatchPointSearchCursor(ILSMIndexOperationContext opCtx) {
         super(opCtx);
@@ -51,6 +56,35 @@ public class LSMBTreeBatchPointSearchCursor extends LSMBTreePointSearchCursor {
             foundTuple = super.doHasNext();
         }
         return foundTuple;
+    }
+
+    // will be used by SampleCursor, to reuse the same cursor
+    @Override
+    public void setPredicate(ISearchPredicate predicate) {
+        // reset the keys for the cursor
+        this.predicate = (BatchPredicateWithKeys) predicate;
+    }
+
+    @Override
+    public void doHasNextWithPredicate(BitSet foundRecordsIndex) throws HyracksDataException {
+        // update the predicate to the new one
+        BatchPredicateWithKeys batchPred = (BatchPredicateWithKeys) predicate;
+        while (batchPred.hasNext()) {
+            batchPred.next();
+            if (foundIn >= 0) {
+                if (operationalComponents.get(foundIn).getType() == LSMComponentType.MEMORY) {
+                    // Shouldn't be any memory component in the search path.
+                    throw new IllegalStateException("shouldn't be any memory component in the search path");
+                }
+                foundIn = -1;
+            }
+            foundTuple = super.doHasNext();
+            if (foundTuple) {
+                foundRecordsIndex.set(batchPred.getKeyIndex());
+            }
+            // set fondTuple to false to search for the next key
+            doNext();
+        }
     }
 
     @Override
@@ -79,5 +113,4 @@ public class LSMBTreeBatchPointSearchCursor extends LSMBTreePointSearchCursor {
     public int getKeyIndex() {
         return ((BatchPredicate) predicate).getKeyIndex();
     }
-
 }

@@ -31,7 +31,6 @@ import java.nio.file.FileStore;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -50,6 +49,7 @@ import org.apache.asterix.common.cloud.IPartitionBootstrapper;
 import org.apache.asterix.common.config.CloudProperties;
 import org.apache.asterix.common.metadata.MetadataConstants;
 import org.apache.asterix.common.transactions.IRecoveryManager.SystemState;
+import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.common.utils.StoragePathUtil;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
@@ -82,12 +82,11 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
     protected final ICloudGuardian guardian;
     protected final IWriteBufferProvider writeBufferProvider;
     protected final String bucket;
-    protected final Set<Integer> partitions;
+    protected final Partitions partitions;
     protected final List<FileReference> partitionPaths;
     protected final IOManager localIoManager;
     protected final INamespacePathResolver nsPathResolver;
     private final List<FileStore> drivePaths;
-    private final String storageScheme;
 
     public AbstractCloudIOManager(IOManager ioManager, CloudProperties cloudProperties,
             INamespacePathResolver nsPathResolver, ICloudGuardian guardian) throws HyracksDataException {
@@ -99,11 +98,10 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
         this.guardian = guardian;
         int numOfThreads = getIODevices().size() * getIOParallelism();
         writeBufferProvider = new WriteBufferProvider(numOfThreads, cloudClient.getWriteBufferSize());
-        partitions = new HashSet<>();
+        partitions = new Partitions();
         partitionPaths = new ArrayList<>();
         this.localIoManager = ioManager;
         drivePaths = PhysicalDrive.getDrivePaths(ioDevices);
-        storageScheme = cloudProperties.getStorageScheme();
     }
 
     /*
@@ -128,7 +126,7 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
     }
 
     @Override
-    public final void bootstrap(Set<Integer> activePartitions, List<FileReference> currentOnDiskPartitions,
+    public final void bootstrap(Partitions activePartitions, List<FileReference> currentOnDiskPartitions,
             boolean metadataNode, int metadataPartition, boolean ensureCompleteBootstrap) throws HyracksDataException {
         partitions.clear();
         partitions.addAll(activePartitions);
@@ -143,11 +141,6 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
         for (Integer partition : activePartitions) {
             String partitionDir = PARTITION_DIR_PREFIX + partition;
             partitionPaths.add(resolve(STORAGE_ROOT_DIR_NAME + File.separator + partitionDir));
-        }
-
-        if (CloudClientProvider.NONE.equals(storageScheme)) {
-            LOGGER.info("Cloud storage scheme is '{}', nothing to reconcile / download", storageScheme);
-            return;
         }
 
         LOGGER.info("Initializing cloud manager with ({}) storage partitions: {}", partitions.size(), partitions);
@@ -174,6 +167,7 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
 
     private void cleanupLocalFiles() throws HyracksDataException {
         Set<CloudFile> cloudFiles = cloudClient.listObjects(bucket, STORAGE_ROOT_DIR_NAME, IoUtil.NO_OP_FILTER);
+        LOGGER.debug("+cleanupLocalFiles: cloud files: {}", cloudFiles);
         if (cloudFiles.isEmpty()) {
             LOGGER.warn("No files in the cloud. Deleting all local files in partitions {}...", partitions);
             for (FileReference partitionPath : partitionPaths) {
@@ -183,7 +177,7 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
                 }
             }
         } else {
-            LOGGER.info("Cleaning node partitions...");
+            LOGGER.info("Cleaning node partitions {}...", partitions);
             for (FileReference partitionPath : partitionPaths) {
                 CloudFileUtil.cleanDirectoryFiles(localIoManager, cloudFiles, partitionPath);
             }
@@ -198,7 +192,7 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
     public void downloadLibrary(Collection<FileReference> libPath) throws HyracksDataException {
         try (IParallelDownloader downloader = cloudClient.createParallelDownloader(bucket, localIoManager)) {
             LOGGER.info("Downloading all files located in {}", libPath);
-            downloader.downloadDirectories(libPath);
+            downloader.downloadDirectoriesWithRetry(libPath);
             LOGGER.info("Finished downloading {}", libPath);
         }
     }
@@ -208,7 +202,7 @@ public abstract class AbstractCloudIOManager extends IOManager implements IParti
             FileReference appDir = resolveAbsolutePath(
                     localIoManager.getWorkspacePath(0).getPath() + File.separator + APPLICATION_ROOT_DIR_NAME);
             LOGGER.info("Downloading all libraries in + {}", appDir);
-            downloader.downloadDirectories(Collections.singletonList(appDir));
+            downloader.downloadDirectoriesWithRetry(Collections.singletonList(appDir));
             LOGGER.info("Finished downloading all libraries");
         }
     }

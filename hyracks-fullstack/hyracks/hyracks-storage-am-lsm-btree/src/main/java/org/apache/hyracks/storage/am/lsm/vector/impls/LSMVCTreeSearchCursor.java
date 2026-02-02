@@ -24,6 +24,9 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -995,6 +998,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                 }
                 return;
             }
+            return;
+        }
 
             System.err.println(String.format(
                     "[LSMVCTreeSearchCursor] Global cluster selected: cid=%d, distance=%.4f, dirPage=%d",
