@@ -43,7 +43,7 @@ public class ClusterSearchResult {
 
     /**
      * Factory method to create ClusterSearchResult instances.
-     *
+     * 
      * @param leafPageId The leaf page ID
      * @param clusterIndex The cluster index within the page
      * @param centroid The centroid vector

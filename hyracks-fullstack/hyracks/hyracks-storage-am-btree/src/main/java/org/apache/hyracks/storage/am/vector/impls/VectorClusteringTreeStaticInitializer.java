@@ -607,7 +607,6 @@ public class VectorClusteringTreeStaticInitializer {
         // Set the root page ID
         setRootPageId(rootPage.pageId);
 
-        // TODO: broken
         vectorTree.setStaticStructureInitialized();
     }
 

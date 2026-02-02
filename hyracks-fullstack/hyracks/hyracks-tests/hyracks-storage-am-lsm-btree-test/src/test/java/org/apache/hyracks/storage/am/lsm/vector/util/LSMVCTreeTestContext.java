@@ -107,7 +107,7 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
                 null, // filterFields (no filter fields)
                 true, // durable
                 metadataPageManagerFactory, // metadataPageManagerFactory
-                null, null); // inputRecDesc (can be null for testing)
+                null); // inputRecDesc (can be null for testing)
 
         LSMVCTreeTestContext testCtx = new LSMVCTreeTestContext(fieldSerdes, lsmVCTree, numVectorFields);
         return testCtx;

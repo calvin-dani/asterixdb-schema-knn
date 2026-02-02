@@ -47,7 +47,7 @@ import org.apache.logging.log4j.Logger;
 public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
     private static final Logger LOGGER = LogManager.getLogger();
 
-    private static final String VCTREE_SUFFIX = "vct";
+    private static final String VCTREE_SUFFIX = "_vct";
     private static final String STATIC_STRUCTURE_SUFFIX = ".staticstructure";
     private static final String MASK_FILE_PREFIX = ".";
 
@@ -60,35 +60,6 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
             TreeIndexFactory<? extends ITreeIndex> vcTreeFactory) {
         super(ioManager, file, null);
         this.vcTreeFactory = vcTreeFactory;
-    }
-
-    @Override
-    protected String getNextComponentSequence(FilenameFilter filenameFilter) throws HyracksDataException {
-        // For VCTree, the static structure is implicitly component [0,0]
-        // Ensure data component sequences start from 0 (first flush will be 0_0, second 1_1, etc.)
-
-        // First check if there are any existing data component files
-        long maxSeq = getOnDiskLastUsedComponentSequence(filenameFilter);
-
-        // If no data files exist yet but static structure exists, start from -1
-        // so the first flush will be sequence 0 (++(-1) = 0)
-        FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
-        if (maxSeq == -1 && staticStructureFile.getFile().exists()) {
-            // Static structure exists but no data files yet - first flush should be 0_0
-            return IndexComponentFileReference.getFlushSequence(0);
-        }
-
-        // Otherwise, increment the max sequence found
-        return IndexComponentFileReference.getFlushSequence(maxSeq + 1);
-    }
-
-    private long getOnDiskLastUsedComponentSequence(FilenameFilter filenameFilter) throws HyracksDataException {
-        long maxComponentSeq = -1;
-        final java.util.Set<FileReference> files = ioManager.list(baseDir, filenameFilter);
-        for (FileReference file : files) {
-            maxComponentSeq = Math.max(maxComponentSeq, IndexComponentFileReference.of(file).getSequenceEnd());
-        }
-        return maxComponentSeq;
     }
 
     @Override
@@ -114,9 +85,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         // Gather all VCTree files
         validateFiles(baseDir.getFile(), vcTreeFilter, allVCTreeFiles, reported, vcTreeFactory);
 
-        // Sort all files in DESCENDING order (newest first) to match LSM component list ordering
-        // LSM expects disk components ordered from newest to oldest: [2,2], [1,1], [0,0]
-        Collections.sort(allVCTreeFiles, Collections.reverseOrder());
+        // Sort all files
+        Collections.sort(allVCTreeFiles);
 
         // Validate the single shared static structure file (one per index, not per component)
         FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
@@ -191,6 +161,39 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
                 LOGGER.debug("Static structure file does not exist: {}", staticStructureFile.getAbsolutePath());
                 return false;
             }
+
+            //            // Check for mask file (indicates incomplete write)
+            //            FileReference maskFile = getMaskFile(staticStructureFile);
+            //            if (ioManager.exists(maskFile)) {
+            //                LOGGER.debug("Static structure file is being written (mask file exists): {}",
+            //                        maskFile.getAbsolutePath());
+            //                return false;
+            //            }
+            //
+            //            // Validate JSON structure by attempting to read it
+            //            byte[] data = ioManager.readAllBytes(staticStructureFile);
+            //            if (data == null || data.length == 0) {
+            //                LOGGER.debug("Static structure file is empty: {}", staticStructureFile.getAbsolutePath());
+            //                return false;
+            //            }
+            //
+            //            // Parse JSON to validate structure
+            //            ObjectMapper mapper = new ObjectMapper();
+            //            @SuppressWarnings("unchecked")
+            //            Map<String, Object> structureData = mapper.readValue(data, Map.class);
+            //
+            //            if (structureData == null) {
+            //                LOGGER.debug("Static structure file is invalid JSON: {}", staticStructureFile.getAbsolutePath());
+            //                return false;
+            //            }
+            //
+            //            // Validate required fields
+            //            if (!structureData.containsKey("numLevels") || !structureData.containsKey("levelDistribution")
+            //                    || !structureData.containsKey("clusterDistribution")) {
+            //                LOGGER.debug("Static structure file missing required fields: {}",
+            //                        staticStructureFile.getAbsolutePath());
+            //                return false;
+            //            }
 
             LOGGER.debug("Static structure file is valid: {}", staticStructureFile.getAbsolutePath());
             return true;

@@ -27,8 +27,6 @@ import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
 import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
-import org.apache.hyracks.storage.am.common.api.ITupleFilter;
-import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
@@ -72,23 +70,16 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // Reusable pointable for extracting string values
     private final UTF8StringPointable stringPointable = new UTF8StringPointable();
 
-    // Factory for creating tuple filters for INCLUDE field predicates (e.g., year > 2000)
-    // When set, the filter is pushed down to the cursor level for proper K counting
-    protected final ITupleFilterFactory tupleFilterFactory;
-
-    // The actual tuple filter, created from the factory
-    protected ITupleFilter tupleFilter;
-
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
             IVectorBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
-            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory) throws HyracksDataException {
+            int[][] partitionsMap) throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
         // Note: No index filter for now (pass false for appendIndexFilter)
-        // Note: We pass null for tupleFilterFactory to parent - we handle filtering in cursor
+        // Note: No tuple filter for now (pass null)
         // Note: No output limit for now (pass -1)
         // Note: No search callback result needed (pass false)
         super(ctx, inputRecDesc, partition, null, // minFilterFieldIndexes
@@ -97,7 +88,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 null, // nonMatchWriterFactory
                 searchCallbackFactory, false, // appendIndexFilter
                 null, // nonFilterWriterFactory
-                null, // tupleFilterFactory - we handle this at cursor level, not operator level
+                null, // tupleFilterFactory
                 -1, // outputLimit
                 false, // appendOpCallbackProceedResult
                 null, // searchCallbackProceedResultFalseValue
@@ -109,23 +100,11 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.queryFields = queryFields;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.distanceFunctionFactory = distanceFunctionFactory;
-        this.tupleFilterFactory = tupleFilterFactory;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
             queryParamsTuple = new PermutingFrameTupleReference();
             queryParamsTuple.setFieldPermutation(queryFields);
-        }
-    }
-
-    @Override
-    public void open() throws HyracksDataException {
-        super.open();
-
-        // Create tuple filter from factory if available
-        // This filter is pushed down to the cursor level for proper K counting
-        if (tupleFilterFactory != null) {
-            tupleFilter = tupleFilterFactory.createTupleFilter(ctx);
         }
     }
 
@@ -162,12 +141,6 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             if (queryFields != null && queryFields.length > 2) {
                 String distanceMetric = extractDistanceMetricFromTuple(queryParamsTuple, 2);
                 vectorPred.setDistanceMetric(distanceMetric);
-            }
-
-            // Set tuple filter for INCLUDE field predicates (e.g., year > 2000)
-            // This filter is applied at cursor level for proper K counting
-            if (tupleFilter != null) {
-                vectorPred.setTupleFilter(tupleFilter);
             }
         }
     }

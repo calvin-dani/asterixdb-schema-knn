@@ -222,40 +222,7 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
                             try {
                                 if (cursor.hasNext()) {
                                     cursor.next();
-                                    ITupleReference cursorTuple = cursor.getTuple();
-                                    System.out.println("DEBUG [LSMPrimaryUpsert]: BEFORE projection - cursorTuple.getFieldCount()=" + cursorTuple.getFieldCount());
-                                    for (int f = 0; f < cursorTuple.getFieldCount(); f++) {
-                                        int fieldStart = cursorTuple.getFieldStart(f);
-                                        int fieldLength = cursorTuple.getFieldLength(f);
-                                        byte[] fieldData = cursorTuple.getFieldData(f);
-                                        System.out.println("  cursorTuple field[" + f + "]: offset=" + fieldStart +
-                                                           ", length=" + fieldLength);
-                                        // Hex dump of field data
-                                        StringBuilder hex = new StringBuilder();
-                                        for (int i = 0; i < Math.min(32, fieldLength); i++) {
-                                            hex.append(String.format("%02X ", fieldData[fieldStart + i]));
-                                            if ((i + 1) % 16 == 0) hex.append("\n    ");
-                                        }
-                                        System.out.println("    Hex: " + hex.toString());
-                                    }
-                                    prevTuple = tupleProjector.project(cursorTuple, dos, tb);
-                                    System.out.println("DEBUG [LSMPrimaryUpsert]: AFTER projection - prevTuple.getFieldCount()=" + prevTuple.getFieldCount());
-                                    for (int f = 0; f < prevTuple.getFieldCount(); f++) {
-                                        int fieldStart = prevTuple.getFieldStart(f);
-                                        int fieldLength = prevTuple.getFieldLength(f);
-                                        byte[] fieldData = prevTuple.getFieldData(f);
-                                        System.out.println("  prevTuple field[" + f + "]: offset=" + fieldStart +
-                                                           ", length=" + fieldLength);
-                                        // Hex dump first 32 bytes
-                                        if (fieldLength > 0) {
-                                            StringBuilder hex = new StringBuilder();
-                                            for (int i = 0; i < Math.min(32, fieldLength); i++) {
-                                                hex.append(String.format("%02X ", fieldData[fieldStart + i]));
-                                                if ((i + 1) % 16 == 0) hex.append("\n    ");
-                                            }
-                                            System.out.println("    Hex: " + hex.toString());
-                                        }
-                                    }
+                                    prevTuple = tupleProjector.project(cursor.getTuple(), dos, tb);
                                     appendOperationIndicator(!isDelete, true);
                                     appendFilterToPrevTuple();
                                     appendPrevRecord();
@@ -512,22 +479,8 @@ public class LSMPrimaryUpsertOperatorNodePushable extends LSMIndexInsertUpdateDe
     }
 
     protected void appendPrevRecord() throws IOException {
-        int fieldIndex = numOfPrimaryKeys;
-        int fieldStart = prevTuple.getFieldStart(fieldIndex);
-        int fieldLength = prevTuple.getFieldLength(fieldIndex);
-        byte[] fieldData = prevTuple.getFieldData(fieldIndex);
-
-        System.out.println("DEBUG [appendPrevRecord]: numOfPrimaryKeys=" + numOfPrimaryKeys +
-                           ", writing field at index " + fieldIndex +
-                           ", length=" + fieldLength);
-        System.out.println("DEBUG [appendPrevRecord]: First 16 bytes of record:");
-        StringBuilder hex = new StringBuilder();
-        for (int i = 0; i < Math.min(16, fieldLength); i++) {
-            hex.append(String.format("%02X ", fieldData[fieldStart + i]));
-        }
-        System.out.println("  " + hex.toString());
-
-        dos.write(fieldData, fieldStart, fieldLength);
+        dos.write(prevTuple.getFieldData(numOfPrimaryKeys), prevTuple.getFieldStart(numOfPrimaryKeys),
+                prevTuple.getFieldLength(numOfPrimaryKeys));
         tb.addFieldEndOffset();
     }
 

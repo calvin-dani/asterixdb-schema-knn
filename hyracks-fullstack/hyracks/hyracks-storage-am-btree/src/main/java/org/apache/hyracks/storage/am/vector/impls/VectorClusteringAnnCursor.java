@@ -415,7 +415,7 @@ public class VectorClusteringAnnCursor extends EnforcedIndexCursor {
                 }
 
                 // Apply cosine law distance estimation for further pruning
-                if (shouldPruneVectorWithCosineLaw(vectorDistanceToCentroid, 0,
+                if (shouldPruneVectorWithCosineLaw(vectorDistanceToCentroid, dataFrame.getCosineValue(i),
                         clusterCentroid, distanceToClusterCentroid)) {
                     continue;
                 }

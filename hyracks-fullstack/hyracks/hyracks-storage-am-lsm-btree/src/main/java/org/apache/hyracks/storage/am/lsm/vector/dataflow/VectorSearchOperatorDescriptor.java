@@ -26,7 +26,6 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
-import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.vector.impls.PKOnlyTupleProjectorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
@@ -70,15 +69,11 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     // This is passed from AsterixDB layer to avoid circular dependencies
     protected final java.io.Serializable distanceFunctionFactory;
 
-    // Factory for creating tuple filters for INCLUDE field predicates (e.g., year > 2000)
-    // When set, the cursor will only return tuples that pass this filter
-    protected final ITupleFilterFactory tupleFilterFactory;
-
     public VectorSearchOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVectorBinaryAccessorFactory vectorAccessorFactory,
             java.io.Serializable distanceFunctionFactory, int[][] partitionsMap, int numPrimaryKeys,
-            int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory) {
+            int numSecondaryKeys) {
         super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
@@ -89,7 +84,6 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         this.partitionsMap = partitionsMap;
         this.numPrimaryKeys = numPrimaryKeys;
         this.numSecondaryKeys = numSecondaryKeys;
-        this.tupleFilterFactory = tupleFilterFactory;
         this.outRecDescs[0] = outRecDesc;
 
         // Create tuple projector factory that extracts only PK fields
@@ -103,6 +97,6 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         return new VectorSearchOperatorNodePushable(ctx, partition,
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
                 retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, tupleFilterFactory);
+                distanceFunctionFactory, partitionsMap);
     }
 }

@@ -25,7 +25,6 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.storage.am.common.api.IPageManagerFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
-import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
@@ -40,25 +39,23 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
     private final ITreeIndexFrameFactory metadataFrameFactory;
     private final ITreeIndexFrameFactory dataFrameFactory;
     private final int vectorDimensions;
-    private final IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     public VectorClusteringTreeFactory(IIOManager ioManager, IBufferCache bufferCache,
             IPageManagerFactory freePageManagerFactory, ITreeIndexFrameFactory interiorFrameFactory,
             ITreeIndexFrameFactory leafFrameFactory, ITreeIndexFrameFactory metadataFrameFactory,
             ITreeIndexFrameFactory dataFrameFactory, IBinaryComparatorFactory[] cmpFactories, int fieldCount,
-            int vectorDimensions, IVectorBinaryAccessorFactory vectorAccessorFactory) {
+            int vectorDimensions) {
         super(ioManager, bufferCache, freePageManagerFactory, interiorFrameFactory, leafFrameFactory, cmpFactories,
                 fieldCount);
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
         this.vectorDimensions = vectorDimensions;
-        this.vectorAccessorFactory = vectorAccessorFactory;
     }
 
     @Override
     public VectorClusteringTree createIndexInstance(FileReference file) {
         return new VectorClusteringTree(bufferCache, freePageManagerFactory.createPageManager(bufferCache),
                 interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory, cmpFactories,
-                vectorDimensions, vectorDimensions, file, vectorAccessorFactory);
+                vectorDimensions, vectorDimensions, file);
     }
 }

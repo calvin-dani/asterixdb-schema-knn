@@ -21,21 +21,21 @@ package org.apache.hyracks.storage.am.vector.tuples;
 
 import java.util.Arrays;
 
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
 
 /**
  * Utility class for vector clustering tuple operations.
  * Provides common functionality for tuple copying, field extraction, and manipulation.
- *
- * Input tuple format: [vector, include_fields..., pk_field]
- * - Field 0: vector
- * - Fields 1 to (1 + numPrimaryKeyFields - 1): include fields
- * - Last field: primary key
  */
 public class VectorClusteringTupleUtils {
+
     /**
      * Copy tuple data to a new SimpleTupleReference using TupleUtils.
      * 
@@ -51,38 +51,116 @@ public class VectorClusteringTupleUtils {
     }
 
     /**
-     * Extract primary key from input tuple.
-     * Input tuple format: [vector, pk_field, include_fields...]
-     * Primary key field is at index 1.
-     *
-     * TODO: Currently only supports single primary key field. To support composite primary keys,
-     * this method should accept numPrimaryKeyFields parameter and concatenate all PK fields.
-     * The infrastructure (numPrimaryKeyFields passed through factory chain to LSMVCTree) is already
-     * in place for this enhancement.
-     *
+     * Extract primary key from tuple (assumes last field).
+     * 
      * @param tuple The tuple to extract primary key from
      * @return Byte array containing the primary key, or null if extraction fails
      */
     public static byte[] extractPrimaryKeyFromTuple(ITupleReference tuple) {
-        if (tuple == null || tuple.getFieldCount() < 2) {
+        if (tuple == null || tuple.getFieldCount() == 0) {
+            System.out.println("DEBUG: extractPrimaryKeyFromTuple - tuple is null or empty");
             return null;
         }
 
-        // Primary key is at the last field index
         int pkFieldIndex = tuple.getFieldCount() - 1;
+        System.out.println("DEBUG: extractPrimaryKeyFromTuple - fieldCount=" + tuple.getFieldCount() + ", pkFieldIndex="
+                + pkFieldIndex);
 
         byte[] data = tuple.getFieldData(pkFieldIndex);
         if (data == null) {
+            System.out.println("DEBUG: extractPrimaryKeyFromTuple - data is null");
             return null;
         }
 
         int offset = tuple.getFieldStart(pkFieldIndex);
         int length = tuple.getFieldLength(pkFieldIndex);
 
+        System.out.println("DEBUG: extractPrimaryKeyFromTuple - offset=" + offset + ", length=" + length
+                + ", data.length=" + data.length);
+
         if (length <= 0) {
+            System.out.println("DEBUG: extractPrimaryKeyFromTuple - length <= 0");
             return null;
         }
 
-        return Arrays.copyOfRange(data, offset, offset + length);
+        try {
+            byte[] result = Arrays.copyOfRange(data, offset, offset + length);
+            System.out.println("DEBUG: extractPrimaryKeyFromTuple - extracted PK: " + Arrays.toString(result));
+            return result;
+        } catch (Exception e) {
+            System.err.println("ERROR: Failed to extract primary key from tuple: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract vector from tuple.
+     * 
+     * @param tuple The tuple to extract vector from
+     * @return Double array containing the vector, or null if extraction fails
+     */
+    public static double[] extractVectorFromTuple(ITupleReference tuple) {
+        if (tuple == null) {
+            return null;
+        }
+
+        // Determine the vector field index based on tuple type:
+        // 1. Data tuples: <distance, cosine, vector, PK> - vector is in field 2
+        // 2. Input tuples: <vector, PK> - vector is in field 0
+        // 3. Update tuples with included fields: <vector, included_field1, ..., included_fieldN, PK> - vector is in field 0
+
+        //        if (tuple.getFieldCount() != 2) {
+        //            System.err.println("ERROR: unsupported tuple format");
+        //            return null;
+        //        }
+
+        try {
+            ISerializerDeserializer[] fieldSerdes =
+                    new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                            DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
+                    };
+            //            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[tuple.getFieldCount()];
+            //            fieldSerdes[0] = DoubleArraySerializerDeserializer.INSTANCE;
+            //            fieldSerdes[1] = new UTF8StringSerializerDeserializer();
+
+            // Deserialize the tuple using the proper TupleUtils method
+            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+
+            // Extract the vector from the deserialized fields
+            return (double[]) fieldValues[1];
+        } catch (Exception e) {
+            // Log the error and return null instead of crashing
+            System.err.println("ERROR: Failed to extract vector from tuple: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract vector from tuple.
+     *
+     * @param tuple The tuple to extract vector from
+     * @return Double array containing the vector, or null if extraction fails
+     */
+    private double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
+        // Centroid is the second field in interior frame tuples
+        try {
+            // Create field serializers array - specify only the centroid field we need
+            ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[3];
+            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
+            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
+            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
+
+            // Deserialize the tuple using the proper TupleUtils method
+            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+
+            // Extract the centroid from the deserialized fields
+            double[] doubleCentroid = (double[]) fieldValues[1];
+
+            return doubleCentroid;
+
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
+        }
     }
 }
