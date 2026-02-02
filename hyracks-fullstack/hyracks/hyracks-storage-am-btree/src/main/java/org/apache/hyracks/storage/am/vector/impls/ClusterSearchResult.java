@@ -29,7 +29,7 @@ public class ClusterSearchResult {
     public final double[] centroid;
     public final double distance;
     public final int centroidId;
-    public final long directoryPageId;  // Direct pointer to cluster's directory/metadata page
+    public final long directoryPageId; // Direct pointer to cluster's directory/metadata page
 
     ClusterSearchResult(int leafPageId, int clusterIndex, double[] centroid, double distance, int centroidId,
             long directoryPageId) {
