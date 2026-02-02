@@ -30,9 +30,9 @@ import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.OptimizationConfUtil;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
-import org.apache.asterix.formats.nontagged.BinaryComparatorFactoryProvider;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
@@ -78,6 +78,11 @@ import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.api.job.JobSpecification;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
+import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
 import org.apache.hyracks.dataflow.common.data.partition.OnePartitionComputerFactory;
 import org.apache.hyracks.dataflow.std.connectors.MToNPartitioningConnectorDescriptor;
@@ -89,6 +94,7 @@ import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
+import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
@@ -96,6 +102,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
     private static final int DEFAULT_BITS = 4;
+    private IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     protected SecondaryVectorOperationsHelper(Dataset dataset, Index index, MetadataProvider metadataProvider,
             SourceLocation sourceLoc) throws AlgebricksException {
@@ -107,6 +114,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         super.init();
         recordDesc = dataset.getPrimaryRecordDescriptor(metadataProvider);
 
+        // Initialize vector accessor factory for extracting vectors from ADM ordered lists
+        vectorAccessorFactory = new AOrderedListVectorBinaryAccessorFactory();
+    }
+
+    /**
+     * Get the vector accessor factory for extracting vectors from tuples.
+     * This factory is passed to the Hyracks layer to handle ADM-specific vector deserialization.
+     */
+    public IVectorBinaryAccessorFactory getVectorAccessorFactory() {
+        return vectorAccessorFactory;
     }
 
     @Override
@@ -205,11 +222,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             K = 20;
         }
         //        System.err.println("Using K value: " + K + " for K-means clustering");
-
-        // Extract distance metric from WITH clause
-        // Extract vector dimension from WITH clause
-        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
-        //        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
 
         int maxScalableKmeansIter = 2;
 
@@ -409,26 +421,40 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID materializedDataUUID = UUID.randomUUID();
 
         // Create output record descriptor for VCTreeBulkLoaderAndGroupingOperatorDescriptor
-        // Format: [centroidId, distance, ...original fields from secondaryRecDesc...]
-        IDataFormat format = metadataProvider.getDataFormat();
-        ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
-        ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
+        // Output tuple format: [distance, centroidId, pk..., include_fields...]
+        // secondaryRecDesc format: [embedding, include_fields..., pk...]
+        // numSecondaryKeys = 1 (embedding) + numIncludeFields
+        // So in secondaryRecDesc:
+        //   - Field 0: embedding (skipped in output)
+        //   - Fields 1 to numSecondaryKeys-1: include fields
+        //   - Fields numSecondaryKeys to numSecondaryKeys+numPrimaryKeys-1: primary keys
+        int numIncludeFieldsForOutput = numSecondaryKeys - 1; // exclude embedding
 
         ISerializerDeserializer[] outputRecFields =
-                new ISerializerDeserializer[2 + secondaryRecDesc.getFieldCount() - 1];
-        ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + secondaryRecDesc.getFieldCount() - 1];
+                new ISerializerDeserializer[2 + numPrimaryKeys + numIncludeFieldsForOutput];
+        ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + numPrimaryKeys + numIncludeFieldsForOutput];
 
-        outputRecFields[0] = serdeProvider.getSerializerDeserializer(ADOUBLE);
-        outputTypeTraits[0] = typeTraitProvider.getTypeTrait(ADOUBLE);
+        // Use raw serializers (without ADM type tags) to match VCTreeBulkLoaderAndGroupingOperatorDescriptor
+        // Distance field (raw double - 8 bytes, no type tag)
+        outputRecFields[0] = DoubleSerializerDeserializer.INSTANCE;
+        outputTypeTraits[0] = new FixedLengthTypeTrait(8);
 
-        // Add centroidId field (int)
-        outputRecFields[1] = serdeProvider.getSerializerDeserializer(AINT32);
-        outputTypeTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
+        // CentroidId field (raw int - 4 bytes, no type tag)
+        outputRecFields[1] = IntegerSerializerDeserializer.INSTANCE;
+        outputTypeTraits[1] = new FixedLengthTypeTrait(4);
 
-        // Copy all original fields from secondaryRecDesc
-        for (int i = 1; i < secondaryRecDesc.getFieldCount(); i++) {
-            outputRecFields[2 + i - 1] = secondaryRecDesc.getFields()[i];
-            outputTypeTraits[2 + i - 1] = secondaryRecDesc.getTypeTraits()[i];
+        // Add primary key fields first (they are at positions numSecondaryKeys to numSecondaryKeys+numPrimaryKeys-1 in secondaryRecDesc)
+        for (int i = 0; i < numPrimaryKeys; i++) {
+            int secondaryRecIdx = numSecondaryKeys + i;
+            outputRecFields[2 + i] = secondaryRecDesc.getFields()[secondaryRecIdx];
+            outputTypeTraits[2 + i] = secondaryRecDesc.getTypeTraits()[secondaryRecIdx];
+        }
+
+        // Add include fields after PKs (they are at positions 1 to numSecondaryKeys-1 in secondaryRecDesc)
+        for (int i = 0; i < numIncludeFieldsForOutput; i++) {
+            int secondaryRecIdx = 1 + i; // Skip embedding at index 0
+            outputRecFields[2 + numPrimaryKeys + i] = secondaryRecDesc.getFields()[secondaryRecIdx];
+            outputTypeTraits[2 + numPrimaryKeys + i] = secondaryRecDesc.getTypeTraits()[secondaryRecIdx];
         }
 
         RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
@@ -446,10 +472,16 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
+
+        // Calculate number of include fields for field reordering in createTransformedTuple
+        int numIncludeFieldsForBulkLoader = (indexDetails.getIncludeFieldNames() != null)
+                ? indexDetails.getIncludeFieldNames().size()
+                : 0;
+
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
-                        distanceMetric, vectorDimension);
+                        distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);
@@ -465,12 +497,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
         //        System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         //        System.err.println("SortNumFrames from config: " + sortNumFrames);
-        int[] sortFields = { 1, 0, 2 }; // Sort by centroidId (0) first, then distance (1)
-        IBinaryComparatorFactory[] sortComparatorFactories =
-                { BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT32, true), // centroidId
-                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(ADOUBLE, true), // distance
-                        BinaryComparatorFactoryProvider.INSTANCE.getBinaryComparatorFactory(AINT64, true) // distance
-                };
+        // Sort by centroidId (field 1) first, then distance (field 0)
+        // Use raw type comparators to match the raw serializers (no ADM type tags)
+        int[] sortFields = { 1, 0 };
+        IBinaryComparatorFactory[] sortComparatorFactories = { IntegerBinaryComparatorFactory.INSTANCE, // centroidId (raw int)
+                DoubleBinaryComparatorFactory.INSTANCE // distance (raw double)
+        };
         // Ensure minimum frames for sort operator (must be > 1)
         int sortFrames = Math.max(sortNumFrames, 2);
         //        System.err.println("Using sortFrames: " + sortFrames);
@@ -1055,20 +1087,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     /**
      * Create primary key fields array for bulk load operation partitioner.
-     * Primary keys are located in outputRecDesc after distance(0), centroidId(1), and secondary keys.
-     * outputRecDesc format: [distance(0), centroidId(1), ...secondaryKeys(2 to 2+numSecondaryKeys-1), ...primaryKeys(2+numSecondaryKeys to 2+numSecondaryKeys+numPrimaryKeys-1), ...filterFields...]
-     * 
+     * Primary keys are located in outputRecDesc at positions 2 to 2+numPrimaryKeys-1.
+     * outputRecDesc format: [distance(0), centroidId(1), pk...(2 to 2+numPrimaryKeys-1), include_fields...]
+     *
      * @param fieldPermutation the field permutation array
-     * @param numSecondaryKeys number of secondary key fields
+     * @param numSecondaryKeys number of secondary key fields (not used after reordering, kept for API compatibility)
      * @return array of field indices where primary keys are located
      */
     private int[] createPkFieldsForBulkLoadOp(int[] fieldPermutation, int numSecondaryKeys) {
         int[] pkFields = new int[numPrimaryKeys];
-        // Primary keys start at index 2 + numSecondaryKeys in outputRecDesc
-        // (accounting for distance at 0 and centroidId at 1)
-        // In identity permutation, they map to fieldPermutation[2 + numSecondaryKeys + i]
+        // Primary keys start at index 2 in outputRecDesc (after distance and centroidId)
         for (int i = 0; i < numPrimaryKeys; i++) {
-            pkFields[i] = fieldPermutation[1 + numSecondaryKeys + i];
+            pkFields[i] = fieldPermutation[2 + i];
         }
         return pkFields;
     }

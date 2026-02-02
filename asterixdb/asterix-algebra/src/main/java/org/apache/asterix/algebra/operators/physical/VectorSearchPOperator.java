@@ -20,11 +20,14 @@ package org.apache.asterix.algebra.operators.physical;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.asterix.metadata.declared.DataSourceId;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.om.functions.BuiltinFunctions;
+import org.apache.asterix.om.types.IAType;
+import org.apache.asterix.optimizer.rules.PushFilterIntoVectorSearchRule;
 import org.apache.asterix.optimizer.rules.am.VectorJobGenParams;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -41,10 +44,12 @@ import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.metadata.IDataSourceIndex;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractUnnestMapOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.IOperatorSchema;
+import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.visitors.VariableUtilities;
 import org.apache.hyracks.algebricks.core.algebra.properties.INodeDomain;
 import org.apache.hyracks.algebricks.core.jobgen.impl.JobGenContext;
 import org.apache.hyracks.api.dataflow.IOperatorDescriptor;
+import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 
 /**
  * Contributes the runtime operator for an unnest-map representing a vector index search.
@@ -94,11 +99,42 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
             VariableUtilities.getLiveVariables(unnestMap, outputVars);
         }
 
-        // TODO: Implement MetadataProvider.getVectorSearchRuntime()
-        // This should create and return the Hyracks operator descriptor for vector index search
+        // Create tuple filter factory if selectCondition is present (for INCLUDE field filtering)
+        // Vector index physical tuple format: [distance, centroidId, pk, include_fields...]
+        // The opSchema only has [pk] because INCLUDE fields are only used for filtering.
+        // Filter variables are mapped directly to physical field indexes via annotation.
+        ITupleFilterFactory tupleFilterFactory = null;
+        if (unnestMap instanceof UnnestMapOperator) {
+            UnnestMapOperator unnestMapOp = (UnnestMapOperator) unnestMap;
+            if (unnestMapOp.getSelectCondition() != null) {
+                // Get filter variable to physical field index mapping from annotation
+                @SuppressWarnings("unchecked")
+                Map<LogicalVariable, Integer> filterVarToFieldIndex = (Map<LogicalVariable, Integer>) unnestMapOp
+                        .getAnnotations().get(PushFilterIntoVectorSearchRule.VECTOR_FILTER_VAR_MAPPING);
+
+                // Get filter variable types from annotation
+                @SuppressWarnings("unchecked")
+                Map<LogicalVariable, IAType> filterVarTypes = (Map<LogicalVariable, IAType>) unnestMapOp
+                        .getAnnotations().get(PushFilterIntoVectorSearchRule.VECTOR_FILTER_VAR_TYPES);
+
+                // Create filter schema with direct mapping for filter-only variables
+                IOperatorSchema filterSchema = new VectorIndexFilterSchema(opSchema, filterVarToFieldIndex);
+
+                // Create type environment with filter variable types
+                // Pass context so function expressions can use this wrapper for recursive type lookups
+                IVariableTypeEnvironment filterTypeEnv =
+                        new VectorIndexFilterTypeEnvironment(typeEnv, filterVarTypes, context);
+
+                tupleFilterFactory = mp.createTupleFilterFactory(new IOperatorSchema[] { filterSchema }, filterTypeEnv,
+                        unnestMapOp.getSelectCondition().getValue(), context);
+            }
+        }
+
+        // Create and configure VectorSearchOperatorDescriptor via MetadataProvider
         Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> vectorSearch =
                 mp.getVectorSearchRuntime(builder.getJobSpec(), outputVars, opSchema, typeEnv, context,
-                        jobGenParams.getRetainInput(), dataset, jobGenParams.getIndexName(), queryIndexes);
+                        jobGenParams.getRetainInput(), dataset, jobGenParams.getIndexName(), queryIndexes,
+                        tupleFilterFactory);
 
         IOperatorDescriptor opDesc = vectorSearch.first;
         opDesc.setSourceLocation(unnestMap.getSourceLocation());

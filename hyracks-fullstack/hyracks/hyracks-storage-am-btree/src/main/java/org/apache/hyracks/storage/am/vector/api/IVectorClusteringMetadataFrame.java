@@ -54,7 +54,7 @@ public interface IVectorClusteringMetadataFrame extends IVectorClusteringFrame {
      * @return the maximum distance
      * @throws HyracksDataException if an error occurs
      */
-    float getMaxDistance(int tupleIndex) throws HyracksDataException;
+    double getMaxDistance(int tupleIndex) throws HyracksDataException;
 
     /**
      * Gets the data page pointer for a metadata entry.
@@ -79,7 +79,7 @@ public interface IVectorClusteringMetadataFrame extends IVectorClusteringFrame {
      * @return ITupleReference representing the metadata tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    ITupleReference createMetadataTuple(float maxDistance, int dataPageId) throws HyracksDataException;
+    ITupleReference createMetadataTuple(double maxDistance, int dataPageId) throws HyracksDataException;
 
     /**
      * Finds the index where a new tuple should be inserted.

@@ -80,6 +80,14 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
         this.numberOfFields = fieldPermutation.length;
         this.prevTupleFilterFactory = prevTupleFilterFactory;
 
+        // DEBUG: Log field permutations
+        System.out.println("DEBUG [LSMSecondaryUpsert Constructor]: fieldPermutation=" +
+                           java.util.Arrays.toString(fieldPermutation));
+        System.out.println("DEBUG [LSMSecondaryUpsert Constructor]: prevTuplePermutation=" +
+                           java.util.Arrays.toString(prevTuplePermutation));
+        System.out.println("DEBUG [LSMSecondaryUpsert Constructor]: operationFieldIndex=" + operationFieldIndex);
+        System.out.println("DEBUG [LSMSecondaryUpsert Constructor]: inputRecDesc.getFieldCount()=" +
+                           inputRecDesc.getFieldCount());
     }
 
     @Override
@@ -109,6 +117,29 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
                 tuple.reset(accessor, i);
                 prevTuple.reset(accessor, i);
 
+                // DEBUG: Log operation type and tuple comparison
+                System.out.println("DEBUG [LSMSecondaryUpsert]: operation=" + operation +
+                                   " (UPSERT_NEW=0, UPSERT_EXISTING=1, DELETE_EXISTING=2)");
+                if (operation == UPSERT_EXISTING) {
+                    boolean tuplesEqual = TupleUtils.equalTuples(tuple, prevTuple, numberOfFields);
+                    System.out.println("DEBUG [LSMSecondaryUpsert]: UPSERT_EXISTING - tuplesEqual=" + tuplesEqual +
+                                       ", numberOfFields=" + numberOfFields);
+                    System.out.println("DEBUG [LSMSecondaryUpsert]: tuple.getFieldCount()=" + tuple.getFieldCount() +
+                                       ", prevTuple.getFieldCount()=" + prevTuple.getFieldCount());
+
+                    // DEBUG: Print field data for both tuples
+                    System.out.println("DEBUG [LSMSecondaryUpsert]: Inspecting tuple fields:");
+                    for (int f = 0; f < tuple.getFieldCount(); f++) {
+                        System.out.println("  tuple field[" + f + "]: offset=" + tuple.getFieldStart(f) +
+                                           ", length=" + tuple.getFieldLength(f));
+                    }
+                    System.out.println("DEBUG [LSMSecondaryUpsert]: Inspecting prevTuple fields:");
+                    for (int f = 0; f < prevTuple.getFieldCount(); f++) {
+                        System.out.println("  prevTuple field[" + f + "]: offset=" + prevTuple.getFieldStart(f) +
+                                           ", length=" + prevTuple.getFieldLength(f));
+                    }
+                }
+
                 if (operation == UPSERT_NEW) {
                     if (tupleFilterIsNull || tupleFilter.accept(frameTuple)) {
                         if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
@@ -118,19 +149,30 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
                     }
                 } else if (operation == UPSERT_EXISTING) {
                     if (!TupleUtils.equalTuples(tuple, prevTuple, numberOfFields)) {
+                        System.out.println("DEBUG [LSMSecondaryUpsert]: Tuples differ, proceeding with delete+insert");
+                        System.out.println("DEBUG [LSMSecondaryUpsert]: prevTupleFilterIsNull=" + prevTupleFilterIsNull);
+
                         if (prevTupleFilterIsNull || prevTupleFilter.accept(frameTuple)) {
+                            System.out.println("DEBUG [LSMSecondaryUpsert]: Calling forceDelete on prevTuple");
                             if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
                                 ((AbstractIndexModificationOperationCallback) abstractModCallback)
                                         .setOp(Operation.DELETE);
                             }
                             lsmAccessor.forceDelete(prevTuple);
+                        } else {
+                            System.out.println("DEBUG [LSMSecondaryUpsert]: prevTupleFilter REJECTED frameTuple - SKIP DELETE");
                         }
+
+                        System.out.println("DEBUG [LSMSecondaryUpsert]: tupleFilterIsNull=" + tupleFilterIsNull);
                         if (tupleFilterIsNull || tupleFilter.accept(frameTuple)) {
+                            System.out.println("DEBUG [LSMSecondaryUpsert]: Calling forceInsert on tuple");
                             if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
                                 ((AbstractIndexModificationOperationCallback) abstractModCallback)
                                         .setOp(Operation.INSERT);
                             }
                             lsmAccessor.forceInsert(tuple);
+                        } else {
+                            System.out.println("DEBUG [LSMSecondaryUpsert]: tupleFilter REJECTED frameTuple - SKIP INSERT");
                         }
                     }
                 } else if (operation == DELETE_EXISTING) {

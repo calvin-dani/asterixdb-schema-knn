@@ -19,6 +19,7 @@
 package org.apache.hyracks.storage.am.vector.impls;
 
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.storage.am.common.api.ITupleFilter;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 
@@ -41,6 +42,7 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int k; // Number of nearest neighbors to return (for ANN queries)
     private int nprobe; // Number of clusters to probe (minimum before K-check)
     private double epsilon; // Distance threshold for level-wise cross-pollination
+    private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
@@ -161,6 +163,22 @@ public class VectorPointPredicate implements ISearchPredicate {
         return epsilon;
     }
 
+    /**
+     * Set the tuple filter for INCLUDE field predicates.
+     * When set, the cursor will only return tuples that pass this filter,
+     * and only count passing tuples toward K.
+     */
+    public void setTupleFilter(ITupleFilter tupleFilter) {
+        this.tupleFilter = tupleFilter;
+    }
+
+    /**
+     * Get the tuple filter for INCLUDE field predicates.
+     */
+    public ITupleFilter getTupleFilter() {
+        return tupleFilter;
+    }
+
     @Override
     public MultiComparator getLowKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
@@ -177,18 +195,6 @@ public class VectorPointPredicate implements ISearchPredicate {
     public ITupleReference getLowKey() {
         // Vector clustering tree doesn't use traditional key searches
         return null;
-    }
-
-    public ITupleReference getHighKey() {
-        return null;
-    }
-
-    public boolean isLowKeyInclusive() {
-        return false;
-    }
-
-    public boolean isHighKeyInclusive() {
-        return false;
     }
 
     @Override
