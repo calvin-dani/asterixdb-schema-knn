@@ -70,6 +70,7 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
     private double[] queryVector;
     private int queryK = 5; // default K
     private List<String> expectedPrimaryKeys = new ArrayList<>();
+    private List<String> excludedPrimaryKeys;
 
     public AbstractVectorTreeTestContext(ISerializerDeserializer[] fieldSerdes, IIndex index, boolean filtered,
             int vectorDimensions) throws HyracksDataException {
@@ -134,5 +135,13 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
 
     public void setExpectedPrimaryKeys(List<String> expectedPrimaryKeys) {
         this.expectedPrimaryKeys = expectedPrimaryKeys;
+    }
+
+    public List<String> getExcludedPrimaryKeys() {
+        return excludedPrimaryKeys;
+    }
+
+    public void setExcludedPrimaryKeys(List<String> excludedPrimaryKeys) {
+        this.excludedPrimaryKeys = excludedPrimaryKeys;
     }
 }

@@ -22,7 +22,6 @@ package org.apache.hyracks.storage.am.vector.api;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 
 /**
  * Interface for vector clustering data frames.
@@ -64,20 +63,6 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      * @param tupleIndex the index to insert at
      */
     void insert(ITupleReference tuple, int tupleIndex);
-
-    /**
-     * Creates a data tuple with the given parameters.
-     *
-     * @param vector        Vector array
-     * @param distance      Distance as double
-     * @param centroidId     Centroid Id as integer
-     * @param originalTuple Original tuple containing primary key
-     * @param ctx
-     * @return ITupleReference representing the data tuple
-     * @throws HyracksDataException if tuple creation fails
-     */
-    ITupleReference createDataTuple(double[] vector, double distance, int centroidId, ITupleReference originalTuple,
-            VectorClusteringOpContext ctx) throws HyracksDataException;
 
     void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
             throws HyracksDataException;

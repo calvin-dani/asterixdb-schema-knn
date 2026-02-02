@@ -68,9 +68,9 @@ public class LSMVCTreeBulkLoadTest extends VectorIndexTestDriver {
         // Create test context
         AbstractVectorTreeTestContext ctx = LSMVCTreeTestContext.create(harness.getNcConfig(), harness.getIOManager(),
                 harness.getVirtualBufferCaches(), harness.getFileReference(), harness.getDiskBufferCache(),
-                dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(), harness.getIOScheduler(),
-                harness.getIOOperationCallbackFactory(), harness.getPageWriteCallbackFactory(),
-                harness.getMetadataPageManagerFactory());
+                dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(),
+                harness.getIOScheduler(), harness.getIOOperationCallbackFactory(),
+                harness.getPageWriteCallbackFactory(), harness.getMetadataPageManagerFactory());
 
         // Set test data in context
         ctx.setStaticStructureCentroids(centroids);

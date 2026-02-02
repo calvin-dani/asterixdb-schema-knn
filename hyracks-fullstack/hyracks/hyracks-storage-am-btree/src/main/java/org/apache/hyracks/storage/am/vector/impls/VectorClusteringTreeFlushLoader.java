@@ -26,8 +26,13 @@ import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     public VectorClusteringTreeFlushLoader(float fillFactor, VectorClusteringTree treeIndex,
             IPageWriteCallback callback) throws HyracksDataException {
@@ -52,26 +57,7 @@ public class VectorClusteringTreeFlushLoader extends AbstractTreeIndexBulkLoader
 
         // WRITE PAGE TO DISK
         write(targetPage);
-        System.out.println("DEBUG: Copied page " + targetPageId + " to " + targetPageId);
-    }
-
-    /**
-     * Simple bulk load: iterate through all pages and write them to disk
-     */
-    public void bulkLoadFromTree() throws HyracksDataException {
-        // Get all page IDs from source tree
-        int maxPageId = freePageManager.getMaxPageId(metaFrame);
-
-        // Copy each page from source to target
-        for (int id = 0; id <= maxPageId; id++) {
-            ICachedPage sourcePage =
-                    treeIndex.getBufferCache().pin(BufferedFileHandle.getDiskPageId(treeIndex.getFileId(), id));
-            try {
-                write(sourcePage);
-            } finally {
-                treeIndex.getBufferCache().unpin(sourcePage);
-            }
-        }
+        LOGGER.log(Level.DEBUG, "Copied page {} to {}", targetPageId, targetPageId);
     }
 
     @Override

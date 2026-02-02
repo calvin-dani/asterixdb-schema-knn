@@ -46,6 +46,7 @@ import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
@@ -54,7 +55,6 @@ import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringBidirectionCursor;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
@@ -89,6 +89,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private final ITreeIndexFrameFactory metadataFrameFactory;
     private final ITreeIndexFrameFactory dataFrameFactory;
     private final IVectorBinaryAccessorFactory vectorAccessorFactory;
+    private final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
     // Add missing frameTuple declaration
     private ITreeIndexTupleReference frameTuple;
@@ -101,12 +102,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
             IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file,
-            org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory) {
+            org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
         this.vectorAccessorFactory = vectorAccessorFactory;
+        this.dataTupleCreatorFactory = dataTupleCreatorFactory;
     }
 
     /**
@@ -334,7 +337,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // Create data tuple: <distance, centroidId, vector, PK>
             // Pass context so createDataTuple can check operation type and set antimatter bit if DELETE
             ITupleReference dataTuple =
-                    ctx.getDataFrame().createDataTuple(vector, distance, centroidId, originalTuple, ctx);
+                    ctx.getDataTupleCreator().createDataTuple(vector, distance, centroidId, originalTuple);
 
             // Check if there's space for the tuple
             FrameOpSpaceStatus spaceStatus = ctx.getDataFrame().hasSpaceInsert(dataTuple);
@@ -587,8 +590,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                         ctx.getDataFrame().setPage(dataPage);
 
                         // Search for tuple by distance + PK (uses binary comparison internally)
+                        int pkFieldIndex = ctx.getDataTupleCreator().getPrimaryKeyFieldIndex();
                         int tupleIndex = ((VectorClusteringDataFrame) ctx.getDataFrame())
-                                .findTupleByDistanceAndPrimaryKey(distance, primaryKey);
+                                .findTupleByDistanceAndPrimaryKey(distance, primaryKey, pkFieldIndex);
 
                         if (tupleIndex >= 0) {
                             // Found! Physically delete it
@@ -598,7 +602,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                             System.err.println("BEFORE DELETE PK=" + Arrays.toString(primaryKey) + " | Page has "
                                     + tupleCountBefore + " tuples, deleting at index=" + tupleIndex);
 
-                            byte[] pkAtIndex = dataFrame.getPrimaryKey(tupleIndex);
+                            byte[] pkAtIndex = dataFrame.getPrimaryKey(tupleIndex, pkFieldIndex);
 
                             // Safety check using binary comparison (no type assumption)
                             if (!Arrays.equals(pkAtIndex, primaryKey)) {
@@ -698,7 +702,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             dataFrame.initBuffer((byte) 0);
 
             // Create data tuple for the new vector
-            ITupleReference dataTuple = dataFrame.createDataTuple(vector, distance, centroidId, originalTuple, ctx);
+            ITupleReference dataTuple =
+                    ctx.getDataTupleCreator().createDataTuple(vector, distance, centroidId, originalTuple);
 
             // Insert the tuple into the new page
             dataFrame.insert(dataTuple, 0);
@@ -1164,7 +1169,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             this.iap = iap;
             this.ctx = new VectorClusteringOpContext(this, tree.interiorFrameFactory, tree.leafFrameFactory,
                     tree.metadataFrameFactory, tree.dataFrameFactory, tree.freePageManager, tree.cmpFactories,
-                    tree.vectorDimensions, iap.getModificationCallback(), iap.getSearchOperationCallback());
+                    tree.vectorDimensions, iap.getModificationCallback(), iap.getSearchOperationCallback(),
+                    tree.dataTupleCreatorFactory);
         }
 
         public void reset(VectorClusteringTree vctree, IIndexAccessParameters iap) {

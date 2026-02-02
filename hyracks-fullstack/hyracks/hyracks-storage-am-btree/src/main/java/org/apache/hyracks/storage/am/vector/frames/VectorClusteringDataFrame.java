@@ -19,14 +19,11 @@
 
 package org.apache.hyracks.storage.am.vector.frames;
 
-import java.io.DataOutput;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
-import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
-import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.frames.OrderedSlotManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
@@ -34,7 +31,6 @@ import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleMode;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleNoExactMatchPolicy;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 
 /**
  * Vector clustering data frame implementation.
@@ -168,7 +164,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             }
 
             // Check primary key match using binary comparison (no type assumption)
-            byte[] pk = getPrimaryKey(i);
+            byte[] pk = getPrimaryKey(i, pkFieldIndex);
             if (Arrays.equals(pk, primaryKey)) {
                 return i; // Found the rightmost matching tuple
             }
@@ -245,90 +241,19 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
 
     /**
      * Get primary key from data tuple.
-     * Data tuple format: <distance, centroidId, PK, include_fields...>
-     * PK is always at field index 2.
+     *
+     * @param tupleIndex the tuple index in this frame
+     * @param pkFieldIndex the field index of the primary key in the data tuple
+     * @return the primary key bytes
      */
-    public byte[] getPrimaryKey(int tupleIndex) throws HyracksDataException {
+    public byte[] getPrimaryKey(int tupleIndex, int pkFieldIndex) throws HyracksDataException {
         frameTuple.resetByTupleIndex(this, tupleIndex);
 
-        // Primary key is at field index 2 (after distance and centroidId)
-        int pkFieldIndex = 2;
         byte[] data = frameTuple.getFieldData(pkFieldIndex);
         int offset = frameTuple.getFieldStart(pkFieldIndex);
         int length = frameTuple.getFieldLength(pkFieldIndex);
 
         return Arrays.copyOfRange(data, offset, offset + length);
-    }
-
-    /**
-     * Create a data tuple for VectorClusteringTree. For DELETE operations, sets the antimatter bit.
-     *
-     * Input tuple format: [vector, include_fields..., pk]
-     * - Field 0: vector
-     * - Fields 1 to (fieldCount - 2): include fields (optional)
-     * - Field (fieldCount - 1): primary key (single field)
-     *
-     * Output data tuple format: <distance, centroidId, pk, include_fields...>
-     * - Field 0: distance (raw double, 8 bytes, no type tag)
-     * - Field 1: centroidId (raw int, 4 bytes, no type tag)
-     * - Field 2: primary key
-     * - Fields 3+: include fields
-     *
-     * @param vector Vector array
-     * @param distance Distance as double
-     * @param centroidId Leaf cluster centroid Id
-     * @param originalTuple Original tuple containing vector, include fields, and primary key
-     * @param ctx Operation context
-     * @return ITupleReference representing the data tuple (with antimatter bit if DELETE)
-     * @throws HyracksDataException if tuple creation fails
-     */
-    public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
-            ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
-        try {
-            // Calculate numIncludeFields from tuple structure
-            // Input: [vector, include_fields..., pk]
-            // numIncludeFields = fieldCount - 2 (subtract vector and pk)
-            int originalFieldCount = originalTuple.getFieldCount();
-            int numIncludeFields = originalFieldCount - 2;
-            if (numIncludeFields < 0) {
-                numIncludeFields = 0;
-            }
-
-            // Total fields in data tuple: distance + centroidId + pk + include_fields
-            int dataFieldCount = 3 + numIncludeFields;
-            ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(dataFieldCount);
-            DataOutput dos = dataTupleBuilder.getDataOutput();
-
-            // Field 0: distance as raw double (8 bytes, no type tag)
-            dos.writeDouble(distance);
-            dataTupleBuilder.addFieldEndOffset();
-
-            // Field 1: centroidId as raw int (4 bytes, no type tag)
-            dos.writeInt(centroidId);
-            dataTupleBuilder.addFieldEndOffset();
-
-            // Field 2: primary key (last field of originalTuple)
-            int pkFieldIndex = originalFieldCount - 1;
-            dataTupleBuilder.addField(originalTuple.getFieldData(pkFieldIndex),
-                    originalTuple.getFieldStart(pkFieldIndex), originalTuple.getFieldLength(pkFieldIndex));
-
-            // Fields 3+: include fields (from originalTuple fields 1 to numIncludeFields)
-            for (int i = 0; i < numIncludeFields; i++) {
-                int srcFieldIndex = 1 + i;
-                dataTupleBuilder.addField(originalTuple.getFieldData(srcFieldIndex),
-                        originalTuple.getFieldStart(srcFieldIndex), originalTuple.getFieldLength(srcFieldIndex));
-            }
-
-            // Return tuple reference directly - let the tuple writer handle null flags byte
-            // The tuple writer will add the null flags byte and set the antimatter bit if needed
-            ArrayTupleReference datatupleRef = new ArrayTupleReference();
-            datatupleRef.reset(dataTupleBuilder.getFieldEndOffsets(), dataTupleBuilder.getByteArray());
-
-            return datatupleRef;
-
-        } catch (Exception e) {
-            throw new HyracksDataException("Failed to create data tuple", e);
-        }
     }
 
     public int getFreeSpaceOff() {

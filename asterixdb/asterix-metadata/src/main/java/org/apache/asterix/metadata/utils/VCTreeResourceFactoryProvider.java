@@ -54,6 +54,8 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTrackerFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResourceFactory;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.common.IResourceFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.util.LogRedactionUtil;
@@ -106,6 +108,22 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
         int vectorDimensions = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
 
+        // Get INCLUDE fields count from index details (needed by factory)
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
+
+        // Determine data tuple creator factory based on description (quantization indicator)
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
+        if (description != null) {
+            // TODO: implement QuantizedVCTreeDataTupleCreatorFactory
+            // dataTupleCreatorFactory = new QuantizedVCTreeDataTupleCreatorFactory(description, vectorDimensions, numIncludeFields);
+            throw new UnsupportedOperationException(
+                    "Quantized vector index not yet implemented (description: " + description + ")");
+        } else {
+            dataTupleCreatorFactory = new VCTreeDataTupleCreatorFactory(numIncludeFields);
+        }
+
         List<List<String>> primaryKeyFields = dataset.getPrimaryKeys();
         int numPrimaryKeys = primaryKeyFields.size();
 
@@ -153,15 +171,12 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
                     new AOrderedListVectorBinaryAccessorFactory();
-            // Get INCLUDE fields count from index details
-            List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
-            int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
             return new LSMVCTreeLocalResourceFactory(storageManager, typeTraits, cmpFactories, filterTypeTraits,
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, indexName);
+                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, dataTupleCreatorFactory, indexName);
         } else {
             return null;
         }

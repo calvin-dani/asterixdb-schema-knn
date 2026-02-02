@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.hyracks.storage.am.lsm.vector;
+package org.apache.hyracks.storage.am.lsm.vector.quantized;
 
 import java.util.List;
 
@@ -65,8 +65,7 @@ public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
     @Override
     protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
             List<ITupleReference> centroids, List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster,
-            int vectorDimension, List<List<ITupleReference>> leafRecords, double[] queryVector, int queryK,
-            List<String> expectedPrimaryKeys) throws Exception {
+            int vectorDimension, List<List<ITupleReference>> leafRecords, List<QueryCase> queryCases) throws Exception {
 
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info("LSMVCTree Optimized Search Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
@@ -77,19 +76,14 @@ public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
         AbstractVectorTreeTestContext ctx = LSMVCTreeTestContext.create(harness.getNcConfig(), harness.getIOManager(),
                 harness.getVirtualBufferCaches(), harness.getFileReference(), harness.getDiskBufferCache(),
                 dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(),
-                harness.getIOScheduler(), harness.getIOOperationCallbackFactory(), harness.getPageWriteCallbackFactory(),
-                harness.getMetadataPageManagerFactory());
+                harness.getIOScheduler(), harness.getIOOperationCallbackFactory(),
+                harness.getPageWriteCallbackFactory(), harness.getMetadataPageManagerFactory());
 
         // Set test data in context
         ctx.setStaticStructureCentroids(centroids);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
         ctx.setDataRecords(leafRecords);
-
-        // Set query configuration
-        ctx.setQueryVector(queryVector);
-        ctx.setQueryK(queryK);
-        ctx.setExpectedPrimaryKeys(expectedPrimaryKeys);
 
         try {
             // 1. Create and activate index
@@ -114,11 +108,17 @@ public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
                 LOGGER.info("Bulk loaded {} clusters with data records", leafRecords.size());
             }
 
-            // 4. Validate: optimized search with bidirectional traversal
-            testUtils.optimizedSearch(ctx);
+            // 4. Validate: optimized search for each query case
+            for (int i = 0; i < queryCases.size(); i++) {
+                QueryCase qc = queryCases.get(i);
+                ctx.setQueryVector(qc.queryVector);
+                ctx.setQueryK(qc.queryK);
+                ctx.setExpectedPrimaryKeys(qc.expectedPrimaryKeys);
+                testUtils.optimizedSearch(ctx);
 
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("Validation: optimized search succeeded");
+                if (LOGGER.isInfoEnabled()) {
+                    LOGGER.info("Query case {}/{} succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
+                }
             }
 
         } finally {

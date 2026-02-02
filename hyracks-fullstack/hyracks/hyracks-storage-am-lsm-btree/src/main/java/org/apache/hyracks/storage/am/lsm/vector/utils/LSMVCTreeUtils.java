@@ -52,10 +52,12 @@ import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponentFact
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeFileManager;
 import org.apache.hyracks.storage.am.lsm.vector.impls.VectorClusteringTreeFactory;
 import org.apache.hyracks.storage.am.lsm.vector.tuples.LSMVCTreeDataTupleWriterFactory;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
@@ -109,7 +111,8 @@ public class LSMVCTreeUtils {
             IComponentFilterHelper filterHelper, boolean durable,
             IMetadataPageManagerFactory metadataPageManagerFactory, boolean atomic, RecordDescriptor inputRecDesc,
             org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields) throws HyracksDataException {
+            int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory)
+            throws HyracksDataException {
 
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: Method started");
@@ -182,9 +185,10 @@ public class LSMVCTreeUtils {
         //                + "] LSMVCTreeUtils.createLSMTree: Frame factories created");
         // VectorClusteringTreeFactory is used for disk components, which are immutable
         // Disk components always use insertDataFrameFactory (no in-place deletes)
-        VectorClusteringTreeFactory vctreeFactory = new VectorClusteringTreeFactory(ioManager, diskBufferCache,
-                metadataPageManagerFactory, interiorFrameFactory, leafFrameFactory, metadataFrameFactory,
-                insertDataFrameFactory, cmpFactories, 4, vectorDimensions, vectorAccessorFactory);
+        VectorClusteringTreeFactory vctreeFactory =
+                new VectorClusteringTreeFactory(ioManager, diskBufferCache, metadataPageManagerFactory,
+                        interiorFrameFactory, leafFrameFactory, metadataFrameFactory, insertDataFrameFactory,
+                        cmpFactories, 4, vectorDimensions, vectorAccessorFactory, dataTupleCreatorFactory);
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: VectorClusteringTreeFactory created");
         // Create file manager for LSM components
@@ -205,7 +209,7 @@ public class LSMVCTreeUtils {
                 fileManager, componentFactory, componentFactory, filterHelper, filterFrameFactory, filterManager,
                 bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields, durable,
-                atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
+                atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTree instance created successfully");
         return result;
@@ -256,10 +260,13 @@ public class LSMVCTreeUtils {
         int numPrimaryKeyFields = 1;
         int numIncludeFields = 0;
 
+        // Default: use standard (non-quantized) data tuple creator factory with no include fields
+        IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory = new VCTreeDataTupleCreatorFactory(numIncludeFields);
+
         return createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits,
                 cmpFactories, bloomFilterFalsePositiveRate, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields,
                 filterFrameFactory, filterManager, filterHelper, durable, metadataPageManagerFactory, atomic,
-                inputRecDesc, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
+                inputRecDesc, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
     }
 }
