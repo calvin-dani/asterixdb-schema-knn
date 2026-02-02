@@ -136,11 +136,13 @@ public class LSMVCTreeUtils {
         metadataTypeTraits[1] = IntegerPointable.TYPE_TRAITS; // page pointer (int) - Fixed 4 bytes
 
         // Data frames need 4-field data tuples: <distance, cosine_similarity, vector, primary_key>
-        ITypeTraits[] dataTypeTraits = new ITypeTraits[3];
+        //TODO Calvin, you need to modify the hardcode values here to make bulkloading work
+        ITypeTraits[] dataTypeTraits = new ITypeTraits[5];
         dataTypeTraits[0] = new FixedLengthTypeTrait(9); // distance (double) - Fixed 8 bytes
-        dataTypeTraits[1] = new FixedLengthTypeTrait(5); // cosine similarity (double) - Fixed 8 bytes
-        //        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // vector (float array) - Variable
-        dataTypeTraits[2] = new FixedLengthTypeTrait(9); // primary key (string/variable) - Variable
+        dataTypeTraits[1] = new FixedLengthTypeTrait(9); // quantized distance (double) - Fixed 8 bytes
+        dataTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // quantized embedding - var length
+        dataTypeTraits[3] = new FixedLengthTypeTrait(5); // centroid id
+        dataTypeTraits[4] = new FixedLengthTypeTrait(9); // primary key (string/variable) - Variable
 
         // Create individual tuple writer factories with correct type traits for each frame type
         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
