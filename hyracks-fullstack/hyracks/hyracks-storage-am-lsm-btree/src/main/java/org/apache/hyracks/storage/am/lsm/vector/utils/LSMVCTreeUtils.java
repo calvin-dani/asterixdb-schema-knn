@@ -117,12 +117,18 @@ public class LSMVCTreeUtils {
         ITypeTraits nullTypeTraits = null; // Can be null for basic testing
         INullIntrospector nullIntrospector = null; // Can be null for basic testing
 
-        // Create specific type traits using primitive type traits for better performance
-        // Interior/Leaf frames need 3-field cluster tuples: <cid, centroid, pointer>
-        ITypeTraits[] clusterTypeTraits = new ITypeTraits[3];
-        clusterTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
-        clusterTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
-        clusterTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
+        // Create specific type traits using primitive type traits
+        // Interior need 3-field cluster tuples: <cid, centroid, pointer>
+        ITypeTraits[] interiorTypeTraits = new ITypeTraits[3];
+        interiorTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
+        interiorTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
+        interiorTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
+
+        ITypeTraits[] leafTypeTraits = new ITypeTraits[4];
+        leafTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
+        leafTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
+        leafTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
+        leafTypeTraits[3] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
 
         // Metadata frames need 2-field metadata tuples: <max_distance, page_pointer>
         ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];
@@ -138,9 +144,9 @@ public class LSMVCTreeUtils {
 
         // Create individual tuple writer factories with correct type traits for each frame type
         VectorClusteringInteriorTupleWriterFactory interiorTupleWriterFactory =
-                new VectorClusteringInteriorTupleWriterFactory(clusterTypeTraits, nullTypeTraits, nullIntrospector);
+                new VectorClusteringInteriorTupleWriterFactory(interiorTypeTraits, nullTypeTraits, nullIntrospector);
         VectorClusteringLeafTupleWriterFactory leafTupleWriterFactory =
-                new VectorClusteringLeafTupleWriterFactory(clusterTypeTraits, nullTypeTraits, nullIntrospector);
+                new VectorClusteringLeafTupleWriterFactory(leafTypeTraits, nullTypeTraits, nullIntrospector);
         VectorClusteringMetadataTupleWriterFactory metadataTupleWriterFactory =
                 new VectorClusteringMetadataTupleWriterFactory(metadataTypeTraits, nullTypeTraits, nullIntrospector);
         VectorClusteringDataTupleWriterFactory dataTupleWriterFactory =
