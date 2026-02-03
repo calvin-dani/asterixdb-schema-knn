@@ -26,6 +26,7 @@ import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
@@ -238,27 +239,55 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
     /**
      * Create entry tuple with centroid info and child page pointer.
+     * Handles variable field counts:
+     * - 2-field input (interior): [centroidId, embedding] -> creates [centroidId, embedding, childPageId]
+     * - 3-field input (leaf with quantization): [centroidId, embedding, quantizedBytes] -> 
+     *   creates [centroidId, embedding, childPageId, quantizedBytes]
      */
     private ITupleReference createEntryTuple(ITupleReference tuple, int childPageId) throws HyracksDataException {
-        ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[2];
-        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
-        fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
+        int inputFieldCount = tuple.getFieldCount();
 
-        // Deserialize the tuple using the proper TupleUtils method
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+        // Deserialize centroidId and embedding (always present)
+        ISerializerDeserializer[] baseFieldSerdes = new ISerializerDeserializer[2];
+        baseFieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
+        baseFieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
 
-        // Extract the vector from the deserialized fields
-        int centroidId = (Integer) fieldValues[0];
-        double[] embedding = (double[]) fieldValues[1];
+        Object[] baseFieldValues = TupleUtils.deserializeTuple(tuple, baseFieldSerdes);
+        int centroidId = (Integer) baseFieldValues[0];
+        double[] embedding = (double[]) baseFieldValues[1];
 
-        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}", centroidId, currentLevel,
-                currentClusterInLevel, currentCentroidInCluster);
+        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId, currentLevel,
+                currentClusterInLevel, currentCentroidInCluster, inputFieldCount);
 
         try {
-            return TupleUtils.createTuple(
-                    new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
-                            DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
-                    centroidId, embedding, childPageId);
+            if (inputFieldCount == 3) {
+                // 3-field input: leaf tuple with quantization [centroidId, embedding, quantizedBytes]
+                // Deserialize the quantized bytes
+                ISerializerDeserializer[] fullFieldSerdes = new ISerializerDeserializer[3];
+                fullFieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
+                fullFieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
+                fullFieldSerdes[2] = ByteArraySerializerDeserializer.INSTANCE;
+
+                Object[] fullFieldValues = TupleUtils.deserializeTuple(tuple, fullFieldSerdes);
+                byte[] quantizedBytes = (byte[]) fullFieldValues[2];
+
+                LOGGER.debug("Leaf tuple with quantization: centroidId={}, embeddingLen={}, quantizedLen={}",
+                        centroidId, embedding.length, quantizedBytes.length);
+
+                // Create 4-field output tuple: [centroidId, embedding, childPageId, quantizedBytes]
+                return TupleUtils.createTuple(
+                        new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
+                                DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE,
+                                ByteArraySerializerDeserializer.INSTANCE },
+                        centroidId, embedding, childPageId, quantizedBytes);
+            } else {
+                // 2-field input: interior or non-quantized leaf [centroidId, embedding]
+                // Create 3-field output tuple: [centroidId, embedding, childPageId]
+                return TupleUtils.createTuple(
+                        new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
+                                DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
+                        centroidId, embedding, childPageId);
+            }
         } catch (Exception e) {
             System.err.println("ERROR creating entry tuple: " + e.getMessage());
             e.printStackTrace();
