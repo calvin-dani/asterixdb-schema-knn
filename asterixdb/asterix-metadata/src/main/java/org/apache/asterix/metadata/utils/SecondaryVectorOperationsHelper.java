@@ -495,6 +495,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         int numIncludeFieldsForBulkLoader =
                 (indexDetails.getIncludeFieldNames() != null) ? indexDetails.getIncludeFieldNames().size() : 0;
 
+        // Determine if quantization is enabled based on description field in WITH clause
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        boolean isQuantized = (description != null);
+
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,

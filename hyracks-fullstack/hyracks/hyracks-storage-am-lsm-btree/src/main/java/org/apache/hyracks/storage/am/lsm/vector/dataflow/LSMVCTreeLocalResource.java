@@ -84,18 +84,17 @@ public class LSMVCTreeLocalResource extends LsmResource {
     protected Integer bits;
     protected Integer sampleCount;
 
-
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
-    IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
-    IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
-    ILSMOperationTrackerFactory opTrackerProvider, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
-    ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-    IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
-    ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
-    Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
-    ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
-    IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-    IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
+            IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
+            IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
+            ILSMOperationTrackerFactory opTrackerProvider, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
+            ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
+            ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
+            Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
+            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
+            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
         this(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions,
@@ -137,17 +136,18 @@ public class LSMVCTreeLocalResource extends LsmResource {
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-    int[] vectorFields, int[] filterFields, boolean atomic, IVectorBinaryAccessorFactory vectorAccessorFactory,
-    int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws HyracksDataException {
+            int[] vectorFields, int[] filterFields, boolean atomic, IVectorBinaryAccessorFactory vectorAccessorFactory,
+            int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory)
+            throws HyracksDataException {
         this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null,
                 null, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-    int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval,
-    Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount,
-    IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-    IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws HyracksDataException {
+            int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval,
+            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount,
+            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws HyracksDataException {
         super(registry, json);
         this.vectorDimensions = vectorDimensions;
         this.vectorFields = vectorFields;

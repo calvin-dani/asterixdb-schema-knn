@@ -144,22 +144,6 @@ public class VectorPointPredicate implements ISearchPredicate {
     }
 
     /**
-     * Set the tuple filter for INCLUDE field predicates.
-     * When set, the cursor will only return tuples that pass this filter,
-     * and only count passing tuples toward K.
-     */
-    public void setTupleFilter(ITupleFilter tupleFilter) {
-        this.tupleFilter = tupleFilter;
-    }
-
-    /**
-     * Get the tuple filter for INCLUDE field predicates.
-     */
-    public ITupleFilter getTupleFilter() {
-        return tupleFilter;
-    }
-
-    /**
      * Set the nprobe parameter (number of clusters to probe).
      * This is the minimum number of clusters to explore before checking if K is satisfied.
      */
