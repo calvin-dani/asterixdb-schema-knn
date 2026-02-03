@@ -29,7 +29,9 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.asterix.common.dataflow.DatasetLocalResource;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
+import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
@@ -54,10 +56,12 @@ import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
@@ -77,6 +81,7 @@ import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
@@ -85,6 +90,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.IResource;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
@@ -756,6 +762,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private IIndexDataflowHelper indexHelper;
                 // private MaterializerTaskState materializedData;
 
+                // Quantization-related instance variables
+                private int maxLevel = -1; // Will be set after buildStructureInfo()
+                private int quantizationBits = 7; // Default: 7 bits (OSQ)
+                private float minQuantile = 0.0f;
+                private float maxQuantile = 1.0f;
+                private float alpha = 0.9f;
+                private float confidenceInterval = 0.999f;
+                private int sampleCount = 0;
+                private boolean quantizationParamsLoaded = false;
+
                 @Override
                 public void open() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity OPENING ===");
@@ -773,10 +789,85 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                         // Use inputRecordDescriptor for reading input frames (hierarchical data)
                         fta = new FrameTupleAccessor(inputRecordDescriptor);
+
+                        // Read quantization parameters from the LSMVCTreeLocalResource
+                        readQuantizationParamsFromMetadata(ctx);
+
                         System.err.println("CreateStructureActivity opened successfully");
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to open CreateStructureActivity: " + e.getMessage());
                         throw HyracksDataException.create(e);
+                    }
+                }
+
+                /**
+                 * Reads quantization parameters from the LSMVCTreeLocalResource metadata.
+                 */
+                private void readQuantizationParamsFromMetadata(IHyracksTaskContext taskCtx)
+                        throws HyracksDataException {
+                    try {
+                        // Create index helper to access the resource (use partition from outer scope)
+                        IIndexDataflowHelper tempHelper = indexHelperFactory.create(taskCtx.getJobletContext()
+                                .getServiceContext(), partition);
+
+                        // Get the local resource from the helper
+                        LocalResource localResource = tempHelper.getResource();
+                        if (localResource != null) {
+                            IResource resource = localResource.getResource();
+                            if (resource instanceof DatasetLocalResource) {
+                                DatasetLocalResource datasetResource = (DatasetLocalResource) resource;
+                                IResource delegate = datasetResource.getResource();
+                                if (delegate instanceof LSMVCTreeLocalResource) {
+                                    LSMVCTreeLocalResource vcTreeResource = (LSMVCTreeLocalResource) delegate;
+
+                                    // Read quantization parameters with defaults
+                                    Integer bits = vcTreeResource.getBits();
+                                    if (bits != null) {
+                                        quantizationBits = bits;
+                                    }
+
+                                    Float ci = vcTreeResource.getConfidenceInterval();
+                                    if (ci != null) {
+                                        confidenceInterval = ci;
+                                    }
+
+                                    Float minQ = vcTreeResource.getMinQuantile();
+                                    if (minQ != null) {
+                                        minQuantile = minQ;
+                                    }
+
+                                    Float maxQ = vcTreeResource.getMaxQuantile();
+                                    if (maxQ != null) {
+                                        maxQuantile = maxQ;
+                                    }
+
+                                    Float a = vcTreeResource.getAlpha();
+                                    if (a != null) {
+                                        alpha = a;
+                                    }
+
+                                    Integer sc = vcTreeResource.getSampleCount();
+                                    if (sc != null) {
+                                        sampleCount = sc;
+                                    }
+
+                                    quantizationParamsLoaded = true;
+                                    System.err.println("Quantization params loaded: bits=" + quantizationBits
+                                            + ", confidenceInterval=" + confidenceInterval + ", minQuantile="
+                                            + minQuantile + ", maxQuantile=" + maxQuantile + ", alpha=" + alpha
+                                            + ", sampleCount=" + sampleCount);
+                                }
+                            }
+                        }
+
+                        if (!quantizationParamsLoaded) {
+                            System.err.println(
+                                    "WARNING: Could not load quantization params, using defaults: bits=" + quantizationBits);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("WARNING: Failed to read quantization params: " + e.getMessage()
+                                + ", using defaults");
+                        // Not fatal - will use default parameters
                     }
                 }
 
@@ -844,12 +935,16 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 }
 
                 /**
-                 * Convert 4-field tuple [treeLevel, centroidId, parentClusterId, embedding] to 2-field tuple [centroidId, embedding]
-                 * for VCTreeStaticStructureBuilder, parsing embeddings using the same logic as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.
+                 * Convert 4-field tuple [treeLevel, centroidId, parentClusterId, embedding] to:
+                 * - For leaf level (level == maxLevel): 3-field tuple [centroidId, embedding, quantizedBytes]
+                 * - For interior levels: 2-field tuple [centroidId, embedding]
+                 * Parsing embeddings using the same logic as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.
                  */
                 private ITupleReference convertToVCTreeBuilderFormat(ITupleReference inputTuple)
                         throws HyracksDataException {
                     try {
+                        int level =
+                                IntegerPointable.getInteger(inputTuple.getFieldData(0), inputTuple.getFieldStart(0));
                         // Extract centroidId from field 1 (second field)
                         int centroidId =
                                 IntegerPointable.getInteger(inputTuple.getFieldData(1), inputTuple.getFieldStart(1));
@@ -878,28 +973,125 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                             throw new HyracksDataException("Failed to extract embedding from hierarchical tuple");
                         }
 
-                        // Create 2-field tuple: [centroidId, embedding] - same format as test code
-                        org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder tupleBuilder =
-                                new org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder(2);
-                        ArrayTupleReference tupleRef = new ArrayTupleReference();
+                        // Check if this is a leaf level (maxLevel) - apply quantization only to leaf nodes
+                        boolean isLeafLevel = (maxLevel >= 0 && level == maxLevel);
 
-                        // Create field serializers and values - use double array for full precision
-                        @SuppressWarnings("rawtypes")
-                        ISerializerDeserializer[] fieldSerdes =
-                                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
-                                        DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
-                        };
-                        Object[] fieldValues = new Object[] { centroidId, embedding };
-
-                        // Build the tuple using TupleUtils - same as test code
-                        TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
-
-                        return tupleRef;
+                        if (isLeafLevel && quantizationParamsLoaded) {
+                            // Leaf level: quantize and create 3-field tuple [centroidId, embedding, quantizedBytes]
+                            return createLeafTupleWithQuantization(centroidId, embedding);
+                        } else {
+                            // Interior level: create 2-field tuple [centroidId, embedding]
+                            return createInteriorTuple(centroidId, embedding);
+                        }
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to convert tuple to VCTreeBuilder format: " + e.getMessage());
                         e.printStackTrace();
                         throw new HyracksDataException("Failed to convert tuple to VCTreeBuilder format", e);
+                    }
+                }
+
+                /**
+                 * Creates a 2-field tuple for interior nodes: [centroidId, embedding]
+                 */
+                private ITupleReference createInteriorTuple(int centroidId, double[] embedding)
+                        throws HyracksDataException {
+                    ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(2);
+                    ArrayTupleReference tupleRef = new ArrayTupleReference();
+
+                    @SuppressWarnings("rawtypes")
+                    ISerializerDeserializer[] fieldSerdes =
+                            new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                                    DoubleArraySerializerDeserializer.INSTANCE // embedding as double array
+                    };
+                    Object[] fieldValues = new Object[] { centroidId, embedding };
+
+                    TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
+                    return tupleRef;
+                }
+
+                /**
+                 * Creates a 3-field tuple for leaf nodes with quantization: [centroidId, embedding, quantizedBytes]
+                 * The quantizedBytes field includes both the quantized vector and corrective multiplier.
+                 */
+                private ITupleReference createLeafTupleWithQuantization(int centroidId, double[] embedding)
+                        throws HyracksDataException {
+                    try {
+                        // Create quantization params
+                        OptimizedScalarQuantizationSampleFile.Params quantParams =
+                                new OptimizedScalarQuantizationSampleFile.Params(quantizationBits, embedding.length,
+                                        sampleCount, confidenceInterval, minQuantile, maxQuantile, alpha);
+
+                        // Use DOT_PRODUCT as default similarity function (can be made configurable later)
+                        OptimizedScalarQuantizationSampleFile.SimilarityFunction simFunc =
+                                OptimizedScalarQuantizationSampleFile.SimilarityFunction.DOT_PRODUCT;
+
+                        // Quantize the embedding
+                        OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedResult =
+                                OptimizedScalarQuantizationSampleFile.quantizeVector(embedding, quantParams, simFunc);
+
+                        // Extract quantized bytes as byte[] (assuming bits <= 8)
+                        byte[] quantizedBytes;
+                        if (quantizedResult.quantizedBytes instanceof byte[]) {
+                            quantizedBytes = (byte[]) quantizedResult.quantizedBytes;
+                        } else if (quantizedResult.quantizedBytes instanceof short[]) {
+                            // Convert short[] to byte[] for storage (2 bytes per short)
+                            short[] shorts = (short[]) quantizedResult.quantizedBytes;
+                            quantizedBytes = new byte[shorts.length * 2];
+                            for (int i = 0; i < shorts.length; i++) {
+                                quantizedBytes[i * 2] = (byte) (shorts[i] >> 8);
+                                quantizedBytes[i * 2 + 1] = (byte) shorts[i];
+                            }
+                        } else if (quantizedResult.quantizedBytes instanceof int[]) {
+                            // Convert int[] to byte[] for storage (4 bytes per int)
+                            int[] ints = (int[]) quantizedResult.quantizedBytes;
+                            quantizedBytes = new byte[ints.length * 4];
+                            for (int i = 0; i < ints.length; i++) {
+                                quantizedBytes[i * 4] = (byte) (ints[i] >> 24);
+                                quantizedBytes[i * 4 + 1] = (byte) (ints[i] >> 16);
+                                quantizedBytes[i * 4 + 2] = (byte) (ints[i] >> 8);
+                                quantizedBytes[i * 4 + 3] = (byte) ints[i];
+                            }
+                        } else {
+                            throw new HyracksDataException(
+                                    "Unexpected quantized bytes type: " + quantizedResult.quantizedBytes.getClass());
+                        }
+
+                        // Append corrective multiplier as 4 bytes at the end of quantizedBytes
+                        // Format: [quantizedVector..., correctiveMultiplier(4 bytes)]
+                        int floatBits = Float.floatToIntBits(quantizedResult.correctiveMultiplier);
+                        byte[] quantizedWithMultiplier = new byte[quantizedBytes.length + 4];
+                        System.arraycopy(quantizedBytes, 0, quantizedWithMultiplier, 0, quantizedBytes.length);
+                        quantizedWithMultiplier[quantizedBytes.length] = (byte) (floatBits >> 24);
+                        quantizedWithMultiplier[quantizedBytes.length + 1] = (byte) (floatBits >> 16);
+                        quantizedWithMultiplier[quantizedBytes.length + 2] = (byte) (floatBits >> 8);
+                        quantizedWithMultiplier[quantizedBytes.length + 3] = (byte) floatBits;
+
+                        // Create 3-field tuple: [centroidId, embedding, quantizedBytes]
+                        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
+                        ArrayTupleReference tupleRef = new ArrayTupleReference();
+
+                        @SuppressWarnings("rawtypes")
+                        ISerializerDeserializer[] fieldSerdes =
+                                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                                        DoubleArraySerializerDeserializer.INSTANCE, // embedding as double array
+                                        ByteArraySerializerDeserializer.INSTANCE // quantized bytes with corrective multiplier
+                                };
+                        Object[] fieldValues = new Object[] { centroidId, embedding, quantizedWithMultiplier };
+
+                        TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
+
+                        System.err.println("Created leaf tuple with quantization: centroidId=" + centroidId
+                                + ", embeddingDim=" + embedding.length + ", quantizedLen=" + quantizedWithMultiplier.length
+                                + ", correctiveMultiplier=" + quantizedResult.correctiveMultiplier);
+
+                        return tupleRef;
+
+                    } catch (Exception e) {
+                        System.err.println("WARNING: Failed to quantize leaf embedding, falling back to 2-field tuple: "
+                                + e.getMessage());
+                        // Fall back to interior tuple format if quantization fails
+                        return createInteriorTuple(centroidId, embedding);
                     }
                 }
 
@@ -1024,6 +1216,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         StructureInfo structureInfo = buildStructureInfo();
                         List<Integer> clustersPerLevel = structureInfo.clustersPerLevel;
                         List<List<Integer>> centroidsPerCluster = structureInfo.centroidsPerCluster;
+
+                        // Store maxLevel for use in convertToVCTreeBuilderFormat (leaf-only quantization)
+                        maxLevel = levelDistribution.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+                        System.err.println("Stored maxLevel=" + maxLevel + " for leaf-only quantization");
 
                         // Open index via IndexDataflowHelper to get LSMVCTree instance
                         System.err.println("Opening index via IndexDataflowHelper...");
