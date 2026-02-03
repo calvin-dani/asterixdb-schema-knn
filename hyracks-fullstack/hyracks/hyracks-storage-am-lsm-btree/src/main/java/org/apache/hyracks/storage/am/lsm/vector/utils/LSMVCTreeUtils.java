@@ -29,7 +29,6 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
-import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
@@ -57,7 +56,6 @@ import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFact
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrameFactory;
-import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringDataTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringLeafTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringMetadataTupleWriterFactory;
@@ -111,11 +109,10 @@ public class LSMVCTreeUtils {
             IComponentFilterHelper filterHelper, boolean durable,
             IMetadataPageManagerFactory metadataPageManagerFactory, boolean atomic, RecordDescriptor inputRecDesc,
             org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields)
-            throws HyracksDataException {
+            int numPrimaryKeyFields, int numIncludeFields) throws HyracksDataException {
 
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: Method started");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: Method started");
         // We need null-related types for tuple writers - use simple defaults for testing
         ITypeTraits nullTypeTraits = null; // Can be null for basic testing
         INullIntrospector nullIntrospector = null; // Can be null for basic testing
@@ -152,8 +149,8 @@ public class LSMVCTreeUtils {
         LSMVCTreeDataTupleWriterFactory deleteDataTupleWriterFactory =
                 new LSMVCTreeDataTupleWriterFactory(dataTypeTraits, true, nullTypeTraits, nullIntrospector);
 
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: Tuple writer factories created");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: Tuple writer factories created");
         // Create tuple writers from factories
         ITreeIndexTupleWriter interiorTupleWriter = interiorTupleWriterFactory.createTupleWriter();
         ITreeIndexTupleWriter leafTupleWriter = leafTupleWriterFactory.createTupleWriter();
@@ -172,36 +169,36 @@ public class LSMVCTreeUtils {
         ITreeIndexFrameFactory deleteDataFrameFactory =
                 new VectorClusteringDataFrameFactory(deleteDataTupleWriterFactory, vectorDimensions);
 
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: Frame factories created");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: Frame factories created");
         // VectorClusteringTreeFactory is used for disk components, which are immutable
         // Disk components always use insertDataFrameFactory (no in-place deletes)
         VectorClusteringTreeFactory vctreeFactory = new VectorClusteringTreeFactory(ioManager, diskBufferCache,
                 metadataPageManagerFactory, interiorFrameFactory, leafFrameFactory, metadataFrameFactory,
                 insertDataFrameFactory, cmpFactories, 4, vectorDimensions, vectorAccessorFactory);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: VectorClusteringTreeFactory created");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: VectorClusteringTreeFactory created");
         // Create file manager for LSM components
         ILSMIndexFileManager fileManager = new LSMVCTreeFileManager(ioManager, file, vctreeFactory);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: LSMVCTreeFileManager created");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTreeFileManager created");
 
         // Create disk component factory
         ILSMDiskComponentFactory componentFactory = new LSMVCTreeDiskComponentFactory(vctreeFactory, filterHelper);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: LSMVCTreeDiskComponentFactory created");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTreeDiskComponentFactory created");
 
         // Create the LSMVCTree instance with both insert and delete data frame factories
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: About to create LSMVCTree instance");
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: About to create LSMVCTree instance");
         LSMVCTree result = new LSMVCTree(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory,
-                leafFrameFactory, metadataFrameFactory, insertDataFrameFactory, deleteDataFrameFactory,
-                diskBufferCache, fileManager, componentFactory, componentFactory, filterHelper, filterFrameFactory,
-                filterManager, bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler,
-                ioOpCallbackFactory, pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields,
-                filterFields, durable, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
-//        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
-//                + "] LSMVCTreeUtils.createLSMTree: LSMVCTree instance created successfully");
+                leafFrameFactory, metadataFrameFactory, insertDataFrameFactory, deleteDataFrameFactory, diskBufferCache,
+                fileManager, componentFactory, componentFactory, filterHelper, filterFrameFactory, filterManager,
+                bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
+                pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields, durable,
+                atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
+        //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
+        //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTree instance created successfully");
         return result;
     }
 

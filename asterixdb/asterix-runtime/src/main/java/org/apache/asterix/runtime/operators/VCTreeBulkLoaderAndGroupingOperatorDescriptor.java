@@ -26,10 +26,6 @@ import java.util.UUID;
 
 import org.apache.asterix.common.dataflow.DatasetLocalResource;
 import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
-import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
-import org.apache.asterix.dataflow.data.nontagged.serde.AInt32SerializerDeserializer;
-import org.apache.asterix.om.base.ADouble;
-import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
@@ -57,8 +53,6 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractSingleActivityOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperatorNodePushable;
@@ -83,7 +77,7 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 /**
  * Operator that handles bulk loader initialization and recursive data grouping to run files.
  * This operator is designed for job 3 in the VCTree creation pipeline.
- * 
+ * <p>
  * Responsibilities:
  * 1. Initialize LSM bulk loader for VectorClusteringTree
  * 2. Apply recursive partitioning logic using SHAPIRO formula
@@ -178,7 +172,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
     /**
      * Convert distance metric string to DistanceFunction implementation.
-     * 
+     *
      * @param distanceType Distance metric string (e.g., "euclidean", "cosine similarity", etc.)
      * @return DistanceFunction implementation
      * @throws IllegalArgumentException if distance type is not supported
@@ -197,7 +191,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
     /**
      * Convert DistanceFunction to IVectorDistanceFunction for use in Hyracks modules.
-     * 
+     *
      * @param distanceFunction AsterixDB DistanceFunction
      * @return IVectorDistanceFunction wrapper
      */
@@ -236,12 +230,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     /**
      * Create transformed tuple with distance, centroidId, PKs, and include fields.
      * Uses TupleUtils.createTuple() with proper serializers from RecordDescriptor.
-     *
+     * <p>
      * Input tuple format from CastAssign: [embedding, include_fields..., pk...]
      * Output tuple format: [distance, centroidId, pk..., include_fields...]
      *
      * @param originalTuple Input tuple with original fields to preserve
-     * @param searchResult ClusterSearchResult containing all needed values
+     * @param searchResult  ClusterSearchResult containing all needed values
      * @return Transformed tuple with format [distance, centroidId, pk..., include_fields...]
      * @throws HyracksDataException if tuple creation fails
      */
@@ -293,9 +287,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     /**
      * Extract embedding from input tuple using IScalarEvaluator and KMeansUtils.
      * This method follows the same pattern as HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.
-     * 
+     *
      * @param tuple Input tuple containing vector data
-     * @param ctx Hyracks task context for evaluator creation
+     * @param ctx   Hyracks task context for evaluator creation
      * @return Extracted double array embedding
      * @throws HyracksDataException if extraction fails
      */
@@ -369,10 +363,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
     /**
      * Initialize VCTreePartitioner for recursive partitioning.
-     * 
-     * @param ctx Hyracks task context for file operations
+     *
+     * @param ctx          Hyracks task context for file operations
      * @param memoryBudget Available memory budget in frames
-     * @param frameSize Frame size in bytes
+     * @param frameSize    Frame size in bytes
      */
     public void initializePartitioner(IHyracksTaskContext ctx, int memoryBudget, int frameSize) {
         //        System.err.println("=== INITIALIZING VCTreePartitioner ===");
@@ -385,7 +379,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
     /**
      * Close VCTreePartitioner and cleanup resources.
-     * 
+     *
      * @throws HyracksDataException if cleanup fails
      */
     public void closePartitioner() throws HyracksDataException {
@@ -443,7 +437,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /**
          * Set the output record descriptor for transformed tuples.
-         * 
+         *
          * @param outputRecDesc Record descriptor for output tuples
          */
         public void setOutputRecordDescriptor(RecordDescriptor outputRecDesc) {
@@ -527,8 +521,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         /**
          * Reads quantization parameters from the metadata file.
          * Falls back to default values if parameters are not available.
-         * 
-         * @param indexHelper The index dataflow helper to get the resource
+         *
+         * @param indexHelper     The index dataflow helper to get the resource
          * @param vectorDimension The vector dimension (used as fallback)
          * @return OptimizedScalarQuantizationSampleFile.Params with values from metadata or defaults
          * @throws HyracksDataException if reading fails
@@ -636,7 +630,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /**
          * Initialize output infrastructure for transformed tuples.
-         * 
+         *
          * @throws HyracksDataException if initialization fails
          */
         private void initializeOutputInfrastructure() throws HyracksDataException {
@@ -662,7 +656,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         /**
          * Find the closest centroid using VectorClusteringTreeAccessor.
          * This follows the same approach as VectorTreeTestUtils.clusterRecords().
-         * 
+         *
          * @param queryVector Query vector to find closest centroid for
          * @return ClusterSearchResult containing closest centroid information
          * @throws HyracksDataException if search fails
@@ -830,9 +824,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         /**
          * Quantizes a vector using optimized scalar quantization with similarity-function awareness.
          * Uses the new API that returns QuantizedVector with corrective multiplier.
-         * 
-         * @param embedding The input embedding vector (double array)
-         * @param params Quantization parameters
+         *
+         * @param embedding      The input embedding vector (double array)
+         * @param params         Quantization parameters
          * @param distanceMetric Distance metric string to determine similarity function
          * @return QuantizedVector containing quantized bytes, corrective multiplier, and metadata
          */
@@ -1044,12 +1038,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 } else {
                                     System.err.println("Failed to find closest centroid for query " + (i + 1));
                                 }
-
-                                // Output the transformed tuple to downstream operators
-                                outputTransformedTuple(transformedTuple);
-
-                            } else {
-                                System.err.println("Failed to find closest centroid for query " + (i + 1));
                             }
                         } else {
                             System.err.println("Skipping tuple " + (i + 1) + " - no valid embedding extracted");
@@ -1068,7 +1056,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /**
          * Output transformed tuple to downstream operators.
-         * 
+         *
          * @param transformedTuple Tuple with [centroidId, distance, ...original fields...]
          * @throws HyracksDataException if output fails
          */
@@ -1162,7 +1150,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /**
          * Stream data from run files in centroid ID order (lowest to highest).
-         * 
+         *
          * @param centroidFiles Map of centroid ID to file reference
          * @throws HyracksDataException if streaming fails
          */
@@ -1200,8 +1188,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /**
          * Stream data from a single run file.
-         * 
-         * @param runFile File reference to the run file
+         *
+         * @param runFile    File reference to the run file
          * @param centroidId Centroid ID for logging
          * @return Number of tuples streamed from this file
          * @throws HyracksDataException if streaming fails
@@ -1240,9 +1228,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /**
          * Process a frame and stream its tuples to the output.
-         * 
+         *
          * @param frameBuffer Frame buffer containing tuples
-         * @param centroidId Centroid ID for logging
+         * @param centroidId  Centroid ID for logging
          * @return Number of tuples processed from this frame
          * @throws HyracksDataException if processing fails
          */

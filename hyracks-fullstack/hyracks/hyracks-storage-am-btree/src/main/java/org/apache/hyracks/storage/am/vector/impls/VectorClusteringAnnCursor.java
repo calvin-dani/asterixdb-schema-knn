@@ -415,8 +415,8 @@ public class VectorClusteringAnnCursor extends EnforcedIndexCursor {
                 }
 
                 // Apply cosine law distance estimation for further pruning
-                if (shouldPruneVectorWithCosineLaw(vectorDistanceToCentroid, 0,
-                        clusterCentroid, distanceToClusterCentroid)) {
+                if (shouldPruneVectorWithCosineLaw(vectorDistanceToCentroid, 0, clusterCentroid,
+                        distanceToClusterCentroid)) {
                     continue;
                 }
 

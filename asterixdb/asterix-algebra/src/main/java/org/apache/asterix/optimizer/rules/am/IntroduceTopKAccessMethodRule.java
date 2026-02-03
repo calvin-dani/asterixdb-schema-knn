@@ -516,7 +516,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
                         String fieldName = fieldNames[fieldIndex];
                         fieldPath.add(fieldName);
-                        System.err.println("=== Resolved field-access-by-index: index " + fieldIndex + " -> field '" + fieldName + "' ===");
+                        System.err.println("=== Resolved field-access-by-index: index " + fieldIndex + " -> field '"
+                                + fieldName + "' ===");
                     }
                 }
             }
@@ -751,8 +752,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 // If query has filter, check if index has required INCLUDE fields
                 if (hasFilter && !indexHasIncludeFields(index, filterFieldNames)) {
                     // Skip this index - it doesn't have required INCLUDE fields for the filter
-                    System.err.println("Skipping index " + index.getIndexName()
-                            + " - missing required INCLUDE fields for filter");
+                    System.err.println(
+                            "Skipping index " + index.getIndexName() + " - missing required INCLUDE fields for filter");
                     continue;
                 }
 

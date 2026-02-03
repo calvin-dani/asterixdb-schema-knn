@@ -64,8 +64,8 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
     }
 
     @Override
-    public void initialize(VectorClusteringTree vcTree, double[] queryVector,
-                          IVectorDistanceFunction distFunc, int k) throws HyracksDataException {
+    public void initialize(VectorClusteringTree vcTree, double[] queryVector, IVectorDistanceFunction distFunc, int k)
+            throws HyracksDataException {
         this.K = k;
         this.globalClusterIndex = 0;
         this.levelWisePhaseComplete = false;
@@ -74,9 +74,8 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         if (queryVector != null && epsilon > 0.0 && vcTree != null) {
             try {
                 globalLevelWiseClusters = VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(
-                    vcTree.getBufferCache(), vcTree.getFileId(), vcTree.getRootPageId(),
-                    vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(),
-                    queryVector, distFunc, epsilon);
+                        vcTree.getBufferCache(), vcTree.getFileId(), vcTree.getRootPageId(),
+                        vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(), queryVector, distFunc, epsilon);
 
                 // Mark first cluster as visited and start getNextCluster() from index 1
                 // The cursor handles index 0 separately via getFirstCluster()
@@ -85,12 +84,11 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                     globalClusterIndex = 1; // Skip first cluster in getNextCluster()
                 }
 
-                System.err.println(String.format(
-                        "[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
+                System.err.println(String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
                         globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
             } catch (Exception e) {
-                System.err.println(String.format(
-                        "[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
+                System.err.println(
+                        String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
                 globalLevelWiseClusters = null;
             }
         }
@@ -108,10 +106,10 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
             // Mark visited for DFS fallback deduplication
             visitedCentroidIds.add(nextCluster.centroidId);
 
-            System.err.println(String.format(
-                    "[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
-                    globalClusterIndex, globalLevelWiseClusters.size(),
-                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
+            System.err.println(
+                    String.format("[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
+                            globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId,
+                            nextCluster.distance, nextCluster.directoryPageId));
 
             if (globalClusterIndex >= globalLevelWiseClusters.size()) {
                 levelWisePhaseComplete = true;
@@ -135,8 +133,7 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
             return null;
         }
 
-        System.err.println(String.format(
-                "[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
+        System.err.println(String.format("[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
                 next.centroidId, next.distance, next.directoryPageId));
 
         return next;

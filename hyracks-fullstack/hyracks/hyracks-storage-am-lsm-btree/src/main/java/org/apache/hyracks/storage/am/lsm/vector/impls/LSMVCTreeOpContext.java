@@ -24,10 +24,7 @@ import java.util.List;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparator;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.api.util.CleanupUtils;
-import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
-import org.apache.hyracks.data.std.accessors.LongBinaryComparatorFactory;
 import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
@@ -39,7 +36,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringOpContext;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
-import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.util.trace.ITracer;
 
@@ -72,11 +69,11 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
     private VectorClusteringOpContext currentMutableVCTreeOpCtx;
     private boolean destroyed = false;
 
-    public LSMVCTreeOpContext(LSMVCTree lsmTree, List<ILSMMemoryComponent> mutableComponents,
-            int[] treeFields, int[] filterFields, IBinaryComparatorFactory[] filterCmpFactories,
+    public LSMVCTreeOpContext(LSMVCTree lsmTree, List<ILSMMemoryComponent> mutableComponents, int[] treeFields,
+            int[] filterFields, IBinaryComparatorFactory[] filterCmpFactories,
             IExtendedModificationOperationCallback modificationCallback, ISearchOperationCallback searchCallback,
             ITracer tracer, IIndexAccessParameters iap) {
-        super(lsmTree, treeFields, filterFields, filterCmpFactories, searchCallback, modificationCallback, tracer);
+        super(lsmTree, treeFields, filterFields, filterCmpFactories, iap, tracer);
 
         this.iap = iap;
         this.insertDataFrameFactory = lsmTree.getInsertDataFrameFactory();
@@ -105,7 +102,8 @@ public class LSMVCTreeOpContext extends AbstractLSMIndexOperationContext {
             mutableVCTrees[i] = mutableComponent.getIndex();
             IIndexAccessParameters componentIap =
                     new IndexAccessParameters(modificationCallback, NoOpOperationCallback.INSTANCE);
-            mutableVCTreeAccessors[i] = (VectorClusteringTree.VectorClusteringTreeAccessor) mutableVCTrees[i].createAccessor(componentIap);
+            mutableVCTreeAccessors[i] =
+                    (VectorClusteringTree.VectorClusteringTreeAccessor) mutableVCTrees[i].createAccessor(componentIap);
             mutableVCTreeOpCtxs[i] = mutableVCTreeAccessors[i].getOpContext();
         }
 

@@ -478,8 +478,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                 List<List<String>> includeFieldNames = new ArrayList<>();
                 int includeFieldsPos = indexRecord.getType().getFieldIndex(INCLUDE_FIELDS_FIELD_NAME);
                 if (includeFieldsPos >= 0) {
-                    IACursor cursor =
-                            ((AOrderedList) indexRecord.getValueByPos(includeFieldsPos)).getCursor();
+                    IACursor cursor = ((AOrderedList) indexRecord.getValueByPos(includeFieldsPos)).getCursor();
                     while (cursor.next()) {
                         String fieldName = ((AString) cursor.get()).getStringValue();
                         includeFieldNames.add(Collections.singletonList(fieldName));
@@ -492,7 +491,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                 List<IAType> includeFieldTypes = new ArrayList<>();
                 for (int i = 0; i < includeFieldNames.size(); i++) {
                     includeFieldSourceIndicators.add(Index.RECORD_INDICATOR);
-                    includeFieldTypes.add(BuiltinType.ANY);  // Type will be resolved from record schema
+                    includeFieldTypes.add(BuiltinType.ANY); // Type will be resolved from record schema
                 }
 
                 indexDetails = new Index.VectorIndexDetails(keyFieldNames.getFirst(), includeFieldNames,

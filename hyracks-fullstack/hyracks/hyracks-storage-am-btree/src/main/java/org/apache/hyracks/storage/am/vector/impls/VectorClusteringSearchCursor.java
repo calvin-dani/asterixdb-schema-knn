@@ -18,15 +18,11 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
-import java.io.DataOutput;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
-import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
@@ -266,7 +262,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
 
             // Initialize DFS iterator and get first (closest) cluster
-            this.currentClusterResult = VCTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
+            this.currentClusterResult =
+                    VCTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
 
             if (this.currentClusterResult == null) {
                 // Empty tree
@@ -343,7 +340,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     public ITupleReference getTuple() {
         return currentTuple;
     }
-
 
     /**
      * Get the query vector used for this search.
@@ -454,8 +450,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.clustersProbed = 1;
 
         // Create ClusterSearchResult for first cluster (for LSM layer to access)
-        this.currentClusterResult = new ClusterSearchResult(
-                -1, // No leaf page ID in full-scan mode
+        this.currentClusterResult = new ClusterSearchResult(-1, // No leaf page ID in full-scan mode
                 0, // Cluster index
                 null, // No centroid vector
                 0.0, // No distance in full-scan mode
@@ -496,9 +491,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Used by full-scan mode for sequential cluster iteration.
      */
     private void openClusterByDirectoryPage(long directoryPageId) throws HyracksDataException {
-        System.err.println(
-                String.format("[VectorClusteringSearchCursor.openClusterByDirectoryPage] Opening directoryPage=%d",
-                        directoryPageId));
+        System.err.println(String.format(
+                "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Opening directoryPage=%d", directoryPageId));
 
         this.targetMetadataPageId = directoryPageId;
 
@@ -577,8 +571,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Create ClusterSearchResult for this sequential cluster
             // In full-scan mode, we don't have centroid info, but we have the directory page
-            this.currentClusterResult = new ClusterSearchResult(
-                    -1, // No leaf page ID in full-scan mode
+            this.currentClusterResult = new ClusterSearchResult(-1, // No leaf page ID in full-scan mode
                     currentSequentialClusterIndex, // Cluster index
                     null, // No centroid vector
                     0.0, // No distance in full-scan mode
@@ -751,8 +744,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             // Get the next page ID from the current data frame's linked list pointer
             int nextDataPageId = dataFrame.getNextPage();
             if (nextDataPageId == -1) {
-                System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] " +
-                    "Reached end of data page chain, no more pages");
+                System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] "
+                        + "Reached end of data page chain, no more pages");
                 return false; // Reached end of chain
             }
 
@@ -762,18 +755,21 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Check if this page has tuples
             if (this.tupleCount > 0) {
-                System.err.println(String.format(
-                    "[VectorClusteringSearchCursor.moveToNextDataPage] " +
-                    "Found non-empty data page %d with %d tuples",
-                    nextDataPageId, this.tupleCount));
+                System.err
+                        .println(String.format(
+                                "[VectorClusteringSearchCursor.moveToNextDataPage] "
+                                        + "Found non-empty data page %d with %d tuples",
+                                nextDataPageId, this.tupleCount));
                 return true; // Found non-empty page
             }
 
             // Page is empty after deletion - continue to next page
-            System.err.println(String.format(
-                "[VectorClusteringSearchCursor.moveToNextDataPage] " +
-                "Data page %d is empty (after deletion), skipping to next page",
-                nextDataPageId));
+            System.err
+                    .println(
+                            String.format(
+                                    "[VectorClusteringSearchCursor.moveToNextDataPage] "
+                                            + "Data page %d is empty (after deletion), skipping to next page",
+                                    nextDataPageId));
             // Loop continues to next page
         }
     }
@@ -880,9 +876,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     @Override
     public void close() throws HyracksDataException {
         // Debug: log who is calling close() to help track unexpected closure
-        System.err.println(String.format(
-                "[VectorClusteringSearchCursor.close] Called on cursor (isOpen=%s, recordsIterated=%d)",
-                isOpen, recordsIterated));
+        System.err.println(
+                String.format("[VectorClusteringSearchCursor.close] Called on cursor (isOpen=%s, recordsIterated=%d)",
+                        isOpen, recordsIterated));
 
         if (isOpen) {
             closeCurrentPage();

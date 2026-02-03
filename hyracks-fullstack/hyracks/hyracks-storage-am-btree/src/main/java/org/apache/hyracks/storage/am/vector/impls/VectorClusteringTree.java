@@ -32,9 +32,6 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
@@ -148,8 +145,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return 0;
     }
 
-    public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance,
-            ITreeIndexAccessor staticAccessor, ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
+    public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance, ITreeIndexAccessor staticAccessor,
+            ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
         @SuppressWarnings("rawtypes")
         ISerializerDeserializer[] dataFrameSerds;
         // Use provided serializers from RecordDescriptor
@@ -241,8 +238,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                 if (targetDataPageId != -1) {
                     // Found appropriate data page - try to insert
-                    LOGGER.log(Level.DEBUG, "Found target data page {} in metadata page {}",
-                            targetDataPageId,  currentMetadataPageId);
+                    LOGGER.log(Level.DEBUG, "Found target data page {} in metadata page {}", targetDataPageId,
+                            currentMetadataPageId);
 
                     boolean inserted =
                             tryInsertIntoDataPage(targetDataPageId, vector, distance, centroidId, originalTuple, ctx);
@@ -335,7 +332,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Create data tuple: <distance, centroidId, vector, PK>
             // Pass context so createDataTuple can check operation type and set antimatter bit if DELETE
-            ITupleReference dataTuple = ctx.getDataFrame().createDataTuple(vector, distance, centroidId, originalTuple, ctx);
+            ITupleReference dataTuple =
+                    ctx.getDataFrame().createDataTuple(vector, distance, centroidId, originalTuple, ctx);
 
             // Check if there's space for the tuple
             FrameOpSpaceStatus spaceStatus = ctx.getDataFrame().hasSpaceInsert(dataTuple);
@@ -349,8 +347,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 case SUFFICIENT_CONTIGUOUS_SPACE:
                 case SUFFICIENT_SPACE:
                     // Find correct insertion position to maintain sorted order by distance
-                    int insertIndex =
-                            ((VectorClusteringDataFrame) ctx.getDataFrame()).findInsertPosition(distance);
+                    int insertIndex = ((VectorClusteringDataFrame) ctx.getDataFrame()).findInsertPosition(distance);
 
                     // Insert the tuple
                     ctx.getDataFrame().insert(dataTuple, insertIndex);
@@ -455,7 +452,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         try {
             originalDataPage.acquireReadLatch();
-            IVectorClusteringDataFrame originalDataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
+            IVectorClusteringDataFrame originalDataFrame =
+                    (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
             originalDataFrame.setPage(originalDataPage);
 
             int originalTupleCount = originalDataFrame.getTupleCount();
@@ -477,7 +475,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         try {
             newDataPage.acquireReadLatch();
-            IVectorClusteringDataFrame newDataFrame = (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
+            IVectorClusteringDataFrame newDataFrame =
+                    (IVectorClusteringDataFrame) ctx.getDataFrameFactory().createFrame();
             newDataFrame.setPage(newDataPage);
 
             int newTupleCount = newDataFrame.getTupleCount();
@@ -504,15 +503,13 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 + ", added new page " + newDataPageId + " maxDistance=" + newPageMaxDistance);
     }
 
-
     /**
      * In-place deletion with three-scenario handling (follows LSMBTree pattern):
      * 1. Tuple not found → Insert antimatter (delegates to insertIntoDataPages)
      * 2. Tuple found (matter only) → Physical DELETE
      * 3. Tuple found (after antimatter was replaced by matter during reinsertion) → Physical DELETE
      */
-    private boolean deleteVector(ITupleReference tuple, VectorClusteringOpContext ctx)
-            throws HyracksDataException {
+    private boolean deleteVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         // Extract vector and primary key (binary format - no type assumption)
         double[] vector = extractVectorFromTuple(tuple);
@@ -528,14 +525,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             int centroidId = accessResult.clusterResult.centroidId;
 
             // Try to find and physically delete tuple from data pages (Scenarios 2 & 3)
-            boolean foundAndDeleted = tryPhysicalDelete(
-                accessResult.metadataPageId,
-                distance,
-                primaryKey,
-                centroidId,
-                tuple,
-                ctx
-            );
+            boolean foundAndDeleted =
+                    tryPhysicalDelete(accessResult.metadataPageId, distance, primaryKey, centroidId, tuple, ctx);
 
             if (foundAndDeleted) {
                 // Scenarios 2 & 3: Successfully deleted from memory
@@ -547,9 +538,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // - Empty metadata pages (creates new data page)
             // - Page splits (if data page is full)
             // - Metadata max distance updates
-            System.err.println("DELETE PK=" + Arrays.toString(primaryKey) + " → Tuple not found in memory, inserting antimatter");
+            System.err.println(
+                    "DELETE PK=" + Arrays.toString(primaryKey) + " → Tuple not found in memory, inserting antimatter");
             insertIntoDataPages(accessResult.metadataPageId, vector, distance, centroidId, tuple, ctx);
-            System.err.println("DELETE PK=" + Arrays.toString(primaryKey) + " → ANTIMATTER inserted (disk tuple) in cluster=" + centroidId + ", distance=" + distance);
+            System.err.println("DELETE PK=" + Arrays.toString(primaryKey)
+                    + " → ANTIMATTER inserted (disk tuple) in cluster=" + centroidId + ", distance=" + distance);
             return true;
 
         } finally {
@@ -566,13 +559,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      *
      * Uses binary comparison for primary key matching - no type assumption.
      */
-    private boolean tryPhysicalDelete(
-            long metadataPageId,
-            double distance,
-            byte[] primaryKey,
-            int centroidId,
-            ITupleReference originalTuple,
-            VectorClusteringOpContext ctx) throws HyracksDataException {
+    private boolean tryPhysicalDelete(long metadataPageId, double distance, byte[] primaryKey, int centroidId,
+            ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
         // Traverse through all linked metadata pages
         long currentMetadataPageId = metadataPageId;
@@ -590,9 +578,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                 if (targetDataPageId != -1) {
                     // Try physical deletion in this data page
-                    ICachedPage dataPage = bufferCache.pin(
-                        BufferedFileHandle.getDiskPageId(getFileId(), (int) targetDataPageId)
-                    );
+                    ICachedPage dataPage =
+                            bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) targetDataPageId));
 
                     try {
                         dataPage.acquireWriteLatch();
@@ -600,22 +587,23 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                         // Search for tuple by distance + PK (uses binary comparison internally)
                         int tupleIndex = ((VectorClusteringDataFrame) ctx.getDataFrame())
-                            .findTupleByDistanceAndPrimaryKey(distance, primaryKey);
+                                .findTupleByDistanceAndPrimaryKey(distance, primaryKey);
 
                         if (tupleIndex >= 0) {
                             // Found! Physically delete it
                             VectorClusteringDataFrame dataFrame = (VectorClusteringDataFrame) ctx.getDataFrame();
 
                             int tupleCountBefore = dataFrame.getTupleCount();
-                            System.err.println("BEFORE DELETE PK=" + Arrays.toString(primaryKey) + " | Page has " + tupleCountBefore +
-                                " tuples, deleting at index=" + tupleIndex);
+                            System.err.println("BEFORE DELETE PK=" + Arrays.toString(primaryKey) + " | Page has "
+                                    + tupleCountBefore + " tuples, deleting at index=" + tupleIndex);
 
                             byte[] pkAtIndex = dataFrame.getPrimaryKey(tupleIndex);
 
                             // Safety check using binary comparison (no type assumption)
                             if (!Arrays.equals(pkAtIndex, primaryKey)) {
-                                System.err.println("ERROR: DELETE PK=" + Arrays.toString(primaryKey) + " → Found WRONG tuple at index " +
-                                    tupleIndex + " with PK=" + Arrays.toString(pkAtIndex) + " (BUG!)");
+                                System.err.println("ERROR: DELETE PK=" + Arrays.toString(primaryKey)
+                                        + " → Found WRONG tuple at index " + tupleIndex + " with PK="
+                                        + Arrays.toString(pkAtIndex) + " (BUG!)");
                                 return false;
                             }
 
@@ -623,10 +611,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                             ctx.getDataFrame().delete(originalTuple, tupleIndex);
 
                             int tupleCountAfter = dataFrame.getTupleCount();
-                            System.err.println("AFTER DELETE PK=" + Arrays.toString(primaryKey) + " | Page now has " + tupleCountAfter +
-                                " tuples (deleted 1)");
-                            System.err.println("DELETE PK=" + Arrays.toString(primaryKey) + " → PHYSICAL delete at index=" + tupleIndex +
-                                " in cluster=" + centroidId + ", distance=" + distance + " (verified PK match)");
+                            System.err.println("AFTER DELETE PK=" + Arrays.toString(primaryKey) + " | Page now has "
+                                    + tupleCountAfter + " tuples (deleted 1)");
+                            System.err.println("DELETE PK=" + Arrays.toString(primaryKey)
+                                    + " → PHYSICAL delete at index=" + tupleIndex + " in cluster=" + centroidId
+                                    + ", distance=" + distance + " (verified PK match)");
 
                             return true; // Successfully deleted
                         }
@@ -679,7 +668,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         accessor.reset(data, offset, length);
         return accessor.getVector();
     }
-
 
     private void upsertVector(ITupleReference tuple, VectorClusteringOpContext ctx) throws HyracksDataException {
         // Implement vector upsert using accessor and frame factories
@@ -971,7 +959,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 getLeafFrameFactory(), queryVector, distanceFunction);
     }
 
-
     public int getVectorDimensions() {
         return vectorDimensions;
     }
@@ -993,9 +980,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         // Use the common navigation logic from VCTreeNavigationUtils
         return VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(bufferCache, getFileId(), rootPage,
                 getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
-      
+
     }
-  
+
     public void setStaticStructureInitialized() {
         isStaticStructureInitialized = true;
     }
@@ -1008,9 +995,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         initialized = true;
     }
 
-
     public void setStaticStructure(VectorClusteringTreeAccessor staticAccessor) throws HyracksDataException {
-        VectorClusteringTree staticStructure =  staticAccessor.getIndex();
+        VectorClusteringTree staticStructure = staticAccessor.getIndex();
         ITreeIndexMetadataFrame metaFrame = staticAccessor.getOpContext().getMetaFrame();
         int maxPageId = staticStructure.getPageManager().getMaxPageId(metaFrame);
 
@@ -1055,8 +1041,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         // Copy page from source to target
         ITreeIndexMetadataFrame metaFrame = freePageManager.createMetadataFrame();
         int targetPageId = freePageManager.takePage(metaFrame) - 1;
-        ICachedPage targetPage =
-                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), targetPageId), NEW);
+        ICachedPage targetPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), targetPageId), NEW);
         // Copy entire page content
         System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
                 sourcePage.getBuffer().capacity());
@@ -1388,6 +1373,21 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         public void releasePage(ICachedPage page) {
             bufferCache.unpin(page);
+        }
+
+        public List<ClusterSearchResult> findCloseLeafCentroid(double[] queryVector,
+                IVectorDistanceFunction hyracksDistanceFunction, double epi) {
+            throw new UnsupportedOperationException("Cross-Pollination is not supported");
+        }
+
+        public List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector,
+                IVectorDistanceFunction hyracksDistanceFunction, double epi) {
+            throw new UnsupportedOperationException("Cross-Pollination is not supported");
+        }
+
+        public List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector,
+                IVectorDistanceFunction hyracksDistanceFunction, double epi) {
+            throw new UnsupportedOperationException("Cross-Pollination is not supported");
         }
     }
 }

@@ -30,7 +30,6 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
@@ -66,6 +65,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileRefe
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -124,8 +124,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
             boolean atomic, org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields)
-            throws HyracksDataException {
+            int numPrimaryKeyFields, int numIncludeFields) throws HyracksDataException {
 
         super(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
@@ -148,10 +147,10 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             String baseDirPath = fileManager.getBaseDir() + "_virtual_" + i;
             FileReference virtualFileRef = ioManager.resolve(baseDirPath);
             // Memory components use insertDataFrameFactory for normal inserts
-            VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
-                    new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
-                    metadataFrameFactory, insertDataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef,
-                    vectorAccessorFactory);
+            VectorClusteringTree vcTree =
+                    new VectorClusteringTree(virtualBufferCache, new VirtualFreePageManager(virtualBufferCache),
+                            interiorFrameFactory, leafFrameFactory, metadataFrameFactory, insertDataFrameFactory,
+                            cmpFactories, 1, vectorDimensions, virtualFileRef, vectorAccessorFactory);
             LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
                     filterHelper == null ? null : filterHelper.createFilter());
             memoryComponents.add(mutableComponent);
@@ -263,8 +262,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         LSMVCTreeOpContext ctx = (LSMVCTreeOpContext) ictx;
 
         // Debug logging
-        System.err.println("[LSMVCTree.modify] Operation: " + ctx.getOperation() +
-                          ", Thread: " + Thread.currentThread().getId());
+        System.err.println(
+                "[LSMVCTree.modify] Operation: " + ctx.getOperation() + ", Thread: " + Thread.currentThread().getId());
 
         ITupleReference indexTuple;
         if (ctx.getIndexTuple() != null) {
@@ -300,7 +299,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) (ctx.getCurrentMutableVCTreeAccessor());
         VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
+                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
         if (!memoryComponentAccessor.getIndex().isInitialized()) {
             memoryComponentAccessor.getIndex().setStaticStructure(staticAccessor);
@@ -326,7 +326,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      */
     private void delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
         // Get the current mutable VectorClusteringTree accessor
-        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor = (ctx.getCurrentMutableVCTreeAccessor());
+        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
+                (ctx.getCurrentMutableVCTreeAccessor());
         VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
                 (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
                         .createAccessor(NoOpIndexAccessParameters.INSTANCE);
@@ -489,8 +490,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     @Override
     public LSMVCTreeOpContext createOpContext(IIndexAccessParameters iap) {
-        return new LSMVCTreeOpContext(this, memoryComponents, getTreeFields(), getFilterFields(), getFilterCmpFactories(),
-                (IExtendedModificationOperationCallback) iap.getModificationCallback(),
+        return new LSMVCTreeOpContext(this, memoryComponents, getTreeFields(), getFilterFields(),
+                getFilterCmpFactories(), (IExtendedModificationOperationCallback) iap.getModificationCallback(),
                 iap.getSearchOperationCallback(), tracer, iap);
     }
 
@@ -622,8 +623,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         // Create LSMVCTreeSearchCursor in full-scan mode for merge operations
         // fullScanMode=true enables sequential cluster iteration (0→1→2→...)
         // returnDeletedTuples=true ensures antimatter tuples are visible for reconciliation
-        IIndexCursor cursor = new LSMVCTreeSearchCursor((ILSMIndexOperationContext) opCtx, returnDeletedTuples, true,
-                stats);
+        IIndexCursor cursor =
+                new LSMVCTreeSearchCursor((ILSMIndexOperationContext) opCtx, returnDeletedTuples, true, stats);
 
         return new LSMVCTreeMergeOperation(accessor, cursor, stats, mergeFileRefs.getInsertIndexFileReference(),
                 callback, getIndexIdentifier());

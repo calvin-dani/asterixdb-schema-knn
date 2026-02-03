@@ -24,9 +24,6 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -49,6 +46,7 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.util.IndexCursorUtils;
+import org.apache.logging.log4j.Level;
 
 /**
  * LSM search cursor for Vector Clustering Tree.
@@ -143,9 +141,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
-        this.reconciledOutputCount = 0;
-        this.nprobe = 10;
-        this.epsilon = 0.3;
+
         // Extract nprobe and epsilon from search predicate
         this.nprobe = extractNprobe(searchPred);
         double epsilon = extractEpsilon(searchPred);
@@ -272,8 +268,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
                     for (int i = 0; i < numVCTrees; i++) {
                         if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
-                            VectorClusteringSearchCursor vcCursor =
-                                    (VectorClusteringSearchCursor) rangeCursors[i];
+                            VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) rangeCursors[i];
                             // Reset cluster counter since we're replacing the initial DFS cluster
                             // with level-wise[0], not advancing to a second cluster
                             vcCursor.resetClustersProbed();
@@ -413,7 +408,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Print final reconciliation summary
         int minClustersProbed = getMinClustersProbed();
         System.err.println("\n========== LSM Vector Index Search Summary ==========");
-        System.err.println(String.format("Mode:                       %s", fullScanMode ? "MERGE (full scan)" : "QUERY"));
+        System.err
+                .println(String.format("Mode:                       %s", fullScanMode ? "MERGE (full scan)" : "QUERY"));
         System.err.println(String.format("K=%d, nprobe=%d", K, nprobe));
         System.err.println(String.format("Level-wise clusters:        %d",
                 clusterStrategy != null ? clusterStrategy.getLevelWiseClusterCount() : 0));
@@ -540,9 +536,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         try {
             long pkValue = LongPointable.getLong(tuple.getFieldData(2), tuple.getFieldStart(2) + 1);
             long yearValue = LongPointable.getLong(tuple.getFieldData(3), tuple.getFieldStart(3) + 1);
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Tuple FILTERED OUT (total filtered: %d) | pk=%d, year=%d",
-                    tuplesFilteredOut, pkValue, yearValue));
+            System.err.println(
+                    String.format("[LSMVCTreeSearchCursor] Tuple FILTERED OUT (total filtered: %d) | pk=%d, year=%d",
+                            tuplesFilteredOut, pkValue, yearValue));
         } catch (Exception e) {
             // Ignore logging errors
         }
@@ -952,9 +948,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         if (clusterStrategy.shouldStopAdvancing(minClustersExplored, resultsCollected)) {
             // We have enough results AND probed enough clusters - set flag to stop advancing
             stopAdvancing = true;
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Early termination: minClustersExplored=%d, returned=%d",
-                    minClustersExplored, resultsCollected));
+            System.err.println(
+                    String.format("[LSMVCTreeSearchCursor] Early termination: minClustersExplored=%d, returned=%d",
+                            minClustersExplored, resultsCollected));
             return;
         }
 
@@ -1000,12 +996,10 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                 }
                 return;
             }
-            return;
-        }
 
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Global cluster selected: cid=%d, distance=%.4f, dirPage=%d",
-                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
+            System.err.println(
+                    String.format("[LSMVCTreeSearchCursor] Global cluster selected: cid=%d, distance=%.4f, dirPage=%d",
+                            nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
 
             // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
             for (int i = 0; i < rangeCursors.length; i++) {
@@ -1031,9 +1025,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         if (!(cursor instanceof VectorClusteringSearchCursor)) {
             clusterExhausted[componentIndex] = true;
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Component %d is not VectorClusteringSearchCursor, skipping",
-                    componentIndex));
+            System.err.println(
+                    String.format("[LSMVCTreeSearchCursor] Component %d is not VectorClusteringSearchCursor, skipping",
+                            componentIndex));
             return;
         }
 
@@ -1051,9 +1045,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             PriorityQueueElement pqe = pqes[componentIndex];
             pqe.reset(vcCursor.getTuple());
             outputPriorityQueue.offer(pqe);
-            System.err.println(String.format(
-                    "[LSMVCTreeSearchCursor] Component %d opened cluster cid=%d (has data, O(1) access)",
-                    componentIndex, cluster.centroidId));
+            System.err.println(
+                    String.format("[LSMVCTreeSearchCursor] Component %d opened cluster cid=%d (has data, O(1) access)",
+                            componentIndex, cluster.centroidId));
         } else {
             clusterExhausted[componentIndex] = true;
             System.err.println(String.format("[LSMVCTreeSearchCursor] Component %d cluster cid=%d is empty",
@@ -1093,9 +1087,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return false;
         }
 
-        System.err.println(String.format(
-                "[LSMVCTreeSearchCursor] ALL components found cluster %d empty, skipping to next cluster",
-                currentClusterIndex[0]));
+        System.err.println(
+                String.format("[LSMVCTreeSearchCursor] ALL components found cluster %d empty, skipping to next cluster",
+                        currentClusterIndex[0]));
         return true; // Continue to next cluster
     }
 }

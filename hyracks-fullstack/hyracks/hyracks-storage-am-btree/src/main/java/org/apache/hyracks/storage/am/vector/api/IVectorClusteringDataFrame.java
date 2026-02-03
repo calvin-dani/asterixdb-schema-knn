@@ -58,7 +58,6 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      */
     double getDistanceToCentroid(int tupleIndex) throws HyracksDataException;
 
-
     /**
      * Inserts a vector record at the specified index, maintaining distance ordering.
      * @param tuple the vector record to insert
@@ -77,8 +76,8 @@ public interface IVectorClusteringDataFrame extends IVectorClusteringFrame {
      * @return ITupleReference representing the data tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    ITupleReference createDataTuple(double[] vector, double distance, int centroidId, ITupleReference originalTuple, VectorClusteringOpContext ctx)
-            throws HyracksDataException;
+    ITupleReference createDataTuple(double[] vector, double distance, int centroidId, ITupleReference originalTuple,
+            VectorClusteringOpContext ctx) throws HyracksDataException;
 
     void split(VectorClusteringDataFrame rightFrame, ITupleReference tuple, int insertIndex)
             throws HyracksDataException;

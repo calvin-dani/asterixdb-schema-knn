@@ -38,8 +38,8 @@ public class LSMVCTreeDataTupleWriterFactory implements ITreeIndexTupleWriterFac
     private final INullIntrospector nullIntrospector;
     private final boolean isAntimatter;
 
-    public LSMVCTreeDataTupleWriterFactory(ITypeTraits[] typeTraits, boolean isAntimatter,
-            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector) {
+    public LSMVCTreeDataTupleWriterFactory(ITypeTraits[] typeTraits, boolean isAntimatter, ITypeTraits nullTypeTraits,
+            INullIntrospector nullIntrospector) {
         this.typeTraits = typeTraits;
         this.isAntimatter = isAntimatter;
         this.nullTypeTraits = nullTypeTraits;

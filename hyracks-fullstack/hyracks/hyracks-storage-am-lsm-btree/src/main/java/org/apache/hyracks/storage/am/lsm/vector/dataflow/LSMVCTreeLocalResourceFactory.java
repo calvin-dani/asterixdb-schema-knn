@@ -51,30 +51,9 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
     protected final String indexName;
 
     /**
-     * Constructor without quantization parameters (for backward compatibility).
-     * Index creation will look for sidecar file if indexName is provided.
-     */
-    public LSMVCTreeLocalResourceFactory(IStorageManager storageManager, ITypeTraits[] typeTraits,
-            IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
-            IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
-            ILSMOperationTrackerFactory opTrackerFactory, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
-            ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-            IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
-            ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
-            Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
-            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,  
-            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields) {
-        this(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
-                opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
-                vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions,
-                vectorFields, nullTypeTraits, nullIntrospector, atomic, null);
-    }
-
-    /**
      * Constructor with index name for locating quantization sidecar file.
      * The sidecar file is expected at: dataset_dir/.quantization_{indexName}
      * 
-     * @param indexName The index name used to find the sidecar file (can be null if no sidecar expected)
      */
     public LSMVCTreeLocalResourceFactory(IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -84,9 +63,9 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
-            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic, String indexName) {
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
-            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields, String indexName) {
+            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
+            String indexName) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -106,7 +85,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
                 filterTypeTraits, filterCmpFactories, filterFields, opTrackerProvider, ioOpCallbackFactory,
                 pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                 mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions, vectorFields, nullTypeTraits,
-                nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields
-                indexName, null, null, null, null, null, null);
+                nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, indexName, null,
+                null, null, null, null, null);
     }
 }

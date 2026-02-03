@@ -26,6 +26,7 @@ import org.apache.asterix.common.context.AsterixVirtualBufferCacheProvider;
 import org.apache.asterix.common.context.IStorageComponentProvider;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
+import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.asterix.formats.nontagged.NullIntrospector;
 import org.apache.asterix.metadata.api.IResourceFactoryProvider;
 import org.apache.asterix.metadata.declared.MetadataProvider;
@@ -37,16 +38,15 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
-import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
-import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
-import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
-import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
 import org.apache.hyracks.algebricks.data.ITypeTraitProvider;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
+import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationSchedulerProvider;
@@ -161,7 +161,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields,indexName);
+                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, indexName);
         } else {
             return null;
         }
@@ -288,7 +288,8 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             includeFieldNames.get(i).toString());
                 }
 
-                cmpFactories[2 + numPrimaryKeys + i] = cmpFactoryProvider.getBinaryComparatorFactory(includeFieldType, true);
+                cmpFactories[2 + numPrimaryKeys + i] =
+                        cmpFactoryProvider.getBinaryComparatorFactory(includeFieldType, true);
             }
         }
 

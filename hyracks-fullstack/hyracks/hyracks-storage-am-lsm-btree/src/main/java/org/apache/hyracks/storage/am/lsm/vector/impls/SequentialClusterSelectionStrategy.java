@@ -87,11 +87,11 @@ public class SequentialClusterSelectionStrategy implements IClusterSelectionStra
         ClusterSearchResult next = firstCursor.getCurrentClusterResult();
 
         if (next != null) {
-            System.err.println(String.format(
-                    "[SequentialStrategy] Next cluster: cid=%d, dirPage=%d",
-                    next.centroidId, next.directoryPageId));
+            System.err.println(String.format("[SequentialStrategy] Next cluster: cid=%d, dirPage=%d", next.centroidId,
+                    next.directoryPageId));
         } else {
-            System.err.println("[SequentialStrategy] advanceToNextCluster succeeded but getCurrentClusterResult is null");
+            System.err
+                    .println("[SequentialStrategy] advanceToNextCluster succeeded but getCurrentClusterResult is null");
         }
 
         return next;

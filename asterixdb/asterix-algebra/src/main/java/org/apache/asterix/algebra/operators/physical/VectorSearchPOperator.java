@@ -131,10 +131,9 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
         }
 
         // Create and configure VectorSearchOperatorDescriptor via MetadataProvider
-        Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> vectorSearch =
-                mp.getVectorSearchRuntime(builder.getJobSpec(), outputVars, opSchema, typeEnv, context,
-                        jobGenParams.getRetainInput(), dataset, jobGenParams.getIndexName(), queryIndexes,
-                        tupleFilterFactory);
+        Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> vectorSearch = mp.getVectorSearchRuntime(
+                builder.getJobSpec(), outputVars, opSchema, typeEnv, context, jobGenParams.getRetainInput(), dataset,
+                jobGenParams.getIndexName(), queryIndexes, tupleFilterFactory);
 
         IOperatorDescriptor opDesc = vectorSearch.first;
         opDesc.setSourceLocation(unnestMap.getSourceLocation());

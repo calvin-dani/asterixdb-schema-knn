@@ -21,9 +21,7 @@ package org.apache.hyracks.storage.am.vector.frames;
 
 import java.io.DataOutput;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
@@ -90,7 +88,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         return buf.getDouble(distanceOff);
     }
 
-
     @Override
     public void insert(ITupleReference tuple, int tupleIndex) {
         // Use the parent class's insert method which correctly manages slots and space
@@ -115,7 +112,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
         }
         return FrameOpSpaceStatus.INSUFFICIENT_SPACE;
     }
-
 
     /**
      * Find the insertion position for a tuple based on distance to maintain sorted order.
@@ -156,8 +152,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
      * @param primaryKey Primary key bytes to match (binary format)
      * @return Tuple index if found, -1 if not found
      */
-    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey)
-            throws HyracksDataException {
+    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey) throws HyracksDataException {
 
         // Step 1: Use RIGHT BOUND search to find upper boundary
         int upperBound = findInsertPosition(distance);
@@ -181,7 +176,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
 
         return -1; // Not found
     }
-
 
     /**
      * Split this data frame using BTree-style approach.
@@ -289,8 +283,7 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
      * @throws HyracksDataException if tuple creation fails
      */
     public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
-            ITupleReference originalTuple, VectorClusteringOpContext ctx)
-            throws HyracksDataException {
+            ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
         try {
             // Calculate numIncludeFields from tuple structure
             // Input: [vector, include_fields..., pk]
@@ -337,7 +330,6 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
             throw new HyracksDataException("Failed to create data tuple", e);
         }
     }
-
 
     public int getFreeSpaceOff() {
         return buf.getInt(Constants.FREE_SPACE_OFFSET);

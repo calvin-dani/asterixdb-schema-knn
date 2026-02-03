@@ -213,8 +213,8 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
                 IAType fieldType = searchInfo.recordType.getSubFieldType(fieldPath);
                 filterVarToType.put(newVar, fieldType);
 
-                System.err.println("=== Created " + newVar + " for field '" + fieldName
-                        + "' -> physical field " + includeFieldPhysicalIndex + " ===");
+                System.err.println("=== Created " + newVar + " for field '" + fieldName + "' -> physical field "
+                        + includeFieldPhysicalIndex + " ===");
             }
 
             includeFieldPhysicalIndex++;
@@ -323,8 +323,7 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
 
         MetadataProvider mp = (MetadataProvider) context.getMetadataProvider();
 
-        Dataset dataset =
-                mp.findDataset(params.getDatabaseName(), params.getDataverseName(), params.getDatasetName());
+        Dataset dataset = mp.findDataset(params.getDatabaseName(), params.getDataverseName(), params.getDatasetName());
         if (dataset == null) {
             return null;
         }
@@ -392,8 +391,7 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
 
         if (fid.equals(BuiltinFunctions.FIELD_ACCESS_BY_NAME)) {
             if (funcExpr.getArguments().size() >= 2) {
-                String fieldName =
-                        AccessMethodUtils.getStringConstant(funcExpr.getArguments().get(1));
+                String fieldName = AccessMethodUtils.getStringConstant(funcExpr.getArguments().get(1));
                 if (fieldName != null) {
                     fieldNames.add(fieldName);
                 }

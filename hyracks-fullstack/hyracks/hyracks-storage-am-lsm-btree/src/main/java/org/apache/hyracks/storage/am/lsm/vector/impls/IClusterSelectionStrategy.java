@@ -46,8 +46,8 @@ public interface IClusterSelectionStrategy {
      * @param k Target number of results
      * @throws HyracksDataException if initialization fails
      */
-    void initialize(VectorClusteringTree vcTree, double[] queryVector,
-                    IVectorDistanceFunction distFunc, int k) throws HyracksDataException;
+    void initialize(VectorClusteringTree vcTree, double[] queryVector, IVectorDistanceFunction distFunc, int k)
+            throws HyracksDataException;
 
     /**
      * Get the next cluster to explore.

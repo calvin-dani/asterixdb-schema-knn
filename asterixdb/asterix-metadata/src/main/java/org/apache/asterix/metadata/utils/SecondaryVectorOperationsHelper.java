@@ -93,8 +93,8 @@ import org.apache.hyracks.dataflow.std.group.preclustered.PreclusteredGroupOpera
 import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
-import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
@@ -474,9 +474,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
 
         // Calculate number of include fields for field reordering in createTransformedTuple
-        int numIncludeFieldsForBulkLoader = (indexDetails.getIncludeFieldNames() != null)
-                ? indexDetails.getIncludeFieldNames().size()
-                : 0;
+        int numIncludeFieldsForBulkLoader =
+                (indexDetails.getIncludeFieldNames() != null) ? indexDetails.getIncludeFieldNames().size() : 0;
 
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
