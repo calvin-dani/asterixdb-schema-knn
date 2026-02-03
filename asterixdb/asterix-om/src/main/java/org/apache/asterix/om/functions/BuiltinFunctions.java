@@ -1165,7 +1165,8 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
             FunctionConstants.newAsterix("vector-distance-constant", 3);
     // Vector search functions
-    public static final FunctionIdentifier ANN_DISTANCE = FunctionConstants.newAsterix("ann-distance", 3);
+    public static final FunctionIdentifier ANN_DISTANCE =
+            FunctionConstants.newAsterix("ann-distance", FunctionIdentifier.VARARGS);
 
     // KMEAN function
     public static final FunctionIdentifier KMEAN_FAISS = FunctionConstants.newAsterix("kmean-faiss", 3);

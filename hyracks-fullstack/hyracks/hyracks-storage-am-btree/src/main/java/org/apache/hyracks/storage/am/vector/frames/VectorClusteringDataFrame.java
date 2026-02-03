@@ -148,7 +148,8 @@ public class VectorClusteringDataFrame extends VectorClusteringNSMFrame implemen
      * @param primaryKey Primary key bytes to match (binary format)
      * @return Tuple index if found, -1 if not found
      */
-    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey) throws HyracksDataException {
+    public int findTupleByDistanceAndPrimaryKey(double distance, byte[] primaryKey, int pkFieldIndex)
+            throws HyracksDataException {
 
         // Step 1: Use RIGHT BOUND search to find upper boundary
         int upperBound = findInsertPosition(distance);

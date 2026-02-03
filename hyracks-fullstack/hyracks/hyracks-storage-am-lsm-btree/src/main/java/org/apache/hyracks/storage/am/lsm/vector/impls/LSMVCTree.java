@@ -265,8 +265,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         LSMVCTreeOpContext ctx = (LSMVCTreeOpContext) ictx;
 
         // Debug logging
-        System.err.println("[LSMVCTree.modify] Operation: " + ctx.getOperation() +
-                          ", Thread: " + Thread.currentThread().getId());
+        System.err.println(
+                "[LSMVCTree.modify] Operation: " + ctx.getOperation() + ", Thread: " + Thread.currentThread().getId());
 
         ITupleReference indexTuple;
         if (ctx.getIndexTuple() != null) {
