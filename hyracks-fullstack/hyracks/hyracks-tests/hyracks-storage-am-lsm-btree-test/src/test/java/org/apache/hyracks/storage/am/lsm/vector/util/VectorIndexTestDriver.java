@@ -36,7 +36,8 @@ import org.junit.Test;
 public abstract class VectorIndexTestDriver {
 
     // Define the 24 leaf centroids (c10 ~ c33) - shared between methods
-    private static final double[][] LEAF_CENTROIDS = {
+    // Protected for subclass access (e.g., insert tests that need to generate records near centroids)
+    protected static final double[][] LEAF_CENTROIDS = {
             // Cluster 2.1: c10, c11, c12
             { 20.0, 30.0, 20.0 }, { 20.0, 20.0, 30.0 }, { 35.0, 25.0, 25.0 },
             // Cluster 2.2: c13, c14, c15
@@ -54,7 +55,8 @@ public abstract class VectorIndexTestDriver {
             // Cluster 2.8: c31, c32, c33
             { 20.0, -30.0, -20.0 }, { 20.0, -20.0, -30.0 }, { 35.0, -25.0, -25.0 } };
 
-    protected abstract void runTest(ISerializerDeserializer[] fieldSerdes, List<ITupleReference> centroids,
+    protected abstract void runTest(ISerializerDeserializer[] centroidSerdes,
+            ISerializerDeserializer[] dataRecordSerdes, List<ITupleReference> centroids,
             List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster, int vectorDimension,
             List<List<ITupleReference>> leafRecords) throws Exception;
 
@@ -75,9 +77,15 @@ public abstract class VectorIndexTestDriver {
         //          cluster 2.7: {c28, c29, c30} - negative x, negative y, negative z quadrant
         //          cluster 2.8: {c31, c32, c33} - positive x, negative y, negative z quadrant
 
-        // Field serializers: centroid ID + Double array vector (3D)
-        ISerializerDeserializer[] fieldSerdes = { IntegerSerializerDeserializer.INSTANCE, // centroid ID
+        // Centroid serializers: centroid ID + Double array vector (3D)
+        ISerializerDeserializer[] centroidSerdes = { IntegerSerializerDeserializer.INSTANCE, // centroid ID
                 DoubleArraySerializerDeserializer.INSTANCE // 3D vector
+        };
+
+        // Data record serializers: distance + centroid ID + primary key
+        ISerializerDeserializer[] dataRecordSerdes = { DoubleSerializerDeserializer.INSTANCE, // distance
+                IntegerSerializerDeserializer.INSTANCE, // centroid ID
+                new UTF8StringSerializerDeserializer() // primary key
         };
 
         // Generate centroids according to the hierarchical structure described in comments
@@ -120,7 +128,7 @@ public abstract class VectorIndexTestDriver {
         // Generate 100 records for each leaf centroid (c10 ~ c33)
         List<List<ITupleReference>> dataRecords = generateDataRecords();
 
-        runTest(fieldSerdes, centroids, numClustersPerLevel, centroidsPerCluster, 3, dataRecords);
+        runTest(centroidSerdes, dataRecordSerdes, centroids, numClustersPerLevel, centroidsPerCluster, 3, dataRecords);
     }
 
     /**
@@ -144,15 +152,17 @@ public abstract class VectorIndexTestDriver {
 
     /**
      * Generate 100 records for each leaf centroid (c10 ~ c33)
-     * Each record format: <distance_to_centroid, vector, primary_key>
+     * Each record format: <distance_to_centroid, centroid_id, primary_key>
      */
     private List<List<ITupleReference>> generateDataRecords() throws Exception {
         List<List<ITupleReference>> allLeafRecords = new ArrayList<>();
 
-        // Generate 100 records for each of the 24 leaf centroids
+        // Generate 100 records for each of the 24 leaf centroids (c10 ~ c33)
         for (int centroidIndex = 0; centroidIndex < LEAF_CENTROIDS.length; centroidIndex++) {
-            double[] centroid = LEAF_CENTROIDS[centroidIndex];
             List<ITupleReference> recordsForCentroid = new ArrayList<>();
+
+            // Centroid ID: c10 ~ c33 (global IDs)
+            int centroidId = centroidIndex + 10;
 
             // Generate records in order of distance from centroid
             double baseDistance = 0.2;
@@ -175,19 +185,11 @@ public abstract class VectorIndexTestDriver {
                     if (recordCount >= 100)
                         break;
 
-                    // Create record vector by adding direction to centroid
-                    double[] recordVector =
-                            { centroid[0] + direction[0], centroid[1] + direction[1], centroid[2] + direction[2] };
-
-                    // Calculate actual distance
-                    double distance = Math.sqrt(
-                            direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
-
                     // Create primary key
-                    String primaryKey = "pk_c_" + (centroidIndex + 10) + "_" + recordCount;
+                    String primaryKey = "pk_c_" + centroidId + "_" + recordCount;
 
-                    // Create record tuple with format: <distance, vector, primary_key>
-                    ITupleReference recordTuple = createRecordTuple(distance, recordVector, primaryKey);
+                    // Create record tuple for bulk loading
+                    ITupleReference recordTuple = createBulkLoadRecordTuple(currentDistance, centroidId, primaryKey);
                     recordsForCentroid.add(recordTuple);
                     recordCount++;
                 }
@@ -203,25 +205,50 @@ public abstract class VectorIndexTestDriver {
     }
 
     /**
-     * Helper method to create a record tuple with format: <distance, vector, primary_key>
+     * Helper method to create a bulk load record tuple.
+     * Format: <distance_to_centroid, centroid_id, primary_key>
+     * Note: distance and centroid_id use raw types (no ADM type tags).
      */
-    private ITupleReference createRecordTuple(double distance, double[] vector, String primaryKey) throws Exception {
-        // Create tuple builder
-        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+    private ITupleReference createBulkLoadRecordTuple(double distance, int centroidId, String primaryKey)
+            throws Exception {
+        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
         ArrayTupleReference tupleRef = new ArrayTupleReference();
 
-        // Create field serializers and values
-        ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE, // distance
-                DoubleSerializerDeserializer.INSTANCE, // cosine similarity, useless for now
-                DoubleArraySerializerDeserializer.INSTANCE, // vector
-                new UTF8StringSerializerDeserializer() // primary key
-        };
+        // Field 0: distance_to_centroid (raw double - 8 bytes, no type tag)
+        tupleBuilder.getDataOutput().writeDouble(distance);
+        tupleBuilder.addFieldEndOffset();
 
-        Object[] fieldValues = new Object[] { distance, 0d, vector, primaryKey };
+        // Field 1: centroid_id (raw int - 4 bytes, no type tag)
+        tupleBuilder.getDataOutput().writeInt(centroidId);
+        tupleBuilder.addFieldEndOffset();
 
-        // Build the tuple using TupleUtils
-        TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
+        // Field 2: primary_key (UTF8 string)
+        new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
+        tupleBuilder.addFieldEndOffset();
 
+        tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
+        return tupleRef;
+    }
+
+    /**
+     * Helper method to create an insert/delete record tuple.
+     * Format: <vector_embedding, primary_key>
+     * Note: vector_embedding has type tag, primary_key does not.
+     */
+    private ITupleReference createInsertRecordTuple(double[] vector, String primaryKey) throws Exception {
+        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(2);
+        ArrayTupleReference tupleRef = new ArrayTupleReference();
+
+        // Field 0: vector_embedding (AORDEREDLIST - type tag + serialized array)
+        tupleBuilder.getDataOutput().writeByte(0x38); // AORDEREDLIST type tag
+        DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
+        tupleBuilder.addFieldEndOffset();
+
+        // Field 1: primary_key (no type tag - dynamic field)
+        new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
+        tupleBuilder.addFieldEndOffset();
+
+        tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
         return tupleRef;
     }
 }

@@ -121,6 +121,11 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     // false = query mode (level-wise + DFS, nprobe/K-based early termination)
     private final boolean fullScanMode;
 
+    // Field index where primary keys start in the data tuple
+    // Non-quantized format: 2 (distance, centroidId, PK...)
+    // Quantized format: 4 (distance, quantized_distance, quantized_embedding, centroidId, PK...)
+    private int pkStartField;
+
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
         this(opCtx, false, false, NoOpIndexCursorStats.INSTANCE);
     }
@@ -141,6 +146,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
         // Extract K from search predicate for cluster advancement decisions
         this.K = extractK(searchPred);
+
+        // Extract pkStartField from search predicate for conditional tuple format
+        this.pkStartField = ((VectorPointPredicate) searchPred).getPkStartField();
 
         // Extract nprobe and epsilon from search predicate
         this.nprobe = extractNprobe(searchPred);
@@ -534,8 +542,10 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Tuple fails filter - log for debugging
         tuplesFilteredOut++;
         try {
-            long pkValue = LongPointable.getLong(tuple.getFieldData(2), tuple.getFieldStart(2) + 1);
-            long yearValue = LongPointable.getLong(tuple.getFieldData(3), tuple.getFieldStart(3) + 1);
+            long pkValue =
+                    LongPointable.getLong(tuple.getFieldData(pkStartField), tuple.getFieldStart(pkStartField) + 1);
+            long yearValue = LongPointable.getLong(tuple.getFieldData(pkStartField + 1),
+                    tuple.getFieldStart(pkStartField + 1) + 1);
             System.err.println(
                     String.format("[LSMVCTreeSearchCursor] Tuple FILTERED OUT (total filtered: %d) | pk=%d, year=%d",
                             tuplesFilteredOut, pkValue, yearValue));
@@ -704,9 +714,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     @Override
     protected void setPriorityQueueComparator() {
-        // For vector index: sort by distance (field 0), then primary key (field 2)
-        // Tuple format: <distance:field0, centroid_id:field1, primary_key:field2>
-        // We skip centroid_id (field 1) in comparisons
+        // For vector index: sort by distance (field 0), then primary key (field pkStartField+)
+        // Skip secondary fields between distance and PKs (centroidId, and optionally quantized fields)
         if (pqCmp == null || pqCmp.getMultiComparator() != cmp) {
             pqCmp = new VectorPriorityQueueComparator(cmp);
         }
@@ -714,8 +723,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     /**
      * Custom priority queue comparator for vector index tuples.
-     * Compares field 0 (distance) and field 2 (primary_key), skipping field 1 (centroid_id).
-     * Must manually skip type tags since fields are type-tagged but comparators expect raw data.
+     * Compares field 0 (distance) then fields from pkStartField onward (PKs + includes),
+     * skipping secondary fields (centroidId, and optionally quantized_distance/quantized_embedding).
      */
     private class VectorPriorityQueueComparator extends PriorityQueueComparator {
 
@@ -729,10 +738,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             ITupleReference tupleB = elementB.getTuple();
 
             try {
-                // Tuple format: [distance, centroidId, primary_keys..., include_fields...]
-                // Compare order: distance first, then all remaining fields (PKs + includes)
-
-                // We skip centroidId since tuples from different clusters can coexist
+                // Tuple format (non-quantized): [distance, centroidId, PKs..., includes...]
+                // Tuple format (quantized): [distance, quantized_dist, quantized_embed, centroidId, PKs..., includes...]
+                // Compare order: distance first, then PKs + includes (skip secondary fields)
 
                 // Compare field 0 (distance) using ADM-aware comparator 0
                 int result = cmp.getComparators()[0].compare(tupleA.getFieldData(0), tupleA.getFieldStart(0),
@@ -743,16 +751,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                     return result;
                 }
 
-                // Compare remaining fields starting at field 2 (include fields + primary keys)
-                // We compare all fields for total ordering in the priority queue
-                int numRemainingFields = cmp.getComparators().length - 2; // All fields after distance and centroidId
+                // Compare remaining fields starting at pkStartField (PKs + includes)
+                int numRemainingFields = cmp.getComparators().length - pkStartField;
                 for (int i = 0; i < numRemainingFields; i++) {
-                    int fieldIdx = 2 + i;
-                    int cmpIdx = 2 + i;
+                    int fieldIdx = pkStartField + i;
+                    int cmpIdx = pkStartField + i;
 
                     // Check if field exists in tuple before comparing
                     if (fieldIdx >= tupleA.getFieldCount() || fieldIdx >= tupleB.getFieldCount()) {
-                        break; // One tuple has fewer fields, skip remaining comparisons
+                        break;
                     }
 
                     result = cmp.getComparators()[cmpIdx].compare(tupleA.getFieldData(fieldIdx),
@@ -789,10 +796,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     protected int compare(MultiComparator cmp, ITupleReference tupleA, ITupleReference tupleB)
             throws HyracksDataException {
 
-        // Tuple format: [distance, centroidId, primary_keys..., include_fields...]
-        // Compare order: distance first, then primary keys (skip centroidId)
-        // TODO: In the future, we may implement filtered search based on INCLUDE fields
-        //       to support predicates like "WHERE movie_year > 2000" during vector search
+        // Tuple format (non-quantized): [distance, centroidId, PKs..., includes...]
+        // Tuple format (quantized): [distance, quantized_dist, quantized_embed, centroidId, PKs..., includes...]
+        // Compare order: distance first, then PKs + includes (skip secondary fields)
 
         // Compare field 0 (distance) using ADM-aware comparator 0
         int result = cmp.getComparators()[0].compare(tupleA.getFieldData(0), tupleA.getFieldStart(0),
@@ -802,18 +808,16 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return result;
         }
 
-        // Compare remaining fields starting at field 2 (include fields + primary keys)
-        // Comparators array: [0=distance, 1=centroidId, 2+=include/PK fields]
-        // We skip comparator 1 (centroidId) since tuples from different clusters can coexist
-        // We compare all remaining fields for total ordering
-        int numRemainingFields = cmp.getComparators().length - 2;
+        // Compare remaining fields starting at pkStartField (PKs + includes)
+        // Skip secondary fields (centroidId, and optionally quantized_distance/quantized_embedding)
+        int numRemainingFields = cmp.getComparators().length - pkStartField;
         for (int i = 0; i < numRemainingFields; i++) {
-            int fieldIdx = 2 + i;
-            int cmpIdx = 2 + i;
+            int fieldIdx = pkStartField + i;
+            int cmpIdx = pkStartField + i;
 
             // Check if field exists in tuple before comparing
             if (fieldIdx >= tupleA.getFieldCount() || fieldIdx >= tupleB.getFieldCount()) {
-                break; // One tuple has fewer fields, skip remaining comparisons
+                break;
             }
 
             result = cmp.getComparators()[cmpIdx].compare(tupleA.getFieldData(fieldIdx), tupleA.getFieldStart(fieldIdx),

@@ -58,13 +58,10 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     private int entriesInCurrentDataPage; // Number of entries in current data page
     private int entriesInCurrentDirectoryPage; // Number of entries in current directory page
     private int currentDataPageId; // Page ID of the current data page
-    private ISerializerDeserializer[] dataFrameSerds;
     private ITreeIndexTupleWriter directoryFrameTupleWriter;
     private ITreeIndexTupleWriter dataFrameTupleWriter;
-    private final VectorClusteringTree vcTreeIndex;
     private int firstDirectoryPageId;
     private int currentCentroidId;
-    private int counter = 0;
 
     public VCTreeBulkLoader(float fillFactor, IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, IBufferCacheWriteContext writeContext,
@@ -76,8 +73,6 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
         this.leafFrame = vectorTree.getLeafFrameFactory().createFrame();
         this.currentDirectoryFrame = vectorTree.getMetadataFrameFactory().createFrame();
         this.currentDataFrame = vectorTree.getDataFrameFactory().createFrame();
-        this.dataFrameSerds = dataFrameSerds;
-        this.vcTreeIndex = vectorTree;
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.currentLeafClusterIndex = 0;
@@ -406,7 +401,7 @@ public class VCTreeBulkLoader extends AbstractTreeIndexBulkLoader {
     @Override
     public void end() throws HyracksDataException {
         // Write the final data page if it has entries
-        // BUG FIX: Previously, we called write(currentDataPage) directly,
+        // Previously, we called write(currentDataPage) directly,
         // which wrote the page but didn't create a directory entry.
         // This made the last records inaccessible during search.
         if (entriesInCurrentDataPage > 0) {

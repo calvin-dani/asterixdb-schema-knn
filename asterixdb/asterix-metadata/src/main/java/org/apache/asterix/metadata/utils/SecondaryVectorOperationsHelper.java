@@ -81,6 +81,8 @@ import org.apache.hyracks.api.job.JobSpecification;
 import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
 import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
+import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
+import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
@@ -420,8 +422,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID permitUUID = UUID.randomUUID();
         UUID materializedDataUUID = UUID.randomUUID();
 
+        // Extract WITH clause parameters early (needed for output record descriptor construction)
+        AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
+        String distanceMetric =
+                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
+        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        boolean isQuantized = (description != null);
+
         // Create output record descriptor for VCTreeBulkLoaderAndGroupingOperatorDescriptor
-        // Output tuple format: [distance, centroidId, pk..., include_fields...]
         // secondaryRecDesc format: [embedding, include_fields..., pk...]
         // numSecondaryKeys = 1 (embedding) + numIncludeFields
         // So in secondaryRecDesc:
@@ -430,47 +439,55 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         //   - Fields numSecondaryKeys to numSecondaryKeys+numPrimaryKeys-1: primary keys
         int numIncludeFieldsForOutput = numSecondaryKeys - 1; // exclude embedding
 
-        ISerializerDeserializer[] outputRecFields =
-                new ISerializerDeserializer[2 + numPrimaryKeys + numIncludeFieldsForOutput];
-        ITypeTraits[] outputTypeTraits = new ITypeTraits[2 + numPrimaryKeys + numIncludeFieldsForOutput];
+        // Number of secondary fields depends on quantization:
+        // Non-quantized: [distance, centroidId, pk..., includes...] → 2 secondary fields
+        // Quantized: [distance, quantized_distance, quantized_embedding, centroidId, pk..., includes...] → 4
+        int numOutputSecondaryFields = isQuantized ? 4 : 2;
 
-        // Use raw serializers (without ADM type tags) to match VCTreeBulkLoaderAndGroupingOperatorDescriptor
-        // Distance field (raw double - 8 bytes, no type tag)
+        ISerializerDeserializer[] outputRecFields =
+                new ISerializerDeserializer[numOutputSecondaryFields + numPrimaryKeys + numIncludeFieldsForOutput];
+        ITypeTraits[] outputTypeTraits =
+                new ITypeTraits[numOutputSecondaryFields + numPrimaryKeys + numIncludeFieldsForOutput];
+
+        // Field 0: Distance (raw double - 8 bytes, no type tag)
         outputRecFields[0] = DoubleSerializerDeserializer.INSTANCE;
         outputTypeTraits[0] = new FixedLengthTypeTrait(8);
 
-        // CentroidId field (raw int - 4 bytes, no type tag)
-        outputRecFields[1] = IntegerSerializerDeserializer.INSTANCE;
-        outputTypeTraits[1] = new FixedLengthTypeTrait(4);
-
-        // Add primary key fields first (they are at positions numSecondaryKeys to numSecondaryKeys+numPrimaryKeys-1 in secondaryRecDesc)
-        for (int i = 0; i < numPrimaryKeys; i++) {
-            int secondaryRecIdx = numSecondaryKeys + i;
-            outputRecFields[2 + i] = secondaryRecDesc.getFields()[secondaryRecIdx];
-            outputTypeTraits[2 + i] = secondaryRecDesc.getTypeTraits()[secondaryRecIdx];
+        if (isQuantized) {
+            // Field 1: quantized_distance (variable-length byte array)
+            outputRecFields[1] = ByteArraySerializerDeserializer.INSTANCE;
+            outputTypeTraits[1] = VarLengthTypeTrait.INSTANCE;
+            // Field 2: quantized_embedding (variable-length byte array)
+            outputRecFields[2] = ByteArraySerializerDeserializer.INSTANCE;
+            outputTypeTraits[2] = VarLengthTypeTrait.INSTANCE;
+            // Field 3: centroidId (raw int - 4 bytes, no type tag)
+            outputRecFields[3] = IntegerSerializerDeserializer.INSTANCE;
+            outputTypeTraits[3] = new FixedLengthTypeTrait(4);
+        } else {
+            // Field 1: centroidId (raw int - 4 bytes, no type tag)
+            outputRecFields[1] = IntegerSerializerDeserializer.INSTANCE;
+            outputTypeTraits[1] = new FixedLengthTypeTrait(4);
         }
 
-        // Add include fields after PKs (they are at positions 1 to numSecondaryKeys-1 in secondaryRecDesc)
+        // Add primary key fields
+        for (int i = 0; i < numPrimaryKeys; i++) {
+            int secondaryRecIdx = numSecondaryKeys + i;
+            outputRecFields[numOutputSecondaryFields + i] = secondaryRecDesc.getFields()[secondaryRecIdx];
+            outputTypeTraits[numOutputSecondaryFields + i] = secondaryRecDesc.getTypeTraits()[secondaryRecIdx];
+        }
+
+        // Add include fields after PKs
         for (int i = 0; i < numIncludeFieldsForOutput; i++) {
             int secondaryRecIdx = 1 + i; // Skip embedding at index 0
-            outputRecFields[2 + numPrimaryKeys + i] = secondaryRecDesc.getFields()[secondaryRecIdx];
-            outputTypeTraits[2 + numPrimaryKeys + i] = secondaryRecDesc.getTypeTraits()[secondaryRecIdx];
+            outputRecFields[numOutputSecondaryFields + numPrimaryKeys + i] =
+                    secondaryRecDesc.getFields()[secondaryRecIdx];
+            outputTypeTraits[numOutputSecondaryFields + numPrimaryKeys + i] =
+                    secondaryRecDesc.getTypeTraits()[secondaryRecIdx];
         }
 
         RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
 
-        // Extract distance metric from WITH clause
-        AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
-        String distanceMetric =
-                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
-        //        System.err.println("Distance metric from CREATE INDEX: " + distanceMetric);
-
-        // Extract vector dimension from WITH clause
-        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
-        //        System.err.println("Vector dimension from CREATE INDEX: " + vectorDimension);
-
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
-        // Use ColumnAccessEvalFactory(0) to access the first field (vector field) from processed tuple
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
 
         // Calculate number of include fields for field reordering in createTransformedTuple
@@ -480,7 +497,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
-                        distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader);
+                        distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader, isQuantized);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);

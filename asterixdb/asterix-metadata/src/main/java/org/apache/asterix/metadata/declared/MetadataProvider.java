@@ -96,6 +96,7 @@ import org.apache.asterix.metadata.utils.DataPartitioningProvider;
 import org.apache.asterix.metadata.utils.DatasetUtil;
 import org.apache.asterix.metadata.utils.FullTextUtil;
 import org.apache.asterix.metadata.utils.IndexUtil;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.functions.IFunctionExtensionManager;
 import org.apache.asterix.om.functions.IFunctionManager;
@@ -177,6 +178,7 @@ import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.IFullTextConfigE
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.IBinaryTokenizerFactory;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor;
 import org.apache.hyracks.storage.am.rtree.dataflow.RTreeSearchOperatorDescriptor;
+import org.apache.hyracks.storage.am.vector.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
@@ -797,7 +799,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
     public Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> getVectorSearchRuntime(JobSpecification jobSpec,
             List<LogicalVariable> outputVars, IOperatorSchema opSchema, IVariableTypeEnvironment typeEnv,
             JobGenContext context, boolean retainInput, Dataset dataset, String indexName, int[] queryFields,
-            ITupleFilterFactory tupleFilterFactory) throws AlgebricksException {
+            ITupleFilterFactory tupleFilterFactory, int searchApproach) throws AlgebricksException {
         // Get vector index metadata
         Index vectorIndex = MetadataManager.INSTANCE.getIndex(mdTxnCtx, dataset.getDatabaseName(),
                 dataset.getDataverseName(), dataset.getDatasetName(), indexName);
@@ -827,14 +829,15 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         IIndexDataflowHelperFactory indexDataflowHelperFactory = new IndexDataflowHelperFactory(
                 storageComponentProvider.getStorageManager(), partitioningProperties.getSplitsProvider());
 
-        // Get secondary key count for vector index
-        // For vector index: secondary keys = distance (double) + cosine (double) + embedding (double[])
-        // numSecondaryKeys = 3 fields (distance, cosine, embedding)
-        // But we only output PK fields, so we skip these 3 fields in the tuple projector
-        // TODO: Verify KeyFieldTypeUtil.getNumSecondaryKeys() works correctly for vector indexes,
-        //       or keep hardcoded value if tuple format is always <distance, cosine, embedding, pk...>
-        // TODO : Make this dynamic if vector index format changes in the future
-        int numSecondaryKeys = 2; // Hardcoded: distance, cosine, embedding
+        // Get secondary key count for vector index (conditional on quantization)
+        // Non-quantized: [distance, centroidId, PK..., includes...] → numSecondaryKeys = 2
+        // Quantized:     [distance, quantized_dist, quantized_embed, centroidId, PK..., includes...] → numSecondaryKeys = 4
+        Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) vectorIndex.getIndexDetails();
+        AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        boolean isQuantized = (description != null);
+        int numSecondaryKeys = isQuantized ? VCTreeDataTupleConstants.Q_NUM_SECONDARY_FIELDS
+                : VCTreeDataTupleConstants.NQ_NUM_SECONDARY_FIELDS;
 
         // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples
         // This factory is serializable and passed through the job pipeline
@@ -848,9 +851,10 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
 
         // Create VectorSearchOperatorDescriptor
         int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
-        VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
-                queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory);
+        VectorSearchOperatorDescriptor vectorSearchOp =
+                new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc, queryFields, indexDataflowHelperFactory,
+                        retainInput, searchCallbackFactory, vectorAccessorFactory, distanceFunctionFactory,
+                        partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory, searchApproach);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }

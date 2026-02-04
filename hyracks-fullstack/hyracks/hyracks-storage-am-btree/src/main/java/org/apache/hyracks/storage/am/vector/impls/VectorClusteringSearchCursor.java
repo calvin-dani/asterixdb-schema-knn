@@ -131,10 +131,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         this.rootPageId = rootPageId;
     }
 
-    public void setTargetMetadataPageId(long targetMetadataPageId) {
-        this.targetMetadataPageId = targetMetadataPageId;
-    }
-
     public void setFrameFactories(ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory) {
         this.interiorFrameFactory = interiorFrameFactory;
@@ -213,28 +209,26 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Get query vector and other parameters from initial state
         // The query vector is passed via IIndexAccessParameters from the operator layer
-        if (initialState instanceof VectorCursorInitialState) {
-            VectorCursorInitialState vectorState = (VectorCursorInitialState) initialState;
-            if (vectorState.getQueryVector() != null) {
-                this.queryVector = vectorState.getQueryVector();
-            }
-            // If targetMetadataPageId is already set in the state, use it directly
-            if (vectorState.getMetadataPageId() != -1) {
-                this.targetMetadataPageId = vectorState.getMetadataPageId();
-            }
-            // Use rootPageId from initial state if provided
-            if (vectorState.getRootPageId() != 0) {
-                this.rootPageId = vectorState.getRootPageId();
-            }
+        VectorCursorInitialState vectorState = (VectorCursorInitialState) initialState;
+        if (vectorState.getQueryVector() != null) {
+            this.queryVector = vectorState.getQueryVector();
+        }
+        // If targetMetadataPageId is already set in the state, use it directly
+        if (vectorState.getMetadataPageId() != -1) {
+            this.targetMetadataPageId = vectorState.getMetadataPageId();
+        }
+        // Use rootPageId from initial state if provided
+        if (vectorState.getRootPageId() != 0) {
+            this.rootPageId = vectorState.getRootPageId();
+        }
 
-            this.accessor = vectorState.getIndexAccessor();
+        this.accessor = vectorState.getIndexAccessor();
 
-            // Get distance function from initial state
-            this.distanceFunction = vectorState.getDistanceFunction();
-            // Fallback to Euclidean if not provided
-            if (this.distanceFunction == null) {
-                this.distanceFunction = VectorUtils::calculateEuclideanDistance;
-            }
+        // Get distance function from initial state
+        this.distanceFunction = vectorState.getDistanceFunction();
+        // Fallback to Euclidean if not provided
+        if (this.distanceFunction == null) {
+            this.distanceFunction = VectorUtils::calculateEuclideanDistance;
         }
 
         // Extract nprobe and epsilon from predicate
@@ -539,7 +533,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /**
      * Advance to the next closest cluster.
      * This method is called by the LSM layer when it needs more data.
-     *
+     * <p>
      * Supports two modes:
      * - Full-scan mode: Sequential iteration (cluster 0 → 1 → 2 → ...)
      * - Query mode: Distance-based iteration (closest clusters first)
@@ -729,6 +723,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /**
      * Move to the next data page using the linked list structure.
      * This is more efficient than going back to the metadata page each time.
+     *
      * @return true if successfully moved to next page, false if no more pages
      */
     private boolean moveToNextDataPage() throws HyracksDataException {
@@ -736,7 +731,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             return false;
         }
 
-        // CRITICAL FIX: After deletion, data pages can become empty but there might
+        // After deletion, data pages can become empty but there might
         // be more non-empty pages later in the chain. We must skip empty pages instead
         // of stopping at the first empty page.
 

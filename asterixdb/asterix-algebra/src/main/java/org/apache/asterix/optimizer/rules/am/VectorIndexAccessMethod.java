@@ -32,6 +32,9 @@ import org.apache.asterix.common.config.DatasetConfig.IndexType;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.object.base.AdmObjectNode;
+import org.apache.asterix.om.base.ADouble;
+import org.apache.asterix.om.base.AInt32;
+import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -47,6 +50,7 @@ import org.apache.hyracks.algebricks.core.algebra.base.LogicalExpressionTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalOperatorTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCallExpression;
+import org.apache.hyracks.algebricks.core.algebra.expressions.ConstantExpression;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IAlgebricksConstantValue;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IVariableTypeEnvironment;
 import org.apache.hyracks.algebricks.core.algebra.expressions.ScalarFunctionCallExpression;
@@ -110,12 +114,15 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             List<AbstractLogicalOperator> assignsAndUnnests, AccessMethodAnalysisContext analysisCtx,
             IOptimizationContext context, IVariableTypeEnvironment typeEnvironment) throws AlgebricksException {
 
-        // Validate: ANN_DISTANCE(vectorField, queryVector, distanceMetric)
+        // Validate: ANN_DISTANCE(vectorField, queryVector, distanceMetric [, nprobe, epsilon, searchApproach])
         // arg0: field reference to vector field (e.g., reviewEmbedding)
         // arg1: query vector (constant array or parameter)
         // arg2: distance metric (string constant: "Euclidean", "Cosine", etc.)
+        // arg3 (optional): nprobe (int, default 10)
+        // arg4 (optional): epsilon (double, default 0.15)
+        // arg5 (optional): search_approach (int: 0=naive, 1=optimized, default 0)
 
-        if (funcExpr.getArguments().size() != 3) {
+        if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 6) {
             return false;
         }
 
@@ -253,6 +260,33 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         LogicalVariable distanceMetricVar = context.newVar();
         queryVarList.add(distanceMetricVar);
         queryExprList.add(new MutableObject<>(distanceMetricExpr.cloneExpression()));
+
+        // Add nprobe variable (arg 3, default 10)
+        LogicalVariable nprobeVar = context.newVar();
+        queryVarList.add(nprobeVar);
+        if (annDistanceExpr.getArguments().size() > 3) {
+            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(3).getValue().cloneExpression()));
+        } else {
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(10)))));
+        }
+
+        // Add epsilon variable (arg 4, default 0.15)
+        LogicalVariable epsilonVar = context.newVar();
+        queryVarList.add(epsilonVar);
+        if (annDistanceExpr.getArguments().size() > 4) {
+            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(4).getValue().cloneExpression()));
+        } else {
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(0.15)))));
+        }
+
+        // Add search_approach variable (arg 5, default 0 = naive)
+        LogicalVariable searchApproachVar = context.newVar();
+        queryVarList.add(searchApproachVar);
+        if (annDistanceExpr.getArguments().size() > 5) {
+            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(5).getValue().cloneExpression()));
+        } else {
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(0)))));
+        }
 
         // Create ASSIGN operator to hold query parameters
         AssignOperator assignSearchKeys = new AssignOperator(queryVarList, queryExprList);

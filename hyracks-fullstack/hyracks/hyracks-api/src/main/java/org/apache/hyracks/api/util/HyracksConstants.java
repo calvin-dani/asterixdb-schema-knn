@@ -43,6 +43,9 @@ public class HyracksConstants {
     // Vector distance function factory (wraps VectorDistanceArrCalculation from AsterixDB)
     public static final String VECTOR_DISTANCE_FUNCTION_FACTORY = "VECTOR_DISTANCE_FUNCTION_FACTORY";
 
+    // Flag to enable optimized search with bidirectional traversal and triangle inequality
+    public static final String USE_OPTIMIZED_SEARCH = "USE_OPTIMIZED_SEARCH";
+
     private HyracksConstants() {
     }
 }

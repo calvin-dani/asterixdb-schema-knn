@@ -46,7 +46,9 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
 import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
+import org.apache.hyracks.data.std.accessors.RawBinaryComparatorFactory;
 import org.apache.hyracks.data.std.primitive.FixedLengthTypeTrait;
+import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationSchedulerProvider;
@@ -54,6 +56,9 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTrackerFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResourceFactory;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
+import org.apache.hyracks.storage.am.vector.impls.QuantizedVCTreeDataTupleCreatorFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.common.IResourceFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.util.LogRedactionUtil;
@@ -106,15 +111,30 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
         int vectorDimensions = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
 
+        // Get INCLUDE fields count from index details (needed by factory)
+        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
+        int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
+
+        // Determine data tuple creator factory based on description (quantization indicator)
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        boolean isQuantized = (description != null);
+        IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
+        if (isQuantized) {
+            dataTupleCreatorFactory = new QuantizedVCTreeDataTupleCreatorFactory(numIncludeFields);
+        } else {
+            dataTupleCreatorFactory = new VCTreeDataTupleCreatorFactory(numIncludeFields);
+        }
+
         List<List<String>> primaryKeyFields = dataset.getPrimaryKeys();
         int numPrimaryKeys = primaryKeyFields.size();
 
         IStorageComponentProvider storageComponentProvider = mdProvider.getStorageComponentProvider();
         ITypeTraitProvider typeTraitProvider = mdProvider.getDataFormat().getTypeTraitProvider();
 
-        // Get type traits and comparator factories
-        ITypeTraits[] typeTraits = getTypeTraits(mdProvider, dataset, index, recordType, metaType);
-        IBinaryComparatorFactory[] cmpFactories = getCmpFactories(mdProvider, dataset, index, recordType, metaType);
+        // Get type traits and comparator factories (conditional on quantization)
+        ITypeTraits[] typeTraits = getTypeTraits(mdProvider, dataset, index, recordType, metaType, isQuantized);
+        IBinaryComparatorFactory[] cmpFactories =
+                getCmpFactories(mdProvider, dataset, index, recordType, metaType, isQuantized);
 
         // Set up vector fields array
         int[] vectorFields = new int[1]; // Only one vector field
@@ -153,22 +173,19 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
                     new AOrderedListVectorBinaryAccessorFactory();
-            // Get INCLUDE fields count from index details
-            List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
-            int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
             return new LSMVCTreeLocalResourceFactory(storageManager, typeTraits, cmpFactories, filterTypeTraits,
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, indexName);
+                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, dataTupleCreatorFactory, indexName);
         } else {
             return null;
         }
     }
 
     private static ITypeTraits[] getTypeTraits(MetadataProvider metadataProvider, Dataset dataset, Index index,
-            ARecordType recordType, ARecordType metaType) throws AlgebricksException {
+            ARecordType recordType, ARecordType metaType, boolean isQuantized) throws AlgebricksException {
         ITypeTraitProvider ttProvider = metadataProvider.getStorageComponentProvider().getTypeTraitProvider();
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
@@ -178,23 +195,36 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
         int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
 
-        // Data frame tuple format: [distance, centroidId, primary_keys..., include_fields...]
-        // This matches what VCTreeBulkLoaderAndGroupingOperatorDescriptor creates
-        int totalFields = 2 + numPrimaryKeys + numIncludeFields;
+        // Data frame tuple format depends on quantization:
+        // Non-quantized: [distance, centroidId, primary_keys..., include_fields...]
+        // Quantized:     [distance, quantized_distance, quantized_embedding, centroidId, primary_keys..., include_fields...]
+        int numSecondaryFields = isQuantized ? 4 : 2;
+        int totalFields = numSecondaryFields + numPrimaryKeys + numIncludeFields;
         ITypeTraits[] typeTraits = new ITypeTraits[totalFields];
 
         // Field 0: distance (raw double - 8 bytes, no ADM type tag)
         typeTraits[0] = new FixedLengthTypeTrait(8);
 
-        // Field 1: centroidId (raw int - 4 bytes, no ADM type tag)
-        typeTraits[1] = new FixedLengthTypeTrait(4);
-
-        // Fields 2+: Primary keys
-        for (int i = 0; i < numPrimaryKeys; i++) {
-            typeTraits[2 + i] = primaryTypeTraits[i];
+        if (isQuantized) {
+            // Field 1: quantized_distance (variable length byte[])
+            typeTraits[1] = VarLengthTypeTrait.INSTANCE;
+            // Field 2: quantized_embedding (variable length byte[])
+            typeTraits[2] = VarLengthTypeTrait.INSTANCE;
+            // Field 3: centroidId (raw int - 4 bytes, no ADM type tag)
+            typeTraits[3] = new FixedLengthTypeTrait(4);
+        } else {
+            // Field 1: centroidId (raw int - 4 bytes, no ADM type tag)
+            typeTraits[1] = new FixedLengthTypeTrait(4);
         }
 
-        // Fields after primary keys: INCLUDE fields (if any)
+        int pkStart = numSecondaryFields;
+
+        // Primary keys
+        for (int i = 0; i < numPrimaryKeys; i++) {
+            typeTraits[pkStart + i] = primaryTypeTraits[i];
+        }
+
+        // INCLUDE fields (if any)
         if (numIncludeFields > 0) {
             List<IAType> includeFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
             List<Integer> includeSourceIndicators = vectorIndexDetails.getIncludeFieldSourceIndicators();
@@ -223,7 +253,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             includeFieldNames.get(i).toString());
                 }
 
-                typeTraits[2 + numPrimaryKeys + i] = ttProvider.getTypeTrait(includeFieldType);
+                typeTraits[pkStart + numPrimaryKeys + i] = ttProvider.getTypeTrait(includeFieldType);
             }
         }
 
@@ -231,7 +261,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
     }
 
     private static IBinaryComparatorFactory[] getCmpFactories(MetadataProvider metadataProvider, Dataset dataset,
-            Index index, ARecordType recordType, ARecordType metaType) throws AlgebricksException {
+            Index index, ARecordType recordType, ARecordType metaType, boolean isQuantized) throws AlgebricksException {
         IBinaryComparatorFactoryProvider cmpFactoryProvider =
                 metadataProvider.getStorageComponentProvider().getComparatorFactoryProvider();
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
@@ -241,22 +271,35 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
         int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
 
-        // Data frame comparators: [distance, centroidId, primary_keys..., include_fields...]
-        // We need comparators for fields used in comparisons (typically distance and primary keys)
-        int totalFields = 2 + numPrimaryKeys + numIncludeFields;
+        // Data frame comparators depend on quantization:
+        // Non-quantized: [distance, centroidId, primary_keys..., include_fields...]
+        // Quantized:     [distance, quantized_distance, quantized_embedding, centroidId, primary_keys..., include_fields...]
+        int numSecondaryFields = isQuantized ? 4 : 2;
+        int totalFields = numSecondaryFields + numPrimaryKeys + numIncludeFields;
         IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[totalFields];
 
         // Comparator 0: distance (raw double - no ADM type tag)
         cmpFactories[0] = DoubleBinaryComparatorFactory.INSTANCE;
 
-        // Comparator 1: centroidId (raw int - no ADM type tag)
-        cmpFactories[1] = IntegerBinaryComparatorFactory.INSTANCE;
+        if (isQuantized) {
+            // Comparator 1: quantized_distance (variable length byte[])
+            cmpFactories[1] = RawBinaryComparatorFactory.INSTANCE;
+            // Comparator 2: quantized_embedding (variable length byte[])
+            cmpFactories[2] = RawBinaryComparatorFactory.INSTANCE;
+            // Comparator 3: centroidId (raw int - no ADM type tag)
+            cmpFactories[3] = IntegerBinaryComparatorFactory.INSTANCE;
+        } else {
+            // Comparator 1: centroidId (raw int - no ADM type tag)
+            cmpFactories[1] = IntegerBinaryComparatorFactory.INSTANCE;
+        }
 
-        // Comparators 2+: Primary keys
+        int pkStart = numSecondaryFields;
+
+        // Primary key comparators
         IBinaryComparatorFactory[] primaryComparatorFactories =
                 dataset.getPrimaryComparatorFactories(metadataProvider, recordType, metaType);
         for (int i = 0; i < numPrimaryKeys; i++) {
-            cmpFactories[2 + i] = primaryComparatorFactories[i];
+            cmpFactories[pkStart + i] = primaryComparatorFactories[i];
         }
 
         // Comparators after primary keys: INCLUDE fields (if any)
@@ -288,7 +331,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             includeFieldNames.get(i).toString());
                 }
 
-                cmpFactories[2 + numPrimaryKeys + i] =
+                cmpFactories[pkStart + numPrimaryKeys + i] =
                         cmpFactoryProvider.getBinaryComparatorFactory(includeFieldType, true);
             }
         }

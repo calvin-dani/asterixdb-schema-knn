@@ -31,6 +31,8 @@ import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreator;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
@@ -57,6 +59,7 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
     private final IPageManager freePageManager;
     private final ITreeIndexMetadataFrame metaFrame;
     private final int vectorDimensions;
+    private final IVCTreeDataTupleCreator dataTupleCreator;
 
     private IVectorClusteringInteriorFrame interiorFrame;
     private IVectorClusteringLeafFrame leafFrame;
@@ -77,7 +80,8 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
             ITreeIndexFrameFactory leafFrameFactory, ITreeIndexFrameFactory metadataFrameFactory,
             ITreeIndexFrameFactory dataFrameFactory, IPageManager freePageManager,
             IBinaryComparatorFactory[] cmpFactories, int vectorDimensions,
-            IModificationOperationCallback modificationCallback, ISearchOperationCallback searchCallback) {
+            IModificationOperationCallback modificationCallback, ISearchOperationCallback searchCallback,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
         this.accessor = accessor;
         this.interiorFrameFactory = interiorFrameFactory;
         this.leafFrameFactory = leafFrameFactory;
@@ -87,6 +91,7 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
         this.vectorDimensions = vectorDimensions;
         this.modificationCallback = modificationCallback;
         this.searchCallback = searchCallback;
+        this.dataTupleCreator = dataTupleCreatorFactory.createDataTupleCreator();
 
         if (cmpFactories[0] != null) {
             this.cmp = MultiComparator.create(cmpFactories);
@@ -181,6 +186,10 @@ public class VectorClusteringOpContext implements IIndexOperationContext, IExtra
 
     public int getVectorDimensions() {
         return vectorDimensions;
+    }
+
+    public IVCTreeDataTupleCreator getDataTupleCreator() {
+        return dataTupleCreator;
     }
 
     public IModificationOperationCallback getModificationCallback() {
