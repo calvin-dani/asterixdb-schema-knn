@@ -256,8 +256,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         int centroidId = (Integer) baseFieldValues[0];
         double[] embedding = (double[]) baseFieldValues[1];
 
-        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId, currentLevel,
-                currentClusterInLevel, currentCentroidInCluster, inputFieldCount);
+        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId,
+                currentLevel, currentClusterInLevel, currentCentroidInCluster, inputFieldCount);
 
         try {
             if (inputFieldCount == 3) {

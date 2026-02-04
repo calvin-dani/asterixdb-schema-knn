@@ -124,7 +124,6 @@ public class LSMVCTreeUtils {
         interiorTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
         interiorTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
 
-
         // Create specific type traits using primitive type traits for better performance
         // Interior/Leaf frames need 3-field cluster tuples: <cid, centroid, pointer>
         ITypeTraits[] leafTypeTraits = new ITypeTraits[4];

@@ -531,6 +531,85 @@ public final class OptimizedScalarQuantizationSampleFile {
         return correctiveSum;
     }
 
+    /**
+     * Converts quantized vector data to a double array for use with distance
+     * functions.
+     * This is a simple type conversion that preserves the quantized integer values
+     * as doubles,
+     * allowing standard distance functions that expect double[] to work on
+     * quantized data.
+     * 
+     * <p>
+     * Example: quantized [71, 9, 88, 63] → dequantized [71.0, 9.0, 88.0, 63.0]
+     * 
+     * @param quantizedBytes The quantized vector as byte[], short[], or int[]
+     * @param params         Quantization parameters (used to determine expected
+     *                       array length and data type)
+     * @return double[] array where each element is the quantized integer value as a
+     *         double
+     * @throws IllegalArgumentException if inputs are null or array length doesn't
+     *                                  match params
+     */
+    public static double[] dequantizeToDoubleArray(Object quantizedBytes, Params params) {
+        if (quantizedBytes == null) {
+            throw new IllegalArgumentException("quantizedBytes must be non-null");
+        }
+        if (params == null) {
+            throw new IllegalArgumentException("params must be non-null");
+        }
+
+        final int dims = params.vectorDimensions;
+        final int bits = params.bits;
+        double[] result = new double[dims];
+
+        // Determine data type based on bits and convert to double
+        if (bits <= 8) {
+            // byte[] - treat as unsigned
+            if (!(quantizedBytes instanceof byte[])) {
+                throw new IllegalArgumentException(
+                        "Expected byte[] for " + bits + " bits, got " + quantizedBytes.getClass().getName());
+            }
+            byte[] bytes = (byte[]) quantizedBytes;
+            if (bytes.length != dims) {
+                throw new IllegalArgumentException("Array length mismatch: expected " + dims + ", got " + bytes.length);
+            }
+            for (int i = 0; i < dims; i++) {
+                result[i] = (double) (bytes[i] & 0xFF); // unsigned byte to double
+            }
+        } else if (bits <= 16) {
+            // short[] - treat as unsigned
+            if (!(quantizedBytes instanceof short[])) {
+                throw new IllegalArgumentException(
+                        "Expected short[] for " + bits + " bits, got " + quantizedBytes.getClass().getName());
+            }
+            short[] shorts = (short[]) quantizedBytes;
+            if (shorts.length != dims) {
+                throw new IllegalArgumentException(
+                        "Array length mismatch: expected " + dims + ", got " + shorts.length);
+            }
+            for (int i = 0; i < dims; i++) {
+                result[i] = (double) (shorts[i] & 0xFFFF); // unsigned short to double
+            }
+        } else if (bits <= 32) {
+            // int[] - treat as unsigned
+            if (!(quantizedBytes instanceof int[])) {
+                throw new IllegalArgumentException(
+                        "Expected int[] for " + bits + " bits, got " + quantizedBytes.getClass().getName());
+            }
+            int[] ints = (int[]) quantizedBytes;
+            if (ints.length != dims) {
+                throw new IllegalArgumentException("Array length mismatch: expected " + dims + ", got " + ints.length);
+            }
+            for (int i = 0; i < dims; i++) {
+                result[i] = (double) (ints[i] & 0xFFFFFFFFL); // unsigned int to double
+            }
+        } else {
+            throw new IllegalArgumentException("bits must be <= 32, got " + bits);
+        }
+
+        return result;
+    }
+
     private static int clampIndex(int idx, int length) {
         if (idx < 0) {
             return 0;
