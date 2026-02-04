@@ -117,7 +117,22 @@ public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
                 testUtils.optimizedSearch(ctx);
 
                 if (LOGGER.isInfoEnabled()) {
-                    LOGGER.info("Query case {}/{} succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
+                    LOGGER.info("Query case {}/{} (optimized) succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
+                }
+            }
+
+            // 5. Validate: naive blocked search for same query cases
+            // LSMVCTreeBlockedCursorNaive should return the same results as LSMVCTreeBlockedCursor
+            for (int i = 0; i < queryCases.size(); i++) {
+                QueryCase qc = queryCases.get(i);
+                ctx.setQueryVector(qc.queryVector);
+                ctx.setQueryK(qc.queryK);
+                ctx.setExpectedPrimaryKeys(qc.expectedPrimaryKeys);
+                testUtils.naiveBlockedSearch(ctx);
+
+                if (LOGGER.isInfoEnabled()) {
+                    LOGGER.info("Query case {}/{} (naive blocked) succeeded: K={}", i + 1, queryCases.size(),
+                            qc.queryK);
                 }
             }
 

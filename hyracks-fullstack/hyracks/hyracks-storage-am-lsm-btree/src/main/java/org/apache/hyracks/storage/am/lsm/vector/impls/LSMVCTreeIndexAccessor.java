@@ -46,17 +46,24 @@ public class LSMVCTreeIndexAccessor extends LSMTreeIndexAccessor {
 
     @Override
     public IIndexCursor createSearchCursor(boolean exclusive) {
-        // Check if optimized search is requested via IndexAccessParameters
+        // Check which cursor type is requested via IndexAccessParameters
         if (ctx instanceof LSMVCTreeOpContext) {
             LSMVCTreeOpContext opCtx = (LSMVCTreeOpContext) ctx;
             IIndexAccessParameters iap = opCtx.getIndexAccessParameters();
             if (iap != null) {
+                // searchApproach=1 or 2: optimized bidirectional (with optional filtering)
                 Boolean useOptimized = iap.getParameter(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.class);
                 if (Boolean.TRUE.equals(useOptimized)) {
                     return lsmVCTree.createBlockedSearchCursor(ctx);
                 }
+                // searchApproach=3: naive blocked (top-K window, quantized distance, no pruning)
+                Boolean useNaiveBlocked = iap.getParameter(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.class);
+                if (Boolean.TRUE.equals(useNaiveBlocked)) {
+                    return lsmVCTree.createNaiveBlockedSearchCursor(ctx);
+                }
             }
         }
+        // searchApproach=0: default naive streaming
         return super.createSearchCursor(exclusive);
     }
 

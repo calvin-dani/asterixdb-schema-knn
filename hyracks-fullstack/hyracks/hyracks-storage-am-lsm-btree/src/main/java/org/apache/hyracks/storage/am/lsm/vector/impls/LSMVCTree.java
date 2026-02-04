@@ -648,6 +648,17 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         return new LSMVCTreeBlockedCursor(opCtx);
     }
 
+    /**
+     * Creates a naive blocked cursor for search without bidirectional pruning.
+     * Uses top-K window with quantized distance, all work done in open().
+     *
+     * @param opCtx the operation context
+     * @return naive blocked search cursor
+     */
+    public IIndexCursor createNaiveBlockedSearchCursor(ILSMIndexOperationContext opCtx) {
+        return new LSMVCTreeBlockedCursorNaive(opCtx);
+    }
+
     @Override
     public synchronized void deactivate(boolean flush) throws HyracksDataException {
         // Clean up static structure component before parent deactivation

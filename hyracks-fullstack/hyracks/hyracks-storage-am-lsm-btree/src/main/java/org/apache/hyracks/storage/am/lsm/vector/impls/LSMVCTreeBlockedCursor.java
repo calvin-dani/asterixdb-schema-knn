@@ -25,8 +25,14 @@ import java.util.PriorityQueue;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
+import org.apache.hyracks.data.std.primitive.LongPointable;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITupleFilter;
+import org.apache.hyracks.storage.am.common.tuples.ReferenceFrameTupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
@@ -67,6 +73,8 @@ import org.apache.hyracks.storage.common.MultiComparator;
  * - Hold-and-check pattern: hold antimatter, check next tuple for same key, cancel if match
  */
 public class LSMVCTreeBlockedCursor implements IIndexCursor {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Operation context
     private ILSMIndexOperationContext opCtx;
@@ -117,9 +125,17 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     // Quantized format: 4 (distance, quantized_distance, quantized_embedding, centroidId, PK...)
     private int pkStartField;
 
+    // Tuple filter for INCLUDE field predicates (e.g., year > 2000)
+    // When set, only tuples passing this filter are added to topKWindow and counted toward K
+    private ITupleFilter tupleFilter;
+
+    // Wrapper to convert ITupleReference to IFrameTupleReference for filter evaluation
+    private ReferenceFrameTupleReference referenceFilterTuple;
+
     // Statistics
     private int totalTuplesProcessed;
     private int antimatterCancellations;
+    private int tuplesFilteredOut;
 
     public LSMVCTreeBlockedCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
@@ -131,6 +147,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.isOpen = true;
         this.totalTuplesProcessed = 0;
         this.antimatterCancellations = 0;
+        this.tuplesFilteredOut = 0;
 
         // Get initial state
         LSMVCTreeCursorInitialState lsmInitialState = (LSMVCTreeCursorInitialState) initialState;
@@ -144,6 +161,15 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.nprobe = vectorPred.getNprobe();
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
+
+        // Extract tuple filter from search predicate for INCLUDE field predicates
+        this.tupleFilter = vectorPred.getTupleFilter();
+        if (this.tupleFilter != null) {
+            this.referenceFilterTuple = new ReferenceFrameTupleReference();
+            LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] Tuple filter is SET - will filter INCLUDE field predicates");
+        } else {
+            LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] Tuple filter is NULL - no INCLUDE field filtering");
+        }
 
         // Get index access parameters
         IIndexAccessParameters iap = ((LSMVCTreeOpContext) opCtx).getIndexAccessParameters();
@@ -197,9 +223,9 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             // Set first cursor for DFS fallback (like LSMVCTreeSearchCursor does)
             clusterStrategy.setFirstCursorForDFS(firstSearchCursor);
 
-            System.err.println(String.format(
-                    "[LSMVCTreeBlockedCursor] Initialized with queryVector dim=%d, K=%d, nprobe=%d, epsilon=%.4f",
-                    queryVector.length, K, nprobe, epsilon));
+            LOGGER.log(Level.INFO,
+                    "[LSMVCTreeBlockedCursor] Initialized with queryVector dim={}, K={}, nprobe={}, epsilon={}",
+                    queryVector.length, K, nprobe, epsilon);
         }
 
         // Get first cluster from strategy (level-wise selection)
@@ -207,7 +233,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
 
         if (firstCluster == null) {
             // No clusters available - empty tree
-            System.err.println("[LSMVCTreeBlockedCursor] No clusters available (empty tree)");
+            LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] No clusters available (empty tree)");
             return;
         }
 
@@ -392,8 +418,11 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             if (!rightCtx.terminated) {
                 ITupleReference rightTuple = getNextValidTuple(rightCtx);
                 if (rightTuple != null) {
-                    double dqx = computeApproximateDistance(rightTuple);
-                    addToTopKWindow(rightTuple, dqx);
+                    // Apply INCLUDE field filter before adding to top-K window
+                    if (passesTupleFilter(rightTuple)) {
+                        double dqx = computeApproximateDistance(rightTuple);
+                        addToTopKWindow(rightTuple, dqx);
+                    }
 
                     // Check right termination: D(x',C) > max{D(q,x)} + D(q,C)
                     if (topKWindow.size() >= K && !rightCtx.queue.isEmpty()) {
@@ -415,8 +444,11 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             if (!leftCtx.terminated) {
                 ITupleReference leftTuple = getNextValidTuple(leftCtx);
                 if (leftTuple != null) {
-                    double dqx = computeApproximateDistance(leftTuple);
-                    addToTopKWindow(leftTuple, dqx);
+                    // Apply INCLUDE field filter before adding to top-K window
+                    if (passesTupleFilter(leftTuple)) {
+                        double dqx = computeApproximateDistance(leftTuple);
+                        addToTopKWindow(leftTuple, dqx);
+                    }
 
                     // Check left termination: D(x',C) < D(q,C) - max{D(q,x)}
                     if (topKWindow.size() >= K && !leftCtx.queue.isEmpty()) {
@@ -683,6 +715,41 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     }
 
     /**
+     * Check if tuple passes the INCLUDE field filter.
+     * Filter is applied AFTER antimatter reconciliation because:
+     * 1. Antimatter from newer components comes first in queue (lower componentId)
+     * 2. By the time we reach here, any matching antimatter has cancelled this tuple
+     * 3. Tuples that fail filter should NOT be added to topKWindow or counted toward K
+     *
+     * @param tuple the tuple to check
+     * @return true if tuple passes filter (or no filter configured), false otherwise
+     */
+    private boolean passesTupleFilter(ITupleReference tuple) throws HyracksDataException {
+        if (tupleFilter == null) {
+            return true;
+        }
+
+        referenceFilterTuple.reset(tuple);
+
+        if (tupleFilter.accept(referenceFilterTuple)) {
+            return true;
+        }
+
+        // Tuple fails filter - log for debugging
+        tuplesFilteredOut++;
+        try {
+            long pkValue =
+                    LongPointable.getLong(tuple.getFieldData(pkStartField), tuple.getFieldStart(pkStartField) + 1);
+            System.err.println(String.format(
+                    "[LSMVCTreeBlockedCursor] Tuple FILTERED OUT (total filtered: %d) | pk=%d", tuplesFilteredOut,
+                    pkValue));
+        } catch (Exception e) {
+            // Ignore logging errors
+        }
+        return false;
+    }
+
+    /**
      * Extract D(x, C) from tuple. First field is distance_to_centroid.
      */
     private double extractDistanceToCentroid(ITupleReference tuple) {
@@ -755,6 +822,16 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     @Override
     public void close() throws HyracksDataException {
         if (isOpen) {
+            // Print final summary
+            System.err.println("\n========== LSMVCTreeBlockedCursor Search Summary ==========");
+            System.err.println(String.format("K=%d, nprobe=%d, epsilon=%.4f", K, nprobe, epsilon));
+            System.err.println(String.format("Clusters explored:          %d", clustersExplored));
+            System.err.println(String.format("Total tuples processed:     %d", totalTuplesProcessed));
+            System.err.println(String.format("Antimatter cancellations:   %d", antimatterCancellations));
+            System.err.println(String.format("Tuples filtered out:        %d", tuplesFilteredOut));
+            System.err.println(String.format("Top-K window size:          %d", topKWindow.size()));
+            System.err.println("============================================================\n");
+
             // Close bidirectional cursors
             for (int i = 0; i < numComponents; i++) {
                 if (vcbCursors[i] != null) {

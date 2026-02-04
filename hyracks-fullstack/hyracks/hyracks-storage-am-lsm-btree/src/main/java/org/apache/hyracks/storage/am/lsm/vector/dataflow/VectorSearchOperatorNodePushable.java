@@ -263,10 +263,15 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // that wrap VectorDistanceArrCalculation from AsterixDB
         iap.getParameters().put(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY, distanceFunctionFactory);
 
-        // Set optimized search flag based on compile-time searchApproach constant
-        // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
-        if (searchApproach == 1) {
+        // Set cursor selection flags based on compile-time searchApproach constant
+        // 0 = naive streaming (LSMVCTreeSearchCursor)
+        // 1 = optimized bidirectional (LSMVCTreeBlockedCursor)
+        // 2 = optimized bidirectional with inline filtering (LSMVCTreeBlockedCursor + ITupleFilter)
+        // 3 = naive blocked (LSMVCTreeBlockedCursorNaive - top-K window, quantized distance, no pruning)
+        if (searchApproach == 1 || searchApproach == 2) {
             iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
+        } else if (searchApproach == 3) {
+            iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
         }
     }
 }

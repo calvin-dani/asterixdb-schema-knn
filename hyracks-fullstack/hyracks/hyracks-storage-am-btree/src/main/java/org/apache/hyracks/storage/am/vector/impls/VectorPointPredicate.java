@@ -50,7 +50,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         // Empty constructor for initialization
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 10; // Default: probe 1 cluster
+        this.nprobe = 2; // Default: probe 1 cluster
         this.epsilon = 0.15; // Default: no epsilon (use nprobe count only)
         this.searchApproach = 0; // Default: naive search
         this.pkStartField = 2; // Default: non-quantized format
