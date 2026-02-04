@@ -22,6 +22,7 @@ import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -79,11 +80,16 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // The actual tuple filter, created from the factory
     protected ITupleFilter tupleFilter;
 
+    // Search approach: 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
+    // Compile-time constant passed from descriptor for cursor selection at open() time
+    protected final int searchApproach;
+
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
             IVectorBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
-            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory) throws HyracksDataException {
+            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach)
+            throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -110,6 +116,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.distanceFunctionFactory = distanceFunctionFactory;
         this.tupleFilterFactory = tupleFilterFactory;
+        this.searchApproach = searchApproach;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
@@ -162,6 +169,27 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             if (queryFields != null && queryFields.length > 2) {
                 String distanceMetric = extractDistanceMetricFromTuple(queryParamsTuple, 2);
                 vectorPred.setDistanceMetric(distanceMetric);
+            }
+
+            // Extract nprobe from field 3 (int, +1 to skip type tag)
+            if (queryFields.length > 3) {
+                int nprobe = IntegerPointable.getInteger(queryParamsTuple.getFieldData(3),
+                        queryParamsTuple.getFieldStart(3) + 1);
+                vectorPred.setNprobe(nprobe);
+            }
+
+            // Extract epsilon from field 4 (double, +1 to skip type tag)
+            if (queryFields.length > 4) {
+                double epsilon = DoublePointable.getDouble(queryParamsTuple.getFieldData(4),
+                        queryParamsTuple.getFieldStart(4) + 1);
+                vectorPred.setEpsilon(epsilon);
+            }
+
+            // Extract searchApproach from field 5 (int, +1 to skip type tag)
+            if (queryFields.length > 5) {
+                int searchApproach = IntegerPointable.getInteger(queryParamsTuple.getFieldData(5),
+                        queryParamsTuple.getFieldStart(5) + 1);
+                vectorPred.setSearchApproach(searchApproach);
             }
 
             // Set tuple filter for INCLUDE field predicates (e.g., year > 2000)
@@ -229,5 +257,11 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // The VCTree will use this factory to create IVectorDistanceFunction implementations
         // that wrap VectorDistanceArrCalculation from AsterixDB
         iap.getParameters().put(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY, distanceFunctionFactory);
+
+        // Set optimized search flag based on compile-time searchApproach constant
+        // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
+        if (searchApproach == 1) {
+            iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
+        }
     }
 }

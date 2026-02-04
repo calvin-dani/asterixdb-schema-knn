@@ -19,6 +19,7 @@
 
 package org.apache.hyracks.storage.am.vector;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.TreeSet;
@@ -65,6 +66,12 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
     protected List<List<Integer>> numCentroidsPerLevel;
     protected List<ITupleReference> centroids;
 
+    // Query configuration for optimized search validation
+    private double[] queryVector;
+    private int queryK = 5; // default K
+    private List<String> expectedPrimaryKeys = new ArrayList<>();
+    private List<String> excludedPrimaryKeys;
+
     public AbstractVectorTreeTestContext(ISerializerDeserializer[] fieldSerdes, IIndex index, boolean filtered,
             int vectorDimensions) throws HyracksDataException {
         super(fieldSerdes, index, filtered);
@@ -103,5 +110,38 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
 
     public void setDataRecords(List<List<ITupleReference>> dataRecords) {
         this.dataRecords = dataRecords;
+    }
+
+    // Query configuration getters/setters
+    public double[] getQueryVector() {
+        return queryVector;
+    }
+
+    public void setQueryVector(double[] queryVector) {
+        this.queryVector = queryVector;
+    }
+
+    public int getQueryK() {
+        return queryK;
+    }
+
+    public void setQueryK(int queryK) {
+        this.queryK = queryK;
+    }
+
+    public List<String> getExpectedPrimaryKeys() {
+        return expectedPrimaryKeys;
+    }
+
+    public void setExpectedPrimaryKeys(List<String> expectedPrimaryKeys) {
+        this.expectedPrimaryKeys = expectedPrimaryKeys;
+    }
+
+    public List<String> getExcludedPrimaryKeys() {
+        return excludedPrimaryKeys;
+    }
+
+    public void setExcludedPrimaryKeys(List<String> excludedPrimaryKeys) {
+        this.excludedPrimaryKeys = excludedPrimaryKeys;
     }
 }

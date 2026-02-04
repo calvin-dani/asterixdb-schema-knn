@@ -35,6 +35,7 @@ import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrameFact
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringInteriorFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringLeafFrameFactory;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrameFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringDataTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringInteriorTupleWriterFactory;
@@ -119,7 +120,8 @@ public class VectorTreeUtils {
                 new VectorClusteringDataFrameFactory(dataTupleWriterFactory, vectorDimensions);
 
         return new VectorClusteringTree(bufferCache, pageManager, interiorFrameFactory, leafFrameFactory,
-                metadataFrameFactory, dataFrameFactory, cmpFactories, 4, vectorDimensions, file, null);
+                metadataFrameFactory, dataFrameFactory, cmpFactories, 4, vectorDimensions, file, null,
+                new VCTreeDataTupleCreatorFactory(0));
     }
 
     /**

@@ -98,6 +98,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final int vectorDimension;
     private final int numPrimaryKeys;
     private final int numIncludeFields;
+    private final boolean isQuantized;
 
     // Partitioning components
     private VCTreePartitioner partitioner;
@@ -203,7 +204,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
             UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension,
-            int numPrimaryKeys, int numIncludeFields) {
+            int numPrimaryKeys, int numIncludeFields, boolean isQuantized) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -216,6 +217,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.vectorDimension = vectorDimension > 0 ? vectorDimension : 384; // Default to 384 if invalid
         this.numPrimaryKeys = numPrimaryKeys;
         this.numIncludeFields = numIncludeFields;
+        this.isQuantized = isQuantized;
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -232,11 +234,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * Uses TupleUtils.createTuple() with proper serializers from RecordDescriptor.
      * <p>
      * Input tuple format from CastAssign: [embedding, include_fields..., pk...]
-     * Output tuple format: [distance, centroidId, pk..., include_fields...]
+     * <p>
+     * Non-quantized output: [distance, centroidId, pk..., include_fields...]
+     * Quantized output:     [distance, quantized_distance, quantized_embedding, centroidId, pk..., include_fields...]
      *
      * @param originalTuple Input tuple with original fields to preserve
      * @param searchResult  ClusterSearchResult containing all needed values
-     * @return Transformed tuple with format [distance, centroidId, pk..., include_fields...]
+     * @return Transformed tuple
      * @throws HyracksDataException if tuple creation fails
      */
     public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
@@ -245,8 +249,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             // Get serializers for original fields from input record descriptor
             ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
 
-            // Total fields = 2 (distance, centroidId) + numPrimaryKeys + numIncludeFields
-            int totalFields = 2 + numPrimaryKeys + numIncludeFields;
+            // Number of secondary fields depends on quantization
+            int numSecondaryFields = isQuantized ? 4 : 2;
+            int totalFields = numSecondaryFields + numPrimaryKeys + numIncludeFields;
 
             // Get output serializers
             ISerializerDeserializer<?>[] outputFieldSerdes = outputRecDesc.getFields();
@@ -255,23 +260,31 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             // Original tuple format: [embedding(0), include_fields(1 to numIncludeFields), pk(numIncludeFields+1 onwards)]
             Object[] originalFieldValues = TupleUtils.deserializeTuple(originalTuple, originalFieldSerdes);
 
-            // Create combined field values with reordered fields:
-            // Output format: [distance, centroidId, pk..., include_fields...]
+            // Create combined field values with reordered fields
             Object[] combinedValues = new Object[totalFields];
             combinedValues[0] = searchResult.distance; // raw double
-            combinedValues[1] = searchResult.centroidId; // raw int
+
+            if (isQuantized) {
+                // Quantized format: [distance, quantized_distance, quantized_embedding, centroidId, pk..., includes...]
+                // TODO: Populate quantized_distance and quantized_embedding from quantization computation
+                combinedValues[1] = new byte[0]; // quantized_distance placeholder
+                combinedValues[2] = new byte[0]; // quantized_embedding placeholder
+                combinedValues[3] = searchResult.centroidId; // raw int
+            } else {
+                // Non-quantized format: [distance, centroidId, pk..., includes...]
+                combinedValues[1] = searchResult.centroidId; // raw int
+            }
 
             // Add primary key fields (they are at positions numIncludeFields+1 onwards in original tuple)
-            // In original: fields 1 to numIncludeFields are include fields, fields numIncludeFields+1 onwards are PKs
             for (int i = 0; i < numPrimaryKeys; i++) {
                 int originalPkIndex = 1 + numIncludeFields + i; // Skip embedding(0) and include fields
-                combinedValues[2 + i] = originalFieldValues[originalPkIndex];
+                combinedValues[numSecondaryFields + i] = originalFieldValues[originalPkIndex];
             }
 
             // Add include fields (they are at positions 1 to numIncludeFields in original tuple)
             for (int i = 0; i < numIncludeFields; i++) {
                 int originalIncludeIndex = 1 + i; // Skip embedding(0)
-                combinedValues[2 + numPrimaryKeys + i] = originalFieldValues[originalIncludeIndex];
+                combinedValues[numSecondaryFields + numPrimaryKeys + i] = originalFieldValues[originalIncludeIndex];
             }
 
             // Use TupleUtils.createTuple() with output serializers and reordered values

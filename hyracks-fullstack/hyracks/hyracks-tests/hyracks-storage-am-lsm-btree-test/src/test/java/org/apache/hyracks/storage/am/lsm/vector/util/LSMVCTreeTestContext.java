@@ -28,8 +28,10 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
+import org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.IntegerBinaryComparatorFactory;
 import org.apache.hyracks.data.std.accessors.UTF8StringBinaryComparatorFactory;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.SerdeUtils;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
@@ -42,6 +44,8 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
+import org.apache.hyracks.storage.am.vector.TestDoubleArrayVectorAccessor;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
 /**
@@ -71,7 +75,7 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
 
     /**
      * Create a new LSMVCTreeTestContext with the specified parameters.
-     * This factory method follows the pattern established by other LSM test contexts.
+     * Uses the default (standard) data tuple creator factory.
      */
     public static LSMVCTreeTestContext create(NCConfig storageConfig, IIOManager ioManager,
             List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
@@ -80,34 +84,66 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             IMetadataPageManagerFactory metadataPageManagerFactory) throws Exception {
 
+        return create(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, fieldSerdes,
+                numVectorFields, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory,
+                metadataPageManagerFactory, null);
+    }
+
+    /**
+     * Create a new LSMVCTreeTestContext with a custom data tuple creator factory.
+     *
+     * @param dataTupleCreatorFactory the factory to use for creating data tuples,
+     *                                or null to use the default (standard) factory
+     */
+    public static LSMVCTreeTestContext create(NCConfig storageConfig, IIOManager ioManager,
+            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
+            ISerializerDeserializer[] fieldSerdes, int numVectorFields, ILSMMergePolicy mergePolicy,
+            ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
+            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            IMetadataPageManagerFactory metadataPageManagerFactory,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws Exception {
+
         ITypeTraits[] typeTraits = SerdeUtils.serdesToTypeTraits(fieldSerdes);
 
         IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[fieldSerdes.length];
         for (int i = 0; i < fieldSerdes.length; i++) {
             if (fieldSerdes[i] instanceof UTF8StringSerializerDeserializer) {
                 cmpFactories[i] = UTF8StringBinaryComparatorFactory.INSTANCE;
+            } else if (fieldSerdes[i] instanceof DoubleSerializerDeserializer) {
+                cmpFactories[i] = DoubleBinaryComparatorFactory.INSTANCE;
             } else {
-                // For vector field and other numeric fields, use integer comparator for now
                 cmpFactories[i] = IntegerBinaryComparatorFactory.INSTANCE;
             }
         }
 
-        // Create the LSM Vector Clustering Tree
-        LSMVCTree lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,
-                diskBufferCache, typeTraits, cmpFactories, null, // valueProviderFactories (can be null)
-                0.0, // bloomFilterFalsePositiveRate (0.0 = no bloom filter)
-                mergePolicy, // mergePolicy
-                opTracker, // opTracker
-                ioScheduler, // ioScheduler
-                ioOpCallbackFactory, // ioOpCallbackFactory
-                pageWriteCallbackFactory, // pageWriteCallbackFactory
-                false, // needKeyDupCheck
-                numVectorFields, // vectorDimensions
-                new int[] { 0 }, // vectorFields (vector field at index 0)
-                null, // filterFields (no filter fields)
-                true, // durable
-                metadataPageManagerFactory, // metadataPageManagerFactory
-                null, null); // inputRecDesc (can be null for testing)
+        LSMVCTree lsmVCTree;
+        if (dataTupleCreatorFactory != null) {
+            // Use full overload with custom factory
+            lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,
+                    diskBufferCache, typeTraits, cmpFactories, 0.0, // bloomFilterFalsePositiveRate
+                    mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, false, // needKeyDupCheck
+                    numVectorFields, // vectorDimensions
+                    new int[] { 0 }, // vectorFields
+                    null, // filterFields
+                    null, null, null, // filterFrameFactory, filterManager, filterHelper
+                    true, // durable
+                    metadataPageManagerFactory, false, // atomic
+                    null, TestDoubleArrayVectorAccessor.Factory.INSTANCE, // inputRecDesc, vectorAccessorFactory
+                    1, 0, // numPrimaryKeyFields, numIncludeFields
+                    dataTupleCreatorFactory);
+        } else {
+            // Use simplified overload with default factory
+            lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,
+                    diskBufferCache, typeTraits, cmpFactories, null, // valueProviderFactories
+                    0.0, // bloomFilterFalsePositiveRate
+                    mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, false, // needKeyDupCheck
+                    numVectorFields, // vectorDimensions
+                    new int[] { 0 }, // vectorFields
+                    null, // filterFields
+                    true, // durable
+                    metadataPageManagerFactory, null, // inputRecDesc
+                    TestDoubleArrayVectorAccessor.Factory.INSTANCE); // vectorAccessorFactory
+        }
 
         LSMVCTreeTestContext testCtx = new LSMVCTreeTestContext(fieldSerdes, lsmVCTree, numVectorFields);
         return testCtx;

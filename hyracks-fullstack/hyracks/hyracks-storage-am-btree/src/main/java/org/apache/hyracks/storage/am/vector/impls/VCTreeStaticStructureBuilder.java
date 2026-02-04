@@ -241,8 +241,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      * Create entry tuple with centroid info and child page pointer.
      * Handles variable field counts:
      * - 2-field input (interior): [centroidId, embedding] -> creates [centroidId, embedding, childPageId]
-     * - 3-field input (leaf with quantization): [centroidId, embedding, quantizedBytes] -> 
-     *   creates [centroidId, embedding, childPageId, quantizedBytes]
+     * - 3-field input (leaf with quantization): [centroidId, embedding, quantizedBytes] ->
+     *   creates [centroidId, embedding, quantizedBytes, childPageId]
      */
     private ITupleReference createEntryTuple(ITupleReference tuple, int childPageId) throws HyracksDataException {
         int inputFieldCount = tuple.getFieldCount();
@@ -256,8 +256,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         int centroidId = (Integer) baseFieldValues[0];
         double[] embedding = (double[]) baseFieldValues[1];
 
-        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId,
-                currentLevel, currentClusterInLevel, currentCentroidInCluster, inputFieldCount);
+        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId, currentLevel,
+                currentClusterInLevel, currentCentroidInCluster, inputFieldCount);
 
         try {
             if (inputFieldCount == 3) {
@@ -274,12 +274,15 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
                 LOGGER.debug("Leaf tuple with quantization: centroidId={}, embeddingLen={}, quantizedLen={}",
                         centroidId, embedding.length, quantizedBytes.length);
 
-                // Create 4-field output tuple: [centroidId, embedding, childPageId, quantizedBytes]
+                // Create 4-field output tuple: [centroidId, embedding, quantizedBytes, childPageId]
+                // childPageId (metadataPtr for leaf) is always the last field so that
+                // getMetadataPagePointer() using getFieldCount()-1 works for both
+                // 3-field (non-quantized) and 4-field (quantized) tuples.
                 return TupleUtils.createTuple(
                         new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
-                                DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE,
-                                ByteArraySerializerDeserializer.INSTANCE },
-                        centroidId, embedding, childPageId, quantizedBytes);
+                                DoubleArraySerializerDeserializer.INSTANCE, ByteArraySerializerDeserializer.INSTANCE,
+                                IntegerSerializerDeserializer.INSTANCE },
+                        centroidId, embedding, quantizedBytes, childPageId);
             } else {
                 // 2-field input: interior or non-quantized leaf [centroidId, embedding]
                 // Create 3-field output tuple: [centroidId, embedding, childPageId]

@@ -88,4 +88,15 @@ public interface IVectorClusteringLeafFrame extends IVectorClusteringFrame {
     boolean getOverflowFlagBit();
 
     void setOverflowFlagBit(boolean overflowFlag);
+
+    /**
+     * Gets the quantized centroid bytes for a cluster entry, if present.
+     * For quantized tuples (4-field format), returns the byte[] at field 2.
+     * For non-quantized tuples (3-field format), returns null.
+     *
+     * @param tupleIndex the index of the cluster entry
+     * @return the quantized centroid bytes, or null if not quantized
+     * @throws HyracksDataException if an error occurs
+     */
+    byte[] getQuantizedCentroidBytes(int tupleIndex) throws HyracksDataException;
 }

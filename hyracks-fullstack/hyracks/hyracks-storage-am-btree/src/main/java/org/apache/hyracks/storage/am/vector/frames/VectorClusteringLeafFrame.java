@@ -19,9 +19,13 @@
 
 package org.apache.hyracks.storage.am.vector.frames;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer;
 import org.apache.hyracks.storage.am.btree.frames.OrderedSlotManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
@@ -117,6 +121,22 @@ public class VectorClusteringLeafFrame extends VectorClusteringNSMFrame implemen
         buf.putInt(Constants.FREE_SPACE_OFFSET, buf.getInt(Constants.FREE_SPACE_OFFSET) + bytesWritten);
         buf.putInt(TOTAL_FREE_SPACE_OFFSET,
                 buf.getInt(TOTAL_FREE_SPACE_OFFSET) - bytesWritten - slotManager.getSlotSize());
+    }
+
+    @Override
+    public byte[] getQuantizedCentroidBytes(int tupleIndex) throws HyracksDataException {
+        frameTuple.resetByTupleIndex(this, tupleIndex);
+        if (frameTuple.getFieldCount() < 4) {
+            return null; // Non-quantized tuple
+        }
+        // Quantized bytes are at field 2 in the 4-field format:
+        // [cid, embedding, quantizedBytes, metadataPtr]
+        int fieldIndex = 2;
+        byte[] fieldData = frameTuple.getFieldData(fieldIndex);
+        int fieldStart = frameTuple.getFieldStart(fieldIndex);
+        int fieldLength = frameTuple.getFieldLength(fieldIndex);
+        DataInputStream dis = new DataInputStream(new ByteArrayInputStream(fieldData, fieldStart, fieldLength));
+        return ByteArraySerializerDeserializer.INSTANCE.deserialize(dis);
     }
 
     @Override
