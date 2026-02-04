@@ -29,6 +29,7 @@ import org.apache.asterix.common.config.DatasetConfig.IndexType;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
@@ -194,9 +195,11 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
         Map<LogicalVariable, Integer> filterVarToFieldIndex = new HashMap<>();
         Map<LogicalVariable, IAType> filterVarToType = new HashMap<>();
 
-        // Physical tuple format: [distance(0), centroidId(1), pk(2), include_fields(3+)]
-        // INCLUDE fields start at physical index 3
-        int includeFieldPhysicalIndex = 3;
+        // Physical tuple format depends on quantization:
+        // Non-quantized: [distance(0), centroidId(1), pk(2), include_fields(3+)]
+        // Quantized:     [distance(0), qDist(1), qEmbed(2), centroidId(3), pk(4), include_fields(5+)]
+        int numSecondaryKeys = searchInfo.isQuantized ? 4 : 2;
+        int includeFieldPhysicalIndex = numSecondaryKeys + 1; // +1 for single PK
 
         for (List<String> fieldPath : searchInfo.includeFieldNames) {
             String fieldName = fieldPath.get(fieldPath.size() - 1);
@@ -255,6 +258,7 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
         String indexName;
         List<List<String>> includeFieldNames;
         ARecordType recordType;
+        boolean isQuantized;
     }
 
     /**
@@ -336,10 +340,15 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
 
         Index.VectorIndexDetails details = (Index.VectorIndexDetails) index.getIndexDetails();
 
+        // Determine quantization from WITH clause description field
+        AdmObjectNode withObjectNode = details.getWithObjectNode();
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+
         VectorSearchInfo info = new VectorSearchInfo();
         info.vectorUnnest = unnest;
         info.indexName = params.getIndexName();
         info.includeFieldNames = details.getIncludeFieldNames();
+        info.isQuantized = (description != null);
         info.recordType = (ARecordType) mp.findType(dataset.getItemTypeDatabaseName(),
                 dataset.getItemTypeDataverseName(), dataset.getItemTypeName());
 

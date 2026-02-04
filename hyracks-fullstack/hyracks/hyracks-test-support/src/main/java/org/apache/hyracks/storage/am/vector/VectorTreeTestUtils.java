@@ -459,6 +459,120 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     }
 
     /**
+     * Test naive blocked search using LSMVCTreeBlockedCursorNaive with sequential cluster scanning
+     * and top-K window collection.
+     *
+     * This method mirrors optimizedSearch() but uses USE_NAIVE_BLOCKED_SEARCH flag
+     * instead of USE_OPTIMIZED_SEARCH, which routes to LSMVCTreeBlockedCursorNaive
+     * (searchApproach=3) instead of LSMVCTreeBlockedCursor (searchApproach=1).
+     *
+     * Both cursors should return the same top-K results for the same query data,
+     * since the difference is in pruning strategy (bidirectional + triangle inequality
+     * vs sequential scan), not in correctness.
+     */
+    public void naiveBlockedSearch(AbstractVectorTreeTestContext ctx) throws Exception {
+        // Get query configuration from context
+        double[] queryVector = ctx.getQueryVector();
+        int k = ctx.getQueryK();
+        List<String> expectedPKs = ctx.getExpectedPrimaryKeys();
+
+        if (queryVector == null) {
+            throw new IllegalStateException("Query vector must be set in context via ctx.setQueryVector()");
+        }
+
+        // 1. Create query tuple containing the vector
+        ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
+        queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
+        ArrayTupleReference queryTuple = new ArrayTupleReference();
+        queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
+
+        // 2. Set up predicate with query tuple reference and K value
+        VectorPointPredicate predicate = new VectorPointPredicate();
+        predicate.setQueryTuple(queryTuple);
+        predicate.setQueryFieldIndex(0);
+        predicate.setDistanceMetric("euclidean");
+        predicate.setK(k);
+
+        // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
+        // Set USE_NAIVE_BLOCKED_SEARCH flag to enable LSMVCTreeBlockedCursorNaive
+        IndexAccessParameters iap =
+                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
+        iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
+
+        IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
+        IIndexCursor cursor = accessor.createSearchCursor(false);
+
+        // Verify we got the naive blocked cursor
+        LOGGER.info("Created cursor type: {}", cursor.getClass().getSimpleName());
+
+        try {
+            // Open cursor with predicate
+            accessor.search(cursor, predicate);
+
+            try {
+                // Collect all results from cursor
+                List<ITupleReference> results = new ArrayList<>();
+                while (cursor.hasNext()) {
+                    cursor.next();
+                    ITupleReference tuple = cursor.getTuple();
+                    results.add(tuple);
+                }
+
+                LOGGER.info("Naive Blocked Search: Found {} records for query vector {} with K={}", results.size(),
+                        Arrays.toString(queryVector), k);
+
+                // Print PKs for debugging
+                LOGGER.info("[naiveBlockedSearch] Results PKs:");
+                for (int i = 0; i < results.size(); i++) {
+                    ITupleReference tuple = results.get(i);
+                    String pk = extractPrimaryKeyFromOptimizedTuple(tuple);
+                    double dxc = extractDistanceFromTuple(tuple);
+                    double[] vec = extractVectorFromOptimizedTuple(tuple);
+                    double dqx = computeEuclideanDistance(queryVector, vec);
+                    LOGGER.info("  [{}] pk={}, D(x,C)={}, D(q,x)={}, vec={}", i, pk, dxc, dqx,
+                            Arrays.toString(vec));
+                }
+
+                // Validate we got the expected number of results
+                assertEquals("Naive blocked search should return K=" + k + " records", k, results.size());
+
+                // Print results with details
+                printOptimizedSearchResults(results, queryVector);
+
+                // Validate expected primary keys are in results (if provided)
+                List<String> actualPKs = new ArrayList<>();
+                for (ITupleReference tuple : results) {
+                    actualPKs.add(extractPrimaryKeyFromOptimizedTuple(tuple));
+                }
+
+                if (expectedPKs != null && !expectedPKs.isEmpty()) {
+                    for (String expectedPK : expectedPKs) {
+                        assertTrue("Expected " + expectedPK + " in results, but got: " + actualPKs,
+                                actualPKs.contains(expectedPK));
+                    }
+                }
+
+                // Validate excluded primary keys are NOT in results (for delete tests)
+                List<String> excludedPKs = ctx.getExcludedPrimaryKeys();
+                if (excludedPKs != null && !excludedPKs.isEmpty()) {
+                    for (String excludedPK : excludedPKs) {
+                        assertFalse("Deleted " + excludedPK + " should NOT be in results, but got: " + actualPKs,
+                                actualPKs.contains(excludedPK));
+                    }
+                }
+
+                LOGGER.info("Naive Blocked Search: All {} results verified correctly", results.size());
+
+            } finally {
+                cursor.close();
+            }
+        } finally {
+            cursor.destroy();
+        }
+    }
+
+    /**
      * Insert records into the memory component using the index accessor.
      *
      * @param ctx Test context with active index

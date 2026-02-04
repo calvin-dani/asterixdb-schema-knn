@@ -37,7 +37,6 @@ import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.control.nc.NodeControllerService;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
 import org.apache.hyracks.storage.am.common.api.INullIntrospector;
-import org.apache.hyracks.storage.am.common.api.IQuantizedResource;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
@@ -56,7 +55,7 @@ import org.apache.hyracks.storage.common.IStorageManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedResource {
+public class LSMVCTreeLocalResource extends LsmResource {
 
     private static final long serialVersionUID = 2L;
     private static final Logger LOGGER = Logger.getLogger(LSMVCTreeLocalResource.class.getName());
@@ -174,14 +173,8 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
         FileReference fileRef = ioManager.resolve(path);
 
         // Try to read quantization constants from sidecar file if not already set
-        System.err.println(
-                "[LSMVCTreeLocalResource] createInstance() - minQuantile=" + minQuantile + ", indexName=" + indexName);
         if (minQuantile == null && indexName != null) {
-            System.err.println("[LSMVCTreeLocalResource] createInstance() - minQuantile is null, trying sidecar file");
             tryReadQuantizationSidecarFile(ioManager, fileRef);
-        } else {
-            System.err.println(
-                    "[LSMVCTreeLocalResource] createInstance() - NOT checking sidecar file (minQuantile already set or no indexName)");
         }
 
         List<IVirtualBufferCache> virtualBufferCaches = vbcProvider.getVirtualBufferCaches(ncServiceCtx, fileRef);
@@ -469,34 +462,5 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
     public boolean hasQuantizationParams() {
         return bits != null && confidenceInterval != null && minQuantile != null && maxQuantile != null
                 && alpha != null;
-    }
-
-    @Override
-    public void setQuantizationParameters(Map<String, Object> parameters) {
-        System.err.println("[LSMVCTreeLocalResource] setQuantizationParameters() - called with: " + parameters);
-        if (parameters == null) {
-            System.err.println("[LSMVCTreeLocalResource] setQuantizationParameters() - parameters is null, returning");
-            return;
-        }
-        if (parameters.containsKey("minQuantile")) {
-            this.minQuantile = (Float) parameters.get("minQuantile");
-        }
-        if (parameters.containsKey("maxQuantile")) {
-            this.maxQuantile = (Float) parameters.get("maxQuantile");
-        }
-        if (parameters.containsKey("alpha")) {
-            this.alpha = (Float) parameters.get("alpha");
-        }
-        if (parameters.containsKey("bits")) {
-            this.bits = (Integer) parameters.get("bits");
-        }
-        if (parameters.containsKey("confidenceInterval")) {
-            this.confidenceInterval = (Float) parameters.get("confidenceInterval");
-        }
-        if (parameters.containsKey("sampleCount")) {
-            this.sampleCount = (Integer) parameters.get("sampleCount");
-        }
-        System.err.println("[LSMVCTreeLocalResource] setQuantizationParameters() - after setting: minQ=" + minQuantile
-                + ", maxQ=" + maxQuantile + ", alpha=" + alpha + ", bits=" + bits);
     }
 }

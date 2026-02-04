@@ -84,11 +84,14 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // Compile-time constant passed from descriptor for cursor selection at open() time
     protected final int searchApproach;
 
+    // Number of secondary key fields before PKs in data tuples (2 for non-quantized, 4 for quantized)
+    protected final int numSecondaryKeys;
+
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
             IVectorBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
-            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach)
+            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys)
             throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
@@ -117,6 +120,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.distanceFunctionFactory = distanceFunctionFactory;
         this.tupleFilterFactory = tupleFilterFactory;
         this.searchApproach = searchApproach;
+        this.numSecondaryKeys = numSecondaryKeys;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
@@ -154,6 +158,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
             vectorPred.setQueryTuple(queryParamsTuple);
             vectorPred.setQueryFieldIndex(0); // Field 0 is the vector field
+            vectorPred.setPkStartField(numSecondaryKeys);
 
             // Extract K value from field 1 if available
             if (queryFields.length > 1) {
@@ -258,10 +263,15 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // that wrap VectorDistanceArrCalculation from AsterixDB
         iap.getParameters().put(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY, distanceFunctionFactory);
 
-        // Set optimized search flag based on compile-time searchApproach constant
-        // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
-        if (searchApproach == 1) {
+        // Set cursor selection flags based on compile-time searchApproach constant
+        // 0 = naive streaming (LSMVCTreeSearchCursor)
+        // 1 = optimized bidirectional (LSMVCTreeBlockedCursor)
+        // 2 = optimized bidirectional with inline filtering (LSMVCTreeBlockedCursor + ITupleFilter)
+        // 3 = naive blocked (LSMVCTreeBlockedCursorNaive - top-K window, quantized distance, no pruning)
+        if (searchApproach == 1 || searchApproach == 2) {
             iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
+        } else if (searchApproach == 3) {
+            iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
         }
     }
 }
