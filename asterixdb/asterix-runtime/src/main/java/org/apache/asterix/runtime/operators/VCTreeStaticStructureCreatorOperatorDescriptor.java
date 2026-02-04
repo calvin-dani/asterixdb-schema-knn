@@ -861,12 +861,12 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         }
 
                         if (!quantizationParamsLoaded) {
-                            System.err.println(
-                                    "WARNING: Could not load quantization params, using defaults: bits=" + quantizationBits);
+                            System.err.println("WARNING: Could not load quantization params, using defaults: bits="
+                                    + quantizationBits);
                         }
                     } catch (Exception e) {
-                        System.err.println("WARNING: Failed to read quantization params: " + e.getMessage()
-                                + ", using defaults");
+                        System.err.println(
+                                "WARNING: Failed to read quantization params: " + e.getMessage() + ", using defaults");
                         // Not fatal - will use default parameters
                     }
                 }
