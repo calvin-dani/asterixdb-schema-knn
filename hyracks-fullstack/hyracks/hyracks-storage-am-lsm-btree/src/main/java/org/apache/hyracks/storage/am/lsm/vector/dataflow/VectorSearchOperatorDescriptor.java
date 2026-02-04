@@ -74,11 +74,15 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     // When set, the cursor will only return tuples that pass this filter
     protected final ITupleFilterFactory tupleFilterFactory;
 
+    // Search approach: 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
+    // This is a compile-time constant extracted from the ANN_DISTANCE function arguments
+    protected final int searchApproach;
+
     public VectorSearchOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVectorBinaryAccessorFactory vectorAccessorFactory,
             java.io.Serializable distanceFunctionFactory, int[][] partitionsMap, int numPrimaryKeys,
-            int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory) {
+            int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory, int searchApproach) {
         super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
@@ -90,6 +94,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         this.numPrimaryKeys = numPrimaryKeys;
         this.numSecondaryKeys = numSecondaryKeys;
         this.tupleFilterFactory = tupleFilterFactory;
+        this.searchApproach = searchApproach;
         this.outRecDescs[0] = outRecDesc;
 
         // Create tuple projector factory that extracts only PK fields
@@ -103,6 +108,6 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         return new VectorSearchOperatorNodePushable(ctx, partition,
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
                 retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, tupleFilterFactory);
+                distanceFunctionFactory, partitionsMap, tupleFilterFactory, searchApproach, numSecondaryKeys);
     }
 }

@@ -47,7 +47,9 @@ import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCacheProvider;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResource;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IStorageManager;
 
@@ -69,6 +71,7 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
     protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
     protected final int numPrimaryKeyFields;
     protected final int numIncludeFields;
+    protected final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
     // Index name for locating sidecar file (optional, only set during index creation)
     protected final String indexName;
@@ -91,12 +94,13 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
-            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields) {
+            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
         this(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions,
                 vectorFields, nullTypeTraits, nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields,
-                numIncludeFields, null, null, null, null, null, null, null);
+                numIncludeFields, dataTupleCreatorFactory, null, null, null, null, null, null, null);
     }
 
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
@@ -109,8 +113,8 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
             IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-            String indexName, Float confidenceInterval, Float minQuantile, Float maxQuantile, Float alpha, Integer bits,
-            Integer sampleCount) {
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, String indexName, Float confidenceInterval,
+            Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) {
         super(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -129,20 +133,22 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.numPrimaryKeyFields = numPrimaryKeyFields;
         this.numIncludeFields = numIncludeFields;
+        this.dataTupleCreatorFactory = dataTupleCreatorFactory;
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
             int[] vectorFields, int[] filterFields, boolean atomic, IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields) throws HyracksDataException {
+            int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory)
+            throws HyracksDataException {
         this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null,
-                null, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields);
+                null, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
     }
 
     protected LSMVCTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
             int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval,
             Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount,
-            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields)
-            throws HyracksDataException {
+            IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws HyracksDataException {
         super(registry, json);
         this.vectorDimensions = vectorDimensions;
         this.vectorFields = vectorFields;
@@ -158,6 +164,7 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.numPrimaryKeyFields = numPrimaryKeyFields;
         this.numIncludeFields = numIncludeFields;
+        this.dataTupleCreatorFactory = dataTupleCreatorFactory;
     }
 
     @Override
@@ -203,14 +210,14 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
                 null, // filterManager
                 null, // filterHelper
                 durable, metadataPageManagerFactory, atomic, null, accessorFactory, numPrimaryKeyFields,
-                numIncludeFields);
+                numIncludeFields, dataTupleCreatorFactory);
     }
 
     /**
      * Tries to read quantization constants from a sidecar file.
      * The sidecar file is located in the dataset directory (parent of index directory).
      * File format: .quantization_<indexName> containing 24 bytes of binary data.
-     * 
+     *
      * @param ioManager The IO manager
      * @param indexFileRef The index file reference (used to derive dataset directory)
      */
@@ -328,10 +335,11 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
         Float alpha = getOrDefaultFloat(json, "alpha", null);
         Integer bits = getOrDefaultInt(json, "bits", null);
         Integer sampleCount = getOrDefaultInt(json, "sampleCount", null);
+        IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory = new VCTreeDataTupleCreatorFactory(numIncludeFields);
 
         return new LSMVCTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic,
                 indexName, confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount, null,
-                numPrimaryKeyFields, numIncludeFields);
+                numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
     }
 
     /**

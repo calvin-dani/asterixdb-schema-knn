@@ -807,8 +807,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         throws HyracksDataException {
                     try {
                         // Create index helper to access the resource (use partition from outer scope)
-                        IIndexDataflowHelper tempHelper =
-                                indexHelperFactory.create(taskCtx.getJobletContext().getServiceContext(), partition);
+                        IIndexDataflowHelper tempHelper = indexHelperFactory.create(taskCtx.getJobletContext()
+                                .getServiceContext(), partition);
 
                         // Get the local resource from the helper
                         LocalResource localResource = tempHelper.getResource();
@@ -1076,15 +1076,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                 new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
                                         DoubleArraySerializerDeserializer.INSTANCE, // embedding as double array
                                         ByteArraySerializerDeserializer.INSTANCE // quantized bytes with corrective multiplier
-                        };
+                                };
                         Object[] fieldValues = new Object[] { centroidId, embedding, quantizedWithMultiplier };
 
                         TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
 
-                        System.err.println(
-                                "Created leaf tuple with quantization: centroidId=" + centroidId + ", embeddingDim="
-                                        + embedding.length + ", quantizedLen=" + quantizedWithMultiplier.length
-                                        + ", correctiveMultiplier=" + quantizedResult.correctiveMultiplier);
+                        System.err.println("Created leaf tuple with quantization: centroidId=" + centroidId
+                                + ", embeddingDim=" + embedding.length + ", quantizedLen=" + quantizedWithMultiplier.length
+                                + ", correctiveMultiplier=" + quantizedResult.correctiveMultiplier);
 
                         return tupleRef;
 

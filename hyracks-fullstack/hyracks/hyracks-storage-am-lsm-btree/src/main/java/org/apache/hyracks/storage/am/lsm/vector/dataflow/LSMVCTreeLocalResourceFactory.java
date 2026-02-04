@@ -32,6 +32,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTrackerFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCacheProvider;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResourceFactory;
+import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IResource;
 import org.apache.hyracks.storage.common.IStorageManager;
@@ -46,6 +47,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
     protected final IVectorBinaryAccessorFactory vectorAccessorFactory;
     protected final int numPrimaryKeyFields;
     protected final int numIncludeFields;
+    protected final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
     // Index name for locating quantization sidecar file
     protected final String indexName;
@@ -53,7 +55,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
     /**
      * Constructor with index name for locating quantization sidecar file.
      * The sidecar file is expected at: dataset_dir/.quantization_{indexName}
-     * 
+     *
      */
     public LSMVCTreeLocalResourceFactory(IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -65,7 +67,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
             IVectorBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-            String indexName) {
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, String indexName) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -77,6 +79,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.numPrimaryKeyFields = numPrimaryKeyFields;
         this.numIncludeFields = numIncludeFields;
+        this.dataTupleCreatorFactory = dataTupleCreatorFactory;
     }
 
     @Override
@@ -85,7 +88,7 @@ public class LSMVCTreeLocalResourceFactory extends LsmResourceFactory {
                 filterTypeTraits, filterCmpFactories, filterFields, opTrackerProvider, ioOpCallbackFactory,
                 pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                 mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions, vectorFields, nullTypeTraits,
-                nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, indexName, null,
-                null, null, null, null, null);
+                nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields,
+                dataTupleCreatorFactory, indexName, null, null, null, null, null, null);
     }
 }

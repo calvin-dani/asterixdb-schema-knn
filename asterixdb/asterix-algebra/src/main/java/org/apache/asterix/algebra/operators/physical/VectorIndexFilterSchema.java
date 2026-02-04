@@ -28,13 +28,16 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.IOperatorSch
  * A wrapper schema for vector index filter evaluation that maps variables to
  * their correct physical tuple positions.
  *
- * Vector index physical tuple format: [distance, centroidId, pk, include_fields...]
+ * Vector index physical tuple format depends on quantization:
+ * Non-quantized: [distance, centroidId, pk, include_fields...]
+ * Quantized:     [distance, qDist, qEmbed, centroidId, pk, include_fields...]
+ *
  * The original opSchema only contains [pk] because:
- * - distance and centroidId are internal to the index
+ * - Secondary fields (distance, centroidId, etc.) are internal to the index
  * - INCLUDE fields are only used for filtering, not output
  *
  * This wrapper supports two mapping modes:
- * 1. Variables in opSchema (like pk): position + 2 offset
+ * 1. Variables in opSchema (like pk): position + numSecondaryKeys offset
  * 2. Filter-only variables (INCLUDE fields): direct mapping via filterVarToFieldIndex
  *
  * This allows the TupleFilter to correctly access INCLUDE fields during vector index search
@@ -42,8 +45,10 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.IOperatorSch
  */
 public class VectorIndexFilterSchema implements IOperatorSchema {
 
-    // Number of internal fields before pk in vector index tuple (distance, centroidId)
-    private static final int VECTOR_INDEX_FIELD_OFFSET = 2;
+    // Number of internal fields before pk in vector index tuple
+    // Non-quantized: 2 (distance, centroidId)
+    // Quantized: 4 (distance, qDist, qEmbed, centroidId)
+    private final int fieldOffset;
 
     private final IOperatorSchema delegate;
 
@@ -55,8 +60,8 @@ public class VectorIndexFilterSchema implements IOperatorSchema {
      * Constructor without direct mapping (backward compatibility).
      * All variables must be in the delegate schema.
      */
-    public VectorIndexFilterSchema(IOperatorSchema delegate) {
-        this(delegate, null);
+    public VectorIndexFilterSchema(IOperatorSchema delegate, int numSecondaryKeys) {
+        this(delegate, null, numSecondaryKeys);
     }
 
     /**
@@ -64,10 +69,13 @@ public class VectorIndexFilterSchema implements IOperatorSchema {
      *
      * @param delegate The operator output schema (contains pk)
      * @param filterVarToFieldIndex Direct mapping for INCLUDE field variables to physical field indexes
+     * @param numSecondaryKeys Number of secondary fields before PK (2 for non-quantized, 4 for quantized)
      */
-    public VectorIndexFilterSchema(IOperatorSchema delegate, Map<LogicalVariable, Integer> filterVarToFieldIndex) {
+    public VectorIndexFilterSchema(IOperatorSchema delegate, Map<LogicalVariable, Integer> filterVarToFieldIndex,
+            int numSecondaryKeys) {
         this.delegate = delegate;
         this.filterVarToFieldIndex = filterVarToFieldIndex;
+        this.fieldOffset = numSecondaryKeys;
     }
 
     @Override
@@ -84,22 +92,22 @@ public class VectorIndexFilterSchema implements IOperatorSchema {
             return originalPos;
         }
         // Add offset to account for distance and centroidId fields
-        return originalPos + VECTOR_INDEX_FIELD_OFFSET;
+        return originalPos + fieldOffset;
     }
 
     @Override
     public LogicalVariable getVariable(int index) {
         // Adjust index back when retrieving variable
-        if (index < VECTOR_INDEX_FIELD_OFFSET) {
+        if (index < fieldOffset) {
             return null; // distance and centroidId have no logical variables
         }
-        return delegate.getVariable(index - VECTOR_INDEX_FIELD_OFFSET);
+        return delegate.getVariable(index - fieldOffset);
     }
 
     @Override
     public int getSize() {
         // Include the offset fields in the size
-        return delegate.getSize() + VECTOR_INDEX_FIELD_OFFSET;
+        return delegate.getSize() + fieldOffset;
     }
 
     // The following methods delegate to the original schema
@@ -117,7 +125,7 @@ public class VectorIndexFilterSchema implements IOperatorSchema {
 
     @Override
     public int addVariable(LogicalVariable var) {
-        return delegate.addVariable(var) + VECTOR_INDEX_FIELD_OFFSET;
+        return delegate.addVariable(var) + fieldOffset;
     }
 
     @Override

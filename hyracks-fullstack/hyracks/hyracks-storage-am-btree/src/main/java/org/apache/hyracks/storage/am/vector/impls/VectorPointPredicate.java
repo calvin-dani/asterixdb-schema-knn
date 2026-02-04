@@ -40,16 +40,20 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int queryFieldIndex;
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
+    private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
     private int nprobe; // Number of clusters to probe (minimum before K-check)
     private double epsilon; // Distance threshold for level-wise cross-pollination
-    private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
+    private int searchApproach; // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
+    private int pkStartField; // Field index where primary keys start (2 for non-quantized, 4 for quantized)
 
     public VectorPointPredicate() {
         // Empty constructor for initialization
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 10; // Default: probe 1 cluster
+        this.nprobe = 2; // Default: probe 1 cluster
         this.epsilon = 0.15; // Default: no epsilon (use nprobe count only)
+        this.searchApproach = 0; // Default: naive search
+        this.pkStartField = 2; // Default: non-quantized format
     }
 
     public VectorPointPredicate(int k) {
@@ -58,6 +62,8 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.distanceMetric = null;
         this.nprobe = 10;
         this.epsilon = 0.15;
+        this.searchApproach = 0;
+        this.pkStartField = 2;
     }
 
     public VectorPointPredicate(int k, int nprobe, double epsilon) {
@@ -66,6 +72,8 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.nprobe = nprobe;
         this.epsilon = epsilon;
         this.distanceMetric = null;
+        this.searchApproach = 0;
+        this.pkStartField = 2;
     }
 
     public VectorPointPredicate(double[] queryVector) {
@@ -74,6 +82,8 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.k = Integer.MAX_VALUE; // Default: no limit
         this.nprobe = 10;
         this.epsilon = 0.15;
+        this.searchApproach = 0;
+        this.pkStartField = 2;
     }
 
     /**
@@ -179,6 +189,35 @@ public class VectorPointPredicate implements ISearchPredicate {
         return tupleFilter;
     }
 
+    /**
+     * Set the search approach (0=naive using LSMVCTreeSearchCursor, 1=optimized using LSMVCTreeBlockedCursor).
+     */
+    public void setSearchApproach(int searchApproach) {
+        this.searchApproach = searchApproach;
+    }
+
+    /**
+     * Get the search approach (0=naive, 1=optimized).
+     */
+    public int getSearchApproach() {
+        return searchApproach;
+    }
+
+    /**
+     * Set the field index where primary keys start in the data tuple.
+     * 2 for non-quantized format, 4 for quantized format.
+     */
+    public void setPkStartField(int pkStartField) {
+        this.pkStartField = pkStartField;
+    }
+
+    /**
+     * Get the field index where primary keys start in the data tuple.
+     */
+    public int getPkStartField() {
+        return pkStartField;
+    }
+
     @Override
     public MultiComparator getLowKeyComparator() {
         // Vector clustering tree doesn't use traditional key comparisons
@@ -200,6 +239,7 @@ public class VectorPointPredicate implements ISearchPredicate {
     @Override
     public String toString() {
         return "VectorPointPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + ", distanceMetric="
-                + distanceMetric + ", k=" + k + ", nprobe=" + nprobe + ", epsilon=" + epsilon + "]";
+                + distanceMetric + ", k=" + k + ", nprobe=" + nprobe + ", epsilon=" + epsilon + ", searchApproach="
+                + searchApproach + ", pkStartField=" + pkStartField + "]";
     }
 }
