@@ -25,6 +25,8 @@ import java.util.Map;
 import org.apache.asterix.metadata.declared.DataSourceId;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
+import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.constants.AsterixConstantValue;
@@ -106,8 +108,16 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
             VariableUtilities.getLiveVariables(unnestMap, outputVars);
         }
 
+        // Determine quantization from vector index metadata
+        Index vectorIndex = mp.getIndex(jobGenParams.getDatabaseName(), jobGenParams.getDataverseName(),
+                jobGenParams.getDatasetName(), jobGenParams.getIndexName());
+        Index.VectorIndexDetails vectorDetails = (Index.VectorIndexDetails) vectorIndex.getIndexDetails();
+        AdmObjectNode withObjectNode = vectorDetails.getWithObjectNode();
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        boolean isQuantized = (description != null);
+        int numSecondaryKeys = isQuantized ? 4 : 2;
+
         // Create tuple filter factory if selectCondition is present (for INCLUDE field filtering)
-        // Vector index physical tuple format: [distance, centroidId, pk, include_fields...]
         // The opSchema only has [pk] because INCLUDE fields are only used for filtering.
         // Filter variables are mapped directly to physical field indexes via annotation.
         ITupleFilterFactory tupleFilterFactory = null;
@@ -125,7 +135,9 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
                         .getAnnotations().get(PushFilterIntoVectorSearchRule.VECTOR_FILTER_VAR_TYPES);
 
                 // Create filter schema with direct mapping for filter-only variables
-                IOperatorSchema filterSchema = new VectorIndexFilterSchema(opSchema, filterVarToFieldIndex);
+                // numSecondaryKeys: offset from physical tuple start to PK field
+                IOperatorSchema filterSchema =
+                        new VectorIndexFilterSchema(opSchema, filterVarToFieldIndex, numSecondaryKeys);
 
                 // Create type environment with filter variable types
                 // Pass context so function expressions can use this wrapper for recursive type lookups

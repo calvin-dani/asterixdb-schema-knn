@@ -34,6 +34,8 @@ import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.base.ADouble;
 import org.apache.asterix.om.base.AInt32;
+import org.apache.asterix.om.base.AInt64;
+import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.types.ARecordType;
@@ -262,10 +264,12 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         queryExprList.add(new MutableObject<>(distanceMetricExpr.cloneExpression()));
 
         // Add nprobe variable (arg 3, default 10)
+        // SQL++ parser creates AInt64 for integer literals; convert to AInt32 for IntegerPointable at runtime
         LogicalVariable nprobeVar = context.newVar();
         queryVarList.add(nprobeVar);
         if (annDistanceExpr.getArguments().size() > 3) {
-            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(3).getValue().cloneExpression()));
+            ILogicalExpression nprobeExpr = annDistanceExpr.getArguments().get(3).getValue().cloneExpression();
+            queryExprList.add(new MutableObject<>(ensureInt32Constant(nprobeExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(10)))));
         }
@@ -280,10 +284,13 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         }
 
         // Add search_approach variable (arg 5, default 0 = naive)
+        // SQL++ parser creates AInt64 for integer literals; convert to AInt32 for IntegerPointable at runtime
         LogicalVariable searchApproachVar = context.newVar();
         queryVarList.add(searchApproachVar);
         if (annDistanceExpr.getArguments().size() > 5) {
-            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(5).getValue().cloneExpression()));
+            ILogicalExpression searchApproachExpr =
+                    annDistanceExpr.getArguments().get(5).getValue().cloneExpression();
+            queryExprList.add(new MutableObject<>(ensureInt32Constant(searchApproachExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(0)))));
         }
@@ -514,6 +521,34 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         String normalized1 = normalizeDistanceMetric(metric1);
         String normalized2 = normalizeDistanceMetric(metric2);
         return normalized1.equals(normalized2);
+    }
+
+    /**
+     * Ensures an integer constant expression uses AInt32 instead of AInt64.
+     *
+     * SQL++ parser creates AInt64 (8 bytes) for all integer literals, but the runtime
+     * uses IntegerPointable.getInteger() which reads only 4 bytes. Reading the first
+     * 4 bytes of an 8-byte big-endian AInt64 for small values yields 0.
+     *
+     * This method converts AInt64 constants to AInt32 at compile time so the runtime
+     * can correctly read them with IntegerPointable.
+     *
+     * @param expr The expression to check and potentially convert
+     * @return The original expression if not an AInt64 constant, or a new AInt32 constant expression
+     */
+    private static ILogicalExpression ensureInt32Constant(ILogicalExpression expr) {
+        if (expr.getExpressionTag() == LogicalExpressionTag.CONSTANT) {
+            ConstantExpression constExpr = (ConstantExpression) expr;
+            IAlgebricksConstantValue constVal = constExpr.getValue();
+            if (constVal instanceof AsterixConstantValue) {
+                IAObject obj = ((AsterixConstantValue) constVal).getObject();
+                if (obj instanceof AInt64) {
+                    int intValue = (int) ((AInt64) obj).getLongValue();
+                    return new ConstantExpression(new AsterixConstantValue(new AInt32(intValue)));
+                }
+            }
+        }
+        return expr;
     }
 
     /**

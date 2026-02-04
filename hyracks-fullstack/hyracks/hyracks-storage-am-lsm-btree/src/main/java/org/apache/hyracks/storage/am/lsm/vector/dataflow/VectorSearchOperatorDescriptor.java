@@ -108,6 +108,6 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         return new VectorSearchOperatorNodePushable(ctx, partition,
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
                 retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, tupleFilterFactory, searchApproach);
+                distanceFunctionFactory, partitionsMap, tupleFilterFactory, searchApproach, numSecondaryKeys);
     }
 }

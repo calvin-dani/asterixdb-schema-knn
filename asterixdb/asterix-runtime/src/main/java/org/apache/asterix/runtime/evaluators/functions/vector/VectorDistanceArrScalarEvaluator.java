@@ -175,9 +175,9 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
         for (int i = 0; i < evaluators.length; ++i) {
             pointables[i] = new VoidPointable();
             evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
-            if (evaluatorFactories[i] instanceof ConstantEvalFactory) {
-                // If the evaluator is a constant, we need to evaluate it to get the value.
-                // This is necessary for functions that require both arguments to be evaluated.
+            // Only process constant optimization for the first 3 args (vector1, vector2, metric).
+            // Args 3+ (nprobe, epsilon, searchApproach) are optimizer hints, not used at runtime.
+            if (i < 3 && evaluatorFactories[i] instanceof ConstantEvalFactory) {
                 evaluators[i].evaluate(null, pointables[i]);
                 isConstant[i] = true;
                 if (i == 2) {
