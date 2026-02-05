@@ -65,6 +65,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileRefe
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -111,6 +112,9 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     protected final int numIncludeFields;
     protected final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
+    // Raw quantization params for lazy quantizer creation at query time (null = non-quantized path)
+    protected final float[] quantizationParams;
+
     protected LSMVCTreeDiskComponent staticStructure;
 
     public LSMVCTree(NCConfig storageConfig, IIOManager ioManager, List<IVirtualBufferCache> virtualBufferCaches,
@@ -125,8 +129,8 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
             boolean atomic, org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory)
-            throws HyracksDataException {
+            int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory,
+            float[] quantizationParams) throws HyracksDataException {
 
         super(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
@@ -144,6 +148,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         this.numPrimaryKeyFields = numPrimaryKeyFields;
         this.numIncludeFields = numIncludeFields;
         this.dataTupleCreatorFactory = dataTupleCreatorFactory;
+        this.quantizationParams = quantizationParams;
 
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
@@ -153,7 +158,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
                     new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
                     metadataFrameFactory, insertDataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef,
-                    vectorAccessorFactory, dataTupleCreatorFactory);
+                    vectorAccessorFactory, dataTupleCreatorFactory, quantizationParams);
             LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
                     filterHelper == null ? null : filterHelper.createFilter());
             memoryComponents.add(mutableComponent);
@@ -258,6 +263,13 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      */
     public int getVectorDimensions() {
         return vectorDimensions;
+    }
+
+    /**
+     * Gets the quantization parameters for this index, or null if no quantization is configured.
+     */
+    public float[] getQuantizationParams() {
+        return quantizationParams;
     }
 
     @Override

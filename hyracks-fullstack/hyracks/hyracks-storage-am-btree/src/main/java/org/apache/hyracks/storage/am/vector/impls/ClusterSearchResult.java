@@ -30,15 +30,17 @@ public class ClusterSearchResult {
     public final double distance;
     public final int centroidId;
     public final long directoryPageId; // Direct pointer to cluster's directory/metadata page
+    public final double quantizedDistance; // Distance computed on quantized representations (NaN = not computed)
 
     ClusterSearchResult(int leafPageId, int clusterIndex, double[] centroid, double distance, int centroidId,
-            long directoryPageId) {
+            long directoryPageId, double quantizedDistance) {
         this.leafPageId = leafPageId;
         this.clusterIndex = clusterIndex;
         this.centroid = centroid;
         this.distance = distance;
         this.centroidId = centroidId;
         this.directoryPageId = directoryPageId;
+        this.quantizedDistance = quantizedDistance;
     }
 
     /**
@@ -54,7 +56,26 @@ public class ClusterSearchResult {
      */
     public static ClusterSearchResult create(int leafPageId, int clusterIndex, double[] centroid, double distance,
             int centroidId, long directoryPageId) {
-        return new ClusterSearchResult(leafPageId, clusterIndex, centroid, distance, centroidId, directoryPageId);
+        return new ClusterSearchResult(leafPageId, clusterIndex, centroid, distance, centroidId, directoryPageId,
+                Double.NaN);
+    }
+
+    /**
+     * Factory method with quantized distance.
+     *
+     * @param leafPageId The leaf page ID
+     * @param clusterIndex The cluster index within the page
+     * @param centroid The centroid vector
+     * @param distance The distance to the centroid
+     * @param centroidId The centroid ID
+     * @param directoryPageId The directory/metadata page ID for this cluster
+     * @param quantizedDistance Distance computed on quantized representations (NaN if not computed)
+     * @return New ClusterSearchResult instance
+     */
+    public static ClusterSearchResult create(int leafPageId, int clusterIndex, double[] centroid, double distance,
+            int centroidId, long directoryPageId, double quantizedDistance) {
+        return new ClusterSearchResult(leafPageId, clusterIndex, centroid, distance, centroidId, directoryPageId,
+                quantizedDistance);
     }
 
     /**
@@ -63,7 +84,7 @@ public class ClusterSearchResult {
      */
     public static ClusterSearchResult create(int leafPageId, int clusterIndex, double[] centroid, double distance,
             int centroidId) {
-        return new ClusterSearchResult(leafPageId, clusterIndex, centroid, distance, centroidId, -1);
+        return new ClusterSearchResult(leafPageId, clusterIndex, centroid, distance, centroidId, -1, Double.NaN);
     }
 
     /**
@@ -72,5 +93,13 @@ public class ClusterSearchResult {
      */
     public boolean hasDirectoryPageId() {
         return directoryPageId >= 0;
+    }
+
+    /**
+     * Check if this result has a valid quantized distance.
+     * @return true if quantizedDistance was computed (not NaN)
+     */
+    public boolean hasQuantizedDistance() {
+        return !Double.isNaN(quantizedDistance);
     }
 }

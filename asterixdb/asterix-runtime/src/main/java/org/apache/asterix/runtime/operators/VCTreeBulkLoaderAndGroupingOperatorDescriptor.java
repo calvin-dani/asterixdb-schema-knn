@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import org.apache.asterix.common.dataflow.DatasetLocalResource;
 import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
+import org.apache.asterix.common.storage.ScalarVectorQuantizer;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunction;
@@ -236,15 +237,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * Input tuple format from CastAssign: [embedding, include_fields..., pk...]
      * <p>
      * Non-quantized output: [distance, centroidId, pk..., include_fields...]
-     * Quantized output:     [distance, quantized_distance, quantized_embedding, centroidId, pk..., include_fields...]
+     * Quantized output:     [distance, centroidId, quantized_distance, quantized_embedding, pk..., include_fields...]
+     * <p>
+     * IMPORTANT: centroidId MUST be at field index 1 in both formats so that
+     * sortFields={1,0} and extractCentroidId(field[1]) work unchanged.
      *
-     * @param originalTuple Input tuple with original fields to preserve
-     * @param searchResult  ClusterSearchResult containing all needed values
+     * @param originalTuple   Input tuple with original fields to preserve
+     * @param searchResult    ClusterSearchResult containing all needed values
+     * @param quantizedVector QuantizedVector from quantization (nullable — only used for quantized indexes)
      * @return Transformed tuple
      * @throws HyracksDataException if tuple creation fails
      */
-    public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
-            throws HyracksDataException {
+    public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult,
+            OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector) throws HyracksDataException {
         try {
             // Get serializers for original fields from input record descriptor
             ISerializerDeserializer<?>[] originalFieldSerdes = inputRecDesc.getFields();
@@ -265,11 +270,36 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             combinedValues[0] = searchResult.distance; // raw double
 
             if (isQuantized) {
-                // Quantized format: [distance, quantized_distance, quantized_embedding, centroidId, pk..., includes...]
-                // TODO: Populate quantized_distance and quantized_embedding from quantization computation
-                combinedValues[1] = new byte[0]; // quantized_distance placeholder
-                combinedValues[2] = new byte[0]; // quantized_embedding placeholder
-                combinedValues[3] = searchResult.centroidId; // raw int
+                // Quantized format: [distance, centroidId, quantized_distance, quantized_embedding, pk..., includes...]
+                combinedValues[1] = searchResult.centroidId; // raw int — MUST be at index 1
+
+                // Fill quantized_distance from navigation result
+                combinedValues[2] = searchResult.hasQuantizedDistance() ? searchResult.quantizedDistance : 0.0;
+
+                // Fill quantized_embedding from quantization result
+                if (quantizedVector != null && quantizedVector.quantizedBytes != null) {
+                    Object qBytes = quantizedVector.quantizedBytes;
+                    if (qBytes instanceof byte[]) {
+                        combinedValues[3] = qBytes;
+                    } else if (qBytes instanceof short[]) {
+                        // Convert short[] to byte[] for serialization
+                        short[] shorts = (short[]) qBytes;
+                        byte[] bytes = new byte[shorts.length * 2];
+                        java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                                .put(shorts);
+                        combinedValues[3] = bytes;
+                    } else if (qBytes instanceof int[]) {
+                        // Convert int[] to byte[] for serialization
+                        int[] ints = (int[]) qBytes;
+                        byte[] bytes = new byte[ints.length * 4];
+                        java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asIntBuffer().put(ints);
+                        combinedValues[3] = bytes;
+                    } else {
+                        combinedValues[3] = new byte[0]; // fallback
+                    }
+                } else {
+                    combinedValues[3] = new byte[0]; // fallback
+                }
             } else {
                 // Non-quantized format: [distance, centroidId, pk..., includes...]
                 combinedValues[1] = searchResult.centroidId; // raw int
@@ -295,6 +325,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             e.printStackTrace();
             throw HyracksDataException.create(e);
         }
+    }
+
+    /**
+     * Legacy overload for backwards compatibility (no quantized vector).
+     */
+    public ITupleReference createTransformedTuple(ITupleReference originalTuple, ClusterSearchResult searchResult)
+            throws HyracksDataException {
+        return createTransformedTuple(originalTuple, searchResult, null);
     }
 
     /**
@@ -440,6 +478,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private DistanceFunction distanceFunction;
         private IVectorDistanceFunction hyracksDistanceFunction;
         private OptimizedScalarQuantizationSampleFile.Params quantizationParams;
+        private ScalarVectorQuantizer quantizer; // nullable — created only for quantized indexes
 
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
@@ -524,6 +563,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         + ", minQ=" + quantizationParams.minQuantile + ", maxQ=" + quantizationParams.maxQuantile
                         + ", alpha=" + quantizationParams.alpha + ", confidenceInterval="
                         + quantizationParams.confidenceInterval + ", sampleCount=" + quantizationParams.sampleCount);
+
+                // Create quantizer for quantized indexes
+                if (isQuantized && quantizationParams != null) {
+                    OptimizedScalarQuantizationSampleFile.SimilarityFunction simFunc =
+                            OptimizedScalarQuantizationSampleFile.fromDistanceMetric(distanceMetric);
+                    this.quantizer = new ScalarVectorQuantizer(quantizationParams, simFunc);
+                    System.err.println("ScalarVectorQuantizer created for distance metric: " + distanceMetric);
+                }
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -675,6 +722,19 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
          * @throws HyracksDataException if search fails
          */
         private ClusterSearchResult findClosestCentroid(double[] queryVector) throws HyracksDataException {
+            return findClosestCentroid(queryVector, null);
+        }
+
+        /**
+         * Find the closest centroid, optionally computing quantized distance.
+         *
+         * @param queryVector Query vector to find closest centroid for
+         * @param quantizedQueryVector Quantized form of queryVector (nullable)
+         * @return ClusterSearchResult containing closest centroid information (with quantizedDistance if quantizer set)
+         * @throws HyracksDataException if search fails
+         */
+        private ClusterSearchResult findClosestCentroid(double[] queryVector, double[] quantizedQueryVector)
+                throws HyracksDataException {
             try {
                 // Validate input vector
                 if (queryVector == null) {
@@ -702,8 +762,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 // Use accessor to find closest leaf centroid with distance function
-                ClusterSearchResult result =
-                        vcTreeAccessor.findClosestLeafCentroid(queryVector, hyracksDistanceFunction);
+                // Pass quantized data through for quantized distance computation
+                ClusterSearchResult result = vcTreeAccessor.findClosestLeafCentroid(queryVector,
+                        hyracksDistanceFunction, quantizedQueryVector, quantizer);
 
                 if (result == null) {
                     System.err.println("WARNING: No closest centroid found for query vector");
@@ -944,7 +1005,15 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             boolean leafPollinate = false;
                             boolean interiorPollinate = false;
                             if (!crossPollinate) {
-                                ClusterSearchResult result = findClosestCentroid(embedding);
+                                // Quantize embedding to double[] for distance computation (if quantized)
+                                double[] quantizedEmbedding = null;
+                                if (quantizer != null) {
+                                    quantizedEmbedding = quantizer.quantize(embedding);
+                                }
+
+                                // Find closest centroid (full-precision navigation + quantized distance output)
+                                ClusterSearchResult result =
+                                        findClosestCentroid(embedding, quantizedEmbedding);
                                 if (result != null) {
                                     successfulQueries++;
 
@@ -974,8 +1043,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                                 + quantizedVector.correctiveMultiplier + ")");
                                     }
 
-                                    // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                    ITupleReference transformedTuple = createTransformedTuple(tuple, result);
+                                    // Create transformed tuple with quantized data filled in
+                                    ITupleReference transformedTuple =
+                                            createTransformedTuple(tuple, result, quantizedVector);
 
                                     // Output the transformed tuple to downstream operators
                                     outputTransformedTuple(transformedTuple);
@@ -994,8 +1064,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                             quantizeVector(embedding, quantizationParams, distanceMetric);
 
                                     for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+                                        // Create transformed tuple with quantized data filled in
+                                        ITupleReference transformedTuple =
+                                                createTransformedTuple(tuple, res, quantizedVector);
 
                                         // Output the transformed tuple to downstream operators
                                         outputTransformedTuple(transformedTuple);
@@ -1017,8 +1088,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                                     for (ClusterSearchResult res : result) {
 
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+                                        // Create transformed tuple with quantized data filled in
+                                        ITupleReference transformedTuple =
+                                                createTransformedTuple(tuple, res, quantizedVector);
 
                                         // Output the transformed tuple to downstream operators
                                         outputTransformedTuple(transformedTuple);
@@ -1042,8 +1114,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                             quantizeVector(embedding, quantizationParams, distanceMetric);
 
                                     for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with [centroidId, distance, ...original fields...]
-                                        ITupleReference transformedTuple = createTransformedTuple(tuple, res);
+                                        // Create transformed tuple with quantized data filled in
+                                        ITupleReference transformedTuple =
+                                                createTransformedTuple(tuple, res, quantizedVector);
 
                                         // Output the transformed tuple to downstream operators
                                         outputTransformedTuple(transformedTuple);

@@ -38,6 +38,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -103,6 +104,10 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
 
     // Vector accessor for extracting vectors from tuples
     private IVectorBinaryAccessor vectorAccessor;
+
+    // Quantization state (propagated from first search cursor)
+    private double[] quantizedQueryVector;
+    private IVectorQuantizer quantizer;
 
     // Cluster selection strategy (nprobe + DFS fallback)
     private IClusterSelectionStrategy clusterStrategy;
@@ -210,6 +215,10 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
             this.firstSearchCursor = (VectorClusteringSearchCursor) rangeCursors[0];
             this.queryVector = firstSearchCursor.getQueryVector();
             this.distanceFunction = firstSearchCursor.getDistanceFunction();
+
+            // Extract quantized state from first cursor (null = non-quantized path)
+            this.quantizedQueryVector = firstSearchCursor.getQuantizedQueryVector();
+            this.quantizer = firstSearchCursor.getQuantizer();
 
             if (this.queryVector == null) {
                 throw HyracksDataException
@@ -577,51 +586,25 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
 
     /**
      * Compute approximate distance D(q, x) using quantized embedding.
-     * Uses IVectorBinaryAccessor to extract the vector from the tuple.
      *
-     * For quantized tuples (pkStartField=4):
-     *   Field 0: distance_to_centroid, Field 1: quantized_distance,
-     *   Field 2: quantized_embedding, Field 3: centroidId, Field 4+: PKs
-     * For non-quantized tuples (pkStartField=2):
-     *   Field 0: distance_to_centroid, Field 1: centroidId, Field 2+: PKs
+     * This cursor is dedicated for quantized vector indexes.
+     * Quantized data tuple format (pkStartField=4):
+     *   Field 0: distance_to_centroid, Field 1: centroidId,
+     *   Field 2: quantized_distance, Field 3: quantized_embedding, Field 4+: PKs
      *
-     * When quantized (pkStartField=4), we use field 2 (quantized_embedding).
-     * When non-quantized (pkStartField=2), there's no separate vector field in the data tuple,
-     * so we fall back to using the distance_to_centroid as an approximation.
+     * Dequantizes the stored embedding bytes (field 3) and computes distance
+     * against the quantized query vector.
      */
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
-        if (pkStartField == 4 && vectorAccessor != null) {
-            // Quantized format: use field 2 (quantized_embedding) for distance computation
-            int vectorFieldIndex = 2;
-            byte[] data = tuple.getFieldData(vectorFieldIndex);
-            int offset = tuple.getFieldStart(vectorFieldIndex);
-            int length = tuple.getFieldLength(vectorFieldIndex);
-
-            vectorAccessor.reset(data, offset, length);
-            double[] tupleVector = vectorAccessor.getVector();
-            return distanceFunction.apply(queryVector, tupleVector);
-        }
-
-        // Non-quantized fallback: use the full vector if available at field 2
-        // In the standard non-quantized data tuple format [distance, centroidId, PKs...],
-        // there's no stored vector. But the vector accessor may be configured to handle this.
-        if (vectorAccessor != null && tuple.getFieldCount() > 2) {
-            try {
-                int vectorFieldIndex = 2;
-                byte[] data = tuple.getFieldData(vectorFieldIndex);
-                int offset = tuple.getFieldStart(vectorFieldIndex);
-                int length = tuple.getFieldLength(vectorFieldIndex);
-
-                vectorAccessor.reset(data, offset, length);
-                double[] tupleVector = vectorAccessor.getVector();
-                return distanceFunction.apply(queryVector, tupleVector);
-            } catch (Exception e) {
-                // Fall through to distance-based approximation
-            }
-        }
-
-        // Last resort: return the stored distance to centroid as an approximation
-        return extractDistanceToCentroid(tuple);
+        // Read quantized bytes from field 3 (quantized_embedding)
+        int vectorFieldIndex = 3;
+        byte[] data = tuple.getFieldData(vectorFieldIndex);
+        int offset = tuple.getFieldStart(vectorFieldIndex);
+        int length = tuple.getFieldLength(vectorFieldIndex);
+        byte[] qBytes = new byte[length];
+        System.arraycopy(data, offset, qBytes, 0, length);
+        double[] dequantized = quantizer.dequantize(qBytes);
+        return distanceFunction.apply(quantizedQueryVector, dequantized);
     }
 
     /**

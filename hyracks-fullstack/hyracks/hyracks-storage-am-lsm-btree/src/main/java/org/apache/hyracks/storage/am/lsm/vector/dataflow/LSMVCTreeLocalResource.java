@@ -82,7 +82,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
     protected Float maxQuantile;
     protected Float alpha;
     protected Integer bits;
-    protected Integer sampleCount;
+protected Integer sampleCount;
 
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -194,6 +194,12 @@ public class LSMVCTreeLocalResource extends LsmResource {
             }
         }
 
+        // Pack quantization params into float[] for lazy quantizer creation at query time
+        float[] quantizationParams = null;
+        if (hasQuantizationParams()) {
+            quantizationParams = new float[] { minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount };
+        }
+
         return LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, fileRef,
                 storageManager.getBufferCache(ncServiceCtx), typeTraits, cmpFactories, 0.01, // bloomFilterFalsePositiveRate
                 mergePolicyFactory.createMergePolicy(mergePolicyProperties, ncServiceCtx),
@@ -203,7 +209,7 @@ public class LSMVCTreeLocalResource extends LsmResource {
                 null, // filterManager
                 null, // filterHelper
                 durable, metadataPageManagerFactory, atomic, null, accessorFactory, numPrimaryKeyFields,
-                numIncludeFields, dataTupleCreatorFactory);
+                numIncludeFields, dataTupleCreatorFactory, quantizationParams);
     }
 
     /**
@@ -463,4 +469,5 @@ public class LSMVCTreeLocalResource extends LsmResource {
         return bits != null && confidenceInterval != null && minQuantile != null && maxQuantile != null
                 && alpha != null;
     }
+
 }

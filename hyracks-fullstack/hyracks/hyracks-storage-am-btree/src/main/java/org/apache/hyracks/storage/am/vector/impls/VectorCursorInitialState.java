@@ -19,6 +19,7 @@
 package org.apache.hyracks.storage.am.vector.impls;
 
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
@@ -42,6 +43,8 @@ public class VectorCursorInitialState implements ICursorInitialState {
     private MultiComparator originalKeyCmp;
     private final IIndexAccessor accessor;
     private IVectorDistanceFunction distanceFunction;
+    private double[] quantizedQueryVector;
+    private IVectorQuantizer quantizer;
 
     public VectorCursorInitialState(IIndexAccessor accessor) {
         this.accessor = accessor;
@@ -161,5 +164,33 @@ public class VectorCursorInitialState implements ICursorInitialState {
      */
     public IVectorDistanceFunction getDistanceFunction() {
         return distanceFunction;
+    }
+
+    /**
+     * Set the quantized query vector (precomputed once per search).
+     */
+    public void setQuantizedQueryVector(double[] quantizedQueryVector) {
+        this.quantizedQueryVector = quantizedQueryVector;
+    }
+
+    /**
+     * Get the quantized query vector, or null if quantization is not configured.
+     */
+    public double[] getQuantizedQueryVector() {
+        return quantizedQueryVector;
+    }
+
+    /**
+     * Set the vector quantizer.
+     */
+    public void setQuantizer(IVectorQuantizer quantizer) {
+        this.quantizer = quantizer;
+    }
+
+    /**
+     * Get the vector quantizer, or null if quantization is not configured.
+     */
+    public IVectorQuantizer getQuantizer() {
+        return quantizer;
     }
 }

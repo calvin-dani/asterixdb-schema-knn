@@ -43,13 +43,14 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
     private final int vectorDimensions;
     private final IVectorBinaryAccessorFactory vectorAccessorFactory;
     private final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
+    private final float[] quantizationParams;
 
     public VectorClusteringTreeFactory(IIOManager ioManager, IBufferCache bufferCache,
             IPageManagerFactory freePageManagerFactory, ITreeIndexFrameFactory interiorFrameFactory,
             ITreeIndexFrameFactory leafFrameFactory, ITreeIndexFrameFactory metadataFrameFactory,
             ITreeIndexFrameFactory dataFrameFactory, IBinaryComparatorFactory[] cmpFactories, int fieldCount,
             int vectorDimensions, IVectorBinaryAccessorFactory vectorAccessorFactory,
-            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, float[] quantizationParams) {
         super(ioManager, bufferCache, freePageManagerFactory, interiorFrameFactory, leafFrameFactory, cmpFactories,
                 fieldCount);
         this.metadataFrameFactory = metadataFrameFactory;
@@ -57,12 +58,14 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
         this.vectorDimensions = vectorDimensions;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.dataTupleCreatorFactory = dataTupleCreatorFactory;
+        this.quantizationParams = quantizationParams;
     }
 
     @Override
     public VectorClusteringTree createIndexInstance(FileReference file) {
         return new VectorClusteringTree(bufferCache, freePageManagerFactory.createPageManager(bufferCache),
                 interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory, cmpFactories,
-                vectorDimensions, vectorDimensions, file, vectorAccessorFactory, dataTupleCreatorFactory);
+                vectorDimensions, vectorDimensions, file, vectorAccessorFactory, dataTupleCreatorFactory,
+                quantizationParams);
     }
 }

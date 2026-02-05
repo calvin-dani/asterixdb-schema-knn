@@ -39,6 +39,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringBidirectionCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
@@ -105,6 +106,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
 
     // Distance function (from first cursor, not hardcoded)
     private IVectorDistanceFunction distanceFunction;
+
+    // Quantization state (propagated from first search cursor)
+    private double[] quantizedQueryVector;
+    private IVectorQuantizer quantizer;
 
     // Cluster selection strategy (nprobe + DFS fallback)
     private IClusterSelectionStrategy clusterStrategy;
@@ -211,6 +216,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             // Get query vector and distance function from first cursor (like LSMVCTreeSearchCursor does)
             this.queryVector = firstSearchCursor.getQueryVector();
             this.distanceFunction = firstSearchCursor.getDistanceFunction();
+
+            // Extract quantized state from first cursor (null = non-quantized path)
+            this.quantizedQueryVector = firstSearchCursor.getQuantizedQueryVector();
+            this.quantizer = firstSearchCursor.getQuantizer();
 
             if (this.queryVector == null) {
                 throw HyracksDataException
@@ -769,10 +778,20 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
      * - Field 3: primary_key
      */
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
-        // TODO: When quantized, compute the approximate distance from the quantized representations
-        // (quantized query residual and stored quantized vector) instead of full-precision vectors.
+        // When quantized, compute the approximate distance from the quantized representations
+        if (quantizedQueryVector != null && quantizer != null) {
+            // Read quantized bytes from field 2 (Q_QUANTIZED_EMBEDDING_FIELD)
+            int vectorFieldIndex = 2;
+            byte[] data = tuple.getFieldData(vectorFieldIndex);
+            int offset = tuple.getFieldStart(vectorFieldIndex);
+            int length = tuple.getFieldLength(vectorFieldIndex);
+            byte[] qBytes = new byte[length];
+            System.arraycopy(data, offset, qBytes, 0, length);
+            double[] dequantized = quantizer.dequantize(qBytes);
+            return distanceFunction.apply(quantizedQueryVector, dequantized);
+        }
 
-        // Extract vector from field 2 using the vector accessor
+        // Full-precision fallback: extract vector from field 2 using the vector accessor
         int vectorFieldIndex = 2;
         byte[] data = tuple.getFieldData(vectorFieldIndex);
         int offset = tuple.getFieldStart(vectorFieldIndex);

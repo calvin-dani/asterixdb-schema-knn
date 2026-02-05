@@ -130,7 +130,7 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
                     metadataPageManagerFactory, false, // atomic
                     null, TestDoubleArrayVectorAccessor.Factory.INSTANCE, // inputRecDesc, vectorAccessorFactory
                     1, 0, // numPrimaryKeyFields, numIncludeFields
-                    dataTupleCreatorFactory);
+                    dataTupleCreatorFactory, null); // quantizer
         } else {
             // Use simplified overload with default factory
             lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,

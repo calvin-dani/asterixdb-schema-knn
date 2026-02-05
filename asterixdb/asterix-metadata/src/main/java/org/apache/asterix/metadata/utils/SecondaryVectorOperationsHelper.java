@@ -442,7 +442,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Number of secondary fields depends on quantization:
         // Non-quantized: [distance, centroidId, pk..., includes...] → 2 secondary fields
-        // Quantized: [distance, quantized_distance, quantized_embedding, centroidId, pk..., includes...] → 4
+        // Quantized: [distance, centroidId, quantized_distance, quantized_embedding, pk..., includes...] → 4
+        // IMPORTANT: centroidId MUST be field 1 in both cases so that sortFields={1,0}
+        // and extractCentroidId(field[1]) work unchanged for quantized and non-quantized.
         int numOutputSecondaryFields = isQuantized ? 4 : 2;
 
         ISerializerDeserializer[] outputRecFields =
@@ -455,15 +457,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         outputTypeTraits[0] = new FixedLengthTypeTrait(8);
 
         if (isQuantized) {
-            // Field 1: quantized_distance (variable-length byte array)
-            outputRecFields[1] = ByteArraySerializerDeserializer.INSTANCE;
-            outputTypeTraits[1] = VarLengthTypeTrait.INSTANCE;
-            // Field 2: quantized_embedding (variable-length byte array)
-            outputRecFields[2] = ByteArraySerializerDeserializer.INSTANCE;
-            outputTypeTraits[2] = VarLengthTypeTrait.INSTANCE;
-            // Field 3: centroidId (raw int - 4 bytes, no type tag)
-            outputRecFields[3] = IntegerSerializerDeserializer.INSTANCE;
-            outputTypeTraits[3] = new FixedLengthTypeTrait(4);
+            // Field 1: centroidId (raw int - 4 bytes, no type tag) — MUST stay at index 1
+            outputRecFields[1] = IntegerSerializerDeserializer.INSTANCE;
+            outputTypeTraits[1] = new FixedLengthTypeTrait(4);
+            // Field 2: quantized_distance (raw double - 8 bytes, distance on quantized representations)
+            outputRecFields[2] = DoubleSerializerDeserializer.INSTANCE;
+            outputTypeTraits[2] = new FixedLengthTypeTrait(8);
+            // Field 3: quantized_embedding (variable-length byte array)
+            outputRecFields[3] = ByteArraySerializerDeserializer.INSTANCE;
+            outputTypeTraits[3] = VarLengthTypeTrait.INSTANCE;
         } else {
             // Field 1: centroidId (raw int - 4 bytes, no type tag)
             outputRecFields[1] = IntegerSerializerDeserializer.INSTANCE;

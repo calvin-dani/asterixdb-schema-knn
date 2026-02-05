@@ -31,6 +31,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
@@ -103,6 +104,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private Set<Integer> sharedVisitedSet; // Shared visited set from LSM layer
     private int nprobe; // Minimum clusters to probe before K-check
     private double epsilon; // Distance threshold for level-wise
+
+    // Quantization state (propagated from VectorCursorInitialState)
+    private double[] quantizedQueryVector; // Quantized query vector (null = non-quantized)
+    private IVectorQuantizer quantizer; // Quantizer instance (null = non-quantized)
 
     public VectorClusteringSearchCursor() {
         this.isOpen = false;
@@ -181,6 +186,20 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     /**
+     * Get the quantized query vector, or null if quantization is not configured.
+     */
+    public double[] getQuantizedQueryVector() {
+        return this.quantizedQueryVector;
+    }
+
+    /**
+     * Get the vector quantizer, or null if quantization is not configured.
+     */
+    public IVectorQuantizer getQuantizer() {
+        return this.quantizer;
+    }
+
+    /**
      * Extract nprobe value from search predicate.
      */
     private int extractNprobe(ISearchPredicate searchPred) {
@@ -230,6 +249,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         if (this.distanceFunction == null) {
             this.distanceFunction = VectorUtils::calculateEuclideanDistance;
         }
+
+        // Extract quantized state from initial state (null = non-quantized path)
+        this.quantizedQueryVector = vectorState.getQuantizedQueryVector();
+        this.quantizer = vectorState.getQuantizer();
 
         // Extract nprobe and epsilon from predicate
         this.nprobe = extractNprobe(searchPred);
@@ -449,7 +472,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 null, // No centroid vector
                 0.0, // No distance in full-scan mode
                 0, // Cluster index as centroid ID
-                this.firstDirectoryPageId // Directory page ID for O(1) access
+                this.firstDirectoryPageId, // Directory page ID for O(1) access
+                Double.NaN // No quantized distance in full-scan mode
         );
 
         System.err.println(String.format(
@@ -570,7 +594,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                     null, // No centroid vector
                     0.0, // No distance in full-scan mode
                     currentSequentialClusterIndex, // Use cluster index as centroid ID
-                    nextDirectoryPageId // Directory page ID for O(1) access
+                    nextDirectoryPageId, // Directory page ID for O(1) access
+                    Double.NaN // No quantized distance in full-scan mode
             );
             this.clustersProbed++;
 

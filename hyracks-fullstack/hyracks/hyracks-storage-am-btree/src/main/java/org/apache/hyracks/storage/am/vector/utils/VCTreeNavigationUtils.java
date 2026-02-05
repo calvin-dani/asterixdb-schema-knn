@@ -40,6 +40,7 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -73,13 +74,30 @@ public class VCTreeNavigationUtils {
     public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
+        return findClosestCentroid(bufferCache, fileId, rootPageId, interiorFrameFactory, leafFrameFactory, queryVector,
+                distanceFunction, null, null);
+    }
 
-        //        Map<String, Object> startFields = new HashMap<>();
-        //        startFields.put("treeFileId", fileId);
-        //        startFields.put("rootPageId", rootPageId);
-        //        startFields.put("vectorDim", queryVector.length);
-        //        startFields.put("queryVector", queryVector);
-        //        logTraversalEvent("traversal_start", startFields);
+    /**
+     * Find the closest centroid by traversing the tree from root to leaf,
+     * optionally computing a quantized distance for the best result.
+     *
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
+     * @param rootPageId Root page ID to start traversal
+     * @param interiorFrameFactory Factory for creating interior frames
+     * @param leafFrameFactory Factory for creating leaf frames
+     * @param queryVector Query vector to find closest centroid for
+     * @param distanceFunction Distance function to use for centroid finding
+     * @param quantizedQueryVector Quantized form of queryVector (nullable — pass null to skip quantized distance)
+     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable — pass null to skip)
+     * @return ClusterSearchResult containing closest centroid information (with quantizedDistance if quantizer provided)
+     * @throws HyracksDataException if any error occurs during traversal
+     */
+    public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
+            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
+            IVectorDistanceFunction distanceFunction, double[] quantizedQueryVector, IVectorQuantizer quantizer)
+            throws HyracksDataException {
 
         // Start from root page
         int currentPageId = rootPageId;
@@ -104,29 +122,15 @@ public class VCTreeNavigationUtils {
                 boolean isLeaf = leafFrame.isLeaf();
 
                 Map<String, Object> pageVisitFields = new HashMap<>();
-                //                pageVisitFields.put("pageId", currentPageId);
-                //                pageVisitFields.put("isLeaf", isLeaf);
-                //                pageVisitFields.put("loopIteration", loopCounter);
-                //                logTraversalEvent("page_visit", pageVisitFields);
 
                 if (isLeaf) {
                     // Leaf level - find closest centroid
-                    //                    Map<String, Object> leafEnterFields = new HashMap<>();
-                    //                    leafEnterFields.put("pageId", currentPageId);
-                    //                    leafEnterFields.put("fileId", fileId);
-                    //                    logTraversalEvent("leaf_page_enter", leafEnterFields);
-
                     bestResult = findClosestInLeafPage(bufferCache, fileId, queryVector, currentPageId, leafFrame,
-                            leafFrameFactory, distanceFunction);
+                            leafFrameFactory, distanceFunction, quantizedQueryVector, quantizer);
                     break; // Found leaf level result
 
                 } else {
                     // Interior level - find closest centroid and descend
-                    //                    Map<String, Object> interiorEnterFields = new HashMap<>();
-                    //                    interiorEnterFields.put("pageId", currentPageId);
-                    //                    interiorEnterFields.put("fileId", fileId);
-                    //                    logTraversalEvent("interior_page_enter", interiorEnterFields);
-
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
@@ -136,12 +140,6 @@ public class VCTreeNavigationUtils {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                                 "No valid centroid found in interior cluster");
                     }
-
-                    //                    Map<String, Object> interiorDescendFields = new HashMap<>();
-                    //                    interiorDescendFields.put("pageId", currentPageId);
-                    //                    interiorDescendFields.put("selectedChildPageId", nextPageId);
-                    //                    interiorDescendFields.put("fileId", fileId);
-                    //                    logTraversalEvent("interior_descend", interiorDescendFields);
 
                     currentPageId = nextPageId;
                 }
@@ -155,14 +153,6 @@ public class VCTreeNavigationUtils {
         if (bestResult == null) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest cluster found");
         }
-
-        //        Map<String, Object> finishFields = new HashMap<>();
-        //        finishFields.put("leafPageId", bestResult.leafPageId);
-        //        finishFields.put("centroidId", bestResult.centroidId);
-        //        finishFields.put("bestDistance", bestResult.distance);
-        //        finishFields.put("vectorDim", queryVector.length);
-        //        finishFields.put("queryVector", queryVector);
-        //        logTraversalEvent("traversal_finish", finishFields);
 
         return bestResult;
     }
@@ -268,6 +258,30 @@ public class VCTreeNavigationUtils {
     private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
             int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
+        return findClosestInLeafPage(bufferCache, fileId, queryVector, startPageId, initialLeafFrame, leafFrameFactory,
+                distanceFunction, null, null);
+    }
+
+    /**
+     * Find the closest centroid in a leaf cluster, handling overflow pages.
+     * Optionally computes a quantized distance for the best result.
+     *
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
+     * @param queryVector Query vector to find closest centroid for
+     * @param startPageId Starting page ID of the leaf cluster
+     * @param initialLeafFrame Leaf frame already set to the initial page (already pinned by caller)
+     * @param leafFrameFactory Factory for creating leaf frames for overflow pages
+     * @param distanceFunction Distance function to use for distance calculation
+     * @param quantizedQueryVector Quantized form of queryVector (nullable)
+     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable)
+     * @return ClusterSearchResult containing closest centroid information
+     * @throws HyracksDataException if any error occurs during search
+     */
+    private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
+            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory,
+            IVectorDistanceFunction distanceFunction, double[] quantizedQueryVector, IVectorQuantizer quantizer)
+            throws HyracksDataException {
 
         double bestDistance = Double.MAX_VALUE;
         int bestTupleIndex = -1;
@@ -275,14 +289,9 @@ public class VCTreeNavigationUtils {
         double[] bestCentroid = null;
         int bestCentroidId = -1;
         long bestDirectoryPageId = -1;
+        byte[] bestQuantizedCentroidBytes = null;
         int candidatesProcessed = 0;
         int pagesProcessed = 0;
-
-        //        Map<String, Object> searchStartFields = new HashMap<>();
-        //        searchStartFields.put("startPageId", startPageId);
-        //        searchStartFields.put("vectorDim", queryVector.length);
-        //        searchStartFields.put("queryVector", queryVector);
-        //        logTraversalEvent("leaf_search_start", searchStartFields);
 
         // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
         int currentPageId = startPageId;
@@ -306,14 +315,6 @@ public class VCTreeNavigationUtils {
                 int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
                 pagesProcessed++;
 
-                //                Map<String, Object> pageFields = new HashMap<>();
-                //                pageFields.put("pageId", currentPageId);
-                //                pageFields.put("tupleCount", tupleCount);
-                //                pageFields.put("hasOverflow", hasOverflow);
-                //                pageFields.put("nextPageId", nextPageId);
-                //                pageFields.put("isFirstPage", isFirstPage);
-                //                logTraversalEvent("leaf_page_search", pageFields);
-
                 // Search all centroids in this page
                 for (int i = 0; i < tupleCount; i++) {
                     try {
@@ -330,14 +331,6 @@ public class VCTreeNavigationUtils {
                         double distance = distanceFunction.apply(queryVector, centroid);
                         candidatesProcessed++;
 
-                        //                        Map<String, Object> candidateFields = new HashMap<>();
-                        //                        candidateFields.put("pageId", currentPageId);
-                        //                        candidateFields.put("tupleIndex", i);
-                        //                        candidateFields.put("centroidId", centroidID);
-                        //                        candidateFields.put("centroidDim", centroid.length);
-                        //                        candidateFields.put("distance", distance);
-                        //                        logTraversalEvent("leaf_candidate", candidateFields);
-
                         if (distance < bestDistance) {
                             bestDistance = distance;
                             bestTupleIndex = i;
@@ -345,6 +338,10 @@ public class VCTreeNavigationUtils {
                             bestCentroid = centroid.clone();
                             bestCentroidId = centroidID;
                             bestDirectoryPageId = currentFrame.getMetadataPagePointer(i);
+                            // Capture quantized centroid bytes when best is updated
+                            if (quantizer != null) {
+                                bestQuantizedCentroidBytes = currentFrame.getQuantizedCentroidBytes(i);
+                            }
                         }
                     } catch (Exception e) {
                         System.err.println(
@@ -368,17 +365,15 @@ public class VCTreeNavigationUtils {
         }
 
         if (bestTupleIndex >= 0) {
-            //            Map<String, Object> searchSelectFields = new HashMap<>();
-            //            searchSelectFields.put("bestPageId", bestPageId);
-            //            searchSelectFields.put("selectedTupleIndex", bestTupleIndex);
-            //            searchSelectFields.put("centroidId", bestCentroidId);
-            //            searchSelectFields.put("bestDistance", bestDistance);
-            //            searchSelectFields.put("candidatesProcessed", candidatesProcessed);
-            //            searchSelectFields.put("pagesProcessed", pagesProcessed);
-            //            logTraversalEvent("leaf_search_select", searchSelectFields);
+            // Compute quantized distance for best result only (after loop)
+            double quantizedDistance = Double.NaN;
+            if (quantizer != null && quantizedQueryVector != null && bestQuantizedCentroidBytes != null) {
+                double[] dequantizedCentroid = quantizer.dequantize(bestQuantizedCentroidBytes);
+                quantizedDistance = distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
+            }
 
             return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId,
-                    bestDirectoryPageId);
+                    bestDirectoryPageId, quantizedDistance);
         }
         // TODO : SOME RETURN EMPTY
         return null;

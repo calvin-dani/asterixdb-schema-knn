@@ -197,7 +197,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
 
         // Data frame tuple format depends on quantization:
         // Non-quantized: [distance, centroidId, primary_keys..., include_fields...]
-        // Quantized:     [distance, quantized_distance, quantized_embedding, centroidId, primary_keys..., include_fields...]
+        // Quantized:     [distance, centroidId, quantized_distance, quantized_embedding, primary_keys..., include_fields...]
         int numSecondaryFields = isQuantized ? 4 : 2;
         int totalFields = numSecondaryFields + numPrimaryKeys + numIncludeFields;
         ITypeTraits[] typeTraits = new ITypeTraits[totalFields];
@@ -206,12 +206,12 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         typeTraits[0] = new FixedLengthTypeTrait(8);
 
         if (isQuantized) {
-            // Field 1: quantized_distance (variable length byte[])
-            typeTraits[1] = VarLengthTypeTrait.INSTANCE;
-            // Field 2: quantized_embedding (variable length byte[])
+            // Field 1: centroidId (raw int - 4 bytes, no ADM type tag)
+            typeTraits[1] = new FixedLengthTypeTrait(4);
+            // Field 2: quantized_distance (variable length byte[])
             typeTraits[2] = VarLengthTypeTrait.INSTANCE;
-            // Field 3: centroidId (raw int - 4 bytes, no ADM type tag)
-            typeTraits[3] = new FixedLengthTypeTrait(4);
+            // Field 3: quantized_embedding (variable length byte[])
+            typeTraits[3] = VarLengthTypeTrait.INSTANCE;
         } else {
             // Field 1: centroidId (raw int - 4 bytes, no ADM type tag)
             typeTraits[1] = new FixedLengthTypeTrait(4);
@@ -273,7 +273,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
 
         // Data frame comparators depend on quantization:
         // Non-quantized: [distance, centroidId, primary_keys..., include_fields...]
-        // Quantized:     [distance, quantized_distance, quantized_embedding, centroidId, primary_keys..., include_fields...]
+        // Quantized:     [distance, centroidId, quantized_distance, quantized_embedding, primary_keys..., include_fields...]
         int numSecondaryFields = isQuantized ? 4 : 2;
         int totalFields = numSecondaryFields + numPrimaryKeys + numIncludeFields;
         IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[totalFields];
@@ -282,12 +282,12 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         cmpFactories[0] = DoubleBinaryComparatorFactory.INSTANCE;
 
         if (isQuantized) {
-            // Comparator 1: quantized_distance (variable length byte[])
-            cmpFactories[1] = RawBinaryComparatorFactory.INSTANCE;
-            // Comparator 2: quantized_embedding (variable length byte[])
+            // Comparator 1: centroidId (raw int - no ADM type tag)
+            cmpFactories[1] = IntegerBinaryComparatorFactory.INSTANCE;
+            // Comparator 2: quantized_distance (variable length byte[])
             cmpFactories[2] = RawBinaryComparatorFactory.INSTANCE;
-            // Comparator 3: centroidId (raw int - no ADM type tag)
-            cmpFactories[3] = IntegerBinaryComparatorFactory.INSTANCE;
+            // Comparator 3: quantized_embedding (variable length byte[])
+            cmpFactories[3] = RawBinaryComparatorFactory.INSTANCE;
         } else {
             // Comparator 1: centroidId (raw int - no ADM type tag)
             cmpFactories[1] = IntegerBinaryComparatorFactory.INSTANCE;

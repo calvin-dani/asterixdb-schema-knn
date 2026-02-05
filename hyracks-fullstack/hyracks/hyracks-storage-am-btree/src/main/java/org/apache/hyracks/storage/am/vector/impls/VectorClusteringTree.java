@@ -49,6 +49,7 @@ import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
@@ -90,6 +91,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private final ITreeIndexFrameFactory dataFrameFactory;
     private final IVectorBinaryAccessorFactory vectorAccessorFactory;
     private final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
+    // Raw quantization params: {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
+    // null = non-quantized index. Quantizer is created lazily at query time using distanceMetric.
+    private final float[] quantizationParams;
 
     // Add missing frameTuple declaration
     private ITreeIndexTupleReference frameTuple;
@@ -103,13 +107,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
             IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file,
             org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, float[] quantizationParams) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
         this.dataFrameFactory = dataFrameFactory;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.dataTupleCreatorFactory = dataTupleCreatorFactory;
+        this.quantizationParams = quantizationParams;
     }
 
     /**
@@ -957,12 +962,29 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      */
     public ClusterSearchResult findClosestClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
+        return findClosestClusterFromRoot(queryVector, ctx, distanceFunction, null, null);
+    }
+
+    /**
+     * Find the closest cluster starting from root and traversing down to leaf level,
+     * optionally computing a quantized distance for the best result.
+     *
+     * @param queryVector Query vector for navigation (full precision)
+     * @param ctx Operation context
+     * @param distanceFunction Distance function for centroid comparison
+     * @param quantizedQueryVector Quantized form of queryVector (nullable — pass null to skip quantized distance)
+     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable — pass null to skip)
+     * @return ClusterSearchResult with optional quantizedDistance
+     */
+    public ClusterSearchResult findClosestClusterFromRoot(double[] queryVector, VectorClusteringOpContext ctx,
+            IVectorDistanceFunction distanceFunction, double[] quantizedQueryVector, IVectorQuantizer quantizer)
+            throws HyracksDataException {
 
         LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
 
         // Use the common navigation logic from VCTreeNavigationUtils
         return VCTreeNavigationUtils.findClosestCentroid(bufferCache, getFileId(), rootPage, getInteriorFrameFactory(),
-                getLeafFrameFactory(), queryVector, distanceFunction);
+                getLeafFrameFactory(), queryVector, distanceFunction, quantizedQueryVector, quantizer);
     }
 
     public int getVectorDimensions() {
@@ -991,6 +1013,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
     public void setStaticStructureInitialized() {
         isStaticStructureInitialized = true;
+    }
+
+    /**
+     * Get the raw quantization parameters, or null if no quantization is configured.
+     * Format: {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
+     */
+    public float[] getQuantizationParams() {
+        return quantizationParams;
     }
 
     public boolean isInitialized() {
@@ -1330,6 +1360,45 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             }
             initialState.setDistanceFunction(distanceFunction);
 
+            // Create quantizer at query time using params from tree + distanceMetric from predicate
+            float[] qParams = tree.getQuantizationParams();
+            if (qParams != null && queryVector != null && distanceMetric != null) {
+                try {
+                    // Create ScalarVectorQuantizer via reflection (AsterixDB class, can't import directly)
+                    // qParams = {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
+                    Class<?> sampleFileClass = Class.forName(
+                            "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile");
+                    Class<?> paramsClass = Class.forName(
+                            "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$Params");
+                    Class<?> simFuncClass = Class.forName(
+                            "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$SimilarityFunction");
+                    Class<?> quantizerClass = Class.forName(
+                            "org.apache.asterix.common.storage.ScalarVectorQuantizer");
+
+                    // Params(int bits, int vectorDimensions, int sampleCount, float confidenceInterval,
+                    //        float minQuantile, float maxQuantile, float alpha)
+                    Object params = paramsClass
+                            .getConstructor(int.class, int.class, int.class, float.class, float.class, float.class,
+                                    float.class)
+                            .newInstance((int) qParams[4], tree.vectorDimensions, (int) qParams[5], qParams[3],
+                                    qParams[0], qParams[1], qParams[2]);
+
+                    // SimilarityFunction fromDistanceMetric(String)
+                    java.lang.reflect.Method fromMetric =
+                            sampleFileClass.getMethod("fromDistanceMetric", String.class);
+                    Object simFunc = fromMetric.invoke(null, distanceMetric);
+
+                    // new ScalarVectorQuantizer(Params, SimilarityFunction)
+                    IVectorQuantizer quantizer = (IVectorQuantizer) quantizerClass
+                            .getConstructor(paramsClass, simFuncClass).newInstance(params, simFunc);
+
+                    initialState.setQuantizedQueryVector(quantizer.quantize(queryVector));
+                    initialState.setQuantizer(quantizer);
+                } catch (Exception e) {
+                    System.err.println("WARNING: Failed to create quantizer via reflection: " + e.getMessage());
+                }
+            }
+
             // Open the cursor - it will perform centroid finding and position on data pages
             vectorCursor.open(initialState, searchPred);
         }
@@ -1345,6 +1414,22 @@ public class VectorClusteringTree extends AbstractTreeIndex {
          */
         public ClusterSearchResult findClosestLeafCentroid(double[] queryVector,
                 IVectorDistanceFunction distanceFunction) throws HyracksDataException {
+            return findClosestLeafCentroid(queryVector, distanceFunction, null, null);
+        }
+
+        /**
+         * Find the closest leaf centroid, optionally computing quantized distance.
+         *
+         * @param queryVector The query vector to find the closest centroid for
+         * @param distanceFunction The distance function to use for centroid finding
+         * @param quantizedQueryVector Quantized form of queryVector (nullable)
+         * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable)
+         * @return ClusterSearchResult with optional quantizedDistance
+         * @throws HyracksDataException if any error occurs during the search
+         */
+        public ClusterSearchResult findClosestLeafCentroid(double[] queryVector,
+                IVectorDistanceFunction distanceFunction, double[] quantizedQueryVector, IVectorQuantizer quantizer)
+                throws HyracksDataException {
             if (destroyed) {
                 throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
             }
@@ -1364,7 +1449,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             }
 
             // Delegate to the tree's implementation
-            return tree.findClosestClusterFromRoot(queryVector, ctx, distanceFunction);
+            return tree.findClosestClusterFromRoot(queryVector, ctx, distanceFunction, quantizedQueryVector, quantizer);
         }
 
         @Override

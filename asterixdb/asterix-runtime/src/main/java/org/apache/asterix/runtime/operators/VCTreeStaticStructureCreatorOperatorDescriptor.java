@@ -1057,16 +1057,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                     "Unexpected quantized bytes type: " + quantizedResult.quantizedBytes.getClass());
                         }
 
-                        // Append corrective multiplier as 4 bytes at the end of quantizedBytes
-                        // Format: [quantizedVector..., correctiveMultiplier(4 bytes)]
-                        int floatBits = Float.floatToIntBits(quantizedResult.correctiveMultiplier);
-                        byte[] quantizedWithMultiplier = new byte[quantizedBytes.length + 4];
-                        System.arraycopy(quantizedBytes, 0, quantizedWithMultiplier, 0, quantizedBytes.length);
-                        quantizedWithMultiplier[quantizedBytes.length] = (byte) (floatBits >> 24);
-                        quantizedWithMultiplier[quantizedBytes.length + 1] = (byte) (floatBits >> 16);
-                        quantizedWithMultiplier[quantizedBytes.length + 2] = (byte) (floatBits >> 8);
-                        quantizedWithMultiplier[quantizedBytes.length + 3] = (byte) floatBits;
-
                         // Create 3-field tuple: [centroidId, embedding, quantizedBytes]
                         ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
                         ArrayTupleReference tupleRef = new ArrayTupleReference();
@@ -1075,15 +1065,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         ISerializerDeserializer[] fieldSerdes =
                                 new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
                                         DoubleArraySerializerDeserializer.INSTANCE, // embedding as double array
-                                        ByteArraySerializerDeserializer.INSTANCE // quantized bytes with corrective multiplier
+                                        ByteArraySerializerDeserializer.INSTANCE // quantized embedding bytes
                                 };
-                        Object[] fieldValues = new Object[] { centroidId, embedding, quantizedWithMultiplier };
+                        Object[] fieldValues = new Object[] { centroidId, embedding, quantizedBytes };
 
                         TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);
 
                         System.err.println("Created leaf tuple with quantization: centroidId=" + centroidId
-                                + ", embeddingDim=" + embedding.length + ", quantizedLen=" + quantizedWithMultiplier.length
-                                + ", correctiveMultiplier=" + quantizedResult.correctiveMultiplier);
+                                + ", embeddingDim=" + embedding.length + ", quantizedLen=" + quantizedBytes.length);
 
                         return tupleRef;
 

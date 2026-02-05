@@ -121,7 +121,7 @@ public class VectorTreeUtils {
 
         return new VectorClusteringTree(bufferCache, pageManager, interiorFrameFactory, leafFrameFactory,
                 metadataFrameFactory, dataFrameFactory, cmpFactories, 4, vectorDimensions, file, null,
-                new VCTreeDataTupleCreatorFactory(0));
+                new VCTreeDataTupleCreatorFactory(0), null);
     }
 
     /**
