@@ -114,20 +114,16 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
 
         @Override
         public void open() throws HyracksDataException {
-            System.err.println("[VectorComponentExtractor] open() - initializing operator");
             writer.open();
             appender = new FrameTupleAppender(new VSizeFrame(ctx));
             vectorFieldEval = vectorFieldEvalFactory.createScalarEvaluator(new EvaluatorContext(ctx));
-            System.err.println("[VectorComponentExtractor] open() - operator initialized");
         }
 
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
             frameTupleAccessor.reset(buffer);
             int tupleCount = frameTupleAccessor.getTupleCount();
-            System.err.println("[VectorComponentExtractor] nextFrame() - processing " + tupleCount + " input tuples");
 
-            int totalComponentsExtracted = 0;
             for (int i = 0; i < tupleCount; i++) {
                 frameTupleReference.reset(frameTupleAccessor, i);
 
@@ -138,22 +134,16 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 byte[] data = vectorFieldValue.getByteArray();
                 int offset = vectorFieldValue.getStartOffset();
                 if (vectorFieldValue.getLength() == 0) {
-                    System.err.println(
-                            "[VectorComponentExtractor] nextFrame() - tuple " + i + ": empty vector field, skipping");
                     continue;
                 }
 
                 ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
                 if (typeTag == ATypeTag.MISSING || typeTag == ATypeTag.NULL || typeTag == ATypeTag.SYSTEM_NULL) {
-                    System.err.println(
-                            "[VectorComponentExtractor] nextFrame() - tuple " + i + ": null/missing vector, skipping");
                     continue;
                 }
 
                 // Check if it's a list type (required for vector)
                 if (!typeTag.isListType()) {
-                    System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i
-                            + ": not a list type (typeTag=" + typeTag + "), skipping");
                     continue;
                 }
 
@@ -161,8 +151,6 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 listAccessor.reset(data, offset);
                 ATypeTag itemTypeTag = listAccessor.getItemType();
                 int listSize = listAccessor.size();
-                System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": extracting " + listSize
-                        + " components from embedding (itemTypeTag=" + itemTypeTag + ")");
 
                 for (int j = 0; j < listSize; j++) {
                     try {
@@ -172,15 +160,7 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                         // Extract numeric value (coerce to double)
                         double componentValue = extractNumericValue(tempVal, itemTypeTag);
                         if (Double.isNaN(componentValue)) {
-                            System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ", component "
-                                    + j + ": NaN value, skipping");
                             continue; // Skip invalid values
-                        }
-
-                        totalComponentsExtracted++;
-                        if (j < 3 || j == listSize - 1) {
-                            System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ", component "
-                                    + j + "/" + listSize + ": extracted value=" + componentValue);
                         }
 
                         // Emit tuple with serialized double value (tag | value format)
@@ -209,11 +189,7 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                         throw HyracksDataException.create(e);
                     }
                 }
-                System.err.println("[VectorComponentExtractor] nextFrame() - tuple " + i + ": extracted " + listSize
-                        + " components total");
             }
-            System.err.println("[VectorComponentExtractor] nextFrame() - frame complete: extracted "
-                    + totalComponentsExtracted + " total components from " + tupleCount + " input tuples");
         }
 
         /**
@@ -232,9 +208,7 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 double value = getValueFromTag(typeTag, data, offset);
                 return value;
             } else {
-                System.err
-                        .println("[VectorComponentExtractor] extractNumericValue() - invalid type: " + derivedTypeTag);
-                return Double.NaN; // Invalid type
+                    return Double.NaN; // Invalid type
             }
         }
 
@@ -267,10 +241,8 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
 
         @Override
         public void close() throws HyracksDataException {
-            System.err.println("[VectorComponentExtractor] close() - flushing final frame and closing");
             FrameUtils.flushFrame(appender.getBuffer(), writer);
             writer.close();
-            System.err.println("[VectorComponentExtractor] close() - operator closed");
         }
     }
 }
