@@ -1017,32 +1017,33 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 if (result != null) {
                                     successfulQueries++;
 
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    // Quantize ONLY if required
+                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
+                                    if (isQuantized) {
+                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
 
-                                    // Log quantization details including corrective multiplier
-                                    if (quantizedVector != null) {
-                                        Object quantizedBytes = quantizedVector.quantizedBytes;
-                                        String typeStr = "unknown";
-                                        int length = 0;
-                                        if (quantizedBytes instanceof byte[]) {
-                                            typeStr = "byte[]";
-                                            length = ((byte[]) quantizedBytes).length;
-                                        } else if (quantizedBytes instanceof short[]) {
-                                            typeStr = "short[]";
-                                            length = ((short[]) quantizedBytes).length;
-                                        } else if (quantizedBytes instanceof int[]) {
-                                            typeStr = "int[]";
-                                            length = ((int[]) quantizedBytes).length;
+                                        // Log quantization details including corrective multiplier
+                                        if (quantizedVector != null) {
+                                            Object quantizedBytes = quantizedVector.quantizedBytes;
+                                            String typeStr = "unknown";
+                                            int length = 0;
+                                            if (quantizedBytes instanceof byte[]) {
+                                                typeStr = "byte[]";
+                                                length = ((byte[]) quantizedBytes).length;
+                                            } else if (quantizedBytes instanceof short[]) {
+                                                typeStr = "short[]";
+                                                length = ((short[]) quantizedBytes).length;
+                                            } else if (quantizedBytes instanceof int[]) {
+                                                typeStr = "int[]";
+                                                length = ((int[]) quantizedBytes).length;
+                                            }
+                                            System.err.println("Quantized vector: " + length + " " + typeStr + " (bits="
+                                                    + quantizationParams.bits + ", similarity="
+                                                    + quantizedVector.similarityFunction + ", normalized="
+                                                    + quantizedVector.isNormalized + ", correctiveMultiplier="
+                                                    + quantizedVector.correctiveMultiplier + ")");
                                         }
-                                        System.err.println("Quantized vector: " + length + " " + typeStr + " (bits="
-                                                + quantizationParams.bits + ", similarity="
-                                                + quantizedVector.similarityFunction + ", normalized="
-                                                + quantizedVector.isNormalized + ", correctiveMultiplier="
-                                                + quantizedVector.correctiveMultiplier + ")");
                                     }
-
                                     // Create transformed tuple with quantized data filled in
                                     ITupleReference transformedTuple =
                                             createTransformedTuple(tuple, result, quantizedVector);
@@ -1059,9 +1060,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 if (result != null) {
                                     successfulQueries++;
 
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    // Quantize ONLY if required
+                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
+                                    if (isQuantized) {
+                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    }
 
                                     for (ClusterSearchResult res : result) {
                                         // Create transformed tuple with quantized data filled in
@@ -1082,9 +1085,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 if (result != null) {
                                     successfulQueries++;
 
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    // Quantize ONLY if required
+                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
+                                    if (isQuantized) {
+                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    }
 
                                     for (ClusterSearchResult res : result) {
 
@@ -1109,9 +1114,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 if (result != null) {
                                     successfulQueries++;
 
-                                    // Quantize AFTER search (search used full precision)
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector =
-                                            quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    // Quantize ONLY if required
+                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
+                                    if (isQuantized) {
+                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    }
 
                                     for (ClusterSearchResult res : result) {
                                         // Create transformed tuple with quantized data filled in
