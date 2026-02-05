@@ -84,11 +84,11 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                     globalClusterIndex = 1; // Skip first cluster in getNextCluster()
                 }
 
-                System.err.println(String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
-                        globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
+                // System.err.println(String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
+                    //    globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
             } catch (Exception e) {
-                System.err.println(
-                        String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
+                // System.err.println(
+                 //       String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
                 globalLevelWiseClusters = null;
             }
         }
@@ -106,14 +106,14 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
             // Mark visited for DFS fallback deduplication
             visitedCentroidIds.add(nextCluster.centroidId);
 
-            System.err.println(
-                    String.format("[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
-                            globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId,
-                            nextCluster.distance, nextCluster.directoryPageId));
+            // System.err.println(
+              //      String.format("[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
+                //            globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId,
+                 //           nextCluster.distance, nextCluster.directoryPageId));
 
             if (globalClusterIndex >= globalLevelWiseClusters.size()) {
                 levelWisePhaseComplete = true;
-                System.err.println("[NprobeStrategy] Level-wise phase complete, DFS fallback next");
+                // System.err.println("[NprobeStrategy] Level-wise phase complete, DFS fallback next");
             }
 
             return nextCluster;
@@ -129,12 +129,12 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         ClusterSearchResult next = firstCursor.findNextClusterDFS();
 
         if (next == null) {
-            System.err.println("[NprobeStrategy] DFS exhausted, no more clusters");
+            // System.err.println("[NprobeStrategy] DFS exhausted, no more clusters");
             return null;
         }
 
-        System.err.println(String.format("[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
-                next.centroidId, next.distance, next.directoryPageId));
+        // System.err.println(String.format("[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
+           //     next.centroidId, next.distance, next.directoryPageId));
 
         return next;
     }
