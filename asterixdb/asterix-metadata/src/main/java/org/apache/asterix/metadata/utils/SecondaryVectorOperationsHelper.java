@@ -37,6 +37,7 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
+import org.apache.asterix.metadata.utils.KeyFieldTypeUtil;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
@@ -1135,10 +1136,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 secondaryFieldAccessEvalFactories[fieldIndex] =
                         createFieldCast(secFieldAccessor, isOverridingKeyFieldTypes, enforcedType, sourceType, keyType);
                 anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
-                secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(keyType);
+                // For nullable/missable include fields, use a NULL-safe serializer.
+                // Unlike B-tree which filters out NULL records, vector INCLUDE fields preserve NULLs.
+                IAType serdeType = keyTypePair.second
+                        ? KeyFieldTypeUtil.makeUnknownableType(keyType, true, true)
+                        : keyType;
+                secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(serdeType);
                 secondaryComparatorFactories[fieldIndex] =
                         comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);
-                secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(keyType);
+                secondaryTypeTraits[fieldIndex] = typeTraitProvider.getTypeTrait(serdeType);
                 secondaryBloomFilterKeyFields[fieldIndex] = fieldIndex;
             }
         }
