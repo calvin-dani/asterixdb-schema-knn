@@ -28,7 +28,7 @@ package org.apache.hyracks.storage.am.vector;
  *   | distance(0) | centroidId(1) | PK...(2+) | includes...(N+) |
  *
  * Quantized format (description != null):
- *   | distance(0) | quantized_distance(1) | quantized_embedding(2) | centroidId(3) | PK...(4+) | includes...(N+) |
+ *   | distance(0) | centroidId(1) | quantized_distance(2) | quantized_embedding(3) | PK...(4+) | includes...(N+) |
  */
 public final class VCTreeDataTupleConstants {
 
@@ -50,15 +50,17 @@ public final class VCTreeDataTupleConstants {
     public static final int NQ_NUM_SECONDARY_FIELDS = 2;
 
     // --- Quantized format field offsets (description != null) ---
-
-    /** Quantized distance field index in quantized format. */
-    public static final int Q_QUANTIZED_DISTANCE_FIELD = 1;
-
-    /** Quantized embedding field index in quantized format. */
-    public static final int Q_QUANTIZED_EMBEDDING_FIELD = 2;
+    // Layout: [distance(0), centroidId(1), quantized_distance(2), quantized_embedding(3), PK...(4+)]
+    // This matches createTransformedTuple() in VCTreeBulkLoaderAndGroupingOperatorDescriptor.
 
     /** Centroid ID field index in quantized format. */
-    public static final int Q_CENTROID_ID_FIELD = 3;
+    public static final int Q_CENTROID_ID_FIELD = 1;
+
+    /** Quantized distance field index in quantized format. */
+    public static final int Q_QUANTIZED_DISTANCE_FIELD = 2;
+
+    /** Quantized embedding field index in quantized format. */
+    public static final int Q_QUANTIZED_EMBEDDING_FIELD = 3;
 
     /** First primary key field index in quantized format. */
     public static final int Q_PK_START_FIELD = 4;

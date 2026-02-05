@@ -692,20 +692,27 @@ public class VCTreeNavigationUtils {
         public final int pageId;
         public final double[] centroid;
         public final long directoryPageId; // Direct pointer to cluster's directory page
+        public final double quantizedDistance; // D(q̃, C̃) — NaN if not computed
 
         public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid,
-                long directoryPageId) {
+                long directoryPageId, double quantizedDistance) {
             this.centroidId = centroidId;
             this.distance = distance;
             this.tupleIndex = tupleIndex;
             this.pageId = pageId;
             this.centroid = centroid;
             this.directoryPageId = directoryPageId;
+            this.quantizedDistance = quantizedDistance;
+        }
+
+        public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid,
+                long directoryPageId) {
+            this(centroidId, distance, tupleIndex, pageId, centroid, directoryPageId, Double.NaN);
         }
 
         // Legacy constructor for backwards compatibility
         public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid) {
-            this(centroidId, distance, tupleIndex, pageId, centroid, -1);
+            this(centroidId, distance, tupleIndex, pageId, centroid, -1, Double.NaN);
         }
     }
 
@@ -1294,6 +1301,22 @@ public class VCTreeNavigationUtils {
             int rootPageId, ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
             double[] queryVector, IVectorDistanceFunction distanceFunction, double epsilon)
             throws HyracksDataException {
+        return findCloseCentroidsLevelWiseGlobalSort(bufferCache, fileId, rootPageId, interiorFrameFactory,
+                leafFrameFactory, queryVector, distanceFunction, epsilon, null, null);
+    }
+
+    /**
+     * Overload that accepts quantizer parameters for computing quantized D(q,C).
+     * Navigation still uses full-precision distances; quantizedDistance is extra metadata
+     * populated in each ClusterSearchResult for triangle inequality pruning at the cursor level.
+     *
+     * @param quantizedQueryVector Dequantized form of query vector (nullable)
+     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable)
+     */
+    public static List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSort(IBufferCache bufferCache, int fileId,
+            int rootPageId, ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
+            double[] queryVector, IVectorDistanceFunction distanceFunction, double epsilon,
+            double[] quantizedQueryVector, IVectorQuantizer quantizer) throws HyracksDataException {
 
         List<ClusterSearchResult> allCentroids = new ArrayList<>();
         Set<Integer> visitedLeafPages = new HashSet<>();
@@ -1327,7 +1350,8 @@ public class VCTreeNavigationUtils {
                         }
 
                         LeafCollectionStats stats = collectLeafCentroidsForLevelWise(bufferCache, fileId, queryVector,
-                                node.pageId, leafFrame, leafFrameFactory, distanceFunction);
+                                node.pageId, leafFrame, leafFrameFactory, distanceFunction, quantizedQueryVector,
+                                quantizer);
 
                         if (stats.centroids.isEmpty()) {
                             continue;
@@ -1335,9 +1359,9 @@ public class VCTreeNavigationUtils {
 
                         // Add ALL centroids from this leaf page to global collection
                         for (LeafCentroid centroid : stats.centroids) {
-                            allCentroids.add(
-                                    ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex, centroid.centroid,
-                                            centroid.distance, centroid.centroidId, centroid.directoryPageId));
+                            allCentroids.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
+                                    centroid.centroid, centroid.distance, centroid.centroidId,
+                                    centroid.directoryPageId, centroid.quantizedDistance));
                         }
 
                     } else {
@@ -1408,6 +1432,18 @@ public class VCTreeNavigationUtils {
             double[] queryVector, int startPageId, IVectorClusteringLeafFrame initialLeafFrame,
             ITreeIndexFrameFactory leafFrameFactory, IVectorDistanceFunction distanceFunction)
             throws HyracksDataException {
+        return collectLeafCentroidsForLevelWise(bufferCache, fileId, queryVector, startPageId, initialLeafFrame,
+                leafFrameFactory, distanceFunction, null, null);
+    }
+
+    /**
+     * Collect all centroids from a leaf page and its overflow chain for level-wise traversal.
+     * When quantizer is provided, also computes quantized D(q,C) for each centroid.
+     */
+    private static LeafCollectionStats collectLeafCentroidsForLevelWise(IBufferCache bufferCache, int fileId,
+            double[] queryVector, int startPageId, IVectorClusteringLeafFrame initialLeafFrame,
+            ITreeIndexFrameFactory leafFrameFactory, IVectorDistanceFunction distanceFunction,
+            double[] quantizedQueryVector, IVectorQuantizer quantizer) throws HyracksDataException {
 
         List<LeafCentroid> centroids = new ArrayList<>();
         int currentPageId = startPageId;
@@ -1446,8 +1482,19 @@ public class VCTreeNavigationUtils {
                         double distance = distanceFunction.apply(queryVector, centroid);
                         candidatesProcessed++;
 
+                        // Compute quantized distance if quantizer is available
+                        double quantizedDistance = Double.NaN;
+                        if (quantizer != null && quantizedQueryVector != null) {
+                            byte[] quantizedCentroidBytes = currentFrame.getQuantizedCentroidBytes(i);
+                            if (quantizedCentroidBytes != null) {
+                                double[] dequantizedCentroid = quantizer.dequantize(quantizedCentroidBytes);
+                                quantizedDistance =
+                                        distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
+                            }
+                        }
+
                         centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid.clone(),
-                                directoryPageId));
+                                directoryPageId, quantizedDistance));
                     } catch (Exception e) {
                         // Skip malformed tuples
                         continue;

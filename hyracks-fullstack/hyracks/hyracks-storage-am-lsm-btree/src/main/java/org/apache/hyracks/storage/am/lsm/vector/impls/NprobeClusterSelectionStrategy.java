@@ -25,6 +25,7 @@ import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -54,6 +55,10 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
     // Shared state for cross-component deduplication
     private Set<Integer> visitedCentroidIds;
 
+    // Quantizer state for computing quantized D(q,C) in ClusterSearchResult
+    private double[] quantizedQueryVector;
+    private IVectorQuantizer quantizer;
+
     // For DFS fallback
     private VectorClusteringSearchCursor firstCursor;
 
@@ -61,6 +66,12 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         this.nprobe = nprobe;
         this.epsilon = epsilon;
         this.visitedCentroidIds = new HashSet<>();
+    }
+
+    @Override
+    public void setQuantizer(double[] quantizedQueryVector, IVectorQuantizer quantizer) {
+        this.quantizedQueryVector = quantizedQueryVector;
+        this.quantizer = quantizer;
     }
 
     @Override
@@ -75,7 +86,8 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
             try {
                 globalLevelWiseClusters = VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(
                         vcTree.getBufferCache(), vcTree.getFileId(), vcTree.getRootPageId(),
-                        vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(), queryVector, distFunc, epsilon);
+                        vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(), queryVector, distFunc, epsilon,
+                        quantizedQueryVector, quantizer);
 
                 // Mark first cluster as visited and start getNextCluster() from index 1
                 // The cursor handles index 0 separately via getFirstCluster()
@@ -186,6 +198,8 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         this.levelWisePhaseComplete = false;
         this.visitedCentroidIds.clear();
         this.firstCursor = null;
+        this.quantizedQueryVector = null;
+        this.quantizer = null;
     }
 
     @Override
