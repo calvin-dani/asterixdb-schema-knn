@@ -544,8 +544,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Create field permutation: include all fields in same order (identity permutation)
         int[] fieldPermutation = createFieldPermutationForSortedDataBulkLoad(outputRecDesc);
 
-        // Create primary key fields array for partitioner (numSecondaryKeys already defined above)
-        int[] pkFields = createPkFieldsForBulkLoadOp(fieldPermutation, numSecondaryKeys);
+        // Create primary key fields array for partitioner
+        // Use numOutputSecondaryFields (2 or 4) not numSecondaryKeys (input secondary key count)
+        // because the output record has distance+centroidId (and optionally qDist+qEmbed) before PKs
+        int[] pkFields = createPkFieldsForBulkLoadOp(fieldPermutation, numOutputSecondaryFields);
 
         // Get partitioning properties
         PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
@@ -1224,18 +1226,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     /**
      * Create primary key fields array for bulk load operation partitioner.
-     * Primary keys are located in outputRecDesc at positions 2 to 2+numPrimaryKeys-1.
-     * outputRecDesc format: [distance(0), centroidId(1), pk...(2 to 2+numPrimaryKeys-1), include_fields...]
+     * Primary keys start after all secondary fields in outputRecDesc:
+     * Non-quantized: [distance(0), centroidId(1), pk..., include_fields...]
+     * Quantized:     [distance(0), centroidId(1), qDist(2), qEmbed(3), pk..., include_fields...]
      *
      * @param fieldPermutation the field permutation array
-     * @param numSecondaryKeys number of secondary key fields (not used after reordering, kept for API compatibility)
+     * @param numSecondaryKeys number of secondary key fields (2 for non-quantized, 4 for quantized)
      * @return array of field indices where primary keys are located
      */
     private int[] createPkFieldsForBulkLoadOp(int[] fieldPermutation, int numSecondaryKeys) {
         int[] pkFields = new int[numPrimaryKeys];
-        // Primary keys start at index 2 in outputRecDesc (after distance and centroidId)
         for (int i = 0; i < numPrimaryKeys; i++) {
-            pkFields[i] = fieldPermutation[2 + i];
+            pkFields[i] = fieldPermutation[numSecondaryKeys + i];
         }
         return pkFields;
     }

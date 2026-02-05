@@ -26,6 +26,7 @@ import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
@@ -134,6 +135,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
 
     // Statistics
     private int totalTuplesProcessed;
+    private int nextCallCount;
     private int antimatterCancellations;
     private int tuplesFilteredOut;
 
@@ -146,6 +148,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
     public void open(ICursorInitialState initialState, ISearchPredicate searchPred) throws HyracksDataException {
         this.isOpen = true;
         this.totalTuplesProcessed = 0;
+        this.nextCallCount = 0;
         this.antimatterCancellations = 0;
         this.tuplesFilteredOut = 0;
 
@@ -597,12 +600,14 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
      */
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
         // Read quantized bytes from field 3 (quantized_embedding)
+        // Field is serialized by ByteArraySerializerDeserializer with a VarLen length prefix
         int vectorFieldIndex = 3;
         byte[] data = tuple.getFieldData(vectorFieldIndex);
         int offset = tuple.getFieldStart(vectorFieldIndex);
-        int length = tuple.getFieldLength(vectorFieldIndex);
-        byte[] qBytes = new byte[length];
-        System.arraycopy(data, offset, qBytes, 0, length);
+        int contentLength = ByteArrayPointable.getContentLength(data, offset);
+        int metaLength = ByteArrayPointable.getNumberBytesToStoreMeta(contentLength);
+        byte[] qBytes = new byte[contentLength];
+        System.arraycopy(data, offset + metaLength, qBytes, 0, contentLength);
         double[] dequantized = quantizer.dequantize(qBytes);
         return distanceFunction.apply(quantizedQueryVector, dequantized);
     }
@@ -643,6 +648,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
             throw HyracksDataException.create(new IllegalStateException("No more tuples"));
         }
         currentResult = topKWindow.poll();
+        nextCallCount++;
     }
 
     @Override
@@ -660,7 +666,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
             System.err.println(String.format("Total tuples processed:     %d", totalTuplesProcessed));
             System.err.println(String.format("Antimatter cancellations:   %d", antimatterCancellations));
             System.err.println(String.format("Tuples filtered out:        %d", tuplesFilteredOut));
-            System.err.println(String.format("Top-K window size:          %d", topKWindow.size()));
+            System.err.println(String.format("Results returned (next()):   %d", nextCallCount));
             System.err.println("================================================================\n");
 
             // Close all component cursors

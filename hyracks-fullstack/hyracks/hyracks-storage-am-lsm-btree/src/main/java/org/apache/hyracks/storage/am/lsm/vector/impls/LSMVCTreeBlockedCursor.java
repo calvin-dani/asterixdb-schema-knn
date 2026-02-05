@@ -24,6 +24,7 @@ import java.util.PriorityQueue;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.logging.log4j.Level;
@@ -781,12 +782,14 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         // When quantized, compute the approximate distance from the quantized representations
         if (quantizedQueryVector != null && quantizer != null) {
             // Read quantized bytes from field 2 (Q_QUANTIZED_EMBEDDING_FIELD)
+            // Field is serialized by ByteArraySerializerDeserializer with a VarLen length prefix
             int vectorFieldIndex = 2;
             byte[] data = tuple.getFieldData(vectorFieldIndex);
             int offset = tuple.getFieldStart(vectorFieldIndex);
-            int length = tuple.getFieldLength(vectorFieldIndex);
-            byte[] qBytes = new byte[length];
-            System.arraycopy(data, offset, qBytes, 0, length);
+            int contentLength = ByteArrayPointable.getContentLength(data, offset);
+            int metaLength = ByteArrayPointable.getNumberBytesToStoreMeta(contentLength);
+            byte[] qBytes = new byte[contentLength];
+            System.arraycopy(data, offset + metaLength, qBytes, 0, contentLength);
             double[] dequantized = quantizer.dequantize(qBytes);
             return distanceFunction.apply(quantizedQueryVector, dequantized);
         }

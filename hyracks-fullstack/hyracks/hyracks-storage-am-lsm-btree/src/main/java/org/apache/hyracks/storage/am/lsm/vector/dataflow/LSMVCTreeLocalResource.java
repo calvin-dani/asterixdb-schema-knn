@@ -37,6 +37,7 @@ import org.apache.hyracks.control.common.controllers.NCConfig;
 import org.apache.hyracks.control.nc.NodeControllerService;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
 import org.apache.hyracks.storage.am.common.api.INullIntrospector;
+import org.apache.hyracks.storage.am.common.api.IQuantizedResource;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
@@ -55,7 +56,7 @@ import org.apache.hyracks.storage.common.IStorageManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-public class LSMVCTreeLocalResource extends LsmResource {
+public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedResource {
 
     private static final long serialVersionUID = 2L;
     private static final Logger LOGGER = Logger.getLogger(LSMVCTreeLocalResource.class.getName());
@@ -470,4 +471,28 @@ protected Integer sampleCount;
                 && alpha != null;
     }
 
+    @Override
+    public void setQuantizationParameters(Map<String, Object> parameters) {
+        if (parameters == null) {
+            return;
+        }
+        if (parameters.containsKey("minQuantile")) {
+            this.minQuantile = (Float) parameters.get("minQuantile");
+        }
+        if (parameters.containsKey("maxQuantile")) {
+            this.maxQuantile = (Float) parameters.get("maxQuantile");
+        }
+        if (parameters.containsKey("alpha")) {
+            this.alpha = (Float) parameters.get("alpha");
+        }
+        if (parameters.containsKey("bits")) {
+            this.bits = (Integer) parameters.get("bits");
+        }
+        if (parameters.containsKey("confidenceInterval")) {
+            this.confidenceInterval = (Float) parameters.get("confidenceInterval");
+        }
+        if (parameters.containsKey("sampleCount")) {
+            this.sampleCount = (Integer) parameters.get("sampleCount");
+        }
+    }
 }
