@@ -32,6 +32,7 @@ import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.types.ARecordType;
+import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.optimizer.rules.am.AccessMethodJobGenParams;
 import org.apache.asterix.optimizer.rules.am.AccessMethodUtils;
@@ -213,7 +214,12 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
                 filterVarToFieldIndex.put(newVar, includeFieldPhysicalIndex);
 
                 // Store type for filter compilation
+                // For open-schema fields not in the type declaration, getSubFieldType returns null.
+                // Default to ANY so the type environment can resolve the variable type.
                 IAType fieldType = searchInfo.recordType.getSubFieldType(fieldPath);
+                if (fieldType == null) {
+                    fieldType = BuiltinType.ANY;
+                }
                 filterVarToType.put(newVar, fieldType);
 
                 System.err.println("=== Created " + newVar + " for field '" + fieldName + "' -> physical field "

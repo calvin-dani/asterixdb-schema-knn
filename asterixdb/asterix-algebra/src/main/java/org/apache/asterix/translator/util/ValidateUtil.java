@@ -279,8 +279,8 @@ public class ValidateUtil {
                     case DAYTIMEDURATION:
                         break;
                     case ANY:
-                        if (indexType == IndexType.BTREE) {
-                            // ANY is only allowed for normal secondary indexes
+                        if (indexType == IndexType.BTREE || indexType == IndexType.VECTOR) {
+                            // ANY is allowed for BTREE and VECTOR (include fields) indexes
                             break;
                         }
                     default:
