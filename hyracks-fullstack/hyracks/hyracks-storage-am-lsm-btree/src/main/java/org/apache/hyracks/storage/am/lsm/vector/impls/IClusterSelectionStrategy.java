@@ -23,6 +23,7 @@ import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
@@ -98,6 +99,18 @@ public interface IClusterSelectionStrategy {
      * @return The first cluster to explore, or null if not yet computed
      */
     ClusterSearchResult getFirstCluster();
+
+    /**
+     * Set quantizer state for computing quantized D(q,C) in ClusterSearchResult.
+     * Call before initialize() so that level-wise navigation can populate
+     * ClusterSearchResult.quantizedDistance for each leaf centroid found.
+     *
+     * @param quantizedQueryVector Dequantized form of query vector (nullable — pass null to skip)
+     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable — pass null to skip)
+     */
+    default void setQuantizer(double[] quantizedQueryVector, IVectorQuantizer quantizer) {
+        // Default no-op for strategies that don't support quantized distance
+    }
 
     /**
      * Reset the strategy for a new search.

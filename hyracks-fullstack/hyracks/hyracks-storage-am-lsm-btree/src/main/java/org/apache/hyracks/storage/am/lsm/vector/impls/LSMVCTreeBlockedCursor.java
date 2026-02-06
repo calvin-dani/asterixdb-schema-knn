@@ -227,6 +227,12 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                         .create(new IllegalArgumentException("Query vector must be provided for optimized search"));
             }
 
+            // Set quantizer on strategy before initialize() so level-wise navigation
+            // can compute quantized D(q,C) for each leaf centroid in ClusterSearchResult
+            if (quantizedQueryVector != null && quantizer != null) {
+                clusterStrategy.setQuantizer(quantizedQueryVector, quantizer);
+            }
+
             // Initialize cluster selection strategy with first component's tree
             clusterStrategy.initialize(vcTree, queryVector, distanceFunction, K);
 
@@ -247,13 +253,19 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             return;
         }
 
-        // D(q, C) is the distance from query to closest centroid
-        this.dqc = firstCluster.distance;
+        // D(q, C) — use quantized distance when available to keep all three
+        // triangle inequality distances in the same (quantized) metric space
+        if (quantizer != null && firstCluster.hasQuantizedDistance()) {
+            this.dqc = firstCluster.quantizedDistance;
+        } else {
+            this.dqc = firstCluster.distance;
+        }
 
         System.err.println(String.format(
-                "[LSMVCTreeBlockedCursor] First cluster from strategy: centroidId=%d, D(q,C)=%.4f, directoryPageId=%d, level-wise count=%d",
-                firstCluster.centroidId, dqc, firstCluster.directoryPageId,
-                clusterStrategy.getLevelWiseClusterCount()));
+                "[LSMVCTreeBlockedCursor] First cluster: cid=%d, D(q,C)_full=%.4f, D(q,C)_quant=%.4f, dqc_used=%.4f, dirPage=%d, levelWise=%d",
+                firstCluster.centroidId, firstCluster.distance,
+                firstCluster.hasQuantizedDistance() ? firstCluster.quantizedDistance : Double.NaN, dqc,
+                firstCluster.directoryPageId, clusterStrategy.getLevelWiseClusterCount()));
 
         // Perform the bidirectional search on first cluster
         openClusterAndSearch(firstCluster, queryVector, dqc);
@@ -282,8 +294,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             }
 
             System.err.println(String.format(
-                    "[LSMVCTreeBlockedCursor] Advancing to cluster: centroidId=%d, D(q,C)=%.4f, directoryPageId=%d",
-                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
+                    "[LSMVCTreeBlockedCursor] Advancing to cluster: cid=%d, D(q,C)_full=%.4f, D(q,C)_quant=%.4f, dqc_used=%.4f, dirPage=%d",
+                    nextCluster.centroidId, nextCluster.distance,
+                    nextCluster.hasQuantizedDistance() ? nextCluster.quantizedDistance : Double.NaN, dqc,
+                    nextCluster.directoryPageId));
 
             advanceAllComponentsToNextCluster(nextCluster);
             clustersExplored++;
@@ -315,9 +329,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         leftCtx.reset();
         topKWindow.clear();
 
-        // Open all VCB cursors for this cluster
+        // Open all VCB cursors for this cluster.
+        // Use full-precision distance for pivot positioning (data pages sorted by full-precision D(x,C)).
         for (int i = 0; i < numComponents; i++) {
-            vcbCursors[i].openCluster(cluster.directoryPageId, dqc);
+            vcbCursors[i].openCluster(cluster.directoryPageId, cluster.distance);
         }
 
         // Seed the priority queues
@@ -337,8 +352,12 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
      * results from previous clusters contribute to the termination threshold.
      */
     private void advanceAllComponentsToNextCluster(ClusterSearchResult cluster) throws HyracksDataException {
-        // Update D(q, C) for the new cluster's centroid
-        this.dqc = cluster.distance;
+        // Update D(q, C) for the new cluster's centroid — use quantized distance when available
+        if (quantizer != null && cluster.hasQuantizedDistance()) {
+            this.dqc = cluster.quantizedDistance;
+        } else {
+            this.dqc = cluster.distance;
+        }
 
         // TODO: Quantize the query vector per-cluster here. The centroid is available from cluster.centroid,
         // which can be used to compute the residual (queryVector - centroid) for product quantization.
@@ -347,9 +366,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         rightCtx.reset();
         leftCtx.reset();
 
-        // Open all VCB cursors for this cluster (same cluster for all components)
+        // Open all VCB cursors for this cluster (same cluster for all components).
+        // Use full-precision distance for pivot positioning (data pages sorted by full-precision D(x,C)).
         for (int i = 0; i < numComponents; i++) {
-            vcbCursors[i].openCluster(cluster.directoryPageId, dqc);
+            vcbCursors[i].openCluster(cluster.directoryPageId, cluster.distance);
         }
 
         // Seed the priority queues
@@ -423,15 +443,32 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
      * Perform bidirectional search with triangle inequality termination.
      */
     private void performBidirectionalSearch() throws HyracksDataException {
+        int iterCount = 0;
         while (!rightCtx.terminated || !leftCtx.terminated) {
             // Process right direction
             if (!rightCtx.terminated) {
                 ITupleReference rightTuple = getNextValidTuple(rightCtx);
                 if (rightTuple != null) {
+                    double dxcFull = extractFullPrecisionDxc(rightTuple);
+                    double dxcQuant = (quantizer != null) ? extractDistanceToCentroid(rightTuple) : Double.NaN;
+                    double dqx = Double.NaN;
+
                     // Apply INCLUDE field filter before adding to top-K window
                     if (passesTupleFilter(rightTuple)) {
-                        double dqx = computeApproximateDistance(rightTuple);
+                        dqx = computeApproximateDistance(rightTuple);
                         addToTopKWindow(rightTuple, dqx);
+                    }
+
+                    // Log first few + every 10th tuple (include threshold when topK is full)
+                    if (true) {
+                        double kthDqx = topKWindow.isEmpty() ? Double.NaN : topKWindow.peek().dqx;
+                        double rThresh = kthDqx + dqc;
+                        double nextRightDxc =
+                                rightCtx.queue.isEmpty() ? Double.NaN : rightCtx.queue.peek().dxc;
+                        System.err.println(String.format(
+                                "[bidir] RIGHT #%d: D(x,C)_full=%.4f, D(x,C)_quant=%.4f, D(q,x)_quant=%.4f, D(q,C)_used=%.4f, topK=%d, kth_dqx=%.4f, threshold=%.4f, nextDxc=%.4f",
+                                iterCount, dxcFull, dxcQuant, dqx, dqc, topKWindow.size(), kthDqx, rThresh,
+                                nextRightDxc));
                     }
 
                     // Check right termination: D(x',C) > max{D(q,x)} + D(q,C)
@@ -441,12 +478,13 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                         if (nextDxc > threshold) {
                             rightCtx.terminated = true;
                             System.err.println(String.format(
-                                    "[LSMVCTreeBlockedCursor] Right terminated: nextDxc=%.4f > threshold=%.4f", nextDxc,
-                                    threshold));
+                                    "[bidir] Right TERMINATED: nextDxc=%.4f > threshold=%.4f (kth_dqx=%.4f + dqc=%.4f)",
+                                    nextDxc, threshold, topKWindow.peek().dqx, dqc));
                         }
                     }
                 } else {
                     rightCtx.terminated = true;
+                    System.err.println("[bidir] Right EXHAUSTED");
                 }
             }
 
@@ -454,10 +492,26 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             if (!leftCtx.terminated) {
                 ITupleReference leftTuple = getNextValidTuple(leftCtx);
                 if (leftTuple != null) {
+                    double dxcFull = extractFullPrecisionDxc(leftTuple);
+                    double dxcQuant = (quantizer != null) ? extractDistanceToCentroid(leftTuple) : Double.NaN;
+                    double dqx = Double.NaN;
+
                     // Apply INCLUDE field filter before adding to top-K window
                     if (passesTupleFilter(leftTuple)) {
-                        double dqx = computeApproximateDistance(leftTuple);
+                        dqx = computeApproximateDistance(leftTuple);
                         addToTopKWindow(leftTuple, dqx);
+                    }
+
+                    // Log first few + every 10th tuple (include threshold when topK is full)
+                    if (true) {
+                        double kthDqx = topKWindow.isEmpty() ? Double.NaN : topKWindow.peek().dqx;
+                        double lThresh = dqc - kthDqx;
+                        double nextLeftDxc =
+                                leftCtx.queue.isEmpty() ? Double.NaN : leftCtx.queue.peek().dxc;
+                        System.err.println(String.format(
+                                "[bidir] LEFT  #%d: D(x,C)_full=%.4f, D(x,C)_quant=%.4f, D(q,x)_quant=%.4f, D(q,C)_used=%.4f, topK=%d, kth_dqx=%.4f, threshold=%.4f, nextDxc=%.4f",
+                                iterCount, dxcFull, dxcQuant, dqx, dqc, topKWindow.size(), kthDqx, lThresh,
+                                nextLeftDxc));
                     }
 
                     // Check left termination: D(x',C) < D(q,C) - max{D(q,x)}
@@ -467,14 +521,16 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                         if (nextDxc < threshold) {
                             leftCtx.terminated = true;
                             System.err.println(String.format(
-                                    "[LSMVCTreeBlockedCursor] Left terminated: nextDxc=%.4f < threshold=%.4f", nextDxc,
-                                    threshold));
+                                    "[bidir] Left TERMINATED: nextDxc=%.4f < threshold=%.4f (dqc=%.4f - kth_dqx=%.4f)",
+                                    nextDxc, threshold, dqc, topKWindow.peek().dqx));
                         }
                     }
                 } else {
                     leftCtx.terminated = true;
+                    System.err.println("[bidir] Left EXHAUSTED");
                 }
             }
+            iterCount++;
         }
 
         System.err.println(
@@ -760,9 +816,22 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     }
 
     /**
-     * Extract D(x, C) from tuple. First field is distance_to_centroid.
+     * Extract D(x, C) from tuple.
+     * When quantizer is available, reads field 2 (Q_QUANTIZED_DISTANCE_FIELD = quantized D(x,C))
+     * to keep all three triangle inequality distances in the same (quantized) metric space.
+     * Otherwise reads field 0 (full-precision D(x,C)).
      */
     private double extractDistanceToCentroid(ITupleReference tuple) {
+        int fieldIndex = (quantizer != null) ? 2 : 0; // field 2 = D(x,C)_quant, field 0 = D(x,C)_full
+        byte[] data = tuple.getFieldData(fieldIndex);
+        int offset = tuple.getFieldStart(fieldIndex);
+        return DoublePointable.getDouble(data, offset);
+    }
+
+    /**
+     * Always extract field 0 (full-precision D(x,C)) for diagnostic logging.
+     */
+    private double extractFullPrecisionDxc(ITupleReference tuple) {
         byte[] data = tuple.getFieldData(0);
         int offset = tuple.getFieldStart(0);
         return DoublePointable.getDouble(data, offset);
@@ -781,9 +850,9 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
         // When quantized, compute the approximate distance from the quantized representations
         if (quantizedQueryVector != null && quantizer != null) {
-            // Read quantized bytes from field 2 (Q_QUANTIZED_EMBEDDING_FIELD)
+            // Read quantized bytes from field 3 (Q_QUANTIZED_EMBEDDING_FIELD)
             // Field is serialized by ByteArraySerializerDeserializer with a VarLen length prefix
-            int vectorFieldIndex = 2;
+            int vectorFieldIndex = 3;
             byte[] data = tuple.getFieldData(vectorFieldIndex);
             int offset = tuple.getFieldStart(vectorFieldIndex);
             int contentLength = ByteArrayPointable.getContentLength(data, offset);
