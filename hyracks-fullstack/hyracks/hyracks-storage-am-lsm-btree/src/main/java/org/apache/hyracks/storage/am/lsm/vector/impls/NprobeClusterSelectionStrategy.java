@@ -30,6 +30,8 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Nprobe-based cluster selection strategy.
@@ -41,6 +43,7 @@ import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
  * Stopping condition: minClustersExplored >= nprobe AND resultsCollected >= K
  */
 public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy {
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Parameters
     private final int nprobe;
@@ -96,11 +99,12 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                     globalClusterIndex = 1; // Skip first cluster in getNextCluster()
                 }
 
-                // System.err.println(String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
-                    //    globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
+                LOGGER.warn(String.format(
+                        "[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
+                        globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
             } catch (Exception e) {
-                // System.err.println(
-                 //       String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
+                LOGGER.warn(String.format(
+                        "[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
                 globalLevelWiseClusters = null;
             }
         }
@@ -118,14 +122,16 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
             // Mark visited for DFS fallback deduplication
             visitedCentroidIds.add(nextCluster.centroidId);
 
-            // System.err.println(
-              //      String.format("[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
-                //            globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId,
-                 //           nextCluster.distance, nextCluster.directoryPageId));
+            LOGGER.warn(String.format(
+                    "[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
+                    globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId,
+                    nextCluster.distance, nextCluster.directoryPageId));
 
             if (globalClusterIndex >= globalLevelWiseClusters.size()) {
                 levelWisePhaseComplete = true;
-                // System.err.println("[NprobeStrategy] Level-wise phase complete, DFS fallback next");
+                LOGGER.warn(String.format(
+                        "[NprobeStrategy] Level-wise phase COMPLETE. Visited centroids: %s",
+                        visitedCentroidIds));
             }
 
             return nextCluster;
@@ -141,12 +147,15 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         ClusterSearchResult next = firstCursor.findNextClusterDFS();
 
         if (next == null) {
-            // System.err.println("[NprobeStrategy] DFS exhausted, no more clusters");
+            LOGGER.warn(String.format(
+                    "[NprobeStrategy] DFS exhausted, no more clusters. Visited centroids: %s",
+                    visitedCentroidIds));
             return null;
         }
 
-        // System.err.println(String.format("[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
-           //     next.centroidId, next.distance, next.directoryPageId));
+        LOGGER.warn(String.format(
+                "[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
+                next.centroidId, next.distance, next.directoryPageId));
 
         return next;
     }

@@ -393,7 +393,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
                 if (currentLevel == numLevels - 1 && currentPage != null) {
                     int nextClusterPageId = computeCurrentClusterPageId();
                     leafFrame.setNextLeaf(nextClusterPageId);
-                    // Keep overflow flag as-is (only true if this page had within-cluster overflow)
+                    leafFrame.setOverflowFlagBit(false);
                     LOGGER.debug("Linking leaf page to next cluster: current page -> page {}", nextClusterPageId);
                 }
 

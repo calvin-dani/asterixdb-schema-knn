@@ -956,17 +956,18 @@ public class VCTreeNavigationUtils {
 
                     // Skip if already visited (e.g., by level-wise exploration)
                     if (state.isVisited(next.centroidId)) {
-                        // System.err.println(String.format("[DFS] Skipping visited centroid: cid=%d, distance=%.4f",
-                          //      next.centroidId, next.distance));
+                        LOGGER.warn(String.format(
+                                "[DFS] Skipping visited centroid: cid=%d, distance=%.4f",
+                                next.centroidId, next.distance));
                         continue;
                     }
 
                     // Mark as visited and return
                     state.markVisited(next.centroidId);
-                    // System.err.println(String.format(
-                       //     "[DFS] Leaf frame pageId=%d returning centroid: cid=%d, distance=%.4f, nextIndex=%d/%d",
-                     //       topFrame.pageId, next.centroidId, next.distance, topFrame.nextIndex,
-// topFrame.sortedCentroids.size()));
+                    LOGGER.warn(String.format(
+                            "[DFS] Returning centroid: cid=%d, distance=%.4f, pageId=%d, nextIndex=%d/%d",
+                            next.centroidId, next.distance, topFrame.pageId, topFrame.nextIndex,
+                            topFrame.sortedCentroids.size()));
                     return ClusterSearchResult.create(next.pageId, next.tupleIndex, next.centroid, next.distance,
                             next.centroidId, next.directoryPageId);
                 }
@@ -1013,7 +1014,7 @@ public class VCTreeNavigationUtils {
         }
 
         // Stack exhausted, no more clusters
-        // System.err.println("[DFS] Stack exhausted, no more clusters available");
+        LOGGER.warn("[DFS] Stack exhausted, no more clusters available");
         return null;
     }
 
@@ -1064,8 +1065,9 @@ public class VCTreeNavigationUtils {
                                     first.distance, first.centroidId, first.directoryPageId);
                         }
                         // Skip visited centroid
-                        // System.err.println(String.format("[DFS descendToLeaf] Skipping visited centroid: cid=%d",
-                          //      first.centroidId));
+                        LOGGER.warn(String.format(
+                                "[DFS descendToLeaf] Skipping visited centroid: cid=%d",
+                                first.centroidId));
                     }
                     // All centroids in this leaf are visited
                     return null;

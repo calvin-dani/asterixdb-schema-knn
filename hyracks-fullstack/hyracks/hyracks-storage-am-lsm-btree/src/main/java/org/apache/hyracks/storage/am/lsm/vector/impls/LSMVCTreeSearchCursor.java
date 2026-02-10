@@ -47,6 +47,8 @@ import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.util.IndexCursorUtils;
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * LSM search cursor for Vector Clustering Tree.
@@ -78,6 +80,7 @@ import org.apache.logging.log4j.Level;
  * - Filters antimatter tuples and handles matter/antimatter cancellation
  */
 public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Accessor array for each component's VCTree
     private VectorClusteringTreeAccessor[] vcTreeAccessors;
@@ -167,9 +170,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         this.tupleFilter = extractTupleFilter(searchPred);
         if (this.tupleFilter != null) {
             this.referenceFilterTuple = new ReferenceFrameTupleReference();
-            System.err.println("[LSMVCTreeSearchCursor] Tuple filter is SET - will filter INCLUDE field predicates");
-        } else {
-            System.err.println("[LSMVCTreeSearchCursor] Tuple filter is NULL - no INCLUDE field filtering");
+//            System.err.println("[LSMVCTreeSearchCursor] Tuple filter is SET - will filter INCLUDE field predicates");
+//        } else {
+//            System.err.println("[LSMVCTreeSearchCursor] Tuple filter is NULL - no INCLUDE field filtering");
         }
 
         // Initialize debug counters
@@ -240,6 +243,10 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Open all cursors with the search predicate
         IndexCursorUtils.open(vcTreeAccessors, rangeCursors, searchPred);
 
+        LOGGER.warn(String.format(
+                "[LSMVCTreeSearchCursor] doOpen: numComponents=%d, K=%d, nprobe=%d, pkStartField=%d",
+                numVCTrees, K, nprobe, pkStartField));
+
         // Initialize strategy and set up DFS fallback
         if (numVCTrees > 0) {
             VectorClusteringSearchCursor firstCursor = (VectorClusteringSearchCursor) rangeCursors[0];
@@ -270,9 +277,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                 ClusterSearchResult dfsCluster = firstCursor.getCurrentClusterResult();
                 if (dfsCluster != null && dfsCluster.centroidId != firstCluster.centroidId) {
                     // DFS found different cluster than level-wise! Re-open all cursors to level-wise[0]
-                    System.err.printf(
-                            "[LSMVCTreeSearchCursor] DFS found cid=%d but level-wise[0] is cid=%d - re-opening all cursors to level-wise[0]%n",
-                            dfsCluster.centroidId, firstCluster.centroidId);
+                    LOGGER.warn(String.format(
+                            "[LSMVCTreeSearchCursor] DFS found cid=%d but level-wise[0] is cid=%d - re-opening all cursors to level-wise[0]",
+                            dfsCluster.centroidId, firstCluster.centroidId));
 
                     for (int i = 0; i < numVCTrees; i++) {
                         if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
@@ -285,17 +292,17 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                     }
                 }
 
-                System.err.printf(
-                        "[LSMVCTreeSearchCursor] Computed %d level-wise clusters, first cluster cid=%d marked visited%n",
-                        clusterStrategy.getLevelWiseClusterCount(), firstCluster.centroidId);
+                LOGGER.warn(String.format(
+                        "[LSMVCTreeSearchCursor] Computed %d level-wise clusters, first cluster cid=%d marked visited",
+                        clusterStrategy.getLevelWiseClusterCount(), firstCluster.centroidId));
             } else {
                 // No level-wise clusters - mark first cluster from DFS as visited
                 ClusterSearchResult dfsFallbackCluster = firstCursor.getCurrentClusterResult();
                 if (dfsFallbackCluster != null) {
                     visitedSet.add(dfsFallbackCluster.centroidId);
-                    System.err.printf(
-                            "[LSMVCTreeSearchCursor] Level-wise disabled, marked first DFS cluster as visited: cid=%d%n",
-                            dfsFallbackCluster.centroidId);
+                    LOGGER.warn(String.format(
+                            "[LSMVCTreeSearchCursor] Level-wise disabled, marked first DFS cluster as visited: cid=%d",
+                            dfsFallbackCluster.centroidId));
                 }
             }
         }
@@ -335,12 +342,32 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         for (int i = 0; i < rangeCursors.length; i++) {
             if (rangeCursors[i].hasNext()) {
                 rangeCursors[i].next();
-                pqes[i].reset(rangeCursors[i].getTuple());
+                ITupleReference tuple = rangeCursors[i].getTuple();
+                pqes[i].reset(tuple);
                 outputPriorityQueue.offer(pqes[i]);
+
+//                // Log tuple being added to PQ
+//                try {
+//                    double dist = org.apache.hyracks.data.std.primitive.DoublePointable.getDouble(
+//                            tuple.getFieldData(0), tuple.getFieldStart(0));
+//                    int cid = org.apache.hyracks.data.std.primitive.IntegerPointable.getInteger(
+//                            tuple.getFieldData(1), tuple.getFieldStart(1));
+//                    byte[] pkData = tuple.getFieldData(2);
+//                    int pkStart = tuple.getFieldStart(2);
+//                    int pkLen = tuple.getFieldLength(2);
+//                    StringBuilder pkHex = new StringBuilder();
+//                    for (int j = 0; j < Math.min(pkLen, 40); j++) {
+//                        pkHex.append(String.format("%02x", pkData[pkStart + j] & 0xFF));
+//                    }
+//                    System.err.println(String.format(
+//                            "[initPQ] comp=%d added: dist=%.4f, cid=%d, pkHex=%s", i, dist, cid, pkHex.toString()));
+//                } catch (Exception e) {
+//                    System.err.println(String.format("[initPQ] comp=%d added (error logging: %s)", i, e.getMessage()));
+//                }
             } else {
                 // Cursor has no data in initial cluster - mark as exhausted
                 clusterExhausted[i] = true;
-                System.err.println(String.format(
+                LOGGER.warn(String.format(
                         "[LSMVCTreeSearchCursor] Component %d has empty initial cluster (marked exhausted)", i));
             }
         }
@@ -356,7 +383,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         }
 
         if (allInitiallyExhausted) {
-            System.err.println("[LSMVCTreeSearchCursor] ALL components have empty initial cluster, advancing to next");
+            LOGGER.warn("[LSMVCTreeSearchCursor] ALL components have empty initial cluster, advancing to next");
             advanceAllComponentsToNextCluster();
         }
     }
@@ -415,21 +442,20 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     public void doClose() throws HyracksDataException {
         // Print final reconciliation summary
         int minClustersProbed = getMinClustersProbed();
-        System.err.println("\n========== LSM Vector Index Search Summary ==========");
-        System.err
-                .println(String.format("Mode:                       %s", fullScanMode ? "MERGE (full scan)" : "QUERY"));
-        System.err.println(String.format("K=%d, nprobe=%d", K, nprobe));
-        System.err.println(String.format("Level-wise clusters:        %d",
+        LOGGER.warn("\n========== LSM Vector Index Search Summary ==========");
+        LOGGER.warn(String.format("Mode:                       %s", fullScanMode ? "MERGE (full scan)" : "QUERY"));
+        LOGGER.warn(String.format("K=%d, nprobe=%d", K, nprobe));
+        LOGGER.warn(String.format("Level-wise clusters:        %d",
                 clusterStrategy != null ? clusterStrategy.getLevelWiseClusterCount() : 0));
-        System.err.println(String.format("Level-wise phase complete:  %s",
+        LOGGER.warn(String.format("Level-wise phase complete:  %s",
                 clusterStrategy != null && clusterStrategy.isLevelWisePhaseComplete()));
-        System.err.println(String.format("Min clusters probed:        %d", minClustersProbed));
-        System.err.println(String.format("Total tuples processed:     %d", totalTuplesPopped));
-        System.err.println(String.format("Antimatter tuples detected: %d", antimatterTuplesDetected));
-        System.err.println(String.format("Cancellations made:         %d", cancellationsMade));
-        System.err.println(String.format("Tuples filtered out:        %d", tuplesFilteredOut));
-        System.err.println(String.format("doGetTuple() was called:    %d times", getTupleCallCount));
-        System.err.println("=====================================================\n");
+        LOGGER.warn(String.format("Min clusters probed:        %d", minClustersProbed));
+        LOGGER.warn(String.format("Total tuples processed:     %d", totalTuplesPopped));
+        LOGGER.warn(String.format("Antimatter tuples detected: %d", antimatterTuplesDetected));
+        LOGGER.warn(String.format("Cancellations made:         %d", cancellationsMade));
+        LOGGER.warn(String.format("Tuples filtered out:        %d", tuplesFilteredOut));
+        LOGGER.warn(String.format("doGetTuple() was called:    %d times", getTupleCallCount));
+        LOGGER.warn("=====================================================\n");
 
         super.doClose();
     }
@@ -539,19 +565,8 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return true;
         }
 
-        // Tuple fails filter - log for debugging
+        // Tuple fails filter
         tuplesFilteredOut++;
-        try {
-            long pkValue =
-                    LongPointable.getLong(tuple.getFieldData(pkStartField), tuple.getFieldStart(pkStartField) + 1);
-            long yearValue = LongPointable.getLong(tuple.getFieldData(pkStartField + 1),
-                    tuple.getFieldStart(pkStartField + 1) + 1);
-            System.err.println(
-                    String.format("[LSMVCTreeSearchCursor] Tuple FILTERED OUT (total filtered: %d) | pk=%d, year=%d",
-                            tuplesFilteredOut, pkValue, yearValue));
-        } catch (Exception e) {
-            // Ignore logging errors
-        }
         return false;
     }
 
@@ -785,10 +800,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     @Override
     public ITupleReference doGetTuple() {
-        // Track how many times this method is called
         getTupleCallCount++;
-
-        // Return tuple from priority queue output element
         return outputElement != null ? outputElement.getTuple() : null;
     }
 
@@ -906,8 +918,10 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         if (cursor.hasNext()) {
             // Current cluster/page has more data
             cursor.next();
-            e.reset(cursor.getTuple());
+            ITupleReference tuple = cursor.getTuple();
+            e.reset(tuple);
             outputPriorityQueue.offer(e);
+
             return;
         }
 
@@ -952,9 +966,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         if (clusterStrategy.shouldStopAdvancing(minClustersExplored, resultsCollected)) {
             // We have enough results AND probed enough clusters - set flag to stop advancing
             stopAdvancing = true;
-//            System.err.println(
-//                    String.format("[LSMVCTreeSearchCursor] Early termination: minClustersExplored=%d, returned=%d",
-//                            minClustersExplored, resultsCollected));
+            LOGGER.warn(String.format(
+                    "[LSMVCTreeSearchCursor] Early termination: minClustersExplored=%d, returned=%d",
+                    minClustersExplored, resultsCollected));
             return;
         }
 
@@ -993,17 +1007,16 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             ClusterSearchResult nextCluster = clusterStrategy.getNextCluster();
 
             if (nextCluster == null) {
-                // No more clusters available
-//                System.err.println("[LSMVCTreeSearchCursor] No more clusters available globally");
+                LOGGER.warn("[LSMVCTreeSearchCursor] No more clusters available globally");
                 for (int i = 0; i < clusterExhausted.length; i++) {
                     clusterExhausted[i] = true;
                 }
                 return;
             }
 
-//            System.err.println(
-//                    String.format("[LSMVCTreeSearchCursor] Global cluster selected: cid=%d, distance=%.4f, dirPage=%d",
-//                            nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
+            LOGGER.warn(String.format(
+                    "[LSMVCTreeSearchCursor] Global cluster selected: cid=%d, distance=%.4f, dirPage=%d",
+                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
 
             // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
             for (int i = 0; i < rangeCursors.length; i++) {
@@ -1046,16 +1059,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Check if cluster has data
         if (hasData && vcCursor.hasNext()) {
             vcCursor.next();
+            ITupleReference tuple = vcCursor.getTuple();
             PriorityQueueElement pqe = pqes[componentIndex];
-            pqe.reset(vcCursor.getTuple());
+            pqe.reset(tuple);
             outputPriorityQueue.offer(pqe);
-//            System.err.println(
-//                    String.format("[LSMVCTreeSearchCursor] Component %d opened cluster cid=%d (has data, O(1) access)",
-//                            componentIndex, cluster.centroidId));
+
         } else {
             clusterExhausted[componentIndex] = true;
-//            System.err.println(String.format("[LSMVCTreeSearchCursor] Component %d cluster cid=%d is empty",
-//                    componentIndex, cluster.centroidId));
+            LOGGER.warn(String.format("[advCluster] comp=%d cluster=%d is EMPTY",
+                    componentIndex, cluster.centroidId));
         }
     }
 
