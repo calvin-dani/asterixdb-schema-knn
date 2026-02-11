@@ -28,6 +28,9 @@ import java.util.UUID;
 import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.OptimizationConfUtil;
+import org.apache.asterix.common.context.ITransactionSubsystemProvider;
+import org.apache.asterix.common.context.TransactionSubsystemProvider;
+import org.apache.asterix.common.transactions.IRecoveryManager;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
@@ -35,8 +38,10 @@ import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
+import org.apache.asterix.transaction.management.opcallbacks.PrimaryIndexInstantSearchOperationCallbackFactory;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
+import org.apache.asterix.metadata.utils.DatasetUtil;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
@@ -92,9 +97,12 @@ import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.dataflow.std.group.AbstractAggregatorDescriptorFactory;
 import org.apache.hyracks.dataflow.std.group.preclustered.PreclusteredGroupOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.sort.ExternalSortOperatorDescriptor;
+import org.apache.hyracks.storage.am.btree.dataflow.BTreeSearchOperatorDescriptor;
+import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
 import org.apache.hyracks.storage.am.common.build.IndexBuilderFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.common.impls.DefaultTupleProjectorFactory;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.QuantizedIndexCreateOperatorDescriptor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
@@ -728,19 +736,25 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // This is the same method used by SampleOperationsHelper and SecondaryVectorOperationsHelper
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
 
-        // For quantization constants, we want all samples (no limit), so use a large sample size
-        // The sample index already contains the ANALYZE samples, so we just need to scan all of them
-        int sampleCardinalityPerPartition = Integer.MAX_VALUE; // Scan all samples
-        long sampleSeed = 0; // Not used when scanning existing sample index
-        System.err.println(
-                "Sample scan: cardinalityPerPartition=" + sampleCardinalityPerPartition + ", seed=" + sampleSeed);
+        // Refactored: Use BTreeSearchOperatorDescriptor on the persistent sample index
+        ITransactionSubsystemProvider txnSubsystemProvider = TransactionSubsystemProvider.INSTANCE;
+        ISearchOperationCallbackFactory searchCallbackFactory = new PrimaryIndexInstantSearchOperationCallbackFactory(
+                        dataset.getDatasetId(), dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
+                        IRecoveryManager.ResourceType.LSM_BTREE);
 
-        IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
-                sampleCardinalityPerPartition, sampleSeed, projectorFactory);
+        IOperatorDescriptor targetOp = new BTreeSearchOperatorDescriptor(spec,
+                        dataset.getPrimaryRecordDescriptor(metadataProvider), null, null, true, true,
+                        sampleIndexHelperFactory, false, false, null, searchCallbackFactory, null, null, false, null,
+                        null,
+                        -1, false, null, null, projectorFactory, null,
+                        samplePartitioningProperties.getComputeStorageMap());
+
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
+                        samplePartitionConstraint);
 
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
-        System.err.println("✓ Connected: DummyKeyProvider → SampleIndexScan");
+        System.err.println("✓ Connected: DummyKeyProvider → PersistentSampleIndexScan (BTreeSearch)");
 
         // Step 2: Extract and flatten vector components
         System.err.println("--- STEP 2: Creating vector component extractor ---");
@@ -887,13 +901,32 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             PartitioningProperties samplePartitioningProperties =
                     metadataProvider.getPartitioningProperties(dataset, sampleIndex.getIndexName());
             AlgebricksPartitionConstraint samplePartitionConstraint = samplePartitioningProperties.getConstraints();
+            IFileSplitProvider sampleFileSplitProvider = samplePartitioningProperties.getSplitsProvider();
             ITupleProjectorFactory projectorFactory =
                     IndexUtil.createPrimaryIndexScanTupleProjectorFactory(dataset.getDatasetFormatInfo(),
                             ALL_FIELDS_TYPE, itemType, metaType, dataset.getPrimaryKeys().size());
 
             IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
-            IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
-                    Integer.MAX_VALUE, 0, projectorFactory);
+
+            // Refactored: Use BTreeSearchOperatorDescriptor on the persistent sample index
+            IStorageManager storageMgr = metadataProvider.getStorageComponentProvider().getStorageManager();
+            IIndexDataflowHelperFactory sampleIndexHelperFactory = new IndexDataflowHelperFactory(storageMgr,
+                            sampleFileSplitProvider);
+
+            ITransactionSubsystemProvider txnSubsystemProvider = TransactionSubsystemProvider.INSTANCE;
+            ISearchOperationCallbackFactory searchCallbackFactory = new PrimaryIndexInstantSearchOperationCallbackFactory(
+                            dataset.getDatasetId(), dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
+                            IRecoveryManager.ResourceType.LSM_BTREE);
+
+            IOperatorDescriptor targetOp = new BTreeSearchOperatorDescriptor(spec,
+                            dataset.getPrimaryRecordDescriptor(metadataProvider), null, null, true, true,
+                            sampleIndexHelperFactory, false, false, null, searchCallbackFactory, null, null, false,
+                            null, null,
+                            -1, false, null, null, projectorFactory, null,
+                            samplePartitioningProperties.getComputeStorageMap());
+
+            AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
+                            samplePartitionConstraint);
 
             spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
             sourceOp = targetOp;
