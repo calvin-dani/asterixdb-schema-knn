@@ -208,7 +208,7 @@ public class VectorComponentExtractorOperatorDescriptor extends AbstractSingleAc
                 double value = getValueFromTag(typeTag, data, offset);
                 return value;
             } else {
-                    return Double.NaN; // Invalid type
+                return Double.NaN; // Invalid type
             }
         }
 

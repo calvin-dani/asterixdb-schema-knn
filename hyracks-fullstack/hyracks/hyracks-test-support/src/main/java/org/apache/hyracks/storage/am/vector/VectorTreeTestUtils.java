@@ -530,8 +530,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                     double dxc = extractDistanceFromTuple(tuple);
                     double[] vec = extractVectorFromOptimizedTuple(tuple);
                     double dqx = computeEuclideanDistance(queryVector, vec);
-                    LOGGER.info("  [{}] pk={}, D(x,C)={}, D(q,x)={}, vec={}", i, pk, dxc, dqx,
-                            Arrays.toString(vec));
+                    LOGGER.info("  [{}] pk={}, D(x,C)={}, D(q,x)={}, vec={}", i, pk, dxc, dqx, Arrays.toString(vec));
                 }
 
                 // Validate we got the expected number of results

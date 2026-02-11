@@ -807,8 +807,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         throws HyracksDataException {
                     try {
                         // Create index helper to access the resource (use partition from outer scope)
-                        IIndexDataflowHelper tempHelper = indexHelperFactory.create(taskCtx.getJobletContext()
-                                .getServiceContext(), partition);
+                        IIndexDataflowHelper tempHelper =
+                                indexHelperFactory.create(taskCtx.getJobletContext().getServiceContext(), partition);
 
                         // Get the local resource from the helper
                         LocalResource localResource = tempHelper.getResource();
@@ -1066,7 +1066,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                 new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE, // centroid ID
                                         DoubleArraySerializerDeserializer.INSTANCE, // embedding as double array
                                         ByteArraySerializerDeserializer.INSTANCE // quantized embedding bytes
-                                };
+                        };
                         Object[] fieldValues = new Object[] { centroidId, embedding, quantizedBytes };
 
                         TupleUtils.createTuple(tupleBuilder, tupleRef, fieldSerdes, fieldValues);

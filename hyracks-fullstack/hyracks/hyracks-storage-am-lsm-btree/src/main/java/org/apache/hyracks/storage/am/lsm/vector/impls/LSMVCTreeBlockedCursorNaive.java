@@ -339,9 +339,9 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
             int minClustersExplored = getMinClustersProbed();
             if (clusterStrategy.shouldStopAdvancing(minClustersExplored, topKWindow.size())) {
                 stopAdvancing = true;
-                System.err.println(String.format(
-                        "[LSMVCTreeBlockedCursorNaive] Early termination: clusters=%d, topK=%d", minClustersExplored,
-                        topKWindow.size()));
+                System.err
+                        .println(String.format("[LSMVCTreeBlockedCursorNaive] Early termination: clusters=%d, topK=%d",
+                                minClustersExplored, topKWindow.size()));
                 break;
             }
 
@@ -578,9 +578,8 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
         try {
             long pkValue =
                     LongPointable.getLong(tuple.getFieldData(pkStartField), tuple.getFieldStart(pkStartField) + 1);
-            System.err.println(String.format(
-                    "[LSMVCTreeBlockedCursorNaive] Tuple FILTERED OUT (total: %d) | pk=%d", tuplesFilteredOut,
-                    pkValue));
+            System.err.println(String.format("[LSMVCTreeBlockedCursorNaive] Tuple FILTERED OUT (total: %d) | pk=%d",
+                    tuplesFilteredOut, pkValue));
         } catch (Exception e) {
             // Ignore logging errors
         }

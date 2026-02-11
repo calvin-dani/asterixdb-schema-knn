@@ -127,7 +127,6 @@ public class LSMVCTreeUtils {
         interiorTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
         interiorTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
 
-
         // Create specific type traits using primitive type traits for better performance
         // Interior/Leaf frames need 3-field cluster tuples: <cid, centroid, pointer>
         ITypeTraits[] leafTypeTraits = new ITypeTraits[4];
@@ -185,11 +184,10 @@ public class LSMVCTreeUtils {
         //                + "] LSMVCTreeUtils.createLSMTree: Frame factories created");
         // VectorClusteringTreeFactory is used for disk components, which are immutable
         // Disk components always use insertDataFrameFactory (no in-place deletes)
-        VectorClusteringTreeFactory vctreeFactory =
-                new VectorClusteringTreeFactory(ioManager, diskBufferCache, metadataPageManagerFactory,
-                        interiorFrameFactory, leafFrameFactory, metadataFrameFactory, insertDataFrameFactory,
-                        cmpFactories, 4, vectorDimensions, vectorAccessorFactory, dataTupleCreatorFactory,
-                        quantizationParams);
+        VectorClusteringTreeFactory vctreeFactory = new VectorClusteringTreeFactory(ioManager, diskBufferCache,
+                metadataPageManagerFactory, interiorFrameFactory, leafFrameFactory, metadataFrameFactory,
+                insertDataFrameFactory, cmpFactories, 4, vectorDimensions, vectorAccessorFactory,
+                dataTupleCreatorFactory, quantizationParams);
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: VectorClusteringTreeFactory created");
         // Create file manager for LSM components
