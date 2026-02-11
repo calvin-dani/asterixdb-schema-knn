@@ -179,10 +179,10 @@ public class QuantizationConstantsAggregateDescriptor extends AbstractAggregateF
                 // This is local aggregate receiving tag|value from VectorComponentExtractorOperatorDescriptor
                 // Extract numeric value and store (will be serialized to binary in finishPartial)
                 // TEMPORARY: Limit collection to prevent "record too big" error
-                if (localValues.size() >= MAX_VALUES_TO_COLLECT) {
-                    // Skip additional values once we've collected enough
-                    return;
-                }
+                // if (localValues.size() >= MAX_VALUES_TO_COLLECT) {
+                // // Skip additional values once we've collected enough
+                // return;
+                // }
                 System.err.println(
                         "[QuantizationConstantsAgg] step() - LOCAL: extracting numeric value, typeTag=" + typeTag);
                 double value = extractNumericValue(data, offset, typeTag);

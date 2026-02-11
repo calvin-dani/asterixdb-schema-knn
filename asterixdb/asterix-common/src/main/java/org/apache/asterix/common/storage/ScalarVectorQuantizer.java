@@ -18,8 +18,6 @@
  */
 package org.apache.asterix.common.storage;
 
-import java.util.Arrays;
-
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 
