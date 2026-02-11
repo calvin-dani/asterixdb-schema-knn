@@ -845,7 +845,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         // Allocate a new metadata page
         int newMetadataPageId = freePageManager.takePage(ctx.getMetaFrame());
-        ICachedPage newMetadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), newMetadataPageId));
+        ICachedPage newMetadataPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), newMetadataPageId), NEW);
 
         try {
             newMetadataPage.acquireWriteLatch();
@@ -1031,7 +1032,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         initialized = true;
     }
 
-    public void setStaticStructure(VectorClusteringTreeAccessor staticAccessor) throws HyracksDataException {
+    public synchronized void setStaticStructure(VectorClusteringTreeAccessor staticAccessor)
+            throws HyracksDataException {
+        if (initialized) {
+            return; // Already initialized, skip
+        }
         VectorClusteringTree staticStructure = staticAccessor.getIndex();
         ITreeIndexMetadataFrame metaFrame = staticAccessor.getOpContext().getMetaFrame();
         int maxPageId = staticStructure.getPageManager().getMaxPageId(metaFrame);

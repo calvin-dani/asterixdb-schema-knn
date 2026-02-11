@@ -50,6 +50,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexFileManager;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicy;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTracker;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
@@ -165,13 +166,38 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         }
     }
 
-    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
+    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) throws HyracksDataException {
         this.staticStructure = staticStructure;
         staticStructure.setInitialized();
+        if (memoryComponentsAllocated) {
+            initializeMemoryComponentsStaticStructure();
+        }
     }
 
     public void setInitialized(LSMVCTreeDiskComponent diskComponent) {
         diskComponent.setInitialized();
+    }
+
+    @Override
+    public synchronized void allocateMemoryComponents() throws HyracksDataException {
+        super.allocateMemoryComponents();
+        initializeMemoryComponentsStaticStructure();
+    }
+
+    private void initializeMemoryComponentsStaticStructure() throws HyracksDataException {
+        if (staticStructure == null) {
+            return; // Not yet loaded (during initial index creation)
+        }
+        for (ILSMMemoryComponent memComponent : memoryComponents) {
+            LSMVCTreeMemoryComponent vcMemComponent = (LSMVCTreeMemoryComponent) memComponent;
+            VectorClusteringTree vcTree = vcMemComponent.getIndex();
+            if (!vcTree.isInitialized()) {
+                VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
+                        (VectorClusteringTree.VectorClusteringTreeAccessor) staticStructure.getIndex()
+                                .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+                vcTree.setStaticStructure(staticAccessor);
+            }
+        }
     }
 
     protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory,
@@ -309,55 +335,12 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     }
 
     private boolean insert(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
-        // TODO: Implement vector-specific duplicate checking logic
-        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) (ctx.getCurrentMutableVCTreeAccessor());
-        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
-                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-
-        if (!memoryComponentAccessor.getIndex().isInitialized()) {
-            memoryComponentAccessor.getIndex().setStaticStructure(staticAccessor);
-        }
-
-        memoryComponentAccessor.insert(tuple);
-
+        ctx.getCurrentMutableVCTreeAccessor().insert(tuple);
         return true;
     }
 
-    /**
-     * Handles delete operation for vector index.
-     * <p>
-     * Delete flow:
-     * 1. Call delete() on VectorClusteringTreeAccessor with the original input tuple
-     * 2. VectorClusteringTreeAccessor.delete() sets operation to DELETE and calls insertVector()
-     * 3. insertVector() navigates, calculates distance, and constructs data tuple
-     * 4. Based on operation type (DELETE), creates antimatter tuple with bit 7 set
-     * 5. Antimatter tuple is inserted into data pages
-     *
-     * This approach reuses all existing insertVector() logic and only differs in
-     * the antimatter bit being set when the operation type is DELETE.
-     */
     private void delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
-        // Get the current mutable VectorClusteringTree accessor
-        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
-                (ctx.getCurrentMutableVCTreeAccessor());
-        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
-                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-
-        // Ensure static structure is initialized (same pattern as insert)
-        if (!memoryComponentAccessor.getIndex().isInitialized()) {
-            memoryComponentAccessor.getIndex().setStaticStructure(staticAccessor);
-        }
-
-        System.err.println("[LSMVCTree.delete] Calling VectorClusteringTreeAccessor.delete(), Thread="
-                + Thread.currentThread().getId());
-
-        // Call delete() which will set operation to DELETE and delegate to insertVector()
-        // insertVector() will create an antimatter tuple based on the DELETE operation
-        memoryComponentAccessor.delete(tuple);
-
+        ctx.getCurrentMutableVCTreeAccessor().delete(tuple);
     }
 
     @Override
