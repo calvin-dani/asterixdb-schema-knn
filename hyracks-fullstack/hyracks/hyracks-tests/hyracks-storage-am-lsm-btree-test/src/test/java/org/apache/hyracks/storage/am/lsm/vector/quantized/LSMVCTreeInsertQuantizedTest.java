@@ -29,6 +29,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestContext;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestHarness;
 import org.apache.hyracks.storage.am.lsm.vector.util.OptimizedSearchTestDriver;
+import org.apache.hyracks.storage.am.lsm.vector.util.VectorTestStructure;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
 import org.apache.logging.log4j.LogManager;
@@ -114,8 +115,8 @@ public class LSMVCTreeInsertQuantizedTest extends OptimizedSearchTestDriver {
             LOGGER.info("Bulk loaded {} records across {} clusters", bulkLoadedCount, leafRecords.size());
 
             // 4. Generate and insert additional records into memory component
-            List<List<ITupleReference>> insertRecords =
-                    generateInsertRecords(centroids, centroidSerdes, centroidsPerCluster, vectorDimension);
+            VectorTestStructure struct = vectorDimension == 2 ? STRUCT_2D : STRUCT_3D;
+            List<List<ITupleReference>> insertRecords = struct.generateInsertRecords(INSERT_RECORDS_PER_CLUSTER);
             int insertedCount = testUtils.insertRecordsIntoMemoryComponent(ctx, insertRecords);
             LOGGER.info("Inserted {} records into memory component", insertedCount);
 
