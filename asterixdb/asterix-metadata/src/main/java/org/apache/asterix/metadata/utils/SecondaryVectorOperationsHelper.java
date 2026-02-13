@@ -30,18 +30,16 @@ import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.OptimizationConfUtil;
 import org.apache.asterix.common.context.ITransactionSubsystemProvider;
 import org.apache.asterix.common.context.TransactionSubsystemProvider;
-import org.apache.asterix.common.transactions.IRecoveryManager;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
+import org.apache.asterix.common.transactions.IRecoveryManager;
 import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
-import org.apache.asterix.transaction.management.opcallbacks.PrimaryIndexInstantSearchOperationCallbackFactory;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
-import org.apache.asterix.metadata.utils.DatasetUtil;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
@@ -57,6 +55,7 @@ import org.apache.asterix.runtime.operators.VCTreeBulkLoaderAndGroupingOperatorD
 import org.apache.asterix.runtime.operators.VCTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VectorComponentExtractorOperatorDescriptor;
 import org.apache.asterix.runtime.utils.RuntimeUtils;
+import org.apache.asterix.transaction.management.opcallbacks.PrimaryIndexInstantSearchOperationCallbackFactory;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraint;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksPartitionConstraintHelper;
@@ -102,7 +101,6 @@ import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
 import org.apache.hyracks.storage.am.common.build.IndexBuilderFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.common.impls.DefaultTupleProjectorFactory;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.QuantizedIndexCreateOperatorDescriptor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
@@ -175,7 +173,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Extract sampling parameters from WITH clause
         AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
         int sampleSize = (withObjectNodeForSampling != null)
-                ? withObjectNodeForSampling.getOptionalInt("sample_size", 10000) : 10000;
+                ? withObjectNodeForSampling.getOptionalInt("train_list_number", 10000) : 10000;
         long sampleSeed = (withObjectNodeForSampling != null)
                 ? (long) withObjectNodeForSampling.getOptionalDouble("sample_seed", System.currentTimeMillis())
                 : System.currentTimeMillis();
@@ -436,8 +434,21 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         String distanceMetric =
                 (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
-        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
-        boolean isQuantized = (description != null);
+        String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
+        boolean isQuantized = (quantization != null);
+        if (isQuantized) {
+            String qUpperCase = quantization.toUpperCase();
+            if (!qUpperCase.startsWith("SQ")) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Quantization property must start with 'SQ' (e.g., 'SQ8')");
+            }
+            try {
+                Integer.parseInt(qUpperCase.substring(2));
+            } catch (NumberFormatException e) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Invalid format for quantization property. Expected 'SQ' followed by a number (e.g., 'SQ8').");
+            }
+        }
 
         // Create output record descriptor for VCTreeBulkLoaderAndGroupingOperatorDescriptor
         // secondaryRecDesc format: [embedding, include_fields..., pk...]
@@ -658,7 +669,23 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Extract quantization parameters from WITH clause
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
-        int bits = (withObjectNode != null) ? withObjectNode.getOptionalInt("bits", DEFAULT_BITS) : DEFAULT_BITS;
+        int bits = DEFAULT_BITS;
+        String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
+        if (quantization != null) {
+            String qUpperCase = quantization.toUpperCase();
+             if (!qUpperCase.startsWith("SQ")) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Quantization property must start with 'SQ' (e.g., 'SQ8')");
+            }
+            try {
+                bits = Integer.parseInt(qUpperCase.substring(2));
+            } catch (NumberFormatException e) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Invalid format for quantization property. Expected 'SQ' followed by a number (e.g., 'SQ8').");
+            }
+        } else {
+             bits = (withObjectNode != null) ? withObjectNode.getOptionalInt("bits", DEFAULT_BITS) : DEFAULT_BITS;
+        }
         float confidenceInterval = (withObjectNode != null)
                 ? (float) withObjectNode.getOptionalDouble("confidence_interval", DEFAULT_CONFIDENCE_INTERVAL)
                 : DEFAULT_CONFIDENCE_INTERVAL;
@@ -739,18 +766,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Refactored: Use BTreeSearchOperatorDescriptor on the persistent sample index
         ITransactionSubsystemProvider txnSubsystemProvider = TransactionSubsystemProvider.INSTANCE;
         ISearchOperationCallbackFactory searchCallbackFactory = new PrimaryIndexInstantSearchOperationCallbackFactory(
-                        dataset.getDatasetId(), dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
-                        IRecoveryManager.ResourceType.LSM_BTREE);
+                dataset.getDatasetId(), dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
+                IRecoveryManager.ResourceType.LSM_BTREE);
 
         IOperatorDescriptor targetOp = new BTreeSearchOperatorDescriptor(spec,
-                        dataset.getPrimaryRecordDescriptor(metadataProvider), null, null, true, true,
-                        sampleIndexHelperFactory, false, false, null, searchCallbackFactory, null, null, false, null,
-                        null,
-                        -1, false, null, null, projectorFactory, null,
-                        samplePartitioningProperties.getComputeStorageMap());
+                dataset.getPrimaryRecordDescriptor(metadataProvider), null, null, true, true, sampleIndexHelperFactory,
+                false, false, null, searchCallbackFactory, null, null, false, null, null, -1, false, null, null,
+                projectorFactory, null, samplePartitioningProperties.getComputeStorageMap());
 
-        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
-                        samplePartitionConstraint);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp, samplePartitionConstraint);
 
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
         sourceOp = targetOp;
@@ -910,23 +934,22 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
             // Refactored: Use BTreeSearchOperatorDescriptor on the persistent sample index
             IStorageManager storageMgr = metadataProvider.getStorageComponentProvider().getStorageManager();
-            IIndexDataflowHelperFactory sampleIndexHelperFactory = new IndexDataflowHelperFactory(storageMgr,
-                            sampleFileSplitProvider);
+            IIndexDataflowHelperFactory sampleIndexHelperFactory =
+                    new IndexDataflowHelperFactory(storageMgr, sampleFileSplitProvider);
 
             ITransactionSubsystemProvider txnSubsystemProvider = TransactionSubsystemProvider.INSTANCE;
-            ISearchOperationCallbackFactory searchCallbackFactory = new PrimaryIndexInstantSearchOperationCallbackFactory(
-                            dataset.getDatasetId(), dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
+            ISearchOperationCallbackFactory searchCallbackFactory =
+                    new PrimaryIndexInstantSearchOperationCallbackFactory(dataset.getDatasetId(),
+                            dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
                             IRecoveryManager.ResourceType.LSM_BTREE);
 
             IOperatorDescriptor targetOp = new BTreeSearchOperatorDescriptor(spec,
-                            dataset.getPrimaryRecordDescriptor(metadataProvider), null, null, true, true,
-                            sampleIndexHelperFactory, false, false, null, searchCallbackFactory, null, null, false,
-                            null, null,
-                            -1, false, null, null, projectorFactory, null,
-                            samplePartitioningProperties.getComputeStorageMap());
+                    dataset.getPrimaryRecordDescriptor(metadataProvider), null, null, true, true,
+                    sampleIndexHelperFactory, false, false, null, searchCallbackFactory, null, null, false, null, null,
+                    -1, false, null, null, projectorFactory, null, samplePartitioningProperties.getComputeStorageMap());
 
             AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
-                            samplePartitionConstraint);
+                    samplePartitionConstraint);
 
             spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
             sourceOp = targetOp;

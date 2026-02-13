@@ -844,16 +844,26 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Handle case where WITH properties are null (no WITH clause was specified)
         int dimension = -1;
         int train_list = -1;
-        String description = "default";
-        String similarity = "euclidean";
+        String quantization = "INVALID";
+        String similarity  = "INVALID";
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
-            train_list = properties.getOptionalInt("train_list", -1);
-            description = properties.getOptionalString("description", "default");
-            similarity = properties.getOptionalString("similarity", "euclidean");
+            train_list = properties.getOptionalInt("train_list_number", -1);
+            quantization = properties.getOptionalString("quantization", "INVALID");
+            similarity = properties.getOptionalString("similarity", "INVALID");
         }
 
+        if(dimension < 0){
+            throw new HyracksDataException("No dimensions defined");
+        }
+        if(train_list < 0){
+            throw new HyracksDataException("No train_list_number or percentage defined");
+        }
+
+        if(similarity == "INVALID"){
+            throw new HyracksDataException("No similarity metric defined");
+        }
         nameValue.reset();
         aString.setValue("dimension");
         stringSerde.serialize(aString, nameValue.getDataOutput());
@@ -869,10 +879,10 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         recordBuilder.addField(nameValue, fieldValue);
 
         nameValue.reset();
-        aString.setValue("description");
+        aString.setValue("quantization");
         stringSerde.serialize(aString, nameValue.getDataOutput());
         fieldValue.reset();
-        aString.setValue(description);
+        aString.setValue(quantization);
         stringSerde.serialize(aString, fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
 
@@ -889,7 +899,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Default values (matching writeWithProperties defaults)
         int dimension = -1;
         int train_list = -1;
-        String description = "default";
+        String quantization = "default";
         String similarity = "euclidean";
 
         // Read dimension field
@@ -910,12 +920,12 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             }
         }
 
-        // Read description field
-        int descriptionPos = indexRecord.getType().getFieldIndex("description");
-        if (descriptionPos >= 0) {
-            IAObject descriptionObj = indexRecord.getValueByPos(descriptionPos);
-            if (descriptionObj != null && descriptionObj.getType().getTypeTag() == ATypeTag.STRING) {
-                description = ((AString) descriptionObj).getStringValue();
+        // Read quantization field
+        int quantizationPos = indexRecord.getType().getFieldIndex("quantization");
+        if (quantizationPos >= 0) {
+            IAObject quantizationObj = indexRecord.getValueByPos(quantizationPos);
+            if (quantizationObj != null && quantizationObj.getType().getTypeTag() == ATypeTag.STRING) {
+                quantization = ((AString) quantizationObj).getStringValue();
             }
         }
 
@@ -929,7 +939,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
 
         // Reconstruct AdmObjectNode only if at least one field differs from default
-        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || !"default".equals(description)
+        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || !"default".equals(quantization)
                 || !"euclidean".equals(similarity);
 
         if (!hasNonDefaultValues) {
@@ -946,8 +956,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             withObjectNode.set("train_list", new AdmBigIntNode(train_list));
         }
 
-        if (!"default".equals(description)) {
-            withObjectNode.set("description", new AdmStringNode(description));
+        if (!"default".equals(quantization)) {
+            withObjectNode.set("quantization", new AdmStringNode(quantization));
         }
 
         if (!"euclidean".equals(similarity)) {
