@@ -67,9 +67,9 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
+import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
@@ -174,7 +174,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         }
     }
 
-    public void setInitialized(LSMVCTreeDiskComponent diskComponent) throws HyracksDataException {
+    public void setInitialized(LSMVCTreeDiskComponent diskComponent) {
         diskComponent.setInitialized();
     }
 
@@ -301,6 +301,10 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public void modify(IIndexOperationContext ictx, ITupleReference tuple) throws HyracksDataException {
         LSMVCTreeOpContext ctx = (LSMVCTreeOpContext) ictx;
 
+        // Debug logging
+        System.err.println(
+                "[LSMVCTree.modify] Operation: " + ctx.getOperation() + ", Thread: " + Thread.currentThread().getId());
+
         ITupleReference indexTuple;
         if (ctx.getIndexTuple() != null) {
             ctx.getIndexTuple().reset(tuple);
@@ -311,15 +315,19 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
         switch (ctx.getOperation()) {
             case PHYSICALDELETE:
+                System.err.println("[LSMVCTree.modify] Executing PHYSICALDELETE");
                 ctx.getCurrentMutableVCTreeAccessor().delete(indexTuple);
                 break;
             case INSERT:
+                System.err.println("[LSMVCTree.modify] Executing INSERT");
                 insert(indexTuple, ctx);
                 break;
             case DELETE:
+                System.err.println("[LSMVCTree.modify] Executing DELETE");
                 delete(indexTuple, ctx);
                 break;
             default:
+                System.err.println("[LSMVCTree.modify] Executing default (UPSERT)");
                 ctx.getCurrentMutableVCTreeAccessor().upsert(indexTuple);
                 break;
         }
@@ -354,46 +362,35 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public ILSMDiskComponent doFlush(ILSMIOOperation operation) throws HyracksDataException {
         LSMVCTreeFlushOperation flushOp = (LSMVCTreeFlushOperation) operation;
         LSMVCTreeMemoryComponent flushingComponent = (LSMVCTreeMemoryComponent) flushOp.getFlushingComponent();
-        VectorClusteringTree memTree = flushingComponent.getIndex();
+        IIndexAccessor accessor = flushingComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
 
         ILSMDiskComponent component = null;
-        VectorClusteringTreeFlushLoader flushLoader = null;
-
+        LSMVCTreeDiskComponentLoader componentFlushLoader = null;
         try {
             component = createDiskComponent(componentFactory, flushOp.getTarget(), null, null, true);
-            VectorClusteringTree diskTree = ((LSMVCTreeDiskComponent) component).getIndex();
 
-            // Create flush loader (new signature: callback, diskTree, sourceMemoryTree)
-            IPageWriteCallback callback = pageWriteCallbackFactory.createPageWriteCallback();
-            flushLoader = new VectorClusteringTreeFlushLoader(callback, diskTree, memTree);
-            callback.initialize(flushLoader);
+            componentFlushLoader =
+                    (LSMVCTreeDiskComponentLoader) ((LSMVCTreeDiskComponent) component).createFlushLoader(storageConfig,
+                            operation, false, pageWriteCallbackFactory.createPageWriteCallback());
 
-            // Copy ALL VBC pages (identity mapping: VBC page N -> disk page N)
             VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
-                    (VectorClusteringTree.VectorClusteringTreeAccessor) memTree
-                            .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-            ITreeIndexMetadataFrame componentMetaFrame = vcTreeAccessor.getOpContext().getMetaFrame();
-            int maxPageId = memTree.getPageManager().getMaxPageId(componentMetaFrame);
-
+                    (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
+            ITreeIndexMetadataFrame componentMetaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
+            // Simple bulk load - just copy all pages
+            int maxPageId = flushingComponent.getIndex().getPageManager().getMaxPageId(componentMetaFrame);
+            System.err.println();
             for (int pageId = 0; pageId <= maxPageId; pageId++) {
                 ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
-                flushLoader.copyPage(sourcePage);
+                componentFlushLoader.copyPage(sourcePage);
                 vcTreeAccessor.releasePage(sourcePage);
             }
 
-            // Append static structure pages at end of file
-            VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                    (VectorClusteringTree.VectorClusteringTreeAccessor) staticStructure.getIndex()
-                            .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-            int rootPageId = flushLoader.copyStaticStructure(staticAccessor);
-
-            // Finalize with correct metadata
-            flushLoader.end(memTree.getNumLeafCentroidMem(), memTree.getFirstLeafCentroidIdMem(), rootPageId);
+            componentFlushLoader.end();
 
         } catch (Throwable e) {
             try {
-                if (flushLoader != null) {
-                    flushLoader.abort();
+                if (componentFlushLoader != null) {
+                    componentFlushLoader.abort();
                 }
             } catch (Throwable th) {
                 e.addSuppressed(th);

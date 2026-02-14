@@ -24,7 +24,6 @@ import java.util.List;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.ITypeTraits;
-import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IIOManager;
@@ -36,15 +35,12 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeser
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.SerdeUtils;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManagerFactory;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentFilterHelper;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilterFrameFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicy;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTracker;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
-import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
@@ -107,43 +103,6 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
             IMetadataPageManagerFactory metadataPageManagerFactory,
             IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws Exception {
 
-        return create(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, fieldSerdes,
-                numVectorFields, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory,
-                metadataPageManagerFactory, dataTupleCreatorFactory, 0);
-    }
-
-    /**
-     * Create a new LSMVCTreeTestContext with include fields support.
-     *
-     * @param numIncludeFields number of include fields in the data record (0 = none)
-     */
-    public static LSMVCTreeTestContext create(NCConfig storageConfig, IIOManager ioManager,
-            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
-            ISerializerDeserializer[] fieldSerdes, int numVectorFields, ILSMMergePolicy mergePolicy,
-            ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
-            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-            IMetadataPageManagerFactory metadataPageManagerFactory, int numIncludeFields) throws Exception {
-
-        return create(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, fieldSerdes,
-                numVectorFields, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory,
-                metadataPageManagerFactory, null, numIncludeFields);
-    }
-
-    /**
-     * Create a new LSMVCTreeTestContext with a custom data tuple creator factory and include fields.
-     *
-     * @param dataTupleCreatorFactory the factory to use for creating data tuples,
-     *                                or null to use the default (standard) factory
-     * @param numIncludeFields number of include fields in the data record (0 = none)
-     */
-    public static LSMVCTreeTestContext create(NCConfig storageConfig, IIOManager ioManager,
-            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
-            ISerializerDeserializer[] fieldSerdes, int numVectorFields, ILSMMergePolicy mergePolicy,
-            ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
-            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-            IMetadataPageManagerFactory metadataPageManagerFactory,
-            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, int numIncludeFields) throws Exception {
-
         ITypeTraits[] typeTraits = SerdeUtils.serdesToTypeTraits(fieldSerdes);
 
         IBinaryComparatorFactory[] cmpFactories = new IBinaryComparatorFactory[fieldSerdes.length];
@@ -158,26 +117,20 @@ public final class LSMVCTreeTestContext extends AbstractVectorTreeTestContext {
         }
 
         LSMVCTree lsmVCTree;
-        if (dataTupleCreatorFactory != null || numIncludeFields > 0) {
-            // When dataTupleCreatorFactory is null but numIncludeFields > 0,
-            // create a default factory with the correct include field count
-            IVCTreeDataTupleCreatorFactory effectiveFactory = dataTupleCreatorFactory != null ? dataTupleCreatorFactory
-                    : new org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory(numIncludeFields);
-            // Use full overload with custom factory and/or include fields
+        if (dataTupleCreatorFactory != null) {
+            // Use full overload with custom factory
             lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,
                     diskBufferCache, typeTraits, cmpFactories, 0.0, // bloomFilterFalsePositiveRate
                     mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, false, // needKeyDupCheck
                     numVectorFields, // vectorDimensions
                     new int[] { 0 }, // vectorFields
-                    (int[]) null, // filterFields
-                    (ILSMComponentFilterFrameFactory) null, // filterFrameFactory
-                    (LSMComponentFilterManager) null, // filterManager
-                    (IComponentFilterHelper) null, // filterHelper
+                    null, // filterFields
+                    null, null, null, // filterFrameFactory, filterManager, filterHelper
                     true, // durable
                     metadataPageManagerFactory, false, // atomic
-                    (RecordDescriptor) null, TestDoubleArrayVectorAccessor.Factory.INSTANCE, // inputRecDesc, vectorAccessorFactory
-                    1, numIncludeFields, // numPrimaryKeyFields, numIncludeFields
-                    effectiveFactory, (float[]) null); // dataTupleCreatorFactory, quantizer
+                    null, TestDoubleArrayVectorAccessor.Factory.INSTANCE, // inputRecDesc, vectorAccessorFactory
+                    1, 0, // numPrimaryKeyFields, numIncludeFields
+                    dataTupleCreatorFactory, null); // quantizer
         } else {
             // Use simplified overload with default factory
             lsmVCTree = LSMVCTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,

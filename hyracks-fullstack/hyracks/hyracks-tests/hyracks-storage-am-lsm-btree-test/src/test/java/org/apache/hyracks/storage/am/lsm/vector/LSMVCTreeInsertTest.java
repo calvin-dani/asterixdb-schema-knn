@@ -236,13 +236,7 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
         int insertedCount = 0;
         for (List<ITupleReference> clusterRecords : insertRecords) {
             for (ITupleReference tuple : clusterRecords) {
-                try {
-                    accessor.insert(tuple);
-                } catch (Throwable e) {
-                    System.err.println("Insert failed at record #" + insertedCount);
-                    e.printStackTrace(System.err);
-                    throw e;
-                }
+                accessor.insert(tuple);
                 insertedCount++;
             }
         }
@@ -286,23 +280,17 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
             int bulkLoadCount = 0;
             int insertCount = 0;
 
-            try {
-                while (cursor.hasNext()) {
-                    cursor.next();
-                    ITupleReference tuple = cursor.getTuple();
-                    String pk = extractPrimaryKeyFromTuple(tuple);
-                    foundPKs.add(pk);
+            while (cursor.hasNext()) {
+                cursor.next();
+                ITupleReference tuple = cursor.getTuple();
+                String pk = extractPrimaryKeyFromTuple(tuple);
+                foundPKs.add(pk);
 
-                    if (pk.startsWith("pk_ins_")) {
-                        insertCount++;
-                    } else {
-                        bulkLoadCount++;
-                    }
+                if (pk.startsWith("pk_ins_")) {
+                    insertCount++;
+                } else {
+                    bulkLoadCount++;
                 }
-            } catch (Throwable e) {
-                System.err.println("Search iteration failed at record #" + foundPKs.size());
-                e.printStackTrace(System.err);
-                throw e;
             }
 
             LOGGER.info("Search returned {} total records: {} bulk-loaded, {} inserted", foundPKs.size(), bulkLoadCount,
