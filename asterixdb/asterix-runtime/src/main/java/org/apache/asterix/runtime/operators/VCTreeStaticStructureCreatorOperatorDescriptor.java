@@ -112,11 +112,12 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     // private final UUID materializedDataUUID;
     private final UUID scalarValuesUUID;
     private final RecordDescriptor inputRecordDescriptor; // Store for CreateStructureActivity
+    private final int[][] partitionsMap; // Maps task partition to storage partition(s)
 
     public VCTreeStaticStructureCreatorOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID, UUID scalarValuesUUID,
-            RecordDescriptor scalarRecDesc) {
+            RecordDescriptor scalarRecDesc, int[][] partitionsMap) {
         super(spec, 1, 1);
         this.indexHelperFactory = indexHelperFactory;
         this.maxEntriesPerPage = maxEntriesPerPage;
@@ -125,6 +126,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         // this.materializedDataUUID = materializedDataUUID;
         this.scalarValuesUUID = scalarValuesUUID;
         this.inputRecordDescriptor = inputRecordDescriptor; // Store for CreateStructureActivity
+        this.partitionsMap = partitionsMap; // Store partition mapping
         // PassThroughActivity outputs scalar values, so use scalarRecDesc
         // CreateStructureActivity uses inputRecordDescriptor (stored separately)
         this.outRecDescs[0] = scalarRecDesc != null ? scalarRecDesc : inputRecordDescriptor;
@@ -772,9 +774,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private int sampleCount = 0;
                 private boolean quantizationParamsLoaded = false;
 
+                // Get actual storage partition from partitionsMap
+                private final int storagePartition = partitionsMap[partition][0];
+
                 @Override
                 public void open() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity OPENING ===");
+                    System.err.println("Task partition: " + partition + ", Storage partition: " + storagePartition);
                     try {
                         EvaluatorContext evalCtx = new EvaluatorContext(ctx);
                         levelEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx); // treeLevel
@@ -806,9 +812,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private void readQuantizationParamsFromMetadata(IHyracksTaskContext taskCtx)
                         throws HyracksDataException {
                     try {
-                        // Create index helper to access the resource (use partition from outer scope)
-                        IIndexDataflowHelper tempHelper =
-                                indexHelperFactory.create(taskCtx.getJobletContext().getServiceContext(), partition);
+                        // Create index helper to access the resource (use storagePartition instead of
+                        // task partition)
+                        IIndexDataflowHelper tempHelper = indexHelperFactory
+                                .create(taskCtx.getJobletContext().getServiceContext(), storagePartition);
 
                         // Get the local resource from the helper
                         LocalResource localResource = tempHelper.getResource();
@@ -927,6 +934,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         tupleCount++;
 
                         // Log progress every 5000 tuples to reduce noise
+                        if (tupleCount % 5000 == 0) {
+                            System.err.println("Partition " + partition + " processed " + tupleCount + " tuples");
+                        }
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to process tuple: " + e.getMessage());
@@ -1086,6 +1096,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void close() throws HyracksDataException {
+                    System.err.println("Partition " + partition + " finished processing. Total tuples: " + tupleCount);
                     //                    System.err.println("=== CreateStructureActivity CLOSING ===");
                     //                    System.err.println("Total tuples collected: " + tupleCount);
                     //                    System.err.println("Frames accumulated: " + frameAccumulator.size());
@@ -1212,7 +1223,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                         // Open index via IndexDataflowHelper to get LSMVCTree instance
                         System.err.println("Opening index via IndexDataflowHelper...");
-                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                        indexHelper =
+                                indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
 
                         // Check LocalResource type before opening
                         LocalResource resource = indexHelper.getResource();

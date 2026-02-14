@@ -54,7 +54,7 @@ public class VectorIndexDeclUtil {
 
     private static ARecordType getWithObjectType() {
         final String[] withNames = { VECTOR_INDEX_PARAMETER_DIMENSION, VECTOR_INDEX_PARAMETER_QUANTIZATION,
-                        VECTOR_INDEX_PARAMETER_TRAIN_LIST, VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_NUM_K };
+                VECTOR_INDEX_PARAMETER_TRAIN_LIST, VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_NUM_K };
         final IAType[] withTypes = { BuiltinType.AINT64, AUnionType.createUnknownableType(BuiltinType.ASTRING),
                 AUnionType.createUnknownableType(BuiltinType.AINT64),
                 AUnionType.createUnknownableType(BuiltinType.ASTRING),

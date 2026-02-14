@@ -831,7 +831,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
 
         // Get secondary key count for vector index (conditional on quantization)
         // Non-quantized: [distance, centroidId, PK..., includes...] → numSecondaryKeys = 2
-        // Quantized:     [distance, quantized_dist, quantized_embed, centroidId, PK..., includes...] → numSecondaryKeys = 4
+        // Quantized:     [distance, centroidId, quantized_distance, quantized_embedding, PK..., includes...] → numSecondaryKeys = 4
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) vectorIndex.getIndexDetails();
         AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
         String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;

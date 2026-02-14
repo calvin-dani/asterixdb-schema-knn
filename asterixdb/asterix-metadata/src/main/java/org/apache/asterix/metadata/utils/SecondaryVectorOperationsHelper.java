@@ -173,15 +173,36 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Extract sampling parameters from WITH clause
         AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
         int sampleSize = (withObjectNodeForSampling != null)
-                ? withObjectNodeForSampling.getOptionalInt("train_list_number", 10000) : 10000;
+                ? withObjectNodeForSampling.getOptionalInt("train_list_number", -1) : -1;
         long sampleSeed = (withObjectNodeForSampling != null)
                 ? (long) withObjectNodeForSampling.getOptionalDouble("sample_seed", System.currentTimeMillis())
                 : System.currentTimeMillis();
+
+        if (sampleSize <= 0) {
+            // No sampling parameters provided - default to full scan
+            throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                    "Invalid or missing sampling parameters in WITH clause. 'train_list_number' must be a positive integer.");
+        }
 
         // Calculate per-partition sample size
         PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
         int numPartitions = partitioningProperties.getNumberOfPartitions();
         int sampleCardinalityPerPartition = Math.max(1, sampleSize / numPartitions);
+
+        // Retrieve cardinality from sample index metadata (if available)
+        long datasetCardinality = 0;
+        try {
+            Index sampleIndex = metadataProvider.findSampleIndex(dataset.getDatabaseName(), dataset.getDataverseName(),
+                    dataset.getDatasetName());
+            if (sampleIndex != null && sampleIndex.getIndexDetails() instanceof Index.SampleIndexDetails) {
+                Index.SampleIndexDetails sampleDetails = (Index.SampleIndexDetails) sampleIndex.getIndexDetails();
+                datasetCardinality = sampleDetails.getSourceCardinality();
+                //            System.err.println("Retrieved sourceCardinality from sample index: " + datasetCardinality);
+            }
+        } catch (Exception e) {
+            // Sample index not found or error retrieving it - continue with datasetCardinality = 0
+            //            System.err.println("Could not retrieve sample index cardinality: " + e.getMessage());
+        }
 
         // dummy key provider -> sample scan (replacing full primary index scan)
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
@@ -189,22 +210,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 sampleCardinalityPerPartition, sampleSeed, projectorFactory);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
-        // ============ ORIGINAL FULL TABLE SCAN (COMMENTED OUT) ============
-        // // dummy key provider -> primary index scan
-        // IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
-        // IOperatorDescriptor targetOp =
-        //         DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
-        // spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-
-        //        System.err.println("Connected: DummyKeyProvider → PrimaryIndexScan");
-
         sourceOp = targetOp;
         // primary index -> cast assign op (produces the secondary index entry)
         targetOp = createAssignOp(spec, numSecondaryKeys, recordDesc);
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
-
-        //        System.err.println("Connected: PrimaryIndexScan → CastAssign");
-        //        System.err.println("CastAssign operator: " + targetOp);
 
         // Update sourceOp to continue the chain
         sourceOp = targetOp;
@@ -214,23 +223,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID permitUUID = UUID.randomUUID();
         UUID scalarValuesUUID = UUID.randomUUID();
 
-        // Register permit state for structure creation coordination
-        //        System.err.println("=== REGISTERING PERMIT STATE ===");
-        //        System.err.println("Permit UUID: " + permitUUID);
-        //        System.err.println("Permit state will be used by StaticStructureCreator operator");
-
         // Extract K value from WITH clause
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
         int K = 20; // default value
         if (withObjectNode != null) {
             K = withObjectNode.getOptionalInt("num_clusters", 20);
         }
-        // Validate K value
-        if (K <= 0) {
-            //            System.err.println("WARNING: Invalid num_k value: " + K + ", using default: 20");
-            K = 20;
-        }
-        //        System.err.println("Using K value: " + K + " for K-means clustering");
 
         int maxScalableKmeansIter = 2;
 
@@ -288,9 +286,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // 2. VCTree static structure creator
         //        System.err.println("🔧 CREATING VCTreeStaticStructureCreator");
+        // Get partitioning properties to obtain the compute-to-storage partition map
+        //        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
         VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
                 new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
-                        hierarchicalRecDesc, permitUUID, materializedDataUUID, scalarValuesUUID, scalarRecDesc);
+                        hierarchicalRecDesc, permitUUID, materializedDataUUID, scalarValuesUUID, scalarRecDesc,
+                        partitioningProperties.getComputeStorageMap());
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeCreator,
                 primaryPartitionConstraint);
         targetOp = vcTreeCreator;
@@ -509,6 +510,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         RecordDescriptor outputRecDesc = new RecordDescriptor(outputRecFields, outputTypeTraits);
 
+        // Partitioning properties for compute-storage map (used by bulk loader and later by LSMIndexBulkLoad)
+        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
+
         // Create VCTreeBulkLoaderAndGroupingOperatorDescriptor
         IScalarEvaluatorFactory vectorFieldAccessor = new ColumnAccessEvalFactory(0);
 
@@ -519,7 +523,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         VCTreeBulkLoaderAndGroupingOperatorDescriptor bulkLoaderAndGroupingOp =
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
-                        distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader, isQuantized);
+                        distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader, isQuantized,
+                        partitioningProperties.getComputeStorageMap());
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);
@@ -533,6 +538,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         sourceOp = bulkLoaderAndGroupingOp;
 
         // 4. ExternalSortOperatorDescriptor - Sort by [centroidId, distance]
+        // Record descriptor for the sort is the same outputRecDesc built above; it already depends on quantization:
+        // - Non-quantized: outputRecDesc has 2 secondary fields (distance, centroidId) then PKs, includes.
+        // - Quantized:    outputRecDesc has 4 secondary fields (distance, centroidId, quantized_distance,
+        //                 quantized_embedding) then PKs, includes.
+        // Sort keys are always field 1 (centroidId) and field 0 (distance), so no branch on isQuantized is needed.
         //        System.err.println("🔧 CREATING ExternalSortOperatorDescriptor");
         //        System.err.println("SortNumFrames from config: " + sortNumFrames);
         // Sort by centroidId (field 1) first, then distance (field 0)
@@ -567,9 +577,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Use numOutputSecondaryFields (2 or 4) not numSecondaryKeys (input secondary key count)
         // because the output record has distance+centroidId (and optionally qDist+qEmbed) before PKs
         int[] pkFields = createPkFieldsForBulkLoadOp(fieldPermutation, numOutputSecondaryFields);
-
-        // Get partitioning properties
-        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
 
         // Create primary index helper factory (for secondary indexes, this may not be needed but required by interface)
         IndexDataflowHelperFactory primaryIndexHelperFactory = new IndexDataflowHelperFactory(
@@ -673,7 +680,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
         if (quantization != null) {
             String qUpperCase = quantization.toUpperCase();
-             if (!qUpperCase.startsWith("SQ")) {
+            if (!qUpperCase.startsWith("SQ")) {
                 throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
                         "Quantization property must start with 'SQ' (e.g., 'SQ8')");
             }
@@ -684,7 +691,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                         "Invalid format for quantization property. Expected 'SQ' followed by a number (e.g., 'SQ8').");
             }
         } else {
-             bits = (withObjectNode != null) ? withObjectNode.getOptionalInt("bits", DEFAULT_BITS) : DEFAULT_BITS;
+            bits = (withObjectNode != null) ? withObjectNode.getOptionalInt("bits", DEFAULT_BITS) : DEFAULT_BITS;
         }
         float confidenceInterval = (withObjectNode != null)
                 ? (float) withObjectNode.getOptionalDouble("confidence_interval", DEFAULT_CONFIDENCE_INTERVAL)

@@ -125,7 +125,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
     // Field index where primary keys start in the data tuple
     // Non-quantized format: 2 (distance, centroidId, PK...)
-    // Quantized format: 4 (distance, quantized_distance, quantized_embedding, centroidId, PK...)
+    // Quantized format: 4 (distance, centroidId, quantized_distance, quantized_embedding, PK...)
     private int pkStartField;
 
     public LSMVCTreeSearchCursor(ILSMIndexOperationContext opCtx) {
@@ -752,7 +752,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
 
             try {
                 // Tuple format (non-quantized): [distance, centroidId, PKs..., includes...]
-                // Tuple format (quantized): [distance, quantized_dist, quantized_embed, centroidId, PKs..., includes...]
+                // Tuple format (quantized): [distance, centroidId, quantized_distance, quantized_embedding, PKs..., includes...]
                 // Compare order: distance first, then PKs + includes (skip secondary fields)
 
                 // Compare field 0 (distance) using ADM-aware comparator 0
@@ -807,7 +807,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             throws HyracksDataException {
 
         // Tuple format (non-quantized): [distance, centroidId, PKs..., includes...]
-        // Tuple format (quantized): [distance, quantized_dist, quantized_embed, centroidId, PKs..., includes...]
+        // Tuple format (quantized): [distance, centroidId, quantized_distance, quantized_embedding, PKs..., includes...]
         // Compare order: distance first, then PKs + includes (skip secondary fields)
 
         // Compare field 0 (distance) using ADM-aware comparator 0
