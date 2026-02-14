@@ -1000,7 +1000,43 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             // Reset exhaustion flags for new cluster
             Arrays.fill(clusterExhausted, false);
 
-            // Determine which cluster ALL components should advance to (via strategy)
+            if (fullScanMode) {
+                // Full-scan mode (merge): each cursor advances independently using its own
+                // allDirectoryPageIds. Directory page IDs are component-local and cannot be
+                // shared across components (bulk-loaded vs flushed components have different layouts).
+                boolean anyAdvanced = false;
+                for (int i = 0; i < rangeCursors.length; i++) {
+                    if (!(rangeCursors[i] instanceof VectorClusteringSearchCursor)) {
+                        clusterExhausted[i] = true;
+                        continue;
+                    }
+                    VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) rangeCursors[i];
+                    boolean advanced = vcCursor.advanceToNextCluster();
+                    if (!advanced) {
+                        clusterExhausted[i] = true;
+                        continue;
+                    }
+                    anyAdvanced = true;
+                    currentClusterIndex[i]++;
+                    if (vcCursor.hasNext()) {
+                        vcCursor.next();
+                        pqes[i].reset(vcCursor.getTuple());
+                        outputPriorityQueue.offer(pqes[i]);
+                    } else {
+                        clusterExhausted[i] = true;
+                    }
+                }
+                if (!anyAdvanced) {
+                    // All cursors exhausted all clusters
+                    return;
+                }
+                if (!shouldSkipToNextCluster()) {
+                    return;
+                }
+                continue; // All empty, try next cluster
+            }
+
+            // Query mode: determine which cluster ALL components should advance to (via strategy)
             ClusterSearchResult nextCluster = clusterStrategy.getNextCluster();
 
             if (nextCluster == null) {
@@ -1015,7 +1051,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                     String.format("[LSMVCTreeSearchCursor] Global cluster selected: cid=%d, distance=%.4f, dirPage=%d",
                             nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
 
-            // Tell ALL components to open this SAME cluster (using O(1) directoryPageId access)
+            // Tell ALL components to open this SAME cluster
             for (int i = 0; i < rangeCursors.length; i++) {
                 advanceComponentToCluster(i, nextCluster);
             }
@@ -1092,10 +1128,22 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
             return false;
         }
 
-        // Check if any component has more clusters available (via strategy)
-        boolean hasMoreClusters = clusterStrategy.hasMoreClusters();
+        // Check if any component has more clusters available
+        boolean hasMoreClusters;
+        if (fullScanMode) {
+            // In fullScanMode, check cursors directly (strategy is not used for advancement)
+            hasMoreClusters = false;
+            for (IIndexCursor cursor : rangeCursors) {
+                if (cursor instanceof VectorClusteringSearchCursor
+                        && ((VectorClusteringSearchCursor) cursor).hasMoreClusters()) {
+                    hasMoreClusters = true;
+                    break;
+                }
+            }
+        } else {
+            hasMoreClusters = clusterStrategy.hasMoreClusters();
+        }
         if (!hasMoreClusters) {
-            //            System.err.println("[LSMVCTreeSearchCursor] All components exhausted, no more clusters to scan");
             return false;
         }
 

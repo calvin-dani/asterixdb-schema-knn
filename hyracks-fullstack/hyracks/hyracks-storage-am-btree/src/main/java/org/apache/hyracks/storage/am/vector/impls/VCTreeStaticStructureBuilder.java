@@ -21,6 +21,8 @@ package org.apache.hyracks.storage.am.vector.impls;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -30,22 +32,44 @@ import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDe
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
-import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
+import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
+import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
+import org.apache.hyracks.storage.common.buffercache.IFIFOPageWriter;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
+import org.apache.hyracks.storage.common.buffercache.PageWriteFailureCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
+import org.apache.hyracks.storage.common.compression.file.ICompressedPageWriter;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
+public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback implements IIndexBulkLoader {
 
     private static final Logger LOGGER = LogManager.getLogger();
+
+    // Fields previously inherited from AbstractTreeIndexBulkLoader
+    private final IBufferCache bufferCache;
+    private final IPageManager freePageManager;
+    private final ITreeIndexMetadataFrame metaFrame;
+    private final AbstractTreeIndex treeIndex;
+    private final int fileId;
+    private final int slotSize;
+    private final IFIFOPageWriter pageWriter;
+    private final ICompressedPageWriter compressedPageWriter;
+
+    // Page buffering for sequential writes at end()
+    private final TreeMap<Integer, ICachedPage> allPages = new TreeMap<>();
+    private int currentPageId = -1;
+
     private final int numLevels;
     private final List<Integer> clustersPerLevel; // List of cluster counts per level
     private final List<List<Integer>> centroidsPerCluster; // List of Lists: level -> [centroids per cluster]
@@ -73,11 +97,23 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     private IVectorClusteringLeafFrame leafFrame;
     private final List<ICachedPage> leafPages = new ArrayList<>();
 
-    public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree,
-            ITreeIndexFrame leafFrame, ITreeIndexFrame dataFrame, int numLevels, List<Integer> clustersPerLevel,
-            List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage) throws HyracksDataException {
+    public VCTreeStaticStructureBuilder(IPageWriteCallback callback, VectorClusteringTree vectorTree, int numLevels,
+            List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage)
+            throws HyracksDataException {
 
-        super(0, callback, vectorTree, leafFrame, DefaultBufferCacheWriteContext.INSTANCE);
+        this.bufferCache = vectorTree.getBufferCache();
+        this.freePageManager = vectorTree.getPageManager();
+        this.fileId = vectorTree.getFileId();
+        this.treeIndex = vectorTree;
+        this.metaFrame = freePageManager.createMetadataFrame();
+
+        // Initialize frames
+        this.interiorFrame = (IVectorClusteringInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
+        this.leafFrame = (IVectorClusteringLeafFrame) vectorTree.getLeafFrameFactory().createFrame();
+        this.slotSize = ((ITreeIndexFrame) leafFrame).getSlotSize();
+
+        this.pageWriter = bufferCache.createFIFOWriter(callback, this, DefaultBufferCacheWriteContext.INSTANCE);
+        this.compressedPageWriter = bufferCache.getCompressedPageWriter(fileId);
 
         this.numLevels = numLevels;
         this.clustersPerLevel = new ArrayList<>(clustersPerLevel); // Defensive copy
@@ -98,10 +134,6 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             levelPageIds.add(new ArrayList<>());
         }
 
-        // Initialize frames
-        this.interiorFrame = (IVectorClusteringInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
-        this.leafFrame = (IVectorClusteringLeafFrame) vectorTree.getLeafFrameFactory().createFrame();
-
         // Precompute helper arrays for mathematical page ID calculation
         computeHelperArrays();
 
@@ -119,9 +151,8 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
             LOGGER.debug("Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
         }
 
-        // TODO: verify number of levels
-        // Create first page (root page) - page ID 1
-        createNewPage(1);
+        // Create first page (root page) - page ID 0
+        createNewPage(0);
 
         LOGGER.debug("VCTreeStaticStructureLoader initialized");
         LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
@@ -153,37 +184,20 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
-        //        System.err.println("=== VCTreeStaticStructureBuilder.add ===");
-        //        System.err.println("Input tuple field count: " + tuple.getFieldCount());
-        //        for (int i = 0; i < tuple.getFieldCount(); i++) {
-        //            System.err.println("  Field " + i + ": length=" + tuple.getFieldLength(i));
-        //        }
-
         // Compute child page ID mathematically
         int childPageId = determineChildPageId();
-        //        System.err.println("Child page ID: " + childPageId);
-
-        // Create entry tuple: <centroid_id, embedding, child_page_id>
-        //        System.err.println("Calling createEntryTuple...");
         ITupleReference entryTuple = createEntryTuple(tuple, childPageId);
-        //        System.err.println("createEntryTuple completed successfully");
 
         // Check if current page has SPACE for this tuple (not just entry count)
         int spaceNeeded = currentFrame.getBytesRequiredToWriteTuple(entryTuple) + slotSize;
         int spaceAvailable = currentFrame.getTotalFreeSpace();
-        //        System.err.println("Space check: needed=" + spaceNeeded + ", available=" + spaceAvailable);
 
         if (spaceNeeded > spaceAvailable) {
-            // Create overflow page for same cluster
-            //            System.err.println("Creating overflow page (insufficient space)...");
             createOverflowPage();
         }
 
-        // Insert entry into current page
-        //        System.err.println("Inserting entry into current page...");
         ((IVectorClusteringFrame) currentFrame).insertSorted(entryTuple);
         entriesInCurrentPage++;
-        //        System.err.println("Entry inserted successfully. Total entries in current page: " + entriesInCurrentPage);
 
         // Advance position in structure
         advancePosition();
@@ -202,12 +216,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         int childClusterIndex = computeChildClusterIndex();
 
         // Child page ID = offset for next level + cluster index within that level
-        int childPageId = totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
-
-        LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
-                childPageId);
-
-        return childPageId + 1;
+        return totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
     }
 
     /**
@@ -234,7 +243,7 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     private int computeCurrentClusterPageId() {
         // Current cluster's page ID = offset for current level + current cluster index
-        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel + 1;
+        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel;
     }
 
     /**
@@ -306,6 +315,9 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
         if (currentPage != null) {
             finishCurrentPage();
         }
+
+        // Track the page ID before confiscating
+        currentPageId = computedPageId;
 
         // Use our computed page ID for actual allocation (ensures deterministic structure)
         long dpid = BufferedFileHandle.getDiskPageId(fileId, computedPageId);
@@ -404,22 +416,22 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
     }
 
     /**
-     * Finish current page and release resources.
+     * Buffer current page for later sequential write.
      */
     private void finishCurrentPage() throws HyracksDataException {
         if (currentPage == null) {
             return;
         }
-        /* TODO: not write back for leaf pages at this point */
-        write(currentPage);
+        allPages.put(currentPageId, currentPage);
+    }
+
+    private void write(ICachedPage cPage) throws HyracksDataException {
+        compressedPageWriter.prepareWrite(cPage);
+        pageWriter.write(cPage);
     }
 
     private int getNumLeafCentroids() {
         return totalCentroidsUpToLevel[numLevels] - totalCentroidsUpToLevel[numLevels - 1];
-    }
-
-    private int getFirstLeafPageId() {
-        return totalPagesUpToLevel[numLevels - 1] + 1;
     }
 
     /**
@@ -463,25 +475,57 @@ public class VCTreeStaticStructureBuilder extends AbstractTreeIndexBulkLoader {
      */
     @Override
     public void end() throws HyracksDataException {
+        // Save the last page being built
+        if (currentPage != null) {
+            allPages.put(currentPageId, currentPage);
+            currentPage = null;
+        }
+
         // Update leaf pages with correct directory page pointers
         updateLeafPagesWithDirectoryPointers();
 
-        // Write all leaf pages
-        for (ICachedPage leafPage : leafPages) {
-            write(leafPage);
-        }
-
+        // Store metadata key-values
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
                 LongPointable.FACTORY.createPointable(totalCentroidsUpToLevel[numLevels - 1]));
-        super.end();
+
+        // Set root page ID (page 0)
+        freePageManager.setRootPageId(0);
+
+        // Check for prior write failures
+        if (hasFailed()) {
+            throw HyracksDataException.create(getFailure());
+        }
+
+        // Write ALL pages in ascending page-ID order (0, 1, 2, 3, ...)
+        for (Map.Entry<Integer, ICachedPage> entry : allPages.entrySet()) {
+            LOGGER.debug("Writing page {} sequentially", entry.getKey());
+            write(entry.getValue());
+        }
+        allPages.clear();
     }
 
     @Override
     public void abort() throws HyracksDataException {
         LOGGER.debug("VCTreeStaticStructureLoader aborted");
-        super.handleException();
+        compressedPageWriter.abort();
+        // Return all buffered pages
+        for (ICachedPage page : allPages.values()) {
+            if (page != null && page.confiscated()) {
+                bufferCache.returnPage(page, false);
+            }
+        }
+        if (currentPage != null && currentPage.confiscated()) {
+            bufferCache.returnPage(currentPage, false);
+        }
+        allPages.clear();
+        freePageManager.returnAllPages();
+    }
+
+    @Override
+    public void force() throws HyracksDataException {
+        bufferCache.force(fileId, false);
     }
 
     /**
