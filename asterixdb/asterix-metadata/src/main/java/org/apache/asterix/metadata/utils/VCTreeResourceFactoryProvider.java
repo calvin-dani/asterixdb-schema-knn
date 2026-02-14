@@ -116,7 +116,7 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
 
         // Determine data tuple creator factory based on description (quantization indicator)
-        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
         boolean isQuantized = (description != null);
         IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
         if (isQuantized) {

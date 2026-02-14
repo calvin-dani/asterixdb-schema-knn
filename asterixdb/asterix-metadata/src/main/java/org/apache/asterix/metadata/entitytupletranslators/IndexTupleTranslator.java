@@ -845,7 +845,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         int dimension = -1;
         int train_list = -1;
         String quantization = "INVALID";
-        String similarity  = "INVALID";
+        String similarity = "INVALID";
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
@@ -854,14 +854,14 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             similarity = properties.getOptionalString("similarity", "INVALID");
         }
 
-        if(dimension < 0){
+        if (dimension < 0) {
             throw new HyracksDataException("No dimensions defined");
         }
-        if(train_list < 0){
+        if (train_list < 0) {
             throw new HyracksDataException("No train_list_number or percentage defined");
         }
 
-        if(similarity == "INVALID"){
+        if (similarity == "INVALID") {
             throw new HyracksDataException("No similarity metric defined");
         }
         nameValue.reset();
@@ -899,8 +899,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Default values (matching writeWithProperties defaults)
         int dimension = -1;
         int train_list = -1;
-        String quantization = "default";
-        String similarity = "euclidean";
+        String quantization = "INVALID";
+        String similarity = "INVALID";
 
         // Read dimension field
         int dimensionPos = indexRecord.getType().getFieldIndex("dimension");
@@ -945,6 +945,17 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         if (!hasNonDefaultValues) {
             return null;
         }
+
+        //        if(dimension < 0){
+        //            throw new HyracksDataException("No dimensions defined");
+        //        }
+        //        if(train_list < 0){
+        //            throw new HyracksDataException("No train_list_number or percentage defined");
+        //        }
+        //
+        //        if(similarity == "INVALID"){
+        //            throw new HyracksDataException("No similarity metric defined");
+        //        }
 
         AdmObjectNode withObjectNode = new AdmObjectNode();
 

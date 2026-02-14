@@ -101,6 +101,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final int numIncludeFields;
     private final boolean isQuantized;
 
+    // Maps task (compute) partition to storage partition(s) for index resource lookup
+    private final int[][] partitionsMap;
+
     // Partitioning components
     private VCTreePartitioner partitioner;
 
@@ -205,7 +208,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
             UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension,
-            int numPrimaryKeys, int numIncludeFields, boolean isQuantized) {
+            int numPrimaryKeys, int numIncludeFields, boolean isQuantized, int[][] partitionsMap) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -219,6 +222,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.numPrimaryKeys = numPrimaryKeys;
         this.numIncludeFields = numIncludeFields;
         this.isQuantized = isQuantized;
+        this.partitionsMap = partitionsMap;
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -460,6 +464,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private class VCTreeBulkLoaderAndGroupingNodePushable extends AbstractUnaryInputUnaryOutputOperatorNodePushable {
         private final IHyracksTaskContext ctx;
         private final int partition;
+        /** Storage partition for index resource lookup (from compute-storage map). */
+        private final int storagePartition;
         private final UUID materializedDataUUID;
         private LSMIndexDiskComponentBulkLoader lsmBulkLoader;
         private IIndexDataflowHelper indexHelper;
@@ -484,7 +490,17 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
             this.ctx = ctx;
             this.partition = partition;
+            this.storagePartition = resolveStoragePartition(partition);
             this.materializedDataUUID = materializedDataUUID;
+        }
+
+        /** Resolve storage partition from compute-storage map; fallback to task partition if map absent. */
+        private int resolveStoragePartition(int taskPartition) {
+            if (partitionsMap != null && taskPartition < partitionsMap.length
+                    && partitionsMap[taskPartition] != null && partitionsMap[taskPartition].length > 0) {
+                return partitionsMap[taskPartition][0];
+            }
+            return taskPartition;
         }
 
         /**
@@ -529,8 +545,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 // Initialize index helper to access static structure via LSM index system
+                // Use storage partition so the correct resource is opened when compute and storage partitions differ
                 //                System.err.println("=== INITIALIZING INDEX-BASED STATIC STRUCTURE ACCESS ===");
-                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
                 indexHelper.open();
 
                 // Get LSMVCTree instance

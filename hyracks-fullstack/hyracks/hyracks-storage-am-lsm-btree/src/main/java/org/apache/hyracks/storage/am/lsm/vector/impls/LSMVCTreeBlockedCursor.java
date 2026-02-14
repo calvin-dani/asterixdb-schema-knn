@@ -127,7 +127,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
 
     // Field index where primary keys start in the data tuple
     // Non-quantized format: 2 (distance, centroidId, PK...)
-    // Quantized format: 4 (distance, quantized_distance, quantized_embedding, centroidId, PK...)
+    // Quantized format: 4 (distance, centroidId, quantized_distance, quantized_embedding, PK...)
     private int pkStartField;
 
     // Tuple filter for INCLUDE field predicates (e.g., year > 2000)
