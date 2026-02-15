@@ -496,8 +496,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         /** Resolve storage partition from compute-storage map; fallback to task partition if map absent. */
         private int resolveStoragePartition(int taskPartition) {
-            if (partitionsMap != null && taskPartition < partitionsMap.length
-                    && partitionsMap[taskPartition] != null && partitionsMap[taskPartition].length > 0) {
+            if (partitionsMap != null && taskPartition < partitionsMap.length && partitionsMap[taskPartition] != null
+                    && partitionsMap[taskPartition].length > 0) {
                 return partitionsMap[taskPartition][0];
             }
             return taskPartition;

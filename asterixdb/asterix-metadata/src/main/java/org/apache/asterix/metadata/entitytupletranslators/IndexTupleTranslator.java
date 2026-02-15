@@ -878,21 +878,25 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         int32Serde.serialize(new AInt32(train_list), fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
 
-        nameValue.reset();
-        aString.setValue("quantization");
-        stringSerde.serialize(aString, nameValue.getDataOutput());
-        fieldValue.reset();
-        aString.setValue(quantization);
-        stringSerde.serialize(aString, fieldValue.getDataOutput());
-        recordBuilder.addField(nameValue, fieldValue);
+        if (!"INVALID".equals(quantization)) {
+            nameValue.reset();
+            aString.setValue("quantization");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            aString.setValue(quantization);
+            stringSerde.serialize(aString, fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
 
-        nameValue.reset();
-        aString.setValue("similarity");
-        stringSerde.serialize(aString, nameValue.getDataOutput());
-        fieldValue.reset();
-        aString.setValue(similarity);
-        stringSerde.serialize(aString, fieldValue.getDataOutput());
-        recordBuilder.addField(nameValue, fieldValue);
+        if (!"INVALID".equals(similarity)) {
+            nameValue.reset();
+            aString.setValue("similarity");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            aString.setValue(similarity);
+            stringSerde.serialize(aString, fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
     }
 
     private AdmObjectNode readWithProperties(ARecord indexRecord) throws AlgebricksException {
@@ -939,8 +943,9 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
 
         // Reconstruct AdmObjectNode only if at least one field differs from default
-        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || !"default".equals(quantization)
-                || !"euclidean".equals(similarity);
+        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1)
+                || (!"default".equals(quantization) && !"INVALID".equals(quantization))
+                || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity));
 
         if (!hasNonDefaultValues) {
             return null;
@@ -967,11 +972,11 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             withObjectNode.set("train_list", new AdmBigIntNode(train_list));
         }
 
-        if (!"default".equals(quantization)) {
+        if (!"default".equals(quantization) && !"INVALID".equals(quantization)) {
             withObjectNode.set("quantization", new AdmStringNode(quantization));
         }
 
-        if (!"euclidean".equals(similarity)) {
+        if (!"euclidean".equals(similarity) && !"INVALID".equals(similarity)) {
             withObjectNode.set("similarity", new AdmStringNode(similarity));
         }
 

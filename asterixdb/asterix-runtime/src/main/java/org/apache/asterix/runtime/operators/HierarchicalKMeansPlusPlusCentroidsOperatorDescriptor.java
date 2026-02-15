@@ -625,6 +625,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private DistanceFunction distanceFunction;
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
+    private int[][] partitionsMap; // Maps compute partition to storage partition(s)
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
@@ -805,7 +806,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory) {
+            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -819,6 +820,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.indexHelperFactory = indexHelperFactory;
+        this.partitionsMap = partitionsMap;
 
         // Initialize distance function to euclidean squared to avoid null pointer issues
         this.distanceFunction = new EuclideanSquaredDistanceFunction();
@@ -1014,8 +1016,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             scalarWriter.initialize(ctx, partition, scalarValuesUUID);
                         }
 
-                        // Get index directory for this partition
-                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                        // Get index directory for this partition (resolve storage partition from compute-storage map)
+                        int storagePartition = partition;
+                        if (partitionsMap != null && partition < partitionsMap.length
+                                && partitionsMap[partition] != null && partitionsMap[partition].length > 0) {
+                            storagePartition = partitionsMap[partition][0];
+                        }
+                        indexHelper =
+                                indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
                         indexHelper.open();
                         IIndex indexInstance = indexHelper.getIndexInstance();
                         if (!(indexInstance instanceof ILSMIndex)) {

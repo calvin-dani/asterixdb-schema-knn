@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
@@ -542,6 +541,14 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         this.targetMetadataPageId = directoryPageId;
 
+        // Guard: directoryPageId=-1 means empty cluster (no data assigned during bulk loading)
+        if (directoryPageId == -1) {
+            this.currentDataPageId = -1;
+            this.tupleCount = 0;
+            this.currentTupleIndex = 0;
+            return;
+        }
+
         // Pin metadata/directory page (use data buffer cache for directory pages)
         ICachedPage dirPage = dataBufferCache.pin(BufferedFileHandle.getDiskPageId(dataFileId, (int) directoryPageId));
         try {
@@ -880,12 +887,14 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     /**
      * Get metadata page ID from cluster search result.
-     * Always resolves locally for THIS component since the clusterResult may come
-     * from a different LSM component with different page ID spaces.
      *
-     * For memory components: uses centroidDirPageMap for O(1) lookup.
-     * For disk components: navigates THIS component's tree using the centroid vector
-     * to find the correct leaf page and metadata pointer.
+     * For memory components: uses centroidDirPageMap for O(1) lookup (the map
+     * translates centroid IDs to VBC directory page IDs).
+     *
+     * For disk components: uses the directoryPageId already stored in the
+     * ClusterSearchResult. This value was read directly from the leaf frame's
+     * metadataPagePointer during level-wise or DFS navigation, so it is the
+     * correct page ID for this component's buffer cache.
      */
     private long getMetadataPageIdFromCluster(ClusterSearchResult clusterResult) throws HyracksDataException {
         // Memory components: use centroidDirPageMap for O(1) lookup
@@ -896,20 +905,11 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
         }
 
-        // Disk components: navigate THIS component's tree to find the centroid.
-        // We use the centroid's own vector as the query so findClosestCentroid
-        // returns the correct leaf page and metadata pointer for THIS component.
-        IVectorDistanceFunction df =
-                (distanceFunction != null) ? distanceFunction : VectorUtils::calculateEuclideanDistance;
-        ClusterSearchResult localResult = VCTreeNavigationUtils.findClosestCentroid(bufferCache, fileId, rootPageId,
-                interiorFrameFactory, leafFrameFactory, clusterResult.centroid, df, null, null);
-
-        if (localResult != null) {
-            return localResult.directoryPageId;
-        }
-
-        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
-                "Could not find cluster centroidId=" + clusterResult.centroidId + " in component");
+        // Disk components: use the directoryPageId already in the ClusterSearchResult.
+        // This was read from the leaf frame during navigation and is valid for
+        // this component's data buffer cache.
+        // Returns -1 for empty clusters (no data assigned); callers handle -1 gracefully.
+        return clusterResult.directoryPageId;
     }
 
     /**
