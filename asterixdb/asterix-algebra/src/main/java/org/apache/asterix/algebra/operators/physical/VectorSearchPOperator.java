@@ -113,8 +113,8 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
                 jobGenParams.getDatasetName(), jobGenParams.getIndexName());
         Index.VectorIndexDetails vectorDetails = (Index.VectorIndexDetails) vectorIndex.getIndexDetails();
         AdmObjectNode withObjectNode = vectorDetails.getWithObjectNode();
-        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
-        boolean isQuantized = (description != null);
+        String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
+        boolean isQuantized = (quantization != null);
         int numSecondaryKeys = isQuantized ? 4 : 2;
 
         // Create tuple filter factory if selectCondition is present (for INCLUDE field filtering)

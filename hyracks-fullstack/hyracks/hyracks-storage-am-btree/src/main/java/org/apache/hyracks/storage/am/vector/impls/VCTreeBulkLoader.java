@@ -58,7 +58,6 @@ import org.apache.logging.log4j.Logger;
 public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndexBulkLoader {
     private static final Logger LOGGER = LogManager.getLogger();
 
-    // Fields replacing inherited ones from AbstractTreeIndexBulkLoader
     private final IBufferCache bufferCache;
     private final IPageManager freePageManager;
     private final ITreeIndexMetadataFrame metaFrame;
@@ -78,22 +77,25 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
     // Per-cluster directory page tracking: clusterIndex -> first dir page ID
     private final int[] clusterFirstDirPageId;
 
-    // Bulk loading state for leaf clusters
+    // Current cluster state
     private int currentLeafClusterIndex;
-    private ICachedPage currentDirectoryPage;
-    private int currentDirectoryPageId;
-    private ICachedPage currentDataPage;
-    private final ITreeIndexFrame currentDataFrame;
-    private final ITreeIndexFrame currentDirectoryFrame;
-    private int entriesInCurrentDataPage;
-    private int entriesInCurrentDirectoryPage;
-    private int currentDataPageId;
-    private ITreeIndexTupleWriter directoryFrameTupleWriter;
-    private ITreeIndexTupleWriter dataFrameTupleWriter;
     private int currentCentroidId;
 
-    // Buffered data pages for current batch (flushed when directory page fills or cluster ends)
-    private final List<ICachedPage> bufferedDataPages = new ArrayList<>();
+    // Current data page (only one in memory at a time — written immediately when full)
+    private ICachedPage currentDataPage;
+    private int currentDataPageId;
+    private final ITreeIndexFrame currentDataFrame;
+    private final ITreeIndexTupleWriter dataFrameTupleWriter;
+    private int entriesInCurrentDataPage;
+
+    // Directory pages for current cluster. Confiscated with INVALID_DPID and kept in memory
+    // until the cluster is finalized, at which point they receive real page IDs, get chained
+    // via nextPage pointers, and are written to disk. Typically only 1 page per cluster in
+    // production (one 32KB directory page holds ~2000 entries).
+    private final ITreeIndexFrame currentDirectoryFrame;
+    private final ITreeIndexTupleWriter directoryFrameTupleWriter;
+    private final List<ICachedPage> pendingDirectoryPages = new ArrayList<>();
+    private ICachedPage currentDirectoryPage;
 
     public VCTreeBulkLoader(IPageWriteCallback callback, VectorClusteringTree vectorTree,
             ITreeIndexAccessor staticAccessor) throws HyracksDataException {
@@ -110,7 +112,7 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
         this.dataFrameTupleWriter = currentDataFrame.getTupleWriter();
         this.directoryFrameTupleWriter = currentDirectoryFrame.getTupleWriter();
         this.slotSize = currentDataFrame.getSlotSize();
-        this.currentLeafClusterIndex = 0;
+        this.currentLeafClusterIndex = -1;
         this.currentCentroidId = -1;
 
         this.pageWriter = bufferCache.createFIFOWriter(callback, this, DefaultBufferCacheWriteContext.INSTANCE);
@@ -153,26 +155,19 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
     }
 
     /**
-     * Create and confiscate directory page for a specific leaf cluster on-demand.
+     * Create a directory page confiscated with INVALID_DPID.
+     * Directory pages are kept in memory until the cluster is finalized,
+     * at which point they receive real page IDs.
      */
-    private void createDirectoryPageForCluster(int clusterIndex) throws HyracksDataException {
-        int dirPageId = freePageManager.takePage(metaFrame);
-        long dpid = BufferedFileHandle.getDiskPageId(fileId, dirPageId);
-        currentDirectoryPage = bufferCache.confiscatePage(dpid);
+    private void createDirectoryPage() throws HyracksDataException {
+        currentDirectoryPage = bufferCache.confiscatePage(IBufferCache.INVALID_DPID);
         currentDirectoryFrame.setPage(currentDirectoryPage);
         currentDirectoryFrame.initBuffer((byte) 0);
-        currentDirectoryPageId = dirPageId;
-        entriesInCurrentDirectoryPage = 0;
 
-        // Record first directory page for this cluster
-        if (clusterFirstDirPageId[clusterIndex] == -1) {
-            clusterFirstDirPageId[clusterIndex] = dirPageId;
-        }
-
-        LOGGER.debug("Created directory page {} for cluster {}", dirPageId, clusterIndex);
+        LOGGER.debug("Created directory page (in-memory) for cluster {}", currentLeafClusterIndex);
     }
 
-    private int extractCentroidId(ITupleReference tuple) throws HyracksDataException {
+    private int extractCentroidId(ITupleReference tuple) {
         return IntegerPointable.getInteger(tuple.getFieldData(1), tuple.getFieldStart(1));
     }
 
@@ -183,9 +178,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
             // First tuple being added - initialize for first cluster
             LOGGER.debug("Starting bulk load with first centroid cluster: {}", tupleCentroidId);
             currentCentroidId = tupleCentroidId;
-            int targetClusterIndex = tupleCentroidId - firstLeafCentroidId;
-            currentLeafClusterIndex = targetClusterIndex;
-            createDirectoryPageForCluster(targetClusterIndex);
+            currentLeafClusterIndex = tupleCentroidId - firstLeafCentroidId;
+            createDirectoryPage();
             createNewDataPage();
         } else if (currentCentroidId != tupleCentroidId) {
             // Moved to a new centroid cluster
@@ -202,7 +196,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
                 if (currentDataFrame.getTupleCount() == 0) {
                     bufferCache.returnPage(currentDataPage, false);
                 }
-                writeDataPageToDirectory(false);
+                // Data page full - write it to disk immediately
+                finishCurrentDataPage(false);
             }
             ((IVectorClusteringDataFrame) currentDataFrame).insertSorted(tuple);
             entriesInCurrentDataPage++;
@@ -217,7 +212,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
     }
 
     /**
-     * Load to a specific leaf cluster by index.
+     * Switch to a specific leaf cluster. Finishes the current data page,
+     * finalizes the current cluster's directory pages, then starts the new cluster.
      */
     public void loadToNextLeafCluster(int targetClusterIndex) throws HyracksDataException {
         if (targetClusterIndex < 0 || targetClusterIndex >= numLeafCentroid) {
@@ -232,17 +228,15 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
 
         // Finish current data page if it has data
         if (currentDataPage != null && entriesInCurrentDataPage > 0) {
-            writeDataPageToDirectory(true);
+            finishCurrentDataPage(true);
         }
 
-        // Flush remaining batch for current cluster
-        if (currentDirectoryPage != null) {
-            flushBatch();
-        }
+        // Finalize directory pages for current cluster (assign IDs, chain, write)
+        finalizeClusterDirectory();
 
-        // Move to target leaf cluster
+        // Start new cluster
         currentLeafClusterIndex = targetClusterIndex;
-        createDirectoryPageForCluster(targetClusterIndex);
+        createDirectoryPage();
         createNewDataPage();
 
         LOGGER.debug("Moved to leaf cluster {} (centroid ID: {})", currentLeafClusterIndex,
@@ -254,65 +248,48 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
     }
 
     /**
-     * Create a new data page for the current leaf cluster.
+     * Create a new data page with a real page ID.
+     * Data pages get real IDs immediately so they can be written to disk right away.
      */
     private void createNewDataPage() throws HyracksDataException {
-        int dataPageId = freePageManager.takePage(metaFrame);
-        long dpid = BufferedFileHandle.getDiskPageId(fileId, dataPageId);
+        currentDataPageId = freePageManager.takePage(metaFrame);
+        long dpid = BufferedFileHandle.getDiskPageId(fileId, currentDataPageId);
         currentDataPage = bufferCache.confiscatePage(dpid);
-        currentDataPageId = dataPageId;
-
         currentDataFrame.setPage(currentDataPage);
         currentDataFrame.initBuffer((byte) 0);
         entriesInCurrentDataPage = 0;
 
-        LOGGER.debug("Created new data page {} for leaf cluster {}", dataPageId, currentLeafClusterIndex);
+        LOGGER.debug("Created new data page {} for leaf cluster {}", currentDataPageId, currentLeafClusterIndex);
     }
 
     /**
-     * Write the current data page information to the directory page.
-     * When lastPage is true, the data page next-pointer is set to -1 and no new data page is allocated.
+     * Finish the current data page: set the next-page pointer, write to disk immediately,
+     * and add a directory entry for it.
+     *
+     * @param lastPage true if this is the last data page for the current cluster
      */
-    private void writeDataPageToDirectory(boolean lastPage) throws HyracksDataException {
+    private void finishCurrentDataPage(boolean lastPage) throws HyracksDataException {
         int tupleCount = currentDataFrame.getTupleCount();
-        double maxDistance = ((IVectorClusteringDataFrame) currentDataFrame).getDistanceToCentroid(tupleCount - 1);
-
-        try {
-            ITupleReference directoryEntry =
-                    TupleUtils.createTuple(new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE,
-                            IntegerSerializerDeserializer.INSTANCE }, maxDistance, currentDataPageId);
-
-            // Check if directory page has space
-            int spaceNeeded = directoryFrameTupleWriter.bytesRequired(directoryEntry) + slotSize;
-            int spaceAvailable = currentDirectoryFrame.getTotalFreeSpace();
-
-            if (spaceNeeded > spaceAvailable) {
-                // Directory page is full - flush current batch before creating overflow
-                flushBatch();
-                createOverflowDirectoryPage();
-            }
-
-            ((IVectorClusteringFrame) currentDirectoryFrame).insertSorted(directoryEntry);
-            entriesInCurrentDirectoryPage++;
-
-            LOGGER.debug("Added directory entry for data page {} to directory page, entries: {}", currentDataPageId,
-                    entriesInCurrentDirectoryPage);
-
-        } catch (HyracksDataException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new HyracksDataException("Failed to create directory entry", e);
+        if (tupleCount == 0) {
+            return;
         }
 
-        // Set next-page pointer on data page
+        double maxDistance = ((IVectorClusteringDataFrame) currentDataFrame).getDistanceToCentroid(tupleCount - 1);
+        int writtenDataPageId = currentDataPageId;
+
         if (lastPage) {
+            // Last data page in cluster - no next page
             ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(-1);
+            write(currentDataPage);
+            currentDataPage = null;
+            entriesInCurrentDataPage = 0;
         } else {
+            // Allocate next data page ID and set forward pointer before writing
             int nextDataPageId = freePageManager.takePage(metaFrame);
             ((IVectorClusteringDataFrame) currentDataFrame).setNextPage(nextDataPageId);
 
-            // Buffer the current data page
-            bufferedDataPages.add(currentDataPage);
+            // Write current data page to disk immediately
+            write(currentDataPage);
 
             // Create new data page with the pre-allocated ID
             currentDataPageId = nextDataPageId;
@@ -323,54 +300,99 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
             entriesInCurrentDataPage = 0;
 
             LOGGER.debug("Created new data page {} for leaf cluster {}", currentDataPageId, currentLeafClusterIndex);
-            return;
         }
 
-        // For last page, just buffer it (no new page created)
-        bufferedDataPages.add(currentDataPage);
-        currentDataPage = null;
-        entriesInCurrentDataPage = 0;
+        // Add directory entry for the written data page
+        addDirectoryEntry(maxDistance, writtenDataPageId);
     }
 
     /**
-     * Flush the current batch: write directory page first, then all buffered data pages.
-     * This ensures sequential page ID ordering (directory page ID < data page IDs).
+     * Add a directory entry <maxDistance, dataPageId> to the current directory page.
+     * If the directory page is full, move it to the pending list and create a new overflow.
      */
-    private void flushBatch() throws HyracksDataException {
-        // Write directory page first (it has the smallest page ID in this batch)
+    private void addDirectoryEntry(double maxDistance, int dataPageId) throws HyracksDataException {
+        try {
+            ITupleReference directoryEntry =
+                    TupleUtils.createTuple(new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE,
+                            IntegerSerializerDeserializer.INSTANCE }, maxDistance, dataPageId);
+
+            // Check if directory page has space
+            int spaceNeeded = directoryFrameTupleWriter.bytesRequired(directoryEntry) + slotSize;
+            int spaceAvailable = currentDirectoryFrame.getTotalFreeSpace();
+
+            if (spaceNeeded > spaceAvailable) {
+                // Directory page full - keep in pending list and create overflow
+                pendingDirectoryPages.add(currentDirectoryPage);
+                createDirectoryPage();
+
+                LOGGER.debug("Directory page full for cluster {}, created overflow", currentLeafClusterIndex);
+            }
+
+            ((IVectorClusteringFrame) currentDirectoryFrame).insertSorted(directoryEntry);
+
+            LOGGER.debug("Added directory entry for data page {} (maxDist={}) to directory, cluster {}", dataPageId,
+                    maxDistance, currentLeafClusterIndex);
+
+        } catch (HyracksDataException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new HyracksDataException("Failed to create directory entry", e);
+        }
+    }
+
+    /**
+     * Finalize directory pages for the current cluster:
+     * 1. Assign real sequential page IDs to all pending directory pages
+     * 2. Set nextPage chain (dir0 -> dir1 -> ... -> -1)
+     * 3. Write all directory pages in ascending ID order
+     * 4. Record clusterFirstDirPageId for leaf frame pointer assignment
+     *
+     * Since directory page IDs are allocated after all data pages have been written,
+     * the overall write order is: data pages (lower IDs) then directory pages (higher IDs),
+     * which naturally maintains strict FIFO ordering.
+     */
+    private void finalizeClusterDirectory() throws HyracksDataException {
+        // Add current directory page to the pending list
         if (currentDirectoryPage != null) {
-            write(currentDirectoryPage);
+            pendingDirectoryPages.add(currentDirectoryPage);
             currentDirectoryPage = null;
         }
 
-        // Write all buffered data pages in order
-        for (ICachedPage dataPage : bufferedDataPages) {
-            write(dataPage);
+        if (pendingDirectoryPages.isEmpty()) {
+            return;
         }
-        bufferedDataPages.clear();
-    }
 
-    /**
-     * Create overflow directory page when current directory page is full.
-     */
-    private void createOverflowDirectoryPage() throws HyracksDataException {
-        int nextDirectoryPageId = freePageManager.takePage(metaFrame);
+        // Allocate real page IDs for all directory pages
+        int numDirPages = pendingDirectoryPages.size();
+        int[] dirPageIds = new int[numDirPages];
+        for (int i = 0; i < numDirPages; i++) {
+            dirPageIds[i] = freePageManager.takePage(metaFrame);
+        }
 
-        // Set next page pointer in current directory page
-        ((IVectorClusteringMetadataFrame) currentDirectoryFrame).setNextPage(nextDirectoryPageId);
+        // Set disk page IDs, nextPage chain, and write
+        for (int i = 0; i < numDirPages; i++) {
+            ICachedPage dirPage = pendingDirectoryPages.get(i);
 
-        // Note: The current directory page was already written in flushBatch() before this call
+            // Assign real disk page ID
+            dirPage.setDiskPageId(BufferedFileHandle.getDiskPageId(fileId, dirPageIds[i]));
 
-        long dpid = BufferedFileHandle.getDiskPageId(fileId, nextDirectoryPageId);
-        currentDirectoryPage = bufferCache.confiscatePage(dpid);
-        currentDirectoryPageId = nextDirectoryPageId;
+            // Set nextPage chain
+            currentDirectoryFrame.setPage(dirPage);
+            if (i < numDirPages - 1) {
+                ((IVectorClusteringMetadataFrame) currentDirectoryFrame).setNextPage(dirPageIds[i + 1]);
+            } else {
+                ((IVectorClusteringMetadataFrame) currentDirectoryFrame).setNextPage(-1);
+            }
 
-        currentDirectoryFrame.setPage(currentDirectoryPage);
-        currentDirectoryFrame.initBuffer((byte) 0);
-        entriesInCurrentDirectoryPage = 0;
+            write(dirPage);
+        }
 
-        LOGGER.debug("Created overflow directory page {} for leaf cluster {}", nextDirectoryPageId,
-                currentLeafClusterIndex);
+        // Record first directory page ID for this cluster
+        clusterFirstDirPageId[currentLeafClusterIndex] = dirPageIds[0];
+        pendingDirectoryPages.clear();
+
+        LOGGER.debug("Finalized directory for cluster {}: {} pages, first dir page = {}", currentLeafClusterIndex,
+                numDirPages, dirPageIds[0]);
     }
 
     private void logDataPageState(ITupleReference tuple, Exception e) {
@@ -391,30 +413,33 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
 
     private void handleException() {
         compressedPageWriter.abort();
-        for (ICachedPage page : bufferedDataPages) {
+        // Return pending directory pages (confiscated with INVALID_DPID or real IDs)
+        for (ICachedPage page : pendingDirectoryPages) {
             if (page != null && page.confiscated()) {
                 bufferCache.returnPage(page, false);
             }
         }
+        pendingDirectoryPages.clear();
         if (currentDirectoryPage != null && currentDirectoryPage.confiscated()) {
             bufferCache.returnPage(currentDirectoryPage, false);
+            currentDirectoryPage = null;
         }
         if (currentDataPage != null && currentDataPage.confiscated()) {
             bufferCache.returnPage(currentDataPage, false);
+            currentDataPage = null;
         }
-        bufferedDataPages.clear();
         freePageManager.returnAllPages();
     }
 
     @Override
     public void end() throws HyracksDataException {
-        // Flush last cluster's remaining pages
-        if (entriesInCurrentDataPage > 0) {
-            writeDataPageToDirectory(true);
+        // Finish last cluster's remaining data page
+        if (currentDataPage != null && entriesInCurrentDataPage > 0) {
+            finishCurrentDataPage(true);
         }
-        if (currentDirectoryPage != null) {
-            flushBatch();
-        }
+
+        // Finalize last cluster's directory pages
+        finalizeClusterDirectory();
 
         // --- Copy static pages to end of file ---
         int staticBasePageId = freePageManager.takePage(metaFrame);
@@ -428,7 +453,6 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
                 (IVectorClusteringInteriorFrame) treeIndex.getInteriorFrameFactory().createFrame();
         IVectorClusteringLeafFrame lfFrame = (IVectorClusteringLeafFrame) treeIndex.getLeafFrameFactory().createFrame();
 
-        int centroidIndex = 0;
         TreeMap<Integer, ICachedPage> staticPages = new TreeMap<>();
 
         for (int i = 0; i < numStaticPages; i++) {
@@ -443,10 +467,11 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
             // Determine page type via level field and adjust pointers
             ((ITreeIndexFrame) intFrame).setPage(page);
             byte level = ((ITreeIndexFrame) intFrame).getLevel();
+            int tupleCount = ((ITreeIndexFrame) intFrame).getTupleCount();
 
             if (level > 0) {
                 // Interior page: offset child pointers by staticBasePageId
-                for (int t = 0; t < ((ITreeIndexFrame) intFrame).getTupleCount(); t++) {
+                for (int t = 0; t < tupleCount; t++) {
                     int oldChildId = intFrame.getChildPageId(t);
                     intFrame.setChildPageId(t, oldChildId + staticBasePageId);
                 }
@@ -456,11 +481,17 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
                 }
             } else {
                 // Leaf page: set metadata pointers to actual dir page IDs
+                // Use centroidId from each tuple to compute correct cluster index,
+                // because page-ID order does NOT match centroid BFS order when
+                // overflow pages exist (overflow pages have higher IDs than
+                // subsequent clusters' main pages).
                 ((ITreeIndexFrame) lfFrame).setPage(page);
-                for (int t = 0; t < ((ITreeIndexFrame) lfFrame).getTupleCount(); t++) {
-                    if (centroidIndex < numLeafCentroid) {
-                        lfFrame.setMetadataPagePointer(t, clusterFirstDirPageId[centroidIndex]);
-                        centroidIndex++;
+                int leafTupleCount = ((ITreeIndexFrame) lfFrame).getTupleCount();
+                for (int t = 0; t < leafTupleCount; t++) {
+                    int centroidId = lfFrame.getCentroidId(t);
+                    int clusterIndex = centroidId - firstLeafCentroidId;
+                    if (clusterIndex >= 0 && clusterIndex < numLeafCentroid) {
+                        lfFrame.setMetadataPagePointer(t, clusterFirstDirPageId[clusterIndex]);
                     }
                 }
                 // Offset next-leaf pointer (overflow or sibling chain)

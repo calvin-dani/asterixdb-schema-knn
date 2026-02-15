@@ -834,8 +834,8 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // Quantized:     [distance, centroidId, quantized_distance, quantized_embedding, PK..., includes...] → numSecondaryKeys = 4
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) vectorIndex.getIndexDetails();
         AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
-        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
-        boolean isQuantized = (description != null);
+        String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
+        boolean isQuantized = (quantization != null);
         int numSecondaryKeys = isQuantized ? VCTreeDataTupleConstants.Q_NUM_SECONDARY_FIELDS
                 : VCTreeDataTupleConstants.NQ_NUM_SECONDARY_FIELDS;
 

@@ -109,7 +109,7 @@ public class LSMVCTreeBulkLoadTest extends VectorIndexTestDriver {
             }
 
             // 5. Validate: top-K search
-            // testUtils.topKSearch(ctx);
+            testUtils.topKSearch(ctx);
 
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Validation: top-K search succeeded");

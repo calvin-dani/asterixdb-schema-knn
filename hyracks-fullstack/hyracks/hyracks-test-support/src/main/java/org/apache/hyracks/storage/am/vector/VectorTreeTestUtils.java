@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.TreeSet;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
@@ -278,6 +279,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k); // Set K for top-K ANN search
+        predicate.setNprobe(1); // Probe only closest cluster for bulk load validation
+        predicate.setEpsilon(0.0); // No level-wise cross-pollination
 
         // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
         IndexAccessParameters iap =
@@ -292,30 +295,41 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
             accessor.search(cursor, predicate);
 
             try {
-                // Collect all results from cursor
-                List<ITupleReference> results = new ArrayList<>();
+                // Deserialize tuples during iteration (ITupleReference is a shared mutable object
+                // that gets repositioned on each next() call, so we must extract values immediately)
+                ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE,
+                        IntegerSerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
+
+                Set<String> seenPKs = new java.util.HashSet<>();
+                int resultCount = 0;
+
                 while (cursor.hasNext()) {
                     cursor.next();
                     ITupleReference tuple = cursor.getTuple();
-                    results.add(tuple);
+
+                    // Deserialize immediately before next() repositions the tuple reference
+                    Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+                    double distance = (Double) values[0];
+                    int centroidId = (Integer) values[1];
+                    String primaryKey = (String) values[2];
+
+                    System.out.println(
+                            " Record: pk='" + primaryKey + "', centroidId=" + centroidId + ", distance=" + distance);
+
+                    assertEquals("All results should be from c10 (centroidId=10)", 10, centroidId);
+                    assertTrue("Duplicate PK found: " + primaryKey, seenPKs.add(primaryKey));
+
+                    resultCount++;
                 }
 
-                LOGGER.info("Top-K Search: Found {} records for query vector [{}, {}, {}] with K={}", results.size(),
-                        queryVector[0], queryVector[1], queryVector[2], k);
+                LOGGER.info("Top-K Search: Found {} unique records for query vector [{}, {}, {}] with K={}",
+                        resultCount, queryVector[0], queryVector[1], queryVector[2], k);
 
                 // Validate we got the expected number of results
-                // c10 cluster has 100 records, so we should get exactly 100 results
-                assertEquals("Top-K search should return K=" + k + " records from c10's cluster", k, results.size());
+                assertEquals("Top-K search should return K=" + k + " records from c10's cluster", k, resultCount);
 
-                printTupleResults(results);
-
-                // Validate all results are from c10 (centroidId = 10)
-                for (ITupleReference tuple : results) {
-                    int centroidId = extractCentroidIdFromTuple(tuple);
-                    assertEquals("All results should be from c10 (centroidId=10)", 10, centroidId);
-                }
-
-                LOGGER.info("Top-K Search: All {} records verified to be from c10 cluster", results.size());
+                LOGGER.info("Top-K Search: All {} records verified to be from c10 cluster with unique PKs",
+                        resultCount);
 
             } finally {
                 cursor.close();

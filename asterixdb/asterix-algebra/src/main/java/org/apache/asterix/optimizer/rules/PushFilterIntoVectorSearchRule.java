@@ -229,10 +229,19 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
             includeFieldPhysicalIndex++;
         }
 
-        // Step 8: Store filter variable mapping as annotation (NOT added to output vars)
+        // Step 8: Store filter variable mapping as annotation
         // This allows VectorSearchPOperator to create correct filter schema
         searchInfo.vectorUnnest.getAnnotations().put(VECTOR_FILTER_VAR_MAPPING, filterVarToFieldIndex);
         searchInfo.vectorUnnest.getAnnotations().put(VECTOR_FILTER_VAR_TYPES, filterVarToType);
+
+        // Step 8b: Add filter variables to the unnest-map's produced variables list
+        // so that the sanity checker knows these variables are defined by this operator.
+        for (Map.Entry<String, LogicalVariable> entry : fieldToNewVar.entrySet()) {
+            LogicalVariable var = entry.getValue();
+            IAType type = filterVarToType.get(var);
+            searchInfo.vectorUnnest.getVariables().add(var);
+            searchInfo.vectorUnnest.getVariableTypes().add(type);
+        }
 
         // Step 9: Rewrite filter to use new variables
         ILogicalExpression rewrittenCondition =
@@ -249,7 +258,8 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
         // Mark as applied
         context.addToDontApplySet(this, op);
 
-        // Recompute types
+        // Recompute types after modifying variables
+        context.computeAndSetTypeEnvironmentForOperator(searchInfo.vectorUnnest);
         OperatorPropertiesUtil.typeOpRec(opRef, context);
 
         System.err.println("=== Successfully pushed filter into vector search ===");
@@ -346,15 +356,15 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
 
         Index.VectorIndexDetails details = (Index.VectorIndexDetails) index.getIndexDetails();
 
-        // Determine quantization from WITH clause description field
+        // Determine quantization from WITH clause quantization field
         AdmObjectNode withObjectNode = details.getWithObjectNode();
-        String description = (withObjectNode != null) ? withObjectNode.getOptionalString("description", null) : null;
+        String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
 
         VectorSearchInfo info = new VectorSearchInfo();
         info.vectorUnnest = unnest;
         info.indexName = params.getIndexName();
         info.includeFieldNames = details.getIncludeFieldNames();
-        info.isQuantized = (description != null);
+        info.isQuantized = (quantization != null);
         info.recordType = (ARecordType) mp.findType(dataset.getItemTypeDatabaseName(),
                 dataset.getItemTypeDataverseName(), dataset.getItemTypeName());
 

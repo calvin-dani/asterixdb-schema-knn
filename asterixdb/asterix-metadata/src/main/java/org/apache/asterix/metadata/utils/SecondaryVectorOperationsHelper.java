@@ -272,7 +272,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
-                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory);
+                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
+                        partitioningProperties.getComputeStorageMap());
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -326,7 +327,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         QuantileCalculatorOperatorDescriptor quantileOp =
                 new QuantileCalculatorOperatorDescriptor(spec, scalarRecDesc, 0.99f, // confidenceInterval
                         7, // bits
-                        dataflowHelperFactory);
+                        dataflowHelperFactory, partitioningProperties.getComputeStorageMap());
         quantileOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, quantileOp,
                 primaryPartitionConstraint);
@@ -891,7 +892,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     public JobSpecification buildCreationJobSpec() throws AlgebricksException {
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
-        boolean useQuantizedCreation = withObjectNode != null && withObjectNode.contains("description");
+        boolean useQuantizedCreation = withObjectNode != null && withObjectNode.contains("quantization");
 
         if (useQuantizedCreation) {
             JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
