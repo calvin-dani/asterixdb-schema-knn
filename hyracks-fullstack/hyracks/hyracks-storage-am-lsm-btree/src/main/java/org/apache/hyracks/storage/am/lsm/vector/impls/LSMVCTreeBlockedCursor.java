@@ -26,9 +26,6 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITupleFilter;
@@ -51,6 +48,9 @@ import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * LSM blocked cursor for optimized vector search using triangle inequality.
@@ -172,7 +172,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.tupleFilter = vectorPred.getTupleFilter();
         if (this.tupleFilter != null) {
             this.referenceFilterTuple = new ReferenceFrameTupleReference();
-            LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] Tuple filter is SET - will filter INCLUDE field predicates");
+            LOGGER.log(Level.INFO,
+                    "[LSMVCTreeBlockedCursor] Tuple filter is SET - will filter INCLUDE field predicates");
         } else {
             LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] Tuple filter is NULL - no INCLUDE field filtering");
         }
@@ -302,7 +303,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             clustersExplored++;
         }
 
-        LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] open() COMPLETE: {} clusters probed, topKWindow.size()={} (BEFORE consumption)",
+        LOGGER.log(Level.INFO,
+                "[LSMVCTreeBlockedCursor] open() COMPLETE: {} clusters probed, topKWindow.size()={} (BEFORE consumption)",
                 clustersExplored, topKWindow.size());
     }
 
@@ -446,8 +448,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                 ITupleReference rightTuple = getNextValidTuple(rightCtx);
                 // Debug: log first few tuples to verify getNextValidTuple is working
                 if (iterCount < 3) {
-                    LOGGER.log(Level.INFO, "[bidir] RIGHT iter={}, tupleReturned={}, fields={}",
-                            iterCount, rightTuple != null, rightTuple != null ? rightTuple.getFieldCount() : -1);
+                    LOGGER.log(Level.INFO, "[bidir] RIGHT iter={}, tupleReturned={}, fields={}", iterCount,
+                            rightTuple != null, rightTuple != null ? rightTuple.getFieldCount() : -1);
                 }
                 if (rightTuple != null) {
                     double dxcFull = extractFullPrecisionDxc(rightTuple);
@@ -480,8 +482,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                 ITupleReference leftTuple = getNextValidTuple(leftCtx);
                 // Debug: log first few tuples to verify getNextValidTuple is working
                 if (iterCount < 3) {
-                    LOGGER.log(Level.INFO, "[bidir] LEFT iter={}, tupleReturned={}, fields={}",
-                            iterCount, leftTuple != null, leftTuple != null ? leftTuple.getFieldCount() : -1);
+                    LOGGER.log(Level.INFO, "[bidir] LEFT iter={}, tupleReturned={}, fields={}", iterCount,
+                            leftTuple != null, leftTuple != null ? leftTuple.getFieldCount() : -1);
                 }
                 if (leftTuple != null) {
                     double dxcFull = extractFullPrecisionDxc(leftTuple);
@@ -514,8 +516,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         }
 
         // Summary log kept for diagnostics
-        LOGGER.log(Level.DEBUG,
-                "[LSMVCTreeBlockedCursor] Search complete: topK={}, processed={}, cancellations={}",
+        LOGGER.log(Level.DEBUG, "[LSMVCTreeBlockedCursor] Search complete: topK={}, processed={}, cancellations={}",
                 topKWindow.size(), totalTuplesProcessed, antimatterCancellations);
     }
 
@@ -874,8 +875,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             // Summary logging via LOGGER (not stderr to avoid blocking)
             LOGGER.log(Level.INFO,
                     "[LSMVCTreeBlockedCursor] Summary: K={}, nprobe={}, clusters={}, processed={}, addToTopKCalls={}, cancellations={}, filtered={}, topK={}",
-                    K, nprobe, clustersExplored, totalTuplesProcessed, addToTopKWindowCallCount, antimatterCancellations, tuplesFilteredOut,
-                    topKWindow.size());
+                    K, nprobe, clustersExplored, totalTuplesProcessed, addToTopKWindowCallCount,
+                    antimatterCancellations, tuplesFilteredOut, topKWindow.size());
 
             // Close bidirectional cursors
             for (int i = 0; i < numComponents; i++) {

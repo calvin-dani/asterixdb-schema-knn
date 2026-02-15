@@ -252,6 +252,32 @@ public class VectorDistanceArrCalculation {
         return dotDouble / (Math.sqrt(normADouble) * Math.sqrt(normBDouble));
     }
 
+    /**
+     * L2 norm of a double vector: sqrt(sum_i a[i]^2).
+     * Returns 0.0 for zero vector or NaN if any component is NaN.
+     */
+    public static double l2Norm(double[] a) {
+        double sum = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            double v = a[i];
+            sum += v * v;
+        }
+        return Double.isNaN(sum) ? Double.NaN : Math.sqrt(sum);
+    }
+
+    /**
+     * Normalize vector in place to unit L2 norm.
+     * No-op if norm is zero or NaN (avoids division by zero).
+     */
+    public static void normalizeL2(double[] a) {
+        double norm = l2Norm(a);
+        if (norm > 0.0 && !Double.isNaN(norm)) {
+            for (int i = 0; i < a.length; i++) {
+                a[i] /= norm;
+            }
+        }
+    }
+
     // Dot Product
     public static double dot(double[] a, double[] b) {
         double sum = 0.0;

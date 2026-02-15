@@ -288,8 +288,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         LogicalVariable searchApproachVar = context.newVar();
         queryVarList.add(searchApproachVar);
         if (annDistanceExpr.getArguments().size() > 5) {
-            ILogicalExpression searchApproachExpr =
-                    annDistanceExpr.getArguments().get(5).getValue().cloneExpression();
+            ILogicalExpression searchApproachExpr = annDistanceExpr.getArguments().get(5).getValue().cloneExpression();
             queryExprList.add(new MutableObject<>(ensureInt32Constant(searchApproachExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(0)))));

@@ -83,7 +83,7 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
     protected Float maxQuantile;
     protected Float alpha;
     protected Integer bits;
-protected Integer sampleCount;
+    protected Integer sampleCount;
 
     public LSMVCTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,

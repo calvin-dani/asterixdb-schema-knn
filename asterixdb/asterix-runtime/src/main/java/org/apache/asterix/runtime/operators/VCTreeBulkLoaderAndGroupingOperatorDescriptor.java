@@ -1012,8 +1012,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                 }
 
                                 // Find closest centroid (full-precision navigation + quantized distance output)
-                                ClusterSearchResult result =
-                                        findClosestCentroid(embedding, quantizedEmbedding);
+                                ClusterSearchResult result = findClosestCentroid(embedding, quantizedEmbedding);
                                 if (result != null) {
                                     successfulQueries++;
 

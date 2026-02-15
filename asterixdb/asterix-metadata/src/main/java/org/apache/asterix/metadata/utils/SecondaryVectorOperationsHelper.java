@@ -37,7 +37,6 @@ import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.entities.InternalDatasetDetails;
-import org.apache.asterix.metadata.utils.KeyFieldTypeUtil;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.pointables.base.DefaultOpenFieldType;
 import org.apache.asterix.om.types.AOrderedListType;
@@ -214,7 +213,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         //        System.err.println("Permit UUID: " + permitUUID);
         //        System.err.println("Permit state will be used by StaticStructureCreator operator");
 
-        // Extract K value from WITH clause
+        // Extract K value and distance metric from WITH clause (same source as loading job / query)
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
         int K = 20; // default value
         if (withObjectNode != null) {
@@ -226,6 +225,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             K = 20;
         }
         //        System.err.println("Using K value: " + K + " for K-means clustering");
+
+        // Distance metric from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.)
+        String distanceMetric =
+                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
 
         int maxScalableKmeansIter = 2;
 
@@ -269,7 +272,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
-                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory);
+                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
+                        distanceMetric);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -845,36 +849,34 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     public JobSpecification buildCreationJobSpec() throws AlgebricksException {
-            Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
-            AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
-            boolean useQuantizedCreation = withObjectNode != null && withObjectNode.contains("description");
+        Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+        AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
+        boolean useQuantizedCreation = withObjectNode != null && withObjectNode.contains("description");
 
-            if (useQuantizedCreation) {
-                    JobSpecification spec = RuntimeUtils
-                                    .createJobSpecification(metadataProvider.getApplicationContext());
-                    IndexUtil.bindJobEventListener(spec, metadataProvider);
+        if (useQuantizedCreation) {
+            JobSpecification spec = RuntimeUtils.createJobSpecification(metadataProvider.getApplicationContext());
+            IndexUtil.bindJobEventListener(spec, metadataProvider);
 
-                    int vectorDimensions = withObjectNode.getOptionalInt("dimension", 384);
+            int vectorDimensions = withObjectNode.getOptionalInt("dimension", 384);
 
-                    // 1. Identify "ANALYZE" sample index
-                Index sampleIndex = metadataProvider.findSampleIndex(dataset.getDatabaseName(),
-                                dataset.getDataverseName(),
-                                dataset.getDatasetName());
-                if (sampleIndex == null) {
-                        throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                                        "A sample index must exist before creating a quantized vector index. Run ANALYZE DATASET first.");
-                }
+            // 1. Identify "ANALYZE" sample index
+            Index sampleIndex = metadataProvider.findSampleIndex(dataset.getDatabaseName(), dataset.getDataverseName(),
+                    dataset.getDatasetName());
+            if (sampleIndex == null) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "A sample index must exist before creating a quantized vector index. Run ANALYZE DATASET first.");
+            }
 
-                // 2. Extract quantization parameters
+            // 2. Extract quantization parameters
             int bits = withObjectNode.getOptionalInt("bits", DEFAULT_BITS);
-            float confidenceInterval = (float) withObjectNode.getOptionalDouble("confidence_interval",
-                            DEFAULT_CONFIDENCE_INTERVAL);
+            float confidenceInterval =
+                    (float) withObjectNode.getOptionalDouble("confidence_interval", DEFAULT_CONFIDENCE_INTERVAL);
 
             // 3. Prepare Vector Extraction
             List<List<String>> vectorFieldPath = vectorIndexDetails.getKeyFieldNames();
             if (vectorFieldPath == null || vectorFieldPath.isEmpty()) {
-                    throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                                    "Vector index must specify vector field");
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Vector index must specify vector field");
             }
             List<String> vectorFieldName = vectorFieldPath.get(0);
 
@@ -887,53 +889,54 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
             // --- Step 1: Scan Sample Index ---
             // Setup partitioning and projector
-            PartitioningProperties samplePartitioningProperties = metadataProvider.getPartitioningProperties(dataset,
-                            sampleIndex.getIndexName());
+            PartitioningProperties samplePartitioningProperties =
+                    metadataProvider.getPartitioningProperties(dataset, sampleIndex.getIndexName());
             AlgebricksPartitionConstraint samplePartitionConstraint = samplePartitioningProperties.getConstraints();
-            ITupleProjectorFactory projectorFactory = IndexUtil.createPrimaryIndexScanTupleProjectorFactory(
-                            dataset.getDatasetFormatInfo(), ALL_FIELDS_TYPE, itemType, metaType,
-                            dataset.getPrimaryKeys().size());
+            ITupleProjectorFactory projectorFactory =
+                    IndexUtil.createPrimaryIndexScanTupleProjectorFactory(dataset.getDatasetFormatInfo(),
+                            ALL_FIELDS_TYPE, itemType, metaType, dataset.getPrimaryKeys().size());
 
             IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
             IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
-                            Integer.MAX_VALUE, 0, projectorFactory);
+                    Integer.MAX_VALUE, 0, projectorFactory);
 
             spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
             sourceOp = targetOp;
 
             // --- Step 2: Extract Vector Features ---
             // Vector Accessor
-            IScalarEvaluatorFactory vectorFieldEvalFactory = createFieldAccessor(itemType, recordColumn,
-                            vectorFieldName);
+            IScalarEvaluatorFactory vectorFieldEvalFactory =
+                    createFieldAccessor(itemType, recordColumn, vectorFieldName);
 
             // Flattened Descriptor
             IDataFormat format = metadataProvider.getDataFormat();
             ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
             ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
-            ISerializerDeserializer<?>[] flattenedSerDes = new ISerializerDeserializer[] {
-                            serdeProvider.getSerializerDeserializer(BuiltinType.ADOUBLE) };
-            ITypeTraits[] flattenedTypeTraits = new ITypeTraits[] {
-                            typeTraitProvider.getTypeTrait(BuiltinType.ADOUBLE) };
+            ISerializerDeserializer<?>[] flattenedSerDes =
+                    new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ADOUBLE) };
+            ITypeTraits[] flattenedTypeTraits =
+                    new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ADOUBLE) };
             RecordDescriptor flattenedRecordDesc = new RecordDescriptor(flattenedSerDes, flattenedTypeTraits);
 
             targetOp = new VectorComponentExtractorOperatorDescriptor(spec, vectorFieldEvalFactory,
-                            dataset.getPrimaryRecordDescriptor(metadataProvider), flattenedRecordDesc);
+                    dataset.getPrimaryRecordDescriptor(metadataProvider), flattenedRecordDesc);
             AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
-                            samplePartitionConstraint);
+                    samplePartitionConstraint);
             spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
             sourceOp = targetOp;
 
             // --- Step 3: Local Aggregate ---
             // Aggregate Output Descriptor
-            ISerializerDeserializer<?>[] aggOutputSerDes = new ISerializerDeserializer[] {
-                            serdeProvider.getSerializerDeserializer(BuiltinType.ABINARY) };
-            ITypeTraits[] aggOutputTypeTraits = new ITypeTraits[] {
-                            typeTraitProvider.getTypeTrait(BuiltinType.ABINARY) };
+            ISerializerDeserializer<?>[] aggOutputSerDes =
+                    new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ABINARY) };
+            ITypeTraits[] aggOutputTypeTraits =
+                    new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ABINARY) };
             RecordDescriptor aggOutputRecordDesc = new RecordDescriptor(aggOutputSerDes, aggOutputTypeTraits);
 
             // Aggregate Function
             IScalarEvaluatorFactory[] aggArgs = new IScalarEvaluatorFactory[] { new ColumnAccessEvalFactory(0) };
-            QuantizationConstantsAggregateDescriptor aggDescriptor = (QuantizationConstantsAggregateDescriptor) QuantizationConstantsAggregateDescriptor.FACTORY
+            QuantizationConstantsAggregateDescriptor aggDescriptor =
+                    (QuantizationConstantsAggregateDescriptor) QuantizationConstantsAggregateDescriptor.FACTORY
                             .createFunctionDescriptor();
             aggDescriptor.setImmutableStates(confidenceInterval, bits);
             IAggregateEvaluatorFactory localAggFactory = aggDescriptor.createAggregateEvaluatorFactory(aggArgs);
@@ -941,66 +944,65 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             // Grouping (Preclustered - GroupAll)
             int[] groupFields = new int[0];
             int framesLimit = OptimizationConfUtil.getGroupByNumFrames(
-                            metadataProvider.getApplicationContext().getCompilerProperties(),
-                            metadataProvider.getConfig(),
-                            sourceLoc);
+                    metadataProvider.getApplicationContext().getCompilerProperties(), metadataProvider.getConfig(),
+                    sourceLoc);
             AbstractAggregatorDescriptorFactory localAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
-                            new IAggregateEvaluatorFactory[] { localAggFactory }, groupFields);
+                    new IAggregateEvaluatorFactory[] { localAggFactory }, groupFields);
             IBinaryComparatorFactory[] comparatorFactories = new IBinaryComparatorFactory[0];
 
             targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories,
-                            localAggFactoryDesc, aggOutputRecordDesc, true, framesLimit);
+                    localAggFactoryDesc, aggOutputRecordDesc, true, framesLimit);
             AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
-                            samplePartitionConstraint);
+                    samplePartitionConstraint);
             spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
             sourceOp = targetOp;
 
             // --- Step 4: Global Aggregate ---
             IAggregateEvaluatorFactory globalAggFactory = aggDescriptor.createAggregateEvaluatorFactory(aggArgs);
-            AbstractAggregatorDescriptorFactory globalAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
+            AbstractAggregatorDescriptorFactory globalAggFactoryDesc =
+                    new SimpleAlgebricksAccumulatingAggregatorFactory(
                             new IAggregateEvaluatorFactory[] { globalAggFactory }, groupFields);
 
             targetOp = new PreclusteredGroupOperatorDescriptor(spec, groupFields, comparatorFactories,
-                            globalAggFactoryDesc, aggOutputRecordDesc, true, framesLimit);
+                    globalAggFactoryDesc, aggOutputRecordDesc, true, framesLimit);
 
             // Global aggregate runs on a single partition
-            AlgebricksAbsolutePartitionConstraint clusterLocations = metadataProvider.getApplicationContext()
-                            .getClusterStateManager().getNodeSortedClusterLocations();
-            AlgebricksAbsolutePartitionConstraint singlePartitionConstraint = new AlgebricksAbsolutePartitionConstraint(
-                            new String[] { clusterLocations.getLocations()[0] });
+            AlgebricksAbsolutePartitionConstraint clusterLocations =
+                    metadataProvider.getApplicationContext().getClusterStateManager().getNodeSortedClusterLocations();
+            AlgebricksAbsolutePartitionConstraint singlePartitionConstraint =
+                    new AlgebricksAbsolutePartitionConstraint(new String[] { clusterLocations.getLocations()[0] });
             AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, targetOp,
-                            singlePartitionConstraint);
+                    singlePartitionConstraint);
 
             // Connect Local -> Global (OnePartition)
             spec.connect(new MToNPartitioningConnectorDescriptor(spec, new OnePartitionComputerFactory()), sourceOp, 0,
-                            targetOp, 0);
+                    targetOp, 0);
             sourceOp = targetOp; // This is the Global Aggregate Output
 
             // --- Step 5: Quantized Index Create ---
             PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
             int[][] computeStorageMap = partitioningProperties.getComputeStorageMap();
-            IndexBuilderFactory[][] indexBuilderFactories = DatasetUtil.getIndexBuilderFactories(dataset,
-                            metadataProvider, index, itemType, metaType, secondaryFileSplitProvider, mergePolicyFactory,
-                            mergePolicyProperties, computeStorageMap);
+            IndexBuilderFactory[][] indexBuilderFactories =
+                    DatasetUtil.getIndexBuilderFactories(dataset, metadataProvider, index, itemType, metaType,
+                            secondaryFileSplitProvider, mergePolicyFactory, mergePolicyProperties, computeStorageMap);
 
             QuantizedIndexCreateOperatorDescriptor createOp = new QuantizedIndexCreateOperatorDescriptor(spec,
-                            indexBuilderFactories, computeStorageMap, aggOutputRecordDesc);
+                    indexBuilderFactories, computeStorageMap, aggOutputRecordDesc);
 
             AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, createOp,
-                            secondaryPartitionConstraint);
+                    secondaryPartitionConstraint);
 
             // Connect Broadcast: GlobalAgg -> Broadcast -> QuantizedCreate
             spec.connect(new org.apache.hyracks.dataflow.std.connectors.MToNBroadcastConnectorDescriptor(spec),
-                            sourceOp,
-                            0, createOp, 0);
+                    sourceOp, 0, createOp, 0);
 
             spec.addRoot(createOp);
             spec.setConnectorPolicyAssignmentPolicy(new ConnectorPolicyAssignmentPolicy());
 
             return spec;
-    } else {
+        } else {
             return super.buildCreationJobSpec();
-    }
+        }
     }
 
     @Override
@@ -1138,9 +1140,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 anySecondaryKeyIsNullable = anySecondaryKeyIsNullable || keyTypePair.second;
                 // For nullable/missable include fields, use a NULL-safe serializer.
                 // Unlike B-tree which filters out NULL records, vector INCLUDE fields preserve NULLs.
-                IAType serdeType = keyTypePair.second
-                        ? KeyFieldTypeUtil.makeUnknownableType(keyType, true, true)
-                        : keyType;
+                IAType serdeType =
+                        keyTypePair.second ? KeyFieldTypeUtil.makeUnknownableType(keyType, true, true) : keyType;
                 secondaryRecFields[fieldIndex] = serdeProvider.getSerializerDeserializer(serdeType);
                 secondaryComparatorFactories[fieldIndex] =
                         comparatorFactoryProvider.getBinaryComparatorFactory(keyType, true);

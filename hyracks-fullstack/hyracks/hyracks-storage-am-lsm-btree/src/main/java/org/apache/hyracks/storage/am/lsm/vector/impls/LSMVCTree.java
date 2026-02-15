@@ -65,7 +65,6 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileRefe
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
-
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;

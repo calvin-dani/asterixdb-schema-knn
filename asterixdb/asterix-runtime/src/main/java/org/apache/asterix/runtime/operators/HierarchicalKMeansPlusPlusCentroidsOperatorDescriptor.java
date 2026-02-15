@@ -29,6 +29,7 @@ import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -599,15 +600,25 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             UTF8StringPointable.generateUTF8Pointable("manhattan distance");
     private static final UTF8StringPointable COSINE_FORMAT =
             UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+    private static final UTF8StringPointable COSINE_ALIAS = UTF8StringPointable.generateUTF8Pointable("cosine");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
-    // Distance function hash map
-    private static final Map<Integer, DistanceFunction> DISTANCE_MAP =
-            Map.of(MANHATTAN_FORMAT.hash(), new ManhattanDistanceFunction(), EUCLIDEAN_DISTANCE.hash(),
-                    new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction(),
-                    EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
-                    EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
-                    new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+    // Distance function hash map (includes "cosine" alias for DDL-normalized metric)
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = buildDistanceMap();
+
+    private static Map<Integer, DistanceFunction> buildDistanceMap() {
+        DistanceFunction cosineFunc = new CosineDistanceFunction();
+        Map<Integer, DistanceFunction> m = new HashMap<>();
+        m.put(MANHATTAN_FORMAT.hash(), new ManhattanDistanceFunction());
+        m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction());
+        m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction());
+        m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction());
+        m.put(EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction());
+        m.put(COSINE_FORMAT.hash(), cosineFunc);
+        m.put(COSINE_ALIAS.hash(), cosineFunc);
+        m.put(DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+        return Collections.unmodifiableMap(m);
+    }
 
     // Clipping constants for centroid values
     private static final double DEFAULT_CLIP_MIN = -1e3;
@@ -627,11 +638,16 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
-        UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
+        if (distanceType == null || distanceType.trim().isEmpty()) {
+            return new EuclideanSquaredDistanceFunction();
+        }
+        String normalized = distanceType.toLowerCase().trim();
+        UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(normalized);
         DistanceFunction func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
         if (func == null) {
-            throw new IllegalArgumentException("Unsupported distance function: " + distanceType);
+            // Default to euclidean squared for unknown metrics (consistent with VCTreeBulkLoaderAndGroupingOperatorDescriptor)
+            return new EuclideanSquaredDistanceFunction();
         }
         return func;
     }
@@ -687,6 +703,26 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         }
 
         return clipped;
+    }
+
+    /**
+     * Whether the current distance function requires centroids to be L2-normalized after each
+     * Lloyd update (e.g. cosine similarity, dot product on unit vectors). Aligns with FAISS
+     * spherical k-means and Spark's CosineDistanceMeasure.
+     */
+    private boolean requiresNormalizedCentroids() {
+        return distanceFunction instanceof CosineDistanceFunction
+                || distanceFunction instanceof DotProductDistanceFunction;
+    }
+
+    /**
+     * Normalizes centroid in place to unit L2 norm when using cosine similarity or dot product,
+     * so that centroid semantics match FAISS/Spark (spherical k-means). No-op for other metrics.
+     */
+    private void maybeNormalizeCentroid(double[] centroid) {
+        if (centroid != null && requiresNormalizedCentroids()) {
+            VectorDistanceArrCalculation.normalizeL2(centroid);
+        }
     }
 
     /**
@@ -805,7 +841,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory) {
+            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, String distanceMetric) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -820,8 +856,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.indexHelperFactory = indexHelperFactory;
 
-        // Initialize distance function to euclidean squared to avoid null pointer issues
-        this.distanceFunction = new EuclideanSquaredDistanceFunction();
+        // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
+        this.distanceFunction = getDistanceFunction(distanceMetric);
     }
 
     @Override
@@ -1532,6 +1568,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 if (dist > 1e-4) {
                                     converged = false;
                                 }
+                                maybeNormalizeCentroid(newCentroids[i]);
                                 centroids.set(i, newCentroids[i]);
                             }
                         }
@@ -1681,6 +1718,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 if (dist > 1e-4) {
                                     converged = false;
                                 }
+                                maybeNormalizeCentroid(newCentroids[i]);
                                 resultCentroids.set(i, newCentroids[i]);
                             }
                         }
@@ -2079,14 +2117,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 if (dist > 1e-4) {
                                     converged = false;
                                 }
+                                maybeNormalizeCentroid(newCentroids[i]);
                                 resultCentroids.set(i, newCentroids[i]);
                             } else {
                                 // Reinitialize empty cluster
                                 // Select random centroid from input centroids list
                                 if (!centroids.isEmpty()) {
                                     int randomIdx = rand.nextInt(centroids.size());
-                                    resultCentroids.set(i,
-                                            Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length));
+                                    double[] reinit =
+                                            Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length);
+                                    maybeNormalizeCentroid(reinit);
+                                    resultCentroids.set(i, reinit);
                                     //                                    System.err.println(
                                     //                                            "Reinitialized empty cluster " + i + " with random centroid from input");
                                     converged = false; // Force continuation since we changed a centroid

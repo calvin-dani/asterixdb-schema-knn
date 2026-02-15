@@ -49,10 +49,10 @@ import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
-import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
@@ -1366,26 +1366,22 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 try {
                     // Create ScalarVectorQuantizer via reflection (AsterixDB class, can't import directly)
                     // qParams = {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
-                    Class<?> sampleFileClass = Class.forName(
-                            "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile");
-                    Class<?> paramsClass = Class.forName(
-                            "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$Params");
+                    Class<?> sampleFileClass =
+                            Class.forName("org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile");
+                    Class<?> paramsClass = Class
+                            .forName("org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$Params");
                     Class<?> simFuncClass = Class.forName(
                             "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$SimilarityFunction");
-                    Class<?> quantizerClass = Class.forName(
-                            "org.apache.asterix.common.storage.ScalarVectorQuantizer");
+                    Class<?> quantizerClass = Class.forName("org.apache.asterix.common.storage.ScalarVectorQuantizer");
 
                     // Params(int bits, int vectorDimensions, int sampleCount, float confidenceInterval,
                     //        float minQuantile, float maxQuantile, float alpha)
-                    Object params = paramsClass
-                            .getConstructor(int.class, int.class, int.class, float.class, float.class, float.class,
-                                    float.class)
-                            .newInstance((int) qParams[4], tree.vectorDimensions, (int) qParams[5], qParams[3],
-                                    qParams[0], qParams[1], qParams[2]);
+                    Object params = paramsClass.getConstructor(int.class, int.class, int.class, float.class,
+                            float.class, float.class, float.class).newInstance((int) qParams[4], tree.vectorDimensions,
+                                    (int) qParams[5], qParams[3], qParams[0], qParams[1], qParams[2]);
 
                     // SimilarityFunction fromDistanceMetric(String)
-                    java.lang.reflect.Method fromMetric =
-                            sampleFileClass.getMethod("fromDistanceMetric", String.class);
+                    java.lang.reflect.Method fromMetric = sampleFileClass.getMethod("fromDistanceMetric", String.class);
                     Object simFunc = fromMetric.invoke(null, distanceMetric);
 
                     // new ScalarVectorQuantizer(Params, SimilarityFunction)
