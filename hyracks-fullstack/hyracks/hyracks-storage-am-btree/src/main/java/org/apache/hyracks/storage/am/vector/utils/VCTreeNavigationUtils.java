@@ -159,28 +159,38 @@ public class VCTreeNavigationUtils {
 
     /**
      * Extract centroid from an interior frame tuple (format: <cid, centroid, child_ptr>).
+     * Reads the centroid vector directly from tuple bytes to avoid full deserialization overhead.
      */
     private static double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
-        // Centroid is the second field in interior frame tuples
-        try {
-            // Create field serializers array - specify only the centroid field we need
-            ISerializerDeserializer<?>[] fieldSerdes = new ISerializerDeserializer<?>[3];
-            fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // Field 0: cid
-            fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE; // Field 1: centroid
-            fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // Field 2: metadata_pointer
+        // Field 1 is the centroid vector, stored as [4 bytes: len][len * 8 bytes: doubles]
+        byte[] data = tuple.getFieldData(1);
+        int offset = tuple.getFieldStart(1);
+        int fieldLen = tuple.getFieldLength(1);
 
-            // Deserialize the tuple using the proper TupleUtils method
-            Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+        // Read array length (number of doubles)
+        int len = ((data[offset] & 0xFF) << 24) | ((data[offset + 1] & 0xFF) << 16)
+                | ((data[offset + 2] & 0xFF) << 8) | (data[offset + 3] & 0xFF);
 
-            // Extract the centroid from the deserialized fields
-            double[] doubleCentroid = (double[]) fieldValues[1];
-
-            return doubleCentroid;
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to extract centroid from interior tuple using TupleUtils.deserializeTuple()", e);
+        // Sanity check: len must be positive and consistent with field length
+        int expectedFieldLen = 4 + len * 8;
+        if (len <= 0 || len > 10000 || expectedFieldLen > fieldLen) {
+            throw new RuntimeException(String.format(
+                    "Corrupted centroid in interior tuple: len=%d, fieldLen=%d, expectedFieldLen=%d (page data may be corrupt)",
+                    len, fieldLen, expectedFieldLen));
         }
+
+        // Read doubles directly from bytes
+        double[] centroid = new double[len];
+        offset += 4; // skip length prefix
+        for (int i = 0; i < len; i++) {
+            long bits = ((long) (data[offset] & 0xFF) << 56) | ((long) (data[offset + 1] & 0xFF) << 48)
+                    | ((long) (data[offset + 2] & 0xFF) << 40) | ((long) (data[offset + 3] & 0xFF) << 32)
+                    | ((long) (data[offset + 4] & 0xFF) << 24) | ((long) (data[offset + 5] & 0xFF) << 16)
+                    | ((long) (data[offset + 6] & 0xFF) << 8) | (data[offset + 7] & 0xFF);
+            centroid[i] = Double.longBitsToDouble(bits);
+            offset += 8;
+        }
+        return centroid;
     }
 
     /**
@@ -1116,7 +1126,12 @@ public class VCTreeNavigationUtils {
         List<ChildCentroid> children = new ArrayList<>();
 
         // Collect from first page (already have frame)
-        for (int i = 0; i < initialFrame.getTupleCount(); i++) {
+        int tupleCount = initialFrame.getTupleCount();
+        LOGGER.warn(String.format(
+                "[collectAndSortChildren] pageId=%d, tupleCount=%d, queryDim=%d",
+                startPageId, tupleCount, state.queryVector.length));
+
+        for (int i = 0; i < tupleCount; i++) {
             try {
                 ITreeIndexTupleReference tuple = initialFrame.createTupleReference();
                 tuple.resetByTupleIndex(initialFrame, i);
@@ -1127,15 +1142,22 @@ public class VCTreeNavigationUtils {
                     int childPageId = initialFrame.getChildPageId(i);
                     children.add(new ChildCentroid(childPageId, distance, i));
                 }
-            } catch (Exception e) {
-                // Skip malformed tuples
+            } catch (RuntimeException | OutOfMemoryError e) {
+                LOGGER.error(String.format(
+                        "[collectAndSortChildren] Error reading tuple %d on page %d: %s",
+                        i, startPageId, e.getMessage()), e);
+                throw e;
             }
         }
 
         // Handle overflow pages
         boolean hasOverflow = initialFrame.getOverflowFlagBit();
+        int nextPageId = hasOverflow ? initialFrame.getNextPage() : -1;
+        LOGGER.warn(String.format(
+                "[collectAndSortChildren] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                startPageId, hasOverflow, nextPageId));
+
         if (hasOverflow) {
-            int nextPageId = initialFrame.getNextPage();
             collectChildrenFromOverflow(state, nextPageId, children, distanceFunction);
         }
 
@@ -1151,7 +1173,9 @@ public class VCTreeNavigationUtils {
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         int currentPageId = pageId;
+        int overflowPageCount = 0;
         while (currentPageId != -1) {
+            overflowPageCount++;
             ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
             try {
                 page.acquireReadLatch();
@@ -1159,7 +1183,12 @@ public class VCTreeNavigationUtils {
                         (IVectorClusteringInteriorFrame) state.interiorFrameFactory.createFrame();
                 frame.setPage(page);
 
-                for (int i = 0; i < frame.getTupleCount(); i++) {
+                int tupleCount = frame.getTupleCount();
+                LOGGER.warn(String.format(
+                        "[collectChildrenFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
+                        overflowPageCount, currentPageId, tupleCount));
+
+                for (int i = 0; i < tupleCount; i++) {
                     try {
                         ITreeIndexTupleReference tuple = frame.createTupleReference();
                         tuple.resetByTupleIndex(frame, i);
@@ -1170,13 +1199,20 @@ public class VCTreeNavigationUtils {
                             int childPageId = frame.getChildPageId(i);
                             children.add(new ChildCentroid(childPageId, distance, i));
                         }
-                    } catch (Exception e) {
-                        // Skip malformed tuples
+                    } catch (RuntimeException | OutOfMemoryError e) {
+                        LOGGER.error(String.format(
+                                "[collectChildrenFromOverflow] Error reading tuple %d on overflow page %d: %s",
+                                i, currentPageId, e.getMessage()), e);
+                        throw e;
                     }
                 }
 
                 boolean hasOverflow = frame.getOverflowFlagBit();
-                currentPageId = hasOverflow ? frame.getNextPage() : -1;
+                int nextPageId = hasOverflow ? frame.getNextPage() : -1;
+                LOGGER.warn(String.format(
+                        "[collectChildrenFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                        currentPageId, hasOverflow, nextPageId));
+                currentPageId = nextPageId;
 
             } finally {
                 page.releaseReadLatch();
@@ -1202,7 +1238,12 @@ public class VCTreeNavigationUtils {
         List<LeafCentroid> centroids = new ArrayList<>();
 
         // Collect from first page
-        for (int i = 0; i < initialFrame.getTupleCount(); i++) {
+        int tupleCount = initialFrame.getTupleCount();
+        LOGGER.warn(String.format(
+                "[collectAndSortLeafCentroids] pageId=%d, tupleCount=%d, queryDim=%d",
+                startPageId, tupleCount, state.queryVector.length));
+
+        for (int i = 0; i < tupleCount; i++) {
             try {
                 ITreeIndexTupleReference tuple = initialFrame.createTupleReference();
                 tuple.resetByTupleIndex(initialFrame, i);
@@ -1214,15 +1255,22 @@ public class VCTreeNavigationUtils {
                     long directoryPageId = initialFrame.getMetadataPagePointer(i);
                     centroids.add(new LeafCentroid(centroidId, distance, i, startPageId, centroid, directoryPageId));
                 }
-            } catch (Exception e) {
-                // Skip malformed tuples
+            } catch (RuntimeException | OutOfMemoryError e) {
+                LOGGER.error(String.format(
+                        "[collectAndSortLeafCentroids] Error reading tuple %d on page %d: %s",
+                        i, startPageId, e.getMessage()), e);
+                throw e;
             }
         }
 
         // Handle overflow pages
         boolean hasOverflow = initialFrame.getOverflowFlagBit();
+        int nextPageId = hasOverflow ? initialFrame.getNextLeaf() : -1;
+        LOGGER.warn(String.format(
+                "[collectAndSortLeafCentroids] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                startPageId, hasOverflow, nextPageId));
+
         if (hasOverflow) {
-            int nextPageId = initialFrame.getNextLeaf();
             collectCentroidsFromOverflow(state, nextPageId, centroids, distanceFunction);
         }
 
@@ -1238,14 +1286,21 @@ public class VCTreeNavigationUtils {
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         int currentPageId = pageId;
+        int overflowPageCount = 0;
         while (currentPageId != -1) {
+            overflowPageCount++;
             ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
             try {
                 page.acquireReadLatch();
                 IVectorClusteringLeafFrame frame = (IVectorClusteringLeafFrame) state.leafFrameFactory.createFrame();
                 frame.setPage(page);
 
-                for (int i = 0; i < frame.getTupleCount(); i++) {
+                int tupleCount = frame.getTupleCount();
+                LOGGER.warn(String.format(
+                        "[collectCentroidsFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
+                        overflowPageCount, currentPageId, tupleCount));
+
+                for (int i = 0; i < tupleCount; i++) {
                     try {
                         ITreeIndexTupleReference tuple = frame.createTupleReference();
                         tuple.resetByTupleIndex(frame, i);
@@ -1258,13 +1313,20 @@ public class VCTreeNavigationUtils {
                             centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid,
                                     directoryPageId));
                         }
-                    } catch (Exception e) {
-                        // Skip malformed tuples
+                    } catch (RuntimeException | OutOfMemoryError e) {
+                        LOGGER.error(String.format(
+                                "[collectCentroidsFromOverflow] Error reading tuple %d on overflow page %d: %s",
+                                i, currentPageId, e.getMessage()), e);
+                        throw e;
                     }
                 }
 
                 boolean hasOverflow = frame.getOverflowFlagBit();
-                currentPageId = hasOverflow ? frame.getNextLeaf() : -1;
+                int nextPageId = hasOverflow ? frame.getNextLeaf() : -1;
+                LOGGER.warn(String.format(
+                        "[collectCentroidsFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                        currentPageId, hasOverflow, nextPageId));
+                currentPageId = nextPageId;
 
             } finally {
                 page.releaseReadLatch();

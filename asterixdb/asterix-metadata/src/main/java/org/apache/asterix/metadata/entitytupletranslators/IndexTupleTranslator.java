@@ -844,12 +844,18 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Handle case where WITH properties are null (no WITH clause was specified)
         int dimension = -1;
         int train_list = -1;
+        int num_clusters = -1;
         String quantization = "INVALID";
         String similarity = "INVALID";
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
+            // Accept both "train_list_number" (from SQL++ WITH clause) and "train_list" (from metadata roundtrip)
             train_list = properties.getOptionalInt("train_list_number", -1);
+            if (train_list < 0) {
+                train_list = properties.getOptionalInt("train_list", -1);
+            }
+            num_clusters = properties.getOptionalInt("num_clusters", -1);
             quantization = properties.getOptionalString("quantization", "INVALID");
             similarity = properties.getOptionalString("similarity", "INVALID");
         }
@@ -861,7 +867,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             throw new HyracksDataException("No train_list_number or percentage defined");
         }
 
-        if (similarity == "INVALID") {
+        if ("INVALID".equals(similarity)) {
             throw new HyracksDataException("No similarity metric defined");
         }
         nameValue.reset();
@@ -877,6 +883,15 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         fieldValue.reset();
         int32Serde.serialize(new AInt32(train_list), fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
+
+        if (num_clusters > 0) {
+            nameValue.reset();
+            aString.setValue("num_clusters");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            int32Serde.serialize(new AInt32(num_clusters), fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
 
         if (!"INVALID".equals(quantization)) {
             nameValue.reset();
@@ -903,6 +918,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Default values (matching writeWithProperties defaults)
         int dimension = -1;
         int train_list = -1;
+        int num_clusters = -1;
         String quantization = "INVALID";
         String similarity = "INVALID";
 
@@ -921,6 +937,15 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             IAObject trainListObj = indexRecord.getValueByPos(trainListPos);
             if (trainListObj != null && trainListObj.getType().getTypeTag() == ATypeTag.INTEGER) {
                 train_list = ((AInt32) trainListObj).getIntegerValue();
+            }
+        }
+
+        // Read num_clusters field
+        int numClustersPos = indexRecord.getType().getFieldIndex("num_clusters");
+        if (numClustersPos >= 0) {
+            IAObject numClustersObj = indexRecord.getValueByPos(numClustersPos);
+            if (numClustersObj != null && numClustersObj.getType().getTypeTag() == ATypeTag.INTEGER) {
+                num_clusters = ((AInt32) numClustersObj).getIntegerValue();
             }
         }
 
@@ -943,7 +968,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
 
         // Reconstruct AdmObjectNode only if at least one field differs from default
-        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1)
+        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || (num_clusters != -1)
                 || (!"default".equals(quantization) && !"INVALID".equals(quantization))
                 || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity));
 
@@ -951,25 +976,19 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             return null;
         }
 
-        //        if(dimension < 0){
-        //            throw new HyracksDataException("No dimensions defined");
-        //        }
-        //        if(train_list < 0){
-        //            throw new HyracksDataException("No train_list_number or percentage defined");
-        //        }
-        //
-        //        if(similarity == "INVALID"){
-        //            throw new HyracksDataException("No similarity metric defined");
-        //        }
-
         AdmObjectNode withObjectNode = new AdmObjectNode();
 
         if (dimension != -1) {
             withObjectNode.set("dimension", new AdmBigIntNode(dimension));
         }
 
+        // Use "train_list_number" key to match what consumers expect (SecondaryVectorOperationsHelper, writeWithProperties)
         if (train_list != -1) {
-            withObjectNode.set("train_list", new AdmBigIntNode(train_list));
+            withObjectNode.set("train_list_number", new AdmBigIntNode(train_list));
+        }
+
+        if (num_clusters != -1) {
+            withObjectNode.set("num_clusters", new AdmBigIntNode(num_clusters));
         }
 
         if (!"default".equals(quantization) && !"INVALID".equals(quantization)) {

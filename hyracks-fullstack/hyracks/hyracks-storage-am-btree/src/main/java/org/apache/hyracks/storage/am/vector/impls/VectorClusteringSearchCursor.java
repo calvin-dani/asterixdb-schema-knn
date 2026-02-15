@@ -18,8 +18,13 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -63,6 +68,12 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     // Centroid-to-directory-page mapping (memory components only, null for disk)
     private int[] centroidDirPageMap;
     private int firstLeafCentroidIdForMap;
+    // Lazily-built centroid→directoryPageId map for disk components.
+    // When centroidDirPageMap is null and openClusterByResult() is called,
+    // the ClusterSearchResult's directoryPageId may be from a DIFFERENT component
+    // (e.g., static structure with predicted IDs). This map resolves the correct
+    // directory page ID by scanning this component's own leaf pages.
+    private Map<Integer, Long> localCentroidDirPageMap;
 
     // Cursor state fields
     /* Metadata page for current cluster */
@@ -891,10 +902,11 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * For memory components: uses centroidDirPageMap for O(1) lookup (the map
      * translates centroid IDs to VBC directory page IDs).
      *
-     * For disk components: uses the directoryPageId already stored in the
-     * ClusterSearchResult. This value was read directly from the leaf frame's
-     * metadataPagePointer during level-wise or DFS navigation, so it is the
-     * correct page ID for this component's buffer cache.
+     * For disk components: builds a lazy local map by scanning this component's
+     * own leaf pages. This is necessary because the ClusterSearchResult's
+     * directoryPageId may come from a DIFFERENT component (e.g., level-wise
+     * computation reads the static structure's leaf pages, which have predicted
+     * directory page IDs that don't match this disk component's actual IDs).
      */
     private long getMetadataPageIdFromCluster(ClusterSearchResult clusterResult) throws HyracksDataException {
         // Memory components: use centroidDirPageMap for O(1) lookup
@@ -905,11 +917,91 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             }
         }
 
-        // Disk components: use the directoryPageId already in the ClusterSearchResult.
-        // This was read from the leaf frame during navigation and is valid for
-        // this component's data buffer cache.
-        // Returns -1 for empty clusters (no data assigned); callers handle -1 gracefully.
+        // Disk components: resolve directoryPageId locally by scanning this
+        // component's own leaf pages (which have correct IDs from VCTreeBulkLoader).
+        if (localCentroidDirPageMap == null) {
+            buildLocalCentroidDirPageMap();
+        }
+        if (localCentroidDirPageMap != null) {
+            Long dirPageId = localCentroidDirPageMap.get(clusterResult.centroidId);
+            if (dirPageId != null) {
+                return dirPageId;
+            }
+        }
+
+        // Fallback: use directoryPageId from ClusterSearchResult
         return clusterResult.directoryPageId;
+    }
+
+    /**
+     * Build a centroidId → directoryPageId map by scanning this component's own leaf pages.
+     * Uses BFS from root to find all leaf pages, then reads each leaf tuple's
+     * centroidId and metadataPagePointer to build the map.
+     *
+     * This is needed because ClusterSearchResults from level-wise computation
+     * carry directoryPageIds from the static structure (predicted sequential IDs),
+     * which don't match this disk component's actual directory page IDs
+     * (set correctly by VCTreeBulkLoader.end()).
+     */
+    private void buildLocalCentroidDirPageMap() throws HyracksDataException {
+        localCentroidDirPageMap = new HashMap<>();
+
+        // BFS from root through the tree to find all leaf pages
+        Queue<Integer> queue = new ArrayDeque<>();
+        queue.add(rootPageId);
+        Set<Integer> visitedPages = new HashSet<>();
+
+        while (!queue.isEmpty()) {
+            int pageId = queue.poll();
+            if (!visitedPages.add(pageId)) {
+                continue;
+            }
+
+            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, pageId));
+            try {
+                page.acquireReadLatch();
+
+                // Use leaf frame to check page level (isLeaf works on any page type)
+                IVectorClusteringLeafFrame lf = createLeafFrame();
+                lf.setPage(page);
+
+                if (lf.isLeaf()) {
+                    // Leaf page: collect centroidId → metadataPagePointer mappings
+                    int tc = lf.getTupleCount();
+                    for (int i = 0; i < tc; i++) {
+                        int centroidId = lf.getCentroidId(i);
+                        long dirPageId = lf.getMetadataPagePointer(i);
+                        localCentroidDirPageMap.put(centroidId, dirPageId);
+                    }
+                    // Follow overflow chain
+                    if (lf.getOverflowFlagBit()) {
+                        int nextLeafPage = lf.getNextLeaf();
+                        if (nextLeafPage >= 0) {
+                            queue.add(nextLeafPage);
+                        }
+                    }
+                } else {
+                    // Interior page: enqueue all children
+                    IVectorClusteringInteriorFrame intFrame = createInteriorFrame();
+                    intFrame.setPage(page);
+
+                    int tc = intFrame.getTupleCount();
+                    for (int i = 0; i < tc; i++) {
+                        queue.add(intFrame.getChildPageId(i));
+                    }
+                    // Follow overflow chain for interior pages
+                    if (intFrame.getOverflowFlagBit()) {
+                        int nextPage = intFrame.getNextPage();
+                        if (nextPage >= 0) {
+                            queue.add(nextPage);
+                        }
+                    }
+                }
+            } finally {
+                page.releaseReadLatch();
+                bufferCache.unpin(page);
+            }
+        }
     }
 
     /**
