@@ -128,12 +128,22 @@ public class LSMVCTreeUtils {
         interiorTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
 
         // Create specific type traits using primitive type traits for better performance
-        // Interior/Leaf frames need 3-field cluster tuples: <cid, centroid, pointer>
-        ITypeTraits[] leafTypeTraits = new ITypeTraits[4];
-        leafTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
-        leafTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
-        leafTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // quantized embedding (float array) Variable
-        leafTypeTraits[3] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
+        // Leaf frames: field count depends on whether quantization is enabled
+        // Without quantization: 3-field <cid, centroid, pointer>
+        // With quantization: 4-field <cid, centroid, quantized_embedding, pointer>
+        ITypeTraits[] leafTypeTraits;
+        if (quantizationParams != null) {
+            leafTypeTraits = new ITypeTraits[4];
+            leafTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
+            leafTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
+            leafTypeTraits[2] = VarLengthTypeTrait.INSTANCE; // quantized embedding (float array) - Variable
+            leafTypeTraits[3] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
+        } else {
+            leafTypeTraits = new ITypeTraits[3];
+            leafTypeTraits[0] = IntegerPointable.TYPE_TRAITS; // cluster ID (int) - Fixed 4 bytes
+            leafTypeTraits[1] = VarLengthTypeTrait.INSTANCE; // centroid (float array) - Variable
+            leafTypeTraits[2] = IntegerPointable.TYPE_TRAITS; // pointer (int) - Fixed 4 bytes
+        }
 
         // Metadata frames need 2-field metadata tuples: <max_distance, page_pointer>
         ITypeTraits[] metadataTypeTraits = new ITypeTraits[2];

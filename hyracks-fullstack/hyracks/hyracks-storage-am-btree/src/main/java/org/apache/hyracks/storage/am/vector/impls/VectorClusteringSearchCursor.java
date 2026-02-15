@@ -495,10 +495,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         this.firstDirectoryPageId = allDirectoryPageIds.get(0);
 
-        // System.err.println(String.format(
-        //       "[VectorClusteringSearchCursor.navigateToFirstCluster] Scan complete: totalClusters=%d, collected %d directory pages",
-        //       totalLeafClusters, allDirectoryPageIds.size()));
-
         // Step 4: Open cluster 0
         this.currentSequentialClusterIndex = 0;
         openClusterByDirectoryPage(this.firstDirectoryPageId);
@@ -582,9 +578,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             long firstDataPageId = metadataFrame.getDataPagePointer(0);
             this.currentDataPageId = firstDataPageId;
 
-            //            // System.err.println(String.format(
-            //                    "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Metadata has %d entries, firstDataPage=%d",
-            //                    metadataTupleCount, firstDataPageId));
         } finally {
             dirPage.releaseReadLatch();
             dataBufferCache.unpin(dirPage);
