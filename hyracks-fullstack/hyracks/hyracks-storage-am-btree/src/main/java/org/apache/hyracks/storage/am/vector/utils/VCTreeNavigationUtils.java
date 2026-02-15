@@ -159,18 +159,38 @@ public class VCTreeNavigationUtils {
 
     /**
      * Extract centroid from an interior frame tuple (format: <cid, centroid, child_ptr>).
-     * Uses TupleUtils.deserializeTuple() which correctly handles TypeAwareTupleWriter's
-     * VarLengthInt field size encoding.
+     * Reads the centroid vector directly from tuple bytes to avoid full deserialization overhead.
      */
-    private static double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple)
-            throws HyracksDataException {
-        ISerializerDeserializer<?>[] fieldSerdes = new ISerializerDeserializer<?>[3];
-        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
-        fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
-        fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE;
+    private static double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple) {
+        // Field 1 is the centroid vector, stored as [4 bytes: len][len * 8 bytes: doubles]
+        byte[] data = tuple.getFieldData(1);
+        int offset = tuple.getFieldStart(1);
+        int fieldLen = tuple.getFieldLength(1);
 
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-        return (double[]) fieldValues[1];
+        // Read array length (number of doubles)
+        int len = ((data[offset] & 0xFF) << 24) | ((data[offset + 1] & 0xFF) << 16)
+                | ((data[offset + 2] & 0xFF) << 8) | (data[offset + 3] & 0xFF);
+
+        // Sanity check: len must be positive and consistent with field length
+        int expectedFieldLen = 4 + len * 8;
+        if (len <= 0 || len > 10000 || expectedFieldLen > fieldLen) {
+            throw new RuntimeException(String.format(
+                    "Corrupted centroid in interior tuple: len=%d, fieldLen=%d, expectedFieldLen=%d (page data may be corrupt)",
+                    len, fieldLen, expectedFieldLen));
+        }
+
+        // Read doubles directly from bytes
+        double[] centroid = new double[len];
+        offset += 4; // skip length prefix
+        for (int i = 0; i < len; i++) {
+            long bits = ((long) (data[offset] & 0xFF) << 56) | ((long) (data[offset + 1] & 0xFF) << 48)
+                    | ((long) (data[offset + 2] & 0xFF) << 40) | ((long) (data[offset + 3] & 0xFF) << 32)
+                    | ((long) (data[offset + 4] & 0xFF) << 24) | ((long) (data[offset + 5] & 0xFF) << 16)
+                    | ((long) (data[offset + 6] & 0xFF) << 8) | (data[offset + 7] & 0xFF);
+            centroid[i] = Double.longBitsToDouble(bits);
+            offset += 8;
+        }
+        return centroid;
     }
 
     /**
@@ -1107,8 +1127,9 @@ public class VCTreeNavigationUtils {
 
         // Collect from first page (already have frame)
         int tupleCount = initialFrame.getTupleCount();
-        LOGGER.warn(String.format("[collectAndSortChildren] pageId=%d, tupleCount=%d, queryDim=%d", startPageId,
-                tupleCount, state.queryVector.length));
+        LOGGER.warn(String.format(
+                "[collectAndSortChildren] pageId=%d, tupleCount=%d, queryDim=%d",
+                startPageId, tupleCount, state.queryVector.length));
 
         for (int i = 0; i < tupleCount; i++) {
             try {
@@ -1116,22 +1137,25 @@ public class VCTreeNavigationUtils {
                 tuple.resetByTupleIndex(initialFrame, i);
                 double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
-                if (centroid != null && centroid.length == state.queryVector.length) {
+                if (centroid.length == state.queryVector.length) {
                     double distance = distanceFunction.apply(state.queryVector, centroid);
                     int childPageId = initialFrame.getChildPageId(i);
                     children.add(new ChildCentroid(childPageId, distance, i));
                 }
-            } catch (Exception e) {
-                LOGGER.warn(String.format("[collectAndSortChildren] Skipping tuple %d on page %d: %s", i, startPageId,
-                        e.getMessage()));
+            } catch (RuntimeException | OutOfMemoryError e) {
+                LOGGER.error(String.format(
+                        "[collectAndSortChildren] Error reading tuple %d on page %d: %s",
+                        i, startPageId, e.getMessage()), e);
+                throw e;
             }
         }
 
         // Handle overflow pages
         boolean hasOverflow = initialFrame.getOverflowFlagBit();
         int nextPageId = hasOverflow ? initialFrame.getNextPage() : -1;
-        LOGGER.warn(String.format("[collectAndSortChildren] pageId=%d, hasOverflow=%b, nextPageId=%d", startPageId,
-                hasOverflow, nextPageId));
+        LOGGER.warn(String.format(
+                "[collectAndSortChildren] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                startPageId, hasOverflow, nextPageId));
 
         if (hasOverflow) {
             collectChildrenFromOverflow(state, nextPageId, children, distanceFunction);
@@ -1160,7 +1184,8 @@ public class VCTreeNavigationUtils {
                 frame.setPage(page);
 
                 int tupleCount = frame.getTupleCount();
-                LOGGER.warn(String.format("[collectChildrenFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
+                LOGGER.warn(String.format(
+                        "[collectChildrenFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
                         overflowPageCount, currentPageId, tupleCount));
 
                 for (int i = 0; i < tupleCount; i++) {
@@ -1169,21 +1194,23 @@ public class VCTreeNavigationUtils {
                         tuple.resetByTupleIndex(frame, i);
                         double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
-                        if (centroid != null && centroid.length == state.queryVector.length) {
+                        if (centroid.length == state.queryVector.length) {
                             double distance = distanceFunction.apply(state.queryVector, centroid);
                             int childPageId = frame.getChildPageId(i);
                             children.add(new ChildCentroid(childPageId, distance, i));
                         }
-                    } catch (Exception e) {
-                        LOGGER.warn(
-                                String.format("[collectChildrenFromOverflow] Skipping tuple %d on overflow page %d: %s",
-                                        i, currentPageId, e.getMessage()));
+                    } catch (RuntimeException | OutOfMemoryError e) {
+                        LOGGER.error(String.format(
+                                "[collectChildrenFromOverflow] Error reading tuple %d on overflow page %d: %s",
+                                i, currentPageId, e.getMessage()), e);
+                        throw e;
                     }
                 }
 
                 boolean hasOverflow = frame.getOverflowFlagBit();
                 int nextPageId = hasOverflow ? frame.getNextPage() : -1;
-                LOGGER.warn(String.format("[collectChildrenFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                LOGGER.warn(String.format(
+                        "[collectChildrenFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
                         currentPageId, hasOverflow, nextPageId));
                 currentPageId = nextPageId;
 
@@ -1212,8 +1239,9 @@ public class VCTreeNavigationUtils {
 
         // Collect from first page
         int tupleCount = initialFrame.getTupleCount();
-        LOGGER.warn(String.format("[collectAndSortLeafCentroids] pageId=%d, tupleCount=%d, queryDim=%d", startPageId,
-                tupleCount, state.queryVector.length));
+        LOGGER.warn(String.format(
+                "[collectAndSortLeafCentroids] pageId=%d, tupleCount=%d, queryDim=%d",
+                startPageId, tupleCount, state.queryVector.length));
 
         for (int i = 0; i < tupleCount; i++) {
             try {
@@ -1221,23 +1249,26 @@ public class VCTreeNavigationUtils {
                 tuple.resetByTupleIndex(initialFrame, i);
                 double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
-                if (centroid != null && centroid.length == state.queryVector.length) {
+                if (centroid.length == state.queryVector.length) {
                     double distance = distanceFunction.apply(state.queryVector, centroid);
                     int centroidId = initialFrame.getCentroidId(i);
                     long directoryPageId = initialFrame.getMetadataPagePointer(i);
                     centroids.add(new LeafCentroid(centroidId, distance, i, startPageId, centroid, directoryPageId));
                 }
-            } catch (Exception e) {
-                LOGGER.warn(String.format("[collectAndSortLeafCentroids] Skipping tuple %d on page %d: %s", i,
-                        startPageId, e.getMessage()));
+            } catch (RuntimeException | OutOfMemoryError e) {
+                LOGGER.error(String.format(
+                        "[collectAndSortLeafCentroids] Error reading tuple %d on page %d: %s",
+                        i, startPageId, e.getMessage()), e);
+                throw e;
             }
         }
 
         // Handle overflow pages
         boolean hasOverflow = initialFrame.getOverflowFlagBit();
         int nextPageId = hasOverflow ? initialFrame.getNextLeaf() : -1;
-        LOGGER.warn(String.format("[collectAndSortLeafCentroids] pageId=%d, hasOverflow=%b, nextPageId=%d", startPageId,
-                hasOverflow, nextPageId));
+        LOGGER.warn(String.format(
+                "[collectAndSortLeafCentroids] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                startPageId, hasOverflow, nextPageId));
 
         if (hasOverflow) {
             collectCentroidsFromOverflow(state, nextPageId, centroids, distanceFunction);
@@ -1265,7 +1296,8 @@ public class VCTreeNavigationUtils {
                 frame.setPage(page);
 
                 int tupleCount = frame.getTupleCount();
-                LOGGER.warn(String.format("[collectCentroidsFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
+                LOGGER.warn(String.format(
+                        "[collectCentroidsFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
                         overflowPageCount, currentPageId, tupleCount));
 
                 for (int i = 0; i < tupleCount; i++) {
@@ -1274,23 +1306,25 @@ public class VCTreeNavigationUtils {
                         tuple.resetByTupleIndex(frame, i);
                         double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
-                        if (centroid != null && centroid.length == state.queryVector.length) {
+                        if (centroid.length == state.queryVector.length) {
                             double distance = distanceFunction.apply(state.queryVector, centroid);
                             int centroidId = frame.getCentroidId(i);
                             long directoryPageId = frame.getMetadataPagePointer(i);
                             centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid,
                                     directoryPageId));
                         }
-                    } catch (Exception e) {
-                        LOGGER.warn(String.format(
-                                "[collectCentroidsFromOverflow] Skipping tuple %d on overflow page %d: %s", i,
-                                currentPageId, e.getMessage()));
+                    } catch (RuntimeException | OutOfMemoryError e) {
+                        LOGGER.error(String.format(
+                                "[collectCentroidsFromOverflow] Error reading tuple %d on overflow page %d: %s",
+                                i, currentPageId, e.getMessage()), e);
+                        throw e;
                     }
                 }
 
                 boolean hasOverflow = frame.getOverflowFlagBit();
                 int nextPageId = hasOverflow ? frame.getNextLeaf() : -1;
-                LOGGER.warn(String.format("[collectCentroidsFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
+                LOGGER.warn(String.format(
+                        "[collectCentroidsFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
                         currentPageId, hasOverflow, nextPageId));
                 currentPageId = nextPageId;
 
