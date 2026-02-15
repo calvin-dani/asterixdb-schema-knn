@@ -92,7 +92,6 @@ public class VectorClusteringTreeFlushLoader extends PageWriteFailureCallback im
         System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
                 sourcePage.getBuffer().capacity());
         write(targetPage);
-        LOGGER.debug("Flushed VBC page -> disk page {}", diskPageId);
     }
 
     /**
