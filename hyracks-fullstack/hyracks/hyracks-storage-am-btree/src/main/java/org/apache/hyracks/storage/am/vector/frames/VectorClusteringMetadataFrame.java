@@ -29,7 +29,6 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.frames.FrameOpSpaceStatus;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleMode;
 import org.apache.hyracks.storage.am.common.ophelpers.FindTupleNoExactMatchPolicy;
-import org.apache.hyracks.storage.am.common.tuples.SimpleTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 
 /**
@@ -187,23 +186,37 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
 
     /**
      * Split metadata frame when it becomes full.
+     * Uses a copy-and-reinitialize approach to avoid page fragmentation from in-place deletes.
      */
     public void split(IVectorClusteringMetadataFrame rightFrame, ITupleReference tuple) throws HyracksDataException {
         int tupleCount = getTupleCount();
         int splitIndex = tupleCount / 2;
 
-        // Move second half of tuples to right frame
+        // Copy all tuples out using TupleUtils.copyTuple (returns ArrayTupleReference
+        // which works with tupleWriter.writeTuple via the ITupleReference interface)
+        ITupleReference[] leftTuples = new ITupleReference[splitIndex];
+        for (int i = 0; i < splitIndex; i++) {
+            frameTuple.resetByTupleIndex(this, i);
+            leftTuples[i] = TupleUtils.copyTuple(frameTuple);
+        }
+        ITupleReference[] rightTuples = new ITupleReference[tupleCount - splitIndex];
         for (int i = splitIndex; i < tupleCount; i++) {
             frameTuple.resetByTupleIndex(this, i);
-            SimpleTupleReference tupleCopy = new SimpleTupleReference();
-            copyTuple(frameTuple, tupleCopy);
-            rightFrame.insert(tupleCopy, rightFrame.getTupleCount());
+            rightTuples[i - splitIndex] = TupleUtils.copyTuple(frameTuple);
         }
 
-        // Remove moved tuples from left frame
-        for (int i = tupleCount - 1; i >= splitIndex; i--) {
-            frameTuple.resetByTupleIndex(this, i);
-            delete(frameTuple, i);
+        // Reinitialize both frames to clean state
+        initBuffer((byte) 0);
+        rightFrame.initBuffer((byte) 0);
+
+        // Re-insert left half tuples
+        for (int i = 0; i < leftTuples.length; i++) {
+            insert(leftTuples[i], i);
+        }
+
+        // Re-insert right half tuples
+        for (int i = 0; i < rightTuples.length; i++) {
+            rightFrame.insert(rightTuples[i], i);
         }
 
         // Insert new tuple into appropriate frame
@@ -212,7 +225,6 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
             int insertIndex = findInsertPosition(newMaxDistance);
             insert(tuple, insertIndex);
         } else {
-            // Use the findInsertPosition method instead of interface method
             int insertIndex = ((VectorClusteringMetadataFrame) rightFrame).findInsertPosition(newMaxDistance);
             rightFrame.insert(tuple, insertIndex);
         }
@@ -225,16 +237,6 @@ public class VectorClusteringMetadataFrame extends VectorClusteringNSMFrame impl
         byte[] data = tuple.getFieldData(0);
         int offset = tuple.getFieldStart(0);
         return DoublePointable.getDouble(data, offset);
-    }
-
-    /**
-     * Copy tuple data to a new SimpleTupleReference.
-     */
-    private void copyTuple(ITupleReference source, SimpleTupleReference target) throws HyracksDataException {
-        // Use TupleUtils.copyTuple to properly copy the tuple without deprecated constructs
-        ITupleReference copiedTuple = TupleUtils.copyTuple(source);
-        target.setFieldCount(copiedTuple.getFieldCount());
-        target.resetByTupleOffset(copiedTuple.getFieldData(0), 0);
     }
 
     /**

@@ -88,9 +88,9 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         if (queryVector != null && epsilon > 0.0 && vcTree != null) {
             try {
                 globalLevelWiseClusters = VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(
-                        vcTree.getBufferCache(), vcTree.getFileId(), vcTree.getRootPageId(),
-                        vcTree.getInteriorFrameFactory(), vcTree.getLeafFrameFactory(), queryVector, distFunc, epsilon,
-                        quantizedQueryVector, quantizer);
+                        vcTree.getNavigationBufferCache(), vcTree.getNavigationFileId(),
+                        vcTree.getNavigationRootPageId(), vcTree.getInteriorFrameFactory(),
+                        vcTree.getLeafFrameFactory(), queryVector, distFunc, epsilon, quantizedQueryVector, quantizer);
 
                 // Mark first cluster as visited and start getNextCluster() from index 1
                 // The cursor handles index 0 separately via getFirstCluster()

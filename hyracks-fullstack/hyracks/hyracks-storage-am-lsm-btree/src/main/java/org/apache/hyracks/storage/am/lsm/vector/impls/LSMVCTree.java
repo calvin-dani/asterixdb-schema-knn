@@ -50,6 +50,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexFileManager;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicy;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTracker;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
@@ -66,9 +67,9 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
+import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
-import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
@@ -165,13 +166,38 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         }
     }
 
-    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) {
+    public void setStaticStructure(LSMVCTreeDiskComponent staticStructure) throws HyracksDataException {
         this.staticStructure = staticStructure;
         staticStructure.setInitialized();
+        if (memoryComponentsAllocated) {
+            initializeMemoryComponentsStaticStructure();
+        }
     }
 
-    public void setInitialized(LSMVCTreeDiskComponent diskComponent) {
+    public void setInitialized(LSMVCTreeDiskComponent diskComponent) throws HyracksDataException {
         diskComponent.setInitialized();
+    }
+
+    @Override
+    public synchronized void allocateMemoryComponents() throws HyracksDataException {
+        super.allocateMemoryComponents();
+        initializeMemoryComponentsStaticStructure();
+    }
+
+    private void initializeMemoryComponentsStaticStructure() throws HyracksDataException {
+        if (staticStructure == null) {
+            return; // Not yet loaded (during initial index creation)
+        }
+        for (ILSMMemoryComponent memComponent : memoryComponents) {
+            LSMVCTreeMemoryComponent vcMemComponent = (LSMVCTreeMemoryComponent) memComponent;
+            VectorClusteringTree vcTree = vcMemComponent.getIndex();
+            if (!vcTree.isInitialized()) {
+                VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
+                        (VectorClusteringTree.VectorClusteringTreeAccessor) staticStructure.getIndex()
+                                .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+                vcTree.setStaticStructure(staticAccessor);
+            }
+        }
     }
 
     protected ILSMDiskComponent createStaticStructure(ILSMDiskComponentFactory factory,
@@ -275,10 +301,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public void modify(IIndexOperationContext ictx, ITupleReference tuple) throws HyracksDataException {
         LSMVCTreeOpContext ctx = (LSMVCTreeOpContext) ictx;
 
-        // Debug logging
-        System.err.println(
-                "[LSMVCTree.modify] Operation: " + ctx.getOperation() + ", Thread: " + Thread.currentThread().getId());
-
         ITupleReference indexTuple;
         if (ctx.getIndexTuple() != null) {
             ctx.getIndexTuple().reset(tuple);
@@ -289,19 +311,15 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
         switch (ctx.getOperation()) {
             case PHYSICALDELETE:
-                System.err.println("[LSMVCTree.modify] Executing PHYSICALDELETE");
                 ctx.getCurrentMutableVCTreeAccessor().delete(indexTuple);
                 break;
             case INSERT:
-                System.err.println("[LSMVCTree.modify] Executing INSERT");
                 insert(indexTuple, ctx);
                 break;
             case DELETE:
-                System.err.println("[LSMVCTree.modify] Executing DELETE");
                 delete(indexTuple, ctx);
                 break;
             default:
-                System.err.println("[LSMVCTree.modify] Executing default (UPSERT)");
                 ctx.getCurrentMutableVCTreeAccessor().upsert(indexTuple);
                 break;
         }
@@ -309,55 +327,12 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     }
 
     private boolean insert(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
-        // TODO: Implement vector-specific duplicate checking logic
-        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) (ctx.getCurrentMutableVCTreeAccessor());
-        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
-                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-
-        if (!memoryComponentAccessor.getIndex().isInitialized()) {
-            memoryComponentAccessor.getIndex().setStaticStructure(staticAccessor);
-        }
-
-        memoryComponentAccessor.insert(tuple);
-
+        ctx.getCurrentMutableVCTreeAccessor().insert(tuple);
         return true;
     }
 
-    /**
-     * Handles delete operation for vector index.
-     * <p>
-     * Delete flow:
-     * 1. Call delete() on VectorClusteringTreeAccessor with the original input tuple
-     * 2. VectorClusteringTreeAccessor.delete() sets operation to DELETE and calls insertVector()
-     * 3. insertVector() navigates, calculates distance, and constructs data tuple
-     * 4. Based on operation type (DELETE), creates antimatter tuple with bit 7 set
-     * 5. Antimatter tuple is inserted into data pages
-     *
-     * This approach reuses all existing insertVector() logic and only differs in
-     * the antimatter bit being set when the operation type is DELETE.
-     */
     private void delete(ITupleReference tuple, LSMVCTreeOpContext ctx) throws HyracksDataException {
-        // Get the current mutable VectorClusteringTree accessor
-        VectorClusteringTree.VectorClusteringTreeAccessor memoryComponentAccessor =
-                (ctx.getCurrentMutableVCTreeAccessor());
-        VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                (VectorClusteringTree.VectorClusteringTreeAccessor) getStaticStructure().getIndex()
-                        .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-
-        // Ensure static structure is initialized (same pattern as insert)
-        if (!memoryComponentAccessor.getIndex().isInitialized()) {
-            memoryComponentAccessor.getIndex().setStaticStructure(staticAccessor);
-        }
-
-        System.err.println("[LSMVCTree.delete] Calling VectorClusteringTreeAccessor.delete(), Thread="
-                + Thread.currentThread().getId());
-
-        // Call delete() which will set operation to DELETE and delegate to insertVector()
-        // insertVector() will create an antimatter tuple based on the DELETE operation
-        memoryComponentAccessor.delete(tuple);
-
+        ctx.getCurrentMutableVCTreeAccessor().delete(tuple);
     }
 
     @Override
@@ -379,35 +354,46 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
     public ILSMDiskComponent doFlush(ILSMIOOperation operation) throws HyracksDataException {
         LSMVCTreeFlushOperation flushOp = (LSMVCTreeFlushOperation) operation;
         LSMVCTreeMemoryComponent flushingComponent = (LSMVCTreeMemoryComponent) flushOp.getFlushingComponent();
-        IIndexAccessor accessor = flushingComponent.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        VectorClusteringTree memTree = flushingComponent.getIndex();
 
         ILSMDiskComponent component = null;
-        LSMVCTreeDiskComponentLoader componentFlushLoader = null;
+        VectorClusteringTreeFlushLoader flushLoader = null;
+
         try {
             component = createDiskComponent(componentFactory, flushOp.getTarget(), null, null, true);
+            VectorClusteringTree diskTree = ((LSMVCTreeDiskComponent) component).getIndex();
 
-            componentFlushLoader =
-                    (LSMVCTreeDiskComponentLoader) ((LSMVCTreeDiskComponent) component).createFlushLoader(storageConfig,
-                            operation, false, pageWriteCallbackFactory.createPageWriteCallback());
+            // Create flush loader (new signature: callback, diskTree, sourceMemoryTree)
+            IPageWriteCallback callback = pageWriteCallbackFactory.createPageWriteCallback();
+            flushLoader = new VectorClusteringTreeFlushLoader(callback, diskTree, memTree);
+            callback.initialize(flushLoader);
 
+            // Copy ALL VBC pages (identity mapping: VBC page N -> disk page N)
             VectorClusteringTree.VectorClusteringTreeAccessor vcTreeAccessor =
-                    (VectorClusteringTree.VectorClusteringTreeAccessor) accessor;
-            ITreeIndexMetadataFrame componentMetaFrame = (vcTreeAccessor).getOpContext().getMetaFrame();
-            // Simple bulk load - just copy all pages
-            int maxPageId = flushingComponent.getIndex().getPageManager().getMaxPageId(componentMetaFrame);
-            System.err.println();
+                    (VectorClusteringTree.VectorClusteringTreeAccessor) memTree
+                            .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+            ITreeIndexMetadataFrame componentMetaFrame = vcTreeAccessor.getOpContext().getMetaFrame();
+            int maxPageId = memTree.getPageManager().getMaxPageId(componentMetaFrame);
+
             for (int pageId = 0; pageId <= maxPageId; pageId++) {
                 ICachedPage sourcePage = vcTreeAccessor.getCachedPage(pageId);
-                componentFlushLoader.copyPage(sourcePage);
+                flushLoader.copyPage(sourcePage);
                 vcTreeAccessor.releasePage(sourcePage);
             }
 
-            componentFlushLoader.end();
+            // Append static structure pages at end of file
+            VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
+                    (VectorClusteringTree.VectorClusteringTreeAccessor) staticStructure.getIndex()
+                            .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+            int rootPageId = flushLoader.copyStaticStructure(staticAccessor);
+
+            // Finalize with correct metadata
+            flushLoader.end(memTree.getNumLeafCentroidMem(), memTree.getFirstLeafCentroidIdMem(), rootPageId);
 
         } catch (Throwable e) {
             try {
-                if (componentFlushLoader != null) {
-                    componentFlushLoader.abort();
+                if (flushLoader != null) {
+                    flushLoader.abort();
                 }
             } catch (Throwable th) {
                 e.addSuppressed(th);

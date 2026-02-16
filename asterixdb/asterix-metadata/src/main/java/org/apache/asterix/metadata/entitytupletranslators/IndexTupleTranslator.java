@@ -844,16 +844,32 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Handle case where WITH properties are null (no WITH clause was specified)
         int dimension = -1;
         int train_list = -1;
-        String description = "default";
-        String similarity = "euclidean";
+        int num_clusters = -1;
+        String quantization = "INVALID";
+        String similarity = "INVALID";
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
-            train_list = properties.getOptionalInt("train_list", -1);
-            description = properties.getOptionalString("description", "default");
-            similarity = properties.getOptionalString("similarity", "euclidean");
+            // Accept both "train_list_number" (from SQL++ WITH clause) and "train_list" (from metadata roundtrip)
+            train_list = properties.getOptionalInt("train_list_number", -1);
+            if (train_list < 0) {
+                train_list = properties.getOptionalInt("train_list", -1);
+            }
+            num_clusters = properties.getOptionalInt("num_clusters", -1);
+            quantization = properties.getOptionalString("quantization", "INVALID");
+            similarity = properties.getOptionalString("similarity", "INVALID");
         }
 
+        if (dimension < 0) {
+            throw new HyracksDataException("No dimensions defined");
+        }
+        if (train_list < 0) {
+            throw new HyracksDataException("No train_list_number or percentage defined");
+        }
+
+        if ("INVALID".equals(similarity)) {
+            throw new HyracksDataException("No similarity metric defined");
+        }
         nameValue.reset();
         aString.setValue("dimension");
         stringSerde.serialize(aString, nameValue.getDataOutput());
@@ -868,29 +884,43 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         int32Serde.serialize(new AInt32(train_list), fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
 
-        nameValue.reset();
-        aString.setValue("description");
-        stringSerde.serialize(aString, nameValue.getDataOutput());
-        fieldValue.reset();
-        aString.setValue(description);
-        stringSerde.serialize(aString, fieldValue.getDataOutput());
-        recordBuilder.addField(nameValue, fieldValue);
+        if (num_clusters > 0) {
+            nameValue.reset();
+            aString.setValue("num_clusters");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            int32Serde.serialize(new AInt32(num_clusters), fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
 
-        nameValue.reset();
-        aString.setValue("similarity");
-        stringSerde.serialize(aString, nameValue.getDataOutput());
-        fieldValue.reset();
-        aString.setValue(similarity);
-        stringSerde.serialize(aString, fieldValue.getDataOutput());
-        recordBuilder.addField(nameValue, fieldValue);
+        if (!"INVALID".equals(quantization)) {
+            nameValue.reset();
+            aString.setValue("quantization");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            aString.setValue(quantization);
+            stringSerde.serialize(aString, fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
+
+        if (!"INVALID".equals(similarity)) {
+            nameValue.reset();
+            aString.setValue("similarity");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            aString.setValue(similarity);
+            stringSerde.serialize(aString, fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
     }
 
     private AdmObjectNode readWithProperties(ARecord indexRecord) throws AlgebricksException {
         // Default values (matching writeWithProperties defaults)
         int dimension = -1;
         int train_list = -1;
-        String description = "default";
-        String similarity = "euclidean";
+        int num_clusters = -1;
+        String quantization = "INVALID";
+        String similarity = "INVALID";
 
         // Read dimension field
         int dimensionPos = indexRecord.getType().getFieldIndex("dimension");
@@ -910,12 +940,21 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             }
         }
 
-        // Read description field
-        int descriptionPos = indexRecord.getType().getFieldIndex("description");
-        if (descriptionPos >= 0) {
-            IAObject descriptionObj = indexRecord.getValueByPos(descriptionPos);
-            if (descriptionObj != null && descriptionObj.getType().getTypeTag() == ATypeTag.STRING) {
-                description = ((AString) descriptionObj).getStringValue();
+        // Read num_clusters field
+        int numClustersPos = indexRecord.getType().getFieldIndex("num_clusters");
+        if (numClustersPos >= 0) {
+            IAObject numClustersObj = indexRecord.getValueByPos(numClustersPos);
+            if (numClustersObj != null && numClustersObj.getType().getTypeTag() == ATypeTag.INTEGER) {
+                num_clusters = ((AInt32) numClustersObj).getIntegerValue();
+            }
+        }
+
+        // Read quantization field
+        int quantizationPos = indexRecord.getType().getFieldIndex("quantization");
+        if (quantizationPos >= 0) {
+            IAObject quantizationObj = indexRecord.getValueByPos(quantizationPos);
+            if (quantizationObj != null && quantizationObj.getType().getTypeTag() == ATypeTag.STRING) {
+                quantization = ((AString) quantizationObj).getStringValue();
             }
         }
 
@@ -929,8 +968,9 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
 
         // Reconstruct AdmObjectNode only if at least one field differs from default
-        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || !"default".equals(description)
-                || !"euclidean".equals(similarity);
+        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || (num_clusters != -1)
+                || (!"default".equals(quantization) && !"INVALID".equals(quantization))
+                || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity));
 
         if (!hasNonDefaultValues) {
             return null;
@@ -942,15 +982,20 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             withObjectNode.set("dimension", new AdmBigIntNode(dimension));
         }
 
+        // Use "train_list_number" key to match what consumers expect (SecondaryVectorOperationsHelper, writeWithProperties)
         if (train_list != -1) {
-            withObjectNode.set("train_list", new AdmBigIntNode(train_list));
+            withObjectNode.set("train_list_number", new AdmBigIntNode(train_list));
         }
 
-        if (!"default".equals(description)) {
-            withObjectNode.set("description", new AdmStringNode(description));
+        if (num_clusters != -1) {
+            withObjectNode.set("num_clusters", new AdmBigIntNode(num_clusters));
         }
 
-        if (!"euclidean".equals(similarity)) {
+        if (!"default".equals(quantization) && !"INVALID".equals(quantization)) {
+            withObjectNode.set("quantization", new AdmStringNode(quantization));
+        }
+
+        if (!"euclidean".equals(similarity) && !"INVALID".equals(similarity)) {
             withObjectNode.set("similarity", new AdmStringNode(similarity));
         }
 

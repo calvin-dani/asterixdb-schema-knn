@@ -22,6 +22,7 @@ package org.apache.hyracks.storage.am.lsm.vector;
 import static org.junit.Assert.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
@@ -52,26 +53,25 @@ import org.junit.After;
 import org.junit.Before;
 
 /**
- * LSMVCTree insert test (standard, non-quantized).
- * Tests insert operations into memory component after bulk loading the first disk component.
+ * LSMVCTree delete test (standard, non-quantized).
+ * Tests delete operations (antimatter tuples) after bulk loading the first disk component.
  *
  * Inherits test case from VectorIndexTestDriver:
  * - threeDimensionThreeLevels(): 3D three-layer structure (3 levels, 24 leaf centroids, 2400 bulk-loaded records)
  *
- * The test bulk loads the dataset, then inserts additional records into the memory component,
- * and verifies that records from both components are retrievable via search.
+ * The test bulk loads the dataset, then deletes specific records from centroid c10 by inserting
+ * antimatter tuples into the memory component. Verification confirms that deleted records are
+ * absent from search results while non-deleted records remain accessible.
  *
  * Data tuple format (standard): <distance, centroid_id, primary_key>
- * No vector field is stored in data tuples.
+ * Delete tuple format: <vector, primary_key> (same as insert)
  */
-public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
+public class LSMVCTreeDeleteTest extends VectorIndexTestDriver {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
     private final LSMVCTreeTestHarness harness = new LSMVCTreeTestHarness();
     private final VectorTreeTestUtils testUtils = new VectorTreeTestUtils();
-
-    private static final int INSERT_RECORDS_PER_CLUSTER = 30;
 
     @Before
     public void setUp() throws HyracksDataException {
@@ -85,14 +85,14 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
 
     /**
      * Implementation of runTest from VectorIndexTestDriver.
-     * Performs: build static structure → bulk load → insert → verify.
+     * Performs: build static structure → bulk load → delete → verify.
      */
     @Override
     protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
             List<ITupleReference> centroids, List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster,
             int vectorDimension, List<List<ITupleReference>> leafRecords) throws Exception {
 
-        LOGGER.info("LSMVCTree Insert Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
+        LOGGER.info("LSMVCTree Delete Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
                 numClustersPerLevel.size(), centroids.size(), leafRecords.size(), vectorDimension);
 
         // Create test context with default (standard) data tuple creator factory
@@ -123,18 +123,18 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
             int bulkLoadedCount = leafRecords.stream().mapToInt(List::size).sum();
             LOGGER.info("Bulk loaded {} records across {} clusters", bulkLoadedCount, leafRecords.size());
 
-            // 4. Generate and insert additional records into memory component
-            List<List<ITupleReference>> insertRecords =
-                    generateInsertRecords(centroids, centroidSerdes, centroidsPerCluster, vectorDimension);
-            int insertedCount = insertRecordsIntoMemoryComponent(ctx, insertRecords);
-            LOGGER.info("Inserted {} records into memory component", insertedCount);
+            // 4. Delete specific records from c10 (antimatter tuples in memory component)
+            // c10 is at [20.0, 30.0, 20.0], records placed at concentric rings around it
+            List<ITupleReference> deleteTuples = generateDeleteTuples();
+            List<String> deletedPKs = getDeletedPKs();
+            int deletedCount = deleteRecords(ctx, deleteTuples);
+            LOGGER.info("Deleted {} records (antimatter tuples) from c10", deletedCount);
 
-            // 5. Verify records using LSMVCTreeSearchCursor
-            // Query near first leaf centroid c10 at [20, 30, 20]
+            // 5. Verify: search near c10 and check deleted PKs are absent
             double[] queryVector = { 20.0, 30.0, 20.0 };
             int queryK = 500;
-            verifyRecordsWithSearch(ctx, queryVector, queryK);
-            LOGGER.info("Verification: Found records from both bulk-loaded and inserted components");
+            verifyDeletedRecordsAbsent(ctx, queryVector, queryK, deletedPKs);
+            LOGGER.info("Verification: Deleted records confirmed absent from search results");
 
         } finally {
             // Cleanup
@@ -145,78 +145,46 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
     }
 
     /**
-     * Generate insert records for all leaf centroids.
-     * Extracts leaf centroid vectors from the centroids list and generates
-     * INSERT_RECORDS_PER_CLUSTER records per leaf centroid.
+     * Generate delete tuples for known records from c10.
+     * c10 centroid: [20.0, 30.0, 20.0]
+     * Records at distance 0.2 in first ring:
+     *   pk_c_10_0: [20.2, 30.0, 20.0] (offset [+0.2, 0, 0])
+     *   pk_c_10_1: [19.8, 30.0, 20.0] (offset [-0.2, 0, 0])
+     *   pk_c_10_2: [20.0, 30.2, 20.0] (offset [0, +0.2, 0])
+     *   pk_c_10_3: [20.0, 29.8, 20.0] (offset [0, -0.2, 0])
+     *   pk_c_10_4: [20.0, 30.0, 20.2] (offset [0, 0, +0.2])
      *
-     * Insert tuple format: <vector, primary_key>
+     * Delete tuple format: <vector, primary_key>
      */
-    private List<List<ITupleReference>> generateInsertRecords(List<ITupleReference> centroids,
-            ISerializerDeserializer[] centroidSerdes, List<List<Integer>> centroidsPerCluster, int vectorDimension)
-            throws Exception {
+    private List<ITupleReference> generateDeleteTuples() throws Exception {
+        double[][] vectors = { { 20.2, 30.0, 20.0 }, { 19.8, 30.0, 20.0 }, { 20.0, 30.2, 20.0 }, { 20.0, 29.8, 20.0 },
+                { 20.0, 30.0, 20.2 } };
+        String[] primaryKeys = { "pk_c_10_0", "pk_c_10_1", "pk_c_10_2", "pk_c_10_3", "pk_c_10_4" };
 
-        // Determine leaf centroid count from last level of structure
-        List<Integer> lastLevelClusters = centroidsPerCluster.get(centroidsPerCluster.size() - 1);
-        int numLeafCentroids = lastLevelClusters.stream().mapToInt(Integer::intValue).sum();
-        int firstLeafCentroidIndex = centroids.size() - numLeafCentroids;
-
-        List<List<ITupleReference>> allRecords = new ArrayList<>();
-
-        for (int i = 0; i < numLeafCentroids; i++) {
-            // Deserialize centroid tuple to extract ID and vector
-            ITupleReference centroidTuple = centroids.get(firstLeafCentroidIndex + i);
-            Object[] values = TupleUtils.deserializeTuple(centroidTuple, centroidSerdes);
-            int centroidId = (Integer) values[0];
-            double[] centroidVector = (double[]) values[1];
-
-            List<ITupleReference> clusterRecords = new ArrayList<>();
-            double baseDistance = 0.15;
-            int recordCount = 0;
-
-            while (recordCount < INSERT_RECORDS_PER_CLUSTER) {
-                double currentDistance = baseDistance;
-
-                // 6 records per ring (±x, ±y, ±z directions) for 3D
-                double[][] offsets = { { currentDistance, 0, 0 }, { -currentDistance, 0, 0 }, { 0, currentDistance, 0 },
-                        { 0, -currentDistance, 0 }, { 0, 0, currentDistance }, { 0, 0, -currentDistance } };
-
-                for (double[] offset : offsets) {
-                    if (recordCount >= INSERT_RECORDS_PER_CLUSTER)
-                        break;
-
-                    double[] vector = new double[vectorDimension];
-                    for (int d = 0; d < vectorDimension; d++) {
-                        vector[d] = centroidVector[d] + offset[d];
-                    }
-
-                    String primaryKey = "pk_ins_c" + centroidId + "_" + recordCount;
-                    ITupleReference tuple = createInsertTuple(vector, primaryKey);
-                    clusterRecords.add(tuple);
-                    recordCount++;
-                }
-
-                baseDistance += 0.15;
-            }
-
-            allRecords.add(clusterRecords);
+        List<ITupleReference> deleteTuples = new ArrayList<>();
+        for (int i = 0; i < vectors.length; i++) {
+            deleteTuples.add(createDeleteTuple(vectors[i], primaryKeys[i]));
         }
-
-        return allRecords;
+        return deleteTuples;
     }
 
     /**
-     * Create an insert tuple.
-     * Format: <vector, primary_key>
+     * Get the list of PKs that were deleted, for verification.
      */
-    private ITupleReference createInsertTuple(double[] vector, String primaryKey) throws Exception {
+    private List<String> getDeletedPKs() {
+        return Arrays.asList("pk_c_10_0", "pk_c_10_1", "pk_c_10_2", "pk_c_10_3", "pk_c_10_4");
+    }
+
+    /**
+     * Create a delete tuple. Format: <vector, primary_key>
+     */
+    private ITupleReference createDeleteTuple(double[] vector, String primaryKey) throws Exception {
         ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(2);
         ArrayTupleReference tupleRef = new ArrayTupleReference();
 
-        // Field 0: vector (serialized with DoubleArraySerializerDeserializer)
         DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
         tupleBuilder.addFieldEndOffset();
 
-        // Field 1: primary_key (UTF8 string)
         new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
         tupleBuilder.addFieldEndOffset();
 
@@ -225,53 +193,38 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
     }
 
     /**
-     * Insert records into the memory component using the index accessor.
+     * Delete records using the index accessor.
      */
-    private int insertRecordsIntoMemoryComponent(AbstractVectorTreeTestContext ctx,
-            List<List<ITupleReference>> insertRecords) throws Exception {
-
+    private int deleteRecords(AbstractVectorTreeTestContext ctx, List<ITupleReference> deleteTuples) throws Exception {
         IIndexAccessor accessor = ctx.getIndex().createAccessor(
                 new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE));
 
-        int insertedCount = 0;
-        for (List<ITupleReference> clusterRecords : insertRecords) {
-            for (ITupleReference tuple : clusterRecords) {
-                try {
-                    accessor.insert(tuple);
-                } catch (Throwable e) {
-                    System.err.println("Insert failed at record #" + insertedCount);
-                    e.printStackTrace(System.err);
-                    throw e;
-                }
-                insertedCount++;
-            }
+        int deletedCount = 0;
+        for (ITupleReference tuple : deleteTuples) {
+            accessor.delete(tuple);
+            deletedCount++;
         }
-
-        LOGGER.info("Inserted {} records via accessor", insertedCount);
-        return insertedCount;
+        return deletedCount;
     }
 
     /**
-     * Verify records by scanning with LSMVCTreeSearchCursor.
-     * Checks that records from both disk (bulk-loaded) and memory (inserted) components are found.
+     * Verify that deleted records are absent from search results.
+     * Also verify that non-deleted records from c10 are still found.
      */
-    private void verifyRecordsWithSearch(AbstractVectorTreeTestContext ctx, double[] queryVector, int k)
-            throws Exception {
+    private void verifyDeletedRecordsAbsent(AbstractVectorTreeTestContext ctx, double[] queryVector, int k,
+            List<String> deletedPKs) throws Exception {
 
-        // Create query tuple
         ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
         queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
         ArrayTupleReference queryTuple = new ArrayTupleReference();
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
-        // Set up predicate
         VectorPointPredicate predicate = new VectorPointPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
 
-        // Create accessor with vector accessor factory
         IndexAccessParameters iap =
                 new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
@@ -283,37 +236,35 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
             accessor.search(cursor, predicate);
 
             List<String> foundPKs = new ArrayList<>();
-            int bulkLoadCount = 0;
-            int insertCount = 0;
+            int c10Count = 0;
 
-            try {
-                while (cursor.hasNext()) {
-                    cursor.next();
-                    ITupleReference tuple = cursor.getTuple();
-                    String pk = extractPrimaryKeyFromTuple(tuple);
-                    foundPKs.add(pk);
+            while (cursor.hasNext()) {
+                cursor.next();
+                ITupleReference tuple = cursor.getTuple();
+                String pk = extractPrimaryKeyFromTuple(tuple);
+                foundPKs.add(pk);
 
-                    if (pk.startsWith("pk_ins_")) {
-                        insertCount++;
-                    } else {
-                        bulkLoadCount++;
-                    }
+                if (pk.startsWith("pk_c_10_")) {
+                    c10Count++;
                 }
-            } catch (Throwable e) {
-                System.err.println("Search iteration failed at record #" + foundPKs.size());
-                e.printStackTrace(System.err);
-                throw e;
             }
 
-            LOGGER.info("Search returned {} total records: {} bulk-loaded, {} inserted", foundPKs.size(), bulkLoadCount,
-                    insertCount);
+            LOGGER.info("Search returned {} total records, {} from c10", foundPKs.size(), c10Count);
 
-            // Verify we got records from both components
-            assertTrue("Should find bulk-loaded records", bulkLoadCount > 0);
-            assertTrue("Should find inserted records", insertCount > 0);
+            // Verify deleted PKs are NOT in results
+            for (String deletedPK : deletedPKs) {
+                assertFalse("Deleted record " + deletedPK + " should not be in search results",
+                        foundPKs.contains(deletedPK));
+            }
 
-            int sampleSize = Math.min(10, foundPKs.size());
-            LOGGER.info("Sample of found PKs: {}", foundPKs.subList(0, sampleSize));
+            // Verify some non-deleted c10 records ARE in results
+            assertTrue("Should find non-deleted c10 records", c10Count > 0);
+
+            // c10 originally has 100 records, we deleted 5, so expect 95 from c10
+            assertEquals("Should find 95 non-deleted c10 records", 95, c10Count);
+
+            LOGGER.info("Verification passed: {} deleted records absent, {} c10 records found", deletedPKs.size(),
+                    c10Count);
 
         } finally {
             cursor.close();

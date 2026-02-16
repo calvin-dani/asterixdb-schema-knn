@@ -37,9 +37,15 @@ import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerD
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.TestOperationCallback;
 import org.apache.hyracks.storage.am.common.impls.IndexAccessParameters;
+import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation.LSMIOOperationStatus;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTree;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestContext;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestHarness;
 import org.apache.hyracks.storage.am.lsm.vector.util.VectorIndexTestDriver;
+import org.apache.hyracks.storage.am.lsm.vector.util.VectorTestStructure;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.TestDoubleArrayVectorAccessor;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
@@ -52,19 +58,22 @@ import org.junit.After;
 import org.junit.Before;
 
 /**
- * LSMVCTree insert test (standard, non-quantized).
- * Tests insert operations into memory component after bulk loading the first disk component.
+ * LSMVCTree merge test.
+ * Tests explicit merge of multiple disk components into a single disk component.
  *
  * Inherits test case from VectorIndexTestDriver:
  * - threeDimensionThreeLevels(): 3D three-layer structure (3 levels, 24 leaf centroids, 2400 bulk-loaded records)
  *
- * The test bulk loads the dataset, then inserts additional records into the memory component,
- * and verifies that records from both components are retrievable via search.
+ * Flow:
+ * 1. Build static structure and bulk load data records → disk component 1
+ * 2. Insert additional records into memory component
+ * 3. Flush memory component → disk component 2
+ * 4. Explicitly merge disk components 1 and 2 into a single disk component
+ * 5. Verify search returns records from both original components after merge
  *
  * Data tuple format (standard): <distance, centroid_id, primary_key>
- * No vector field is stored in data tuples.
  */
-public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
+public class LSMVCTreeMergeTest extends VectorIndexTestDriver {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -85,14 +94,14 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
 
     /**
      * Implementation of runTest from VectorIndexTestDriver.
-     * Performs: build static structure → bulk load → insert → verify.
+     * Performs: build static structure → bulk load → insert → flush → merge → verify.
      */
     @Override
     protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,
             List<ITupleReference> centroids, List<Integer> numClustersPerLevel, List<List<Integer>> centroidsPerCluster,
             int vectorDimension, List<List<ITupleReference>> leafRecords) throws Exception {
 
-        LOGGER.info("LSMVCTree Insert Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
+        LOGGER.info("LSMVCTree Merge Test: {} levels, {} centroids, {} leaf clusters, {}D vectors",
                 numClustersPerLevel.size(), centroids.size(), leafRecords.size(), vectorDimension);
 
         // Create test context with default (standard) data tuple creator factory
@@ -108,6 +117,8 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
         ctx.setDataRecords(leafRecords);
 
+        LSMVCTree lsmvcTree = (LSMVCTree) ctx.getIndex();
+
         try {
             // 1. Create and activate index
             ctx.getIndex().create();
@@ -118,23 +129,39 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
             testUtils.buildStaticStructure(ctx);
             LOGGER.info("Static structure built with {} centroids", centroids.size());
 
-            // 3. Bulk load data records (first disk component)
+            // 3. Bulk load data records → disk component 1
             testUtils.bulkLoadRecords(ctx);
             int bulkLoadedCount = leafRecords.stream().mapToInt(List::size).sum();
-            LOGGER.info("Bulk loaded {} records across {} clusters", bulkLoadedCount, leafRecords.size());
+            LOGGER.info("Bulk loaded {} records → disk component 1", bulkLoadedCount);
+            assertEquals("Should have 1 disk component after bulk load", 1, lsmvcTree.getDiskComponents().size());
 
-            // 4. Generate and insert additional records into memory component
-            List<List<ITupleReference>> insertRecords =
-                    generateInsertRecords(centroids, centroidSerdes, centroidsPerCluster, vectorDimension);
-            int insertedCount = insertRecordsIntoMemoryComponent(ctx, insertRecords);
+            // 4. Insert additional records into memory component
+            VectorTestStructure struct = VectorTestStructure.threeDim3Level();
+            List<List<ITupleReference>> insertRecords = struct.generateInsertRecords(INSERT_RECORDS_PER_CLUSTER);
+            int insertedCount = testUtils.insertRecordsIntoMemoryComponent(ctx, insertRecords);
             LOGGER.info("Inserted {} records into memory component", insertedCount);
 
-            // 5. Verify records using LSMVCTreeSearchCursor
-            // Query near first leaf centroid c10 at [20, 30, 20]
+            // 5. Flush memory component → disk component 2
+            flush(ctx);
+            LOGGER.info("Flushed memory component → disk component 2");
+            assertEquals("Should have 2 disk components after flush", 2, lsmvcTree.getDiskComponents().size());
+
+            // 6. Explicitly merge all disk components
+            ILSMIndexAccessor lsmAccessor =
+                    (ILSMIndexAccessor) ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+            ILSMIOOperation mergeOp = lsmAccessor.scheduleMerge(lsmvcTree.getDiskComponents());
+            mergeOp.sync();
+            if (mergeOp.getStatus() == LSMIOOperationStatus.FAILURE) {
+                throw HyracksDataException.create(mergeOp.getFailure());
+            }
+            LOGGER.info("Merged disk components into single component");
+            assertEquals("Should have 1 disk component after merge", 1, lsmvcTree.getDiskComponents().size());
+
+            // 7. Verify search returns records from both original components
             double[] queryVector = { 20.0, 30.0, 20.0 };
             int queryK = 500;
-            verifyRecordsWithSearch(ctx, queryVector, queryK);
-            LOGGER.info("Verification: Found records from both bulk-loaded and inserted components");
+            verifyMergedRecords(ctx, queryVector, queryK);
+            LOGGER.info("Verification: Records from both components found after merge");
 
         } finally {
             // Cleanup
@@ -145,133 +172,33 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
     }
 
     /**
-     * Generate insert records for all leaf centroids.
-     * Extracts leaf centroid vectors from the centroids list and generates
-     * INSERT_RECORDS_PER_CLUSTER records per leaf centroid.
-     *
-     * Insert tuple format: <vector, primary_key>
+     * Flush the current memory component to disk.
      */
-    private List<List<ITupleReference>> generateInsertRecords(List<ITupleReference> centroids,
-            ISerializerDeserializer[] centroidSerdes, List<List<Integer>> centroidsPerCluster, int vectorDimension)
-            throws Exception {
-
-        // Determine leaf centroid count from last level of structure
-        List<Integer> lastLevelClusters = centroidsPerCluster.get(centroidsPerCluster.size() - 1);
-        int numLeafCentroids = lastLevelClusters.stream().mapToInt(Integer::intValue).sum();
-        int firstLeafCentroidIndex = centroids.size() - numLeafCentroids;
-
-        List<List<ITupleReference>> allRecords = new ArrayList<>();
-
-        for (int i = 0; i < numLeafCentroids; i++) {
-            // Deserialize centroid tuple to extract ID and vector
-            ITupleReference centroidTuple = centroids.get(firstLeafCentroidIndex + i);
-            Object[] values = TupleUtils.deserializeTuple(centroidTuple, centroidSerdes);
-            int centroidId = (Integer) values[0];
-            double[] centroidVector = (double[]) values[1];
-
-            List<ITupleReference> clusterRecords = new ArrayList<>();
-            double baseDistance = 0.15;
-            int recordCount = 0;
-
-            while (recordCount < INSERT_RECORDS_PER_CLUSTER) {
-                double currentDistance = baseDistance;
-
-                // 6 records per ring (±x, ±y, ±z directions) for 3D
-                double[][] offsets = { { currentDistance, 0, 0 }, { -currentDistance, 0, 0 }, { 0, currentDistance, 0 },
-                        { 0, -currentDistance, 0 }, { 0, 0, currentDistance }, { 0, 0, -currentDistance } };
-
-                for (double[] offset : offsets) {
-                    if (recordCount >= INSERT_RECORDS_PER_CLUSTER)
-                        break;
-
-                    double[] vector = new double[vectorDimension];
-                    for (int d = 0; d < vectorDimension; d++) {
-                        vector[d] = centroidVector[d] + offset[d];
-                    }
-
-                    String primaryKey = "pk_ins_c" + centroidId + "_" + recordCount;
-                    ITupleReference tuple = createInsertTuple(vector, primaryKey);
-                    clusterRecords.add(tuple);
-                    recordCount++;
-                }
-
-                baseDistance += 0.15;
-            }
-
-            allRecords.add(clusterRecords);
+    private void flush(AbstractVectorTreeTestContext ctx) throws HyracksDataException, InterruptedException {
+        ILSMIndexAccessor accessor =
+                (ILSMIndexAccessor) ctx.getIndex().createAccessor(NoOpIndexAccessParameters.INSTANCE);
+        ILSMIOOperation flushOp = accessor.scheduleFlush();
+        flushOp.sync();
+        if (flushOp.getStatus() == LSMIOOperationStatus.FAILURE) {
+            throw HyracksDataException.create(flushOp.getFailure());
         }
-
-        return allRecords;
     }
 
     /**
-     * Create an insert tuple.
-     * Format: <vector, primary_key>
+     * Verify that records from both bulk load and insert are findable after merge.
      */
-    private ITupleReference createInsertTuple(double[] vector, String primaryKey) throws Exception {
-        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(2);
-        ArrayTupleReference tupleRef = new ArrayTupleReference();
-
-        // Field 0: vector (serialized with DoubleArraySerializerDeserializer)
-        DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
-        tupleBuilder.addFieldEndOffset();
-
-        // Field 1: primary_key (UTF8 string)
-        new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
-        tupleBuilder.addFieldEndOffset();
-
-        tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
-        return tupleRef;
-    }
-
-    /**
-     * Insert records into the memory component using the index accessor.
-     */
-    private int insertRecordsIntoMemoryComponent(AbstractVectorTreeTestContext ctx,
-            List<List<ITupleReference>> insertRecords) throws Exception {
-
-        IIndexAccessor accessor = ctx.getIndex().createAccessor(
-                new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE));
-
-        int insertedCount = 0;
-        for (List<ITupleReference> clusterRecords : insertRecords) {
-            for (ITupleReference tuple : clusterRecords) {
-                try {
-                    accessor.insert(tuple);
-                } catch (Throwable e) {
-                    System.err.println("Insert failed at record #" + insertedCount);
-                    e.printStackTrace(System.err);
-                    throw e;
-                }
-                insertedCount++;
-            }
-        }
-
-        LOGGER.info("Inserted {} records via accessor", insertedCount);
-        return insertedCount;
-    }
-
-    /**
-     * Verify records by scanning with LSMVCTreeSearchCursor.
-     * Checks that records from both disk (bulk-loaded) and memory (inserted) components are found.
-     */
-    private void verifyRecordsWithSearch(AbstractVectorTreeTestContext ctx, double[] queryVector, int k)
-            throws Exception {
-
-        // Create query tuple
+    private void verifyMergedRecords(AbstractVectorTreeTestContext ctx, double[] queryVector, int k) throws Exception {
         ArrayTupleBuilder queryTupleBuilder = new ArrayTupleBuilder(1);
         queryTupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, queryVector);
         ArrayTupleReference queryTuple = new ArrayTupleReference();
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
-        // Set up predicate
         VectorPointPredicate predicate = new VectorPointPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
 
-        // Create accessor with vector accessor factory
         IndexAccessParameters iap =
                 new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
@@ -286,31 +213,25 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
             int bulkLoadCount = 0;
             int insertCount = 0;
 
-            try {
-                while (cursor.hasNext()) {
-                    cursor.next();
-                    ITupleReference tuple = cursor.getTuple();
-                    String pk = extractPrimaryKeyFromTuple(tuple);
-                    foundPKs.add(pk);
+            while (cursor.hasNext()) {
+                cursor.next();
+                ITupleReference tuple = cursor.getTuple();
+                String pk = extractPrimaryKeyFromTuple(tuple);
+                foundPKs.add(pk);
 
-                    if (pk.startsWith("pk_ins_")) {
-                        insertCount++;
-                    } else {
-                        bulkLoadCount++;
-                    }
+                if (pk.startsWith("pk_ins_")) {
+                    insertCount++;
+                } else {
+                    bulkLoadCount++;
                 }
-            } catch (Throwable e) {
-                System.err.println("Search iteration failed at record #" + foundPKs.size());
-                e.printStackTrace(System.err);
-                throw e;
             }
 
-            LOGGER.info("Search returned {} total records: {} bulk-loaded, {} inserted", foundPKs.size(), bulkLoadCount,
-                    insertCount);
+            LOGGER.info("Post-merge search returned {} total records: {} bulk-loaded, {} inserted", foundPKs.size(),
+                    bulkLoadCount, insertCount);
 
-            // Verify we got records from both components
-            assertTrue("Should find bulk-loaded records", bulkLoadCount > 0);
-            assertTrue("Should find inserted records", insertCount > 0);
+            // Verify we got records from both original components
+            assertTrue("Should find bulk-loaded records after merge", bulkLoadCount > 0);
+            assertTrue("Should find inserted records after merge", insertCount > 0);
 
             int sampleSize = Math.min(10, foundPKs.size());
             LOGGER.info("Sample of found PKs: {}", foundPKs.subList(0, sampleSize));

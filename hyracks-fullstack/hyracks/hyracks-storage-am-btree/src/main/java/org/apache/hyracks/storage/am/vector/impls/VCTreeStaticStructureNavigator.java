@@ -18,15 +18,9 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
-import java.util.LinkedList;
-import java.util.Queue;
-
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
-import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
-import org.apache.hyracks.storage.common.buffercache.ICachedPage;
-import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -141,60 +135,6 @@ public class VCTreeStaticStructureNavigator {
             throw HyracksDataException.create(org.apache.hyracks.api.exceptions.ErrorCode.ILLEGAL_STATE,
                     "Static structure validation failed - root page not accessible: " + e.getMessage());
         }
-    }
-
-    /**
-     * Copy all pages in level-order using BFS traversal.
-     * 
-     * @param bulkLoader VCTreeBulkLoder to copy pages to
-     * @throws HyracksDataException if any error occurs during traversal
-     */
-    public void copyPagesInLevelOrder(VCTreeBulkLoader bulkLoader) throws HyracksDataException {
-        LOGGER.debug("Starting level-order page copying from root page {}", rootPageId);
-
-        Queue<Integer> pageQueue = new LinkedList<>();
-        pageQueue.offer(rootPageId); // Start with root page
-
-        int pagesProcessed = 0;
-
-        while (!pageQueue.isEmpty()) {
-            int currentPageId = pageQueue.poll();
-
-            // Pin and copy the current page
-            ICachedPage sourcePage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
-            try {
-                sourcePage.acquireReadLatch();
-
-                // Copy the page
-                bulkLoader.copyPage(sourcePage);
-                pagesProcessed++;
-
-                LOGGER.debug("Copied page {} (total processed: {})", currentPageId, pagesProcessed);
-
-                // Check if this is an interior page (has children)
-                IVectorClusteringInteriorFrame interiorFrame =
-                        (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
-                interiorFrame.setPage(sourcePage);
-
-                if (!interiorFrame.isLeaf()) {
-                    // Add all child pages to queue
-                    int tupleCount = interiorFrame.getTupleCount();
-                    for (int i = 0; i < tupleCount; i++) {
-                        int childPageId = interiorFrame.getChildPageId(i);
-                        if (childPageId > 0) {
-                            pageQueue.offer(childPageId);
-                            LOGGER.debug("Added child page {} to queue", childPageId);
-                        }
-                    }
-                }
-
-            } finally {
-                sourcePage.releaseReadLatch();
-                bufferCache.unpin(sourcePage);
-            }
-        }
-
-        LOGGER.debug("Level-order page copying completed. Total pages processed: {}", pagesProcessed);
     }
 
     /**

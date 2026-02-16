@@ -61,13 +61,15 @@ public class QuantileCalculatorOperatorDescriptor extends AbstractSingleActivity
     private final float confidenceInterval;
     private final int bits;
     private final IIndexDataflowHelperFactory indexHelperFactory;
+    private final int[][] partitionsMap;
 
     public QuantileCalculatorOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor recordDesc,
-            float confidenceInterval, int bits, IIndexDataflowHelperFactory indexHelperFactory) {
+            float confidenceInterval, int bits, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap) {
         super(spec, 1, 1);
         this.confidenceInterval = confidenceInterval;
         this.bits = bits;
         this.indexHelperFactory = indexHelperFactory;
+        this.partitionsMap = partitionsMap;
         this.outRecDescs[0] = recordDesc;
     }
 
@@ -273,7 +275,13 @@ public class QuantileCalculatorOperatorDescriptor extends AbstractSingleActivity
 
             IIndexDataflowHelper indexHelper = null;
             try {
-                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                // Resolve storage partition from compute-storage map
+                int storagePartition = partition;
+                if (partitionsMap != null && partition < partitionsMap.length && partitionsMap[partition] != null
+                        && partitionsMap[partition].length > 0) {
+                    storagePartition = partitionsMap[partition][0];
+                }
+                indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
                 indexHelper.open();
                 IIndex indexInstance = indexHelper.getIndexInstance();
                 if (!(indexInstance instanceof ILSMIndex)) {

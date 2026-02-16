@@ -49,6 +49,7 @@ public class VectorClusteringLeafFrame extends VectorClusteringNSMFrame implemen
     public void initBuffer(byte level) {
         super.initBuffer(level);
         buf.putInt(NEXT_PAGE_OFFSET, -1); // Initialize next leaf pointer to -1
+        buf.put(OVERFLOW_FLAG_OFFSET, (byte) 0); // Initialize overflow flag to false
     }
 
     @Override

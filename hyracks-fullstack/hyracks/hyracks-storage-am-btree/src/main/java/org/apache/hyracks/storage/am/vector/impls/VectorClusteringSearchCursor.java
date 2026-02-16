@@ -18,8 +18,13 @@
  */
 package org.apache.hyracks.storage.am.vector.impls;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -48,7 +53,7 @@ import org.apache.hyracks.storage.common.file.BufferedFileHandle;
  */
 public class VectorClusteringSearchCursor implements IIndexCursor {
 
-    // Tree navigation fields
+    // Tree navigation fields (used for static structure traversal)
     private IBufferCache bufferCache;
     private int fileId;
     private int rootPageId;
@@ -56,6 +61,19 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private ITreeIndexFrameFactory leafFrameFactory;
     private ITreeIndexFrameFactory metadataFrameFactory;
     private ITreeIndexFrameFactory dataFrameFactory;
+
+    // Data access fields (for memory components: VBC; for disk: same as bufferCache)
+    private IBufferCache dataBufferCache;
+    private int dataFileId;
+    // Centroid-to-directory-page mapping (memory components only, null for disk)
+    private int[] centroidDirPageMap;
+    private int firstLeafCentroidIdForMap;
+    // Lazily-built centroid→directoryPageId map for disk components.
+    // When centroidDirPageMap is null and openClusterByResult() is called,
+    // the ClusterSearchResult's directoryPageId may be from a DIFFERENT component
+    // (e.g., static structure with predicted IDs). This map resolves the correct
+    // directory page ID by scanning this component's own leaf pages.
+    private Map<Integer, Long> localCentroidDirPageMap;
 
     // Cursor state fields
     /* Metadata page for current cluster */
@@ -126,10 +144,37 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     public void setBufferCache(IBufferCache bufferCache) {
         this.bufferCache = bufferCache;
+        // Default: data uses same buffer cache as navigation
+        if (this.dataBufferCache == null) {
+            this.dataBufferCache = bufferCache;
+        }
     }
 
     public void setFileId(int fileId) {
         this.fileId = fileId;
+        // Default: data uses same file ID as navigation
+        if (this.dataFileId == 0) {
+            this.dataFileId = fileId;
+        }
+    }
+
+    /**
+     * Set separate buffer cache for data page access (memory components).
+     * Navigation uses the main bufferCache/fileId (static structure).
+     * Data pages use dataBufferCache/dataFileId (VBC).
+     */
+    public void setDataBufferCache(IBufferCache dataBufferCache, int dataFileId) {
+        this.dataBufferCache = dataBufferCache;
+        this.dataFileId = dataFileId;
+    }
+
+    /**
+     * Set centroid-to-directory-page mapping for memory components.
+     * When set, the cursor resolves directory pages from the map instead of reading leaf pages.
+     */
+    public void setCentroidDirPageMap(int[] map, int firstLeafCentroidId) {
+        this.centroidDirPageMap = map;
+        this.firstLeafCentroidIdForMap = firstLeafCentroidId;
     }
 
     public void setRootPageId(int rootPageId) {
@@ -310,7 +355,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     @Override
     public boolean hasNext() throws HyracksDataException {
         if (!isOpen) {
-            // System.err.println("[VectorClusteringSearchCursor.hasNext] Cursor not open, returning false");
             return false;
         }
 
@@ -321,14 +365,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Current page exhausted, try to move to next data page in same cluster
         if (moveToNextDataPage()) {
-            // System.err.println(String.format(
-            //         "[VectorClusteringSearchCursor.hasNext] Moved to next data page, tupleCount=%d", tupleCount));
-            return true; // Found more data pages in current cluster
+            return true;
         }
-
-        // System.err.println(String.format(
-        //        "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsIterated=%d, exhaustedAllClusters=%s",
-        //        recordsIterated, exhaustedAllClusters));
 
         // Current cluster exhausted - return false
         // Let the LSM layer decide whether to advance to next cluster
@@ -380,8 +418,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Then: leftmost leaf → next leaf → ... → last leaf (following nextLeaf pointers)
      */
     private void navigateToFirstCluster() throws HyracksDataException {
-        // System.err.println("[VectorClusteringSearchCursor.navigateToFirstCluster] Starting navigation to cluster 0...");
-
         // Step 1: Navigate to leftmost leaf page
         int currentPageId = rootPageId;
 
@@ -393,12 +429,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 IVectorClusteringInteriorFrame interiorFrame = createInteriorFrame();
                 interiorFrame.setPage(page);
 
-                // Always take FIRST child to reach leftmost leaf
                 if (interiorFrame.getTupleCount() > 0) {
                     currentPageId = interiorFrame.getChildPageId(0);
-                    // System.err.println(String.format(
-                    //        "[VectorClusteringSearchCursor.navigateToFirstCluster] Interior page, taking first child -> pageId=%d",
-                    //        currentPageId));
                 } else {
                     throw HyracksDataException
                             .create(new IllegalStateException("Empty interior page encountered during navigation"));
@@ -410,13 +442,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         }
 
         // Step 2: Scan ALL leaf pages and collect ALL directory page IDs
+        // (Full-scan mode is only used for merge operations on disk components)
         this.allDirectoryPageIds = new ArrayList<>();
         int leafPageId = currentPageId;
         int totalClusters = 0;
-
-        // System.err.println(String.format(
-        //     "[VectorClusteringSearchCursor.navigateToFirstCluster] Starting leaf page scan from pageId=%d",
-        //      leafPageId));
 
         while (leafPageId != -1) {
             ICachedPage leafPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, leafPageId));
@@ -427,10 +456,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
                 int tupleCount = leafFrame.getTupleCount();
                 int nextLeafPageId = leafFrame.getNextLeaf();
-
-                // System.err.println(String.format(
-                //         "[VectorClusteringSearchCursor.navigateToFirstCluster] Leaf page %d: tuples=%d, nextLeaf=%d",
-                //        leafPageId, tupleCount, nextLeafPageId));
 
                 // Collect directory page IDs from THIS leaf page
                 for (int i = 0; i < tupleCount; i++) {
@@ -457,10 +482,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         this.firstDirectoryPageId = allDirectoryPageIds.get(0);
 
-        // System.err.println(String.format(
-        //       "[VectorClusteringSearchCursor.navigateToFirstCluster] Scan complete: totalClusters=%d, collected %d directory pages",
-        //       totalLeafClusters, allDirectoryPageIds.size()));
-
         // Step 4: Open cluster 0
         this.currentSequentialClusterIndex = 0;
         openClusterByDirectoryPage(this.firstDirectoryPageId);
@@ -476,9 +497,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 Double.NaN // No quantized distance in full-scan mode
         );
 
-        // System.err.println(String.format(
-        //          "[VectorClusteringSearchCursor.navigateToFirstCluster] Successfully opened cluster 0, tupleCount=%d",
-        //      tupleCount));
     }
 
     /**
@@ -509,13 +527,18 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Used by full-scan mode for sequential cluster iteration.
      */
     private void openClusterByDirectoryPage(long directoryPageId) throws HyracksDataException {
-        // System.err.println(String.format(
-        //     "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Opening directoryPage=%d", directoryPageId));
-
         this.targetMetadataPageId = directoryPageId;
 
-        // Pin metadata/directory page
-        ICachedPage dirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) directoryPageId));
+        // Guard: directoryPageId=-1 means empty cluster (no data assigned during bulk loading)
+        if (directoryPageId == -1) {
+            this.currentDataPageId = -1;
+            this.tupleCount = 0;
+            this.currentTupleIndex = 0;
+            return;
+        }
+
+        // Pin metadata/directory page (use data buffer cache for directory pages)
+        ICachedPage dirPage = dataBufferCache.pin(BufferedFileHandle.getDiskPageId(dataFileId, (int) directoryPageId));
         try {
             dirPage.acquireReadLatch();
             IVectorClusteringMetadataFrame metadataFrame = createMetadataFrame();
@@ -523,9 +546,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             int metadataTupleCount = metadataFrame.getTupleCount();
             if (metadataTupleCount == 0) {
-                // Empty cluster - no data pages
-                // System.err.println(
-                //      "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Empty cluster (no metadata entries)");
                 this.currentDataPageId = -1;
                 this.tupleCount = 0;
                 this.currentTupleIndex = 0;
@@ -536,12 +556,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             long firstDataPageId = metadataFrame.getDataPagePointer(0);
             this.currentDataPageId = firstDataPageId;
 
-            //            // System.err.println(String.format(
-            //                    "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Metadata has %d entries, firstDataPage=%d",
-            //                    metadataTupleCount, firstDataPageId));
         } finally {
             dirPage.releaseReadLatch();
-            bufferCache.unpin(dirPage);
+            dataBufferCache.unpin(dirPage);
         }
 
         // Open first data page
@@ -565,26 +582,16 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * @return true if successfully moved to next cluster, false if no more clusters available
      */
     public boolean advanceToNextCluster() throws HyracksDataException {
-        // System.err.println("[VectorClusteringSearchCursor.advanceToNextCluster] Looking for next cluster...");
-
         if (fullScanMode) {
             // Full-scan mode: Sequential iteration through clusters
             currentSequentialClusterIndex++;
 
             if (currentSequentialClusterIndex >= totalLeafClusters) {
                 exhaustedAllClusters = true;
-                // System.err.println(String.format(
-                //    "[VectorClusteringSearchCursor.advanceToNextCluster] Full-scan exhausted all %d clusters",
-                // totalLeafClusters));
-                return false; // No more clusters
+                return false;
             }
 
-            // Get directory page ID from collected list (handles multiple leaf pages)
             long nextDirectoryPageId = allDirectoryPageIds.get(currentSequentialClusterIndex);
-            // System.err.println(String.format(
-            //     "[VectorClusteringSearchCursor.advanceToNextCluster] Full-scan advancing to cluster %d (directoryPage=%d)",
-            //         currentSequentialClusterIndex, nextDirectoryPageId));
-
             openClusterByDirectoryPage(nextDirectoryPageId);
 
             // Create ClusterSearchResult for this sequential cluster
@@ -610,17 +617,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             if (nextCluster == null) {
                 exhaustedAllClusters = true;
-                // System.err.println(
-                //      "[VectorClusteringSearchCursor.advanceToNextCluster] No more clusters, marking exhausted");
-                return false; // No more clusters available
+                return false;
             }
 
-            // Open next cluster (even if it might be empty)
             openCluster(nextCluster);
-            boolean hasData = currentTupleIndex < tupleCount;
-            // System.err.println(String.format(
-            //         "[VectorClusteringSearchCursor.advanceToNextCluster] Opened cluster %d (centroidId=%d, distance=%.4f), hasData=%s, tupleCount=%d",
-            //        clustersProbed, nextCluster.centroidId, nextCluster.distance, hasData, tupleCount));
 
             // Return true even if cluster is empty - let LSMVCTreeSearchCursor handle it
             // This ensures cluster synchronization across all LSM components
@@ -650,29 +650,18 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             return false;
         }
 
-        // System.err.println(String.format(
-        //        "[VectorClusteringSearchCursor.openClusterByResult] Opening cluster cid=%d with directoryPageId=%d (O(1) access)",
-        //       cluster.centroidId, cluster.directoryPageId));
-
-        // Use directoryPageId if available (O(1)), otherwise fall back to tree traversal (O(n))
-        if (cluster.hasDirectoryPageId()) {
-            // O(1) direct access using stored directory page ID
-            openClusterByDirectoryPage(cluster.directoryPageId);
-            this.currentClusterResult = cluster;
-            this.clustersProbed++;
-        } else {
-            // Fall back to tree traversal (legacy path)
-            // System.err.println(
-            //          "[VectorClusteringSearchCursor.openClusterByResult] No directoryPageId, falling back to openCluster()");
-            openCluster(cluster);
-        }
+        // Always resolve directoryPageId locally for this component.
+        // The cluster's directoryPageId may come from a different LSM component
+        // (e.g., memory component VBC page IDs vs disk component page IDs).
+        // getMetadataPageIdFromCluster handles both memory (centroidDirPageMap)
+        // and disk (leaf page traversal) correctly.
+        long localDirPageId = getMetadataPageIdFromCluster(cluster);
+        openClusterByDirectoryPage(localDirPageId);
+        this.currentClusterResult = cluster;
+        this.clustersProbed++;
 
         // Check if cluster has data
         boolean hasData = currentTupleIndex < tupleCount;
-        //        // System.err.println(String.format(
-        //                "[VectorClusteringSearchCursor.openClusterByResult] Opened cluster cid=%d, hasData=%s, tupleCount=%d",
-        //                cluster.centroidId, hasData, tupleCount));
-
         return hasData;
     }
 
@@ -707,8 +696,9 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             return -1;
         }
 
+        // Use data buffer cache for directory/metadata pages
         ICachedPage metadataPage =
-                bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) targetMetadataPageId));
+                dataBufferCache.pin(BufferedFileHandle.getDiskPageId(dataFileId, (int) targetMetadataPageId));
         try {
             metadataPage.acquireReadLatch();
             IVectorClusteringMetadataFrame metadataFrame = createMetadataFrame();
@@ -722,7 +712,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             return -1;
         } finally {
             metadataPage.releaseReadLatch();
-            bufferCache.unpin(metadataPage);
+            dataBufferCache.unpin(metadataPage);
         }
     }
 
@@ -733,8 +723,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         // Close current page if open
         closeCurrentPage();
 
-        // Pin and acquire the new data page
-        this.currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) dataPageId));
+        // Pin and acquire the new data page (use data buffer cache for directory/data pages)
+        this.currentPage = dataBufferCache.pin(BufferedFileHandle.getDiskPageId(dataFileId, (int) dataPageId));
         this.currentPage.acquireReadLatch();
 
         // Initialize data frame
@@ -764,8 +754,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             // Get the next page ID from the current data frame's linked list pointer
             int nextDataPageId = dataFrame.getNextPage();
             if (nextDataPageId == -1) {
-                //                // System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] "
-                //                        + "Reached end of data page chain, no more pages");
                 return false; // Reached end of chain
             }
 
@@ -775,22 +763,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Check if this page has tuples
             if (this.tupleCount > 0) {
-                //                System.err
-                //                        .println(String.format(
-                //                                "[VectorClusteringSearchCursor.moveToNextDataPage] "
-                //                                        + "Found non-empty data page %d with %d tuples",
-                //                                nextDataPageId, this.tupleCount));
                 return true; // Found non-empty page
             }
 
             // Page is empty after deletion - continue to next page
-            //            System.err
-            //                    .println(
-            //                            String.format(
-            //                                    "[VectorClusteringSearchCursor.moveToNextDataPage] "
-            //                                            + "Data page %d is empty (after deletion), skipping to next page",
-            //                                    nextDataPageId));
-            // Loop continues to next page
         }
     }
 
@@ -800,7 +776,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     private void closeCurrentPage() throws HyracksDataException {
         if (currentPage != null) {
             currentPage.releaseReadLatch();
-            bufferCache.unpin(currentPage);
+            dataBufferCache.unpin(currentPage);
             currentPage = null;
         }
     }
@@ -833,11 +809,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         }
 
         this.currentTupleIndex = 0;
-
-        // Log cluster probing
-        // System.err.println(String.format(
-        //             "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records iterated so far: %d",
-        //       clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsIterated));
     }
 
     /**
@@ -862,17 +833,109 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     /**
      * Get metadata page ID from cluster search result.
+     *
+     * For memory components: uses centroidDirPageMap for O(1) lookup (the map
+     * translates centroid IDs to VBC directory page IDs).
+     *
+     * For disk components: builds a lazy local map by scanning this component's
+     * own leaf pages. This is necessary because the ClusterSearchResult's
+     * directoryPageId may come from a DIFFERENT component (e.g., level-wise
+     * computation reads the static structure's leaf pages, which have predicted
+     * directory page IDs that don't match this disk component's actual IDs).
      */
     private long getMetadataPageIdFromCluster(ClusterSearchResult clusterResult) throws HyracksDataException {
-        ICachedPage leafPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, clusterResult.leafPageId));
-        try {
-            leafPage.acquireReadLatch();
-            IVectorClusteringLeafFrame leafFrame = createLeafFrame();
-            leafFrame.setPage(leafPage);
-            return leafFrame.getMetadataPagePointer(clusterResult.clusterIndex);
-        } finally {
-            leafPage.releaseReadLatch();
-            bufferCache.unpin(leafPage);
+        // Memory components: use centroidDirPageMap for O(1) lookup
+        if (centroidDirPageMap != null) {
+            int centroidIndex = clusterResult.centroidId - firstLeafCentroidIdForMap;
+            if (centroidIndex >= 0 && centroidIndex < centroidDirPageMap.length) {
+                return centroidDirPageMap[centroidIndex];
+            }
+        }
+
+        // Disk components: resolve directoryPageId locally by scanning this
+        // component's own leaf pages (which have correct IDs from VCTreeBulkLoader).
+        if (localCentroidDirPageMap == null) {
+            buildLocalCentroidDirPageMap();
+        }
+        if (localCentroidDirPageMap != null) {
+            Long dirPageId = localCentroidDirPageMap.get(clusterResult.centroidId);
+            if (dirPageId != null) {
+                return dirPageId;
+            }
+        }
+
+        // Fallback: use directoryPageId from ClusterSearchResult
+        return clusterResult.directoryPageId;
+    }
+
+    /**
+     * Build a centroidId → directoryPageId map by scanning this component's own leaf pages.
+     * Uses BFS from root to find all leaf pages, then reads each leaf tuple's
+     * centroidId and metadataPagePointer to build the map.
+     *
+     * This is needed because ClusterSearchResults from level-wise computation
+     * carry directoryPageIds from the static structure (predicted sequential IDs),
+     * which don't match this disk component's actual directory page IDs
+     * (set correctly by VCTreeBulkLoader.end()).
+     */
+    private void buildLocalCentroidDirPageMap() throws HyracksDataException {
+        localCentroidDirPageMap = new HashMap<>();
+
+        // BFS from root through the tree to find all leaf pages
+        Queue<Integer> queue = new ArrayDeque<>();
+        queue.add(rootPageId);
+        Set<Integer> visitedPages = new HashSet<>();
+
+        while (!queue.isEmpty()) {
+            int pageId = queue.poll();
+            if (!visitedPages.add(pageId)) {
+                continue;
+            }
+
+            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, pageId));
+            try {
+                page.acquireReadLatch();
+
+                // Use leaf frame to check page level (isLeaf works on any page type)
+                IVectorClusteringLeafFrame lf = createLeafFrame();
+                lf.setPage(page);
+
+                if (lf.isLeaf()) {
+                    // Leaf page: collect centroidId → metadataPagePointer mappings
+                    int tc = lf.getTupleCount();
+                    for (int i = 0; i < tc; i++) {
+                        int centroidId = lf.getCentroidId(i);
+                        long dirPageId = lf.getMetadataPagePointer(i);
+                        localCentroidDirPageMap.put(centroidId, dirPageId);
+                    }
+                    // Follow overflow chain
+                    if (lf.getOverflowFlagBit()) {
+                        int nextLeafPage = lf.getNextLeaf();
+                        if (nextLeafPage >= 0) {
+                            queue.add(nextLeafPage);
+                        }
+                    }
+                } else {
+                    // Interior page: enqueue all children
+                    IVectorClusteringInteriorFrame intFrame = createInteriorFrame();
+                    intFrame.setPage(page);
+
+                    int tc = intFrame.getTupleCount();
+                    for (int i = 0; i < tc; i++) {
+                        queue.add(intFrame.getChildPageId(i));
+                    }
+                    // Follow overflow chain for interior pages
+                    if (intFrame.getOverflowFlagBit()) {
+                        int nextPage = intFrame.getNextPage();
+                        if (nextPage >= 0) {
+                            queue.add(nextPage);
+                        }
+                    }
+                }
+            } finally {
+                page.releaseReadLatch();
+                bufferCache.unpin(page);
+            }
         }
     }
 
@@ -895,18 +958,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     @Override
     public void close() throws HyracksDataException {
-        // Debug: log who is calling close() to help track unexpected closure
-        //        // System.err.println(
-        //                String.format("[VectorClusteringSearchCursor.close] Called on cursor (isOpen=%s, recordsIterated=%d)",
-        //                        isOpen, recordsIterated));
-
         if (isOpen) {
             closeCurrentPage();
-
-            // Log final statistics
-            //            // System.err.println(String.format(
-            //                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records iterated: %d | Exhausted all clusters: %s",
-            //                    clustersProbed, recordsIterated, exhaustedAllClusters));
         }
         this.isOpen = false;
         this.currentTuple = null;

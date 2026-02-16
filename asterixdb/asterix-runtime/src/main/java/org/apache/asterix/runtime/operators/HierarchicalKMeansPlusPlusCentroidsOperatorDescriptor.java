@@ -636,6 +636,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private DistanceFunction distanceFunction;
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
+    private int[][] partitionsMap; // Maps compute partition to storage partition(s)
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
@@ -841,7 +842,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, String distanceMetric) {
+            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap,String distanceMetric) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -855,6 +856,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.indexHelperFactory = indexHelperFactory;
+        this.partitionsMap = partitionsMap;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
         this.distanceFunction = getDistanceFunction(distanceMetric);
@@ -1050,8 +1052,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             scalarWriter.initialize(ctx, partition, scalarValuesUUID);
                         }
 
-                        // Get index directory for this partition
-                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                        // Get index directory for this partition (resolve storage partition from compute-storage map)
+                        int storagePartition = partition;
+                        if (partitionsMap != null && partition < partitionsMap.length
+                                && partitionsMap[partition] != null && partitionsMap[partition].length > 0) {
+                            storagePartition = partitionsMap[partition][0];
+                        }
+                        indexHelper =
+                                indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
                         indexHelper.open();
                         IIndex indexInstance = indexHelper.getIndexInstance();
                         if (!(indexInstance instanceof ILSMIndex)) {
@@ -1648,11 +1656,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             }
                             // Weighted distance: weight[j] * D(c_j)
                             weightedDistances[j] = weights[j] * minDist;
-                            totalWeightedDistance += weightedDistances[j];
+                            totalWeighte\dDistance += weightedDistances[j];
                         }
 
                         if (totalWeightedDistance <= 0) {
-                            break;
+                            b//ak;
                         }
 
                         // Weighted random selection

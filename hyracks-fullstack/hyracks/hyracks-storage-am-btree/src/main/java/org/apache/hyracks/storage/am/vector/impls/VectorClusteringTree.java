@@ -22,10 +22,11 @@ package org.apache.hyracks.storage.am.vector.impls;
 import static org.apache.hyracks.storage.common.buffercache.context.read.DefaultBufferCacheReadContextProvider.NEW;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
@@ -66,10 +67,7 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
-import org.apache.hyracks.storage.common.buffercache.NoOpPageWriteCallback;
-import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
-import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -101,6 +99,19 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private boolean isStaticStructureInitialized = true;
 
     private boolean initialized = false;
+
+    // For memory components: reference to static structure for navigation
+    private IBufferCache staticBufferCache;
+    private int staticFileId;
+    private int staticRootPage;
+
+    // Centroid-to-directory-page mapping (memory components only)
+    private int[] centroidDirPageMap; // centroidIndex -> VBC directory page ID
+    private int firstLeafCentroidIdMem;
+    private int numLeafCentroidMem;
+
+    // Track directory page IDs for flush pointer adjustment
+    private Set<Integer> directoryPageIds;
 
     public VectorClusteringTree(IBufferCache bufferCache, IPageManager freePageManager,
             ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
@@ -154,15 +165,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return 0;
     }
 
-    public IIndexBulkLoader createComponentBulkLoader(NoOpPageWriteCallback instance, ITreeIndexAccessor staticAccessor,
-            ISerializerDeserializer[] dataFrameSerdes) throws HyracksDataException {
-        @SuppressWarnings("rawtypes")
-        ISerializerDeserializer[] dataFrameSerds;
-        // Use provided serializers from RecordDescriptor
-        dataFrameSerds = dataFrameSerdes;
-
-        return new VCTreeBulkLoader(0, instance, this, leafFrameFactory.createFrame(), dataFrameFactory.createFrame(),
-                DefaultBufferCacheWriteContext.INSTANCE, dataFrameSerds, staticAccessor);
+    public IIndexBulkLoader createComponentBulkLoader(IPageWriteCallback callback, ITreeIndexAccessor staticAccessor)
+            throws HyracksDataException {
+        return new VCTreeBulkLoader(callback, this, staticAccessor);
     }
 
     @Override
@@ -187,13 +192,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     public IIndexBulkLoader createStaticStructureBulkLoader(int numLevels, List<Integer> clustersPerLevel,
             List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage, IPageWriteCallback callback)
             throws HyracksDataException {
-        return new VCTreeStaticStructureBuilder(callback, this, leafFrameFactory.createFrame(),
-                dataFrameFactory.createFrame(), numLevels, clustersPerLevel, centroidsPerCluster, maxEntriesPerPage);
-    }
-
-    public IIndexBulkLoader createFlushLoader(float fillFactor, IPageWriteCallback callback)
-            throws HyracksDataException {
-        return new VectorClusteringTreeFlushLoader(fillFactor, this, callback);
+        return new VCTreeStaticStructureBuilder(callback, this, numLevels, clustersPerLevel, centroidsPerCluster,
+                maxEntriesPerPage);
     }
 
     /**
@@ -216,8 +216,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             insertIntoDataPages(accessResult.metadataPageId, vector, distance, centroidId, tuple, ctx);
 
         } finally {
-            accessResult.leafPage.releaseWriteLatch(true);
-            bufferCache.unpin(accessResult.leafPage);
+            if (accessResult.leafPage != null) {
+                accessResult.leafPage.releaseWriteLatch(true);
+                bufferCache.unpin(accessResult.leafPage);
+            }
         }
     }
 
@@ -228,10 +230,16 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private void insertIntoDataPages(long metadataPageId, double[] vector, double distance, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
-        // Traverse through all linked metadata pages to find the appropriate data page
+        // Traverse through all linked directory (metadata) pages to find the appropriate data page
         long currentMetadataPageId = metadataPageId;
+        int loopCount = 0;
 
         while (currentMetadataPageId != -1) {
+            loopCount++;
+            if (loopCount > 100) {
+                throw new HyracksDataException(
+                        "Infinite loop in directory page chain starting at page " + metadataPageId);
+            }
             ICachedPage metadataPage =
                     bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), (int) currentMetadataPageId));
             ctx.setMetadataPageId(currentMetadataPageId);
@@ -239,44 +247,37 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 metadataPage.acquireWriteLatch();
                 ctx.getMetadataFrame().setPage(metadataPage);
 
-                LOGGER.log(Level.DEBUG, "Searching metadata page {} for distance {}", currentMetadataPageId,
-                        metadataPage);
+                // Determine if this is the last directory page in the chain
+                int nextMetadataPageId = ctx.getMetadataFrame().getNextPage();
+                boolean isLastInChain = (nextMetadataPageId <= 0);
 
-                // Try to find appropriate data page in current metadata page based on distance
-                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), distance);
+                // Try to find appropriate data page based on distance.
+                // Only uses catch-all (last data page) on the last directory page;
+                // otherwise returns -1 so we traverse to the next directory page.
+                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), distance, isLastInChain);
 
                 if (targetDataPageId != -1) {
                     // Found appropriate data page - try to insert
-                    LOGGER.log(Level.DEBUG, "Found target data page {} in metadata page {}", targetDataPageId,
-                            currentMetadataPageId);
-
                     boolean inserted =
                             tryInsertIntoDataPage(targetDataPageId, vector, distance, centroidId, originalTuple, ctx);
 
                     if (inserted) {
-                        System.err.println("DEBUG: Successfully inserted into data page " + targetDataPageId);
                         return; // Successfully inserted
                     }
 
                     // If insert failed due to space, we need to handle overflow
-                    System.err.println("DEBUG: Data page " + targetDataPageId + " is full, handling overflow");
                     handleDataPageOverflow(currentMetadataPageId, vector, distance, centroidId, originalTuple, ctx);
                     return;
                 }
 
-                // Check if there's a next metadata page to examine
-                int nextMetadataPageId = ctx.getMetadataFrame().getNextPage();
-                System.err.println("DEBUG: No suitable data page found in metadata page " + currentMetadataPageId
-                        + ", next metadata page: " + nextMetadataPageId);
-
-                // TODO: properly handle empty directory page
-                if (nextMetadataPageId == 0 || nextMetadataPageId == -1) {
-                    // Reached end of metadata chain - need to create new data page
-                    System.err.println("DEBUG: Reached end of metadata chain, creating new data page");
+                // No match on this directory page
+                if (isLastInChain) {
+                    // Last page in chain - create new data page
                     handleDataPageOverflow(currentMetadataPageId, vector, distance, centroidId, originalTuple, ctx);
                     return;
                 }
 
+                // Traverse to next directory page
                 currentMetadataPageId = nextMetadataPageId;
 
             } finally {
@@ -303,8 +304,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
      * @param distance The distance to search for
      * @return Data page ID, or -1 if metadata is empty
      */
-    private long findDataPageInMetadataPage(IVectorClusteringMetadataFrame metadataFrame, double distance)
-            throws HyracksDataException {
+    private long findDataPageInMetadataPage(IVectorClusteringMetadataFrame metadataFrame, double distance,
+            boolean isLastInChain) throws HyracksDataException {
 
         int tupleCount = metadataFrame.getTupleCount();
 
@@ -319,12 +320,13 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             }
         }
 
-        // No exact match: use last data page as catch-all (for ALL operations)
-        if (tupleCount > 0) {
+        // Only use catch-all (last data page) on the last directory page in the chain.
+        // For non-last pages, return -1 so the caller traverses to the next directory page.
+        if (isLastInChain && tupleCount > 0) {
             return metadataFrame.getDataPagePointer(tupleCount - 1);
         }
 
-        return -1; // Metadata is empty
+        return -1; // No match on this page (or empty)
     }
 
     /**
@@ -368,14 +370,10 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     // Update metadata maxDistance if this is the new maximum for this data page
                     updateMetadataMaxDistanceIfNeeded(ctx.getMetadataPageId(), dataPageId, distance, ctx);
 
-                    System.err.println("DEBUG: Successfully inserted tuple at index " + insertIndex + " in data page "
-                            + dataPageId);
                     return true;
 
                 case INSUFFICIENT_SPACE:
                     // Handle overflow by splitting the data page
-                    System.err.println(
-                            "DEBUG: Insufficient space in data page " + dataPageId + ", triggering data page split");
 
                     // Find correct insertion position to maintain sorted order by distance
                     int splitInsertIndex =
@@ -383,13 +381,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                     // Split the data page while maintaining distance-based ordering
                     splitDataPageMaintainOrder(dataPageId, dataTuple, splitInsertIndex, ctx);
-
-                    System.err.println("DEBUG: Successfully split data page " + dataPageId + " and inserted tuple");
                     return true;
 
                 default:
-                    System.err.println("DEBUG: Unexpected space status in data page " + dataPageId + ", spaceStatus="
-                            + spaceStatus);
                     return false; // Unexpected space status
             }
 
@@ -449,8 +443,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         long targetMetadataPageId = ctx.getMetadataPageId();
 
         if (targetMetadataPageId == -1) {
-            System.out
-                    .println("DEBUG: Could not find metadata page containing originalDataPageId=" + originalDataPageId);
+            LOGGER.warn("Could not find metadata page containing originalDataPageId={}", originalDataPageId);
             return; // Could not find the metadata page
         }
 
@@ -469,9 +462,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             if (originalTupleCount > 0) {
                 originalPageMaxDistance = originalDataFrame.getDistanceToCentroid(originalTupleCount - 1);
             }
-
-            System.err.println("DEBUG: After split, original data page " + originalDataPageId + " has maxDistance="
-                    + originalPageMaxDistance + ", tupleCount=" + originalTupleCount);
 
         } finally {
             originalDataPage.releaseReadLatch();
@@ -493,9 +483,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 newPageMaxDistance = newDataFrame.getDistanceToCentroid(newTupleCount - 1);
             }
 
-            System.err.println("DEBUG: New data page " + newDataPageId + " has maxDistance=" + newPageMaxDistance
-                    + ", tupleCount=" + newTupleCount);
-
         } finally {
             newDataPage.releaseReadLatch();
             bufferCache.unpin(newDataPage);
@@ -506,10 +493,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         // Add NEW page's metadata entry
         updateMetadataWithNewDataPage(targetMetadataPageId, newDataPageId, newPageMaxDistance, ctx);
-
-        System.err.println("DEBUG: Successfully updated metadata page " + targetMetadataPageId
-                + " - updated original page " + originalDataPageId + " maxDistance=" + originalPageMaxDistance
-                + ", added new page " + newDataPageId + " maxDistance=" + newPageMaxDistance);
     }
 
     /**
@@ -547,17 +530,15 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // - Empty metadata pages (creates new data page)
             // - Page splits (if data page is full)
             // - Metadata max distance updates
-            System.err.println(
-                    "DELETE PK=" + Arrays.toString(primaryKey) + " → Tuple not found in memory, inserting antimatter");
             insertIntoDataPages(accessResult.metadataPageId, vector, distance, centroidId, tuple, ctx);
-            System.err.println("DELETE PK=" + Arrays.toString(primaryKey)
-                    + " → ANTIMATTER inserted (disk tuple) in cluster=" + centroidId + ", distance=" + distance);
             return true;
 
         } finally {
-            // Release leaf page
-            accessResult.leafPage.releaseWriteLatch(true);
-            bufferCache.unpin(accessResult.leafPage);
+            // Release leaf page (null for memory components)
+            if (accessResult.leafPage != null) {
+                accessResult.leafPage.releaseWriteLatch(true);
+                bufferCache.unpin(accessResult.leafPage);
+            }
         }
     }
 
@@ -571,7 +552,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     private boolean tryPhysicalDelete(long metadataPageId, double distance, byte[] primaryKey, int centroidId,
             ITupleReference originalTuple, VectorClusteringOpContext ctx) throws HyracksDataException {
 
-        // Traverse through all linked metadata pages
+        // Traverse through all linked directory (metadata) pages
         long currentMetadataPageId = metadataPageId;
 
         while (currentMetadataPageId != -1) {
@@ -582,8 +563,12 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                 metadataPage.acquireReadLatch();
                 ctx.getMetadataFrame().setPage(metadataPage);
 
+                // Determine if this is the last directory page in the chain
+                int nextMetadataPageId = ctx.getMetadataFrame().getNextPage();
+                boolean isLastInChain = (nextMetadataPageId <= 0);
+
                 // Find appropriate data page based on distance
-                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), distance);
+                long targetDataPageId = findDataPageInMetadataPage(ctx.getMetadataFrame(), distance, isLastInChain);
 
                 if (targetDataPageId != -1) {
                     // Try physical deletion in this data page
@@ -603,29 +588,15 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                             // Found! Physically delete it
                             VectorClusteringDataFrame dataFrame = (VectorClusteringDataFrame) ctx.getDataFrame();
 
-                            int tupleCountBefore = dataFrame.getTupleCount();
-                            System.err.println("BEFORE DELETE PK=" + Arrays.toString(primaryKey) + " | Page has "
-                                    + tupleCountBefore + " tuples, deleting at index=" + tupleIndex);
-
                             byte[] pkAtIndex = dataFrame.getPrimaryKey(tupleIndex, pkFieldIndex);
 
                             // Safety check using binary comparison (no type assumption)
                             if (!Arrays.equals(pkAtIndex, primaryKey)) {
-                                System.err.println("ERROR: DELETE PK=" + Arrays.toString(primaryKey)
-                                        + " → Found WRONG tuple at index " + tupleIndex + " with PK="
-                                        + Arrays.toString(pkAtIndex) + " (BUG!)");
                                 return false;
                             }
 
                             // Physical delete
                             ctx.getDataFrame().delete(originalTuple, tupleIndex);
-
-                            int tupleCountAfter = dataFrame.getTupleCount();
-                            System.err.println("AFTER DELETE PK=" + Arrays.toString(primaryKey) + " | Page now has "
-                                    + tupleCountAfter + " tuples (deleted 1)");
-                            System.err.println("DELETE PK=" + Arrays.toString(primaryKey)
-                                    + " → PHYSICAL delete at index=" + tupleIndex + " in cluster=" + centroidId
-                                    + ", distance=" + distance + " (verified PK match)");
 
                             return true; // Successfully deleted
                         }
@@ -637,9 +608,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     }
                 }
 
-                // Check next metadata page
-                int nextMetadataPageId = ctx.getMetadataFrame().getNextPage();
-                if (nextMetadataPageId == 0 || nextMetadataPageId == -1) {
+                // No match or not found - check next directory page
+                if (isLastInChain) {
                     break; // End of chain
                 }
                 currentMetadataPageId = nextMetadataPageId;
@@ -748,9 +718,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     // Only update if new distance is larger
                     if (newDistance > currentMaxDistance) {
                         metadataFrame.updateMaxDistance(i, newDistance);
-
-                        System.err.println("DEBUG: Updated metadata entry " + i + " for data page " + dataPageId
-                                + ": maxDistance " + currentMaxDistance + " → " + newDistance);
                     }
                     break;
                 }
@@ -786,9 +753,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
                     // ALWAYS update (even if decreasing)
                     metadataFrame.updateMaxDistance(i, newMaxDistance);
-
-                    System.err.println("DEBUG: Force updated metadata entry " + i + " for data page " + dataPageId
-                            + ": maxDistance " + currentMaxDistance + " → " + newMaxDistance);
                     break;
                 }
             }
@@ -845,7 +809,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
         // Allocate a new metadata page
         int newMetadataPageId = freePageManager.takePage(ctx.getMetaFrame());
-        ICachedPage newMetadataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), newMetadataPageId));
+        if (directoryPageIds != null) {
+            directoryPageIds.add(newMetadataPageId);
+        }
+        ICachedPage newMetadataPage =
+                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), newMetadataPageId), NEW);
 
         try {
             newMetadataPage.acquireWriteLatch();
@@ -864,9 +832,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Initialize the next page pointer in the new metadata page to -1
             rightFrame.setNextPage(-1);
-
-            System.out
-                    .println("DEBUG: Split metadata page " + metadataPageId + " created new page " + newMetadataPageId);
 
         } finally {
             newMetadataPage.releaseWriteLatch(true);
@@ -950,8 +915,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     return -dotProduct; // Negate for minimization
                 };
             default:
-                System.err.println(
-                        "WARNING: Unsupported distance function: " + distanceMetric + ", defaulting to euclidean");
+                LOGGER.warn("Unsupported distance function: {}, defaulting to euclidean", distanceMetric);
                 return VectorUtils::calculateEuclideanDistance;
         }
     }
@@ -980,11 +944,29 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             IVectorDistanceFunction distanceFunction, double[] quantizedQueryVector, IVectorQuantizer quantizer)
             throws HyracksDataException {
 
-        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
+        // For memory components: navigate via static structure reference
+        IBufferCache navBC = (staticBufferCache != null) ? staticBufferCache : bufferCache;
+        int navFileId = (staticBufferCache != null) ? staticFileId : getFileId();
+        int navRoot = (staticBufferCache != null) ? staticRootPage : rootPage;
 
-        // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findClosestCentroid(bufferCache, getFileId(), rootPage, getInteriorFrameFactory(),
-                getLeafFrameFactory(), queryVector, distanceFunction, quantizedQueryVector, quantizer);
+        LOGGER.debug("Starting findClosestClusterFromRoot with navRoot={}, isMemoryComponent={}", navRoot,
+                staticBufferCache != null);
+
+        ClusterSearchResult result =
+                VCTreeNavigationUtils.findClosestCentroid(navBC, navFileId, navRoot, getInteriorFrameFactory(),
+                        getLeafFrameFactory(), queryVector, distanceFunction, quantizedQueryVector, quantizer);
+
+        // For memory components: replace directoryPageId with VBC mapping
+        if (centroidDirPageMap != null && result != null) {
+            int centroidIndex = result.centroidId - firstLeafCentroidIdMem;
+            if (centroidIndex >= 0 && centroidIndex < centroidDirPageMap.length) {
+                result = ClusterSearchResult.create(result.leafPageId, result.clusterIndex, result.centroid,
+                        result.distance, result.centroidId, centroidDirPageMap[centroidIndex],
+                        result.quantizedDistance);
+            }
+        }
+
+        return result;
     }
 
     public int getVectorDimensions() {
@@ -996,6 +978,33 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     }
 
     /**
+     * Get the buffer cache to use for tree navigation.
+     * For memory components, this returns the static structure's buffer cache.
+     * For disk components, this returns the component's own buffer cache.
+     */
+    public IBufferCache getNavigationBufferCache() {
+        return (staticBufferCache != null) ? staticBufferCache : bufferCache;
+    }
+
+    /**
+     * Get the file ID to use for tree navigation.
+     * For memory components, this returns the static structure's file ID.
+     * For disk components, this returns the component's own file ID.
+     */
+    public int getNavigationFileId() {
+        return (staticBufferCache != null) ? staticFileId : getFileId();
+    }
+
+    /**
+     * Get the root page ID to use for tree navigation.
+     * For memory components, this returns the static structure's root page.
+     * For disk components, this returns the component's own root page.
+     */
+    public int getNavigationRootPageId() {
+        return (staticBufferCache != null) ? staticRootPage : rootPage;
+    }
+
+    /**
      * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
      * interior and leaf frames.
      */
@@ -1003,12 +1012,32 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
             throws HyracksDataException {
 
-        LOGGER.debug("Starting findClosestClusterFromRoot with rootPage={}", rootPage);
+        // For memory components: navigate via static structure reference
+        IBufferCache navBC = (staticBufferCache != null) ? staticBufferCache : bufferCache;
+        int navFileId = (staticBufferCache != null) ? staticFileId : getFileId();
+        int navRoot = (staticBufferCache != null) ? staticRootPage : rootPage;
 
-        // Use the common navigation logic from VCTreeNavigationUtils
-        return VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(bufferCache, getFileId(), rootPage,
-                getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
+        LOGGER.debug("Starting findCloseCentroidsLevelWiseFromRoot with navRoot={}", navRoot);
 
+        List<ClusterSearchResult> results =
+                VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(navBC, navFileId, navRoot,
+                        getInteriorFrameFactory(), getLeafFrameFactory(), queryVector, distanceFunction, ep);
+
+        // For memory components: replace directoryPageId with VBC mapping
+        if (centroidDirPageMap != null && results != null) {
+            for (int r = 0; r < results.size(); r++) {
+                ClusterSearchResult result = results.get(r);
+                int centroidIndex = result.centroidId - firstLeafCentroidIdMem;
+                if (centroidIndex >= 0 && centroidIndex < centroidDirPageMap.length) {
+                    results.set(r,
+                            ClusterSearchResult.create(result.leafPageId, result.clusterIndex, result.centroid,
+                                    result.distance, result.centroidId, centroidDirPageMap[centroidIndex],
+                                    result.quantizedDistance));
+                }
+            }
+        }
+
+        return results;
     }
 
     public void setStaticStructureInitialized() {
@@ -1031,63 +1060,90 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         initialized = true;
     }
 
-    public void setStaticStructure(VectorClusteringTreeAccessor staticAccessor) throws HyracksDataException {
+    public synchronized void setStaticStructure(VectorClusteringTreeAccessor staticAccessor)
+            throws HyracksDataException {
+        if (initialized) {
+            return; // Already initialized, skip
+        }
+
         VectorClusteringTree staticStructure = staticAccessor.getIndex();
         ITreeIndexMetadataFrame metaFrame = staticAccessor.getOpContext().getMetaFrame();
-        int maxPageId = staticStructure.getPageManager().getMaxPageId(metaFrame);
 
-        // copy all pages in static structure
+        // Store references to static structure for read-only navigation
+        this.staticBufferCache = staticStructure.getBufferCache();
+        this.staticFileId = staticStructure.getFileId();
+        this.staticRootPage = staticStructure.rootPage;
 
-        for (int pageId = 1; pageId <= maxPageId; pageId++) {
-            ICachedPage sourcePage = staticAccessor.getCachedPage(pageId);
-            copyPage(sourcePage);
-            staticAccessor.releasePage(sourcePage);
-        }
+        // Pin the static structure's metadata page onto metaFrame before reading
+        // (getMaxPageId internally calls metaFrame.setPage() which initializes the frame's buffer)
+        staticStructure.getPageManager().getMaxPageId(metaFrame);
 
-        MutableArrayValueReference key = new MutableArrayValueReference("num_leaf_centroids".getBytes());
-        LongPointable value = LongPointable.FACTORY.createPointable();
-        metaFrame.get(key, value);
-        int numLeafCentroid = value.intValue();
+        // Read metadata from static structure
+        MutableArrayValueReference key1 = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+        LongPointable value1 = LongPointable.FACTORY.createPointable();
+        MutableArrayValueReference key2 = new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
+        LongPointable value2 = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key1, value1);
+        metaFrame.get(key2, value2);
+        this.numLeafCentroidMem = value1.intValue();
+        this.firstLeafCentroidIdMem = value2.intValue();
+
+        // Create empty directory pages in VBC (using takePage() directly)
+        ITreeIndexMetadataFrame vbcMetaFrame = freePageManager.createMetadataFrame();
         ITreeIndexFrame directoryFrame = metadataFrameFactory.createFrame();
+        centroidDirPageMap = new int[numLeafCentroidMem];
+        directoryPageIds = new HashSet<>();
 
-        for (int leafCentroidId = 0; leafCentroidId < numLeafCentroid; leafCentroidId++) {
-            // For metadata pages, use freePageManager.takePage() normally
-            int metadataPageId = freePageManager.takePage(metaFrame) - 1;
+        for (int i = 0; i < numLeafCentroidMem; i++) {
+            int dirPageId = freePageManager.takePage(vbcMetaFrame);
+            centroidDirPageMap[i] = dirPageId;
+            directoryPageIds.add(dirPageId);
 
-            ICachedPage targetPage =
-                    bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), metadataPageId), NEW);
-
+            ICachedPage targetPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), dirPageId), NEW);
             directoryFrame.setPage(targetPage);
             directoryFrame.initBuffer((byte) 0);
-
             bufferCache.unpin(targetPage);
 
-            LOGGER.debug("Created directory page {} for leaf centroid {}", metadataPageId, leafCentroidId);
+            LOGGER.debug("Created directory page {} for leaf centroid {}", dirPageId, i);
         }
-
-        // TODO: a very hacky way
-        ICachedPage targetPage =
-                bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), maxPageId + numLeafCentroid + 1), NEW);
-        bufferCache.unpin(targetPage);
 
         initialized = true;
     }
 
-    private void copyPage(ICachedPage sourcePage) throws HyracksDataException {
-        // Copy page from source to target
-        ITreeIndexMetadataFrame metaFrame = freePageManager.createMetadataFrame();
-        int targetPageId = freePageManager.takePage(metaFrame) - 1;
-        ICachedPage targetPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), targetPageId), NEW);
-        // Copy entire page content
-        System.arraycopy(sourcePage.getBuffer().array(), 0, targetPage.getBuffer().array(), 0,
-                sourcePage.getBuffer().capacity());
-        bufferCache.unpin(targetPage);
-
-        LOGGER.debug("Copied page {} ", targetPage);
-    }
-
     public void setRootPageId(int rootPageId) {
         rootPage = rootPageId;
+    }
+
+    public int[] getCentroidDirPageMap() {
+        return centroidDirPageMap;
+    }
+
+    public int getFirstLeafCentroidIdMem() {
+        return firstLeafCentroidIdMem;
+    }
+
+    public int getNumLeafCentroidMem() {
+        return numLeafCentroidMem;
+    }
+
+    public Set<Integer> getDirectoryPageIds() {
+        return directoryPageIds;
+    }
+
+    public boolean isDirectoryPage(int pageId) {
+        return directoryPageIds != null && directoryPageIds.contains(pageId);
+    }
+
+    public IBufferCache getStaticBufferCache() {
+        return staticBufferCache;
+    }
+
+    public int getStaticFileId() {
+        return staticFileId;
+    }
+
+    public int getStaticRootPage() {
+        return staticRootPage;
     }
 
     /**
@@ -1109,6 +1165,9 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
 
         public void release() throws HyracksDataException {
+            if (leafPage == null) {
+                return;
+            }
             try {
                 if (isWriteOperation) {
                     leafPage.releaseWriteLatch(true);
@@ -1153,7 +1212,13 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No cluster found for vector");
         }
 
-        // Pin the leaf page containing the cluster
+        // For memory components: directoryPageId already set by findClosestClusterFromRoot
+        if (centroidDirPageMap != null) {
+            long dirPageId = clusterResult.directoryPageId;
+            return new ClusterAccessResult(clusterResult, null, dirPageId, isWriteOperation);
+        }
+
+        // For disk components: pin leaf page and read metadata pointer (existing logic)
         ICachedPage leafPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), clusterResult.leafPageId));
 
         try {
@@ -1251,9 +1316,19 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             VectorClusteringSearchCursor cursor = new VectorClusteringSearchCursor();
 
             // Configure cursor with tree navigation capabilities
-            cursor.setBufferCache(tree.bufferCache);
-            cursor.setFileId(tree.getFileId());
-            cursor.setRootPageId(tree.rootPage);
+            if (tree.staticBufferCache != null) {
+                cursor.setBufferCache(tree.staticBufferCache);
+                cursor.setFileId(tree.staticFileId);
+                cursor.setRootPageId(tree.staticRootPage);
+                cursor.setDataBufferCache(tree.bufferCache, tree.getFileId());
+                cursor.setCentroidDirPageMap(tree.centroidDirPageMap, tree.firstLeafCentroidIdMem);
+            } else {
+                cursor.setBufferCache(tree.bufferCache);
+                cursor.setFileId(tree.getFileId());
+                cursor.setRootPageId(tree.rootPage);
+                // For disk components, data pages use the same buffer cache
+                cursor.setDataBufferCache(tree.bufferCache, tree.getFileId());
+            }
             cursor.setFrameFactories(tree.interiorFrameFactory, tree.leafFrameFactory, tree.metadataFrameFactory,
                     tree.dataFrameFactory);
 
@@ -1293,9 +1368,20 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             VectorClusteringSearchCursor vectorCursor = (VectorClusteringSearchCursor) cursor;
 
             // Configure cursor with tree navigation capabilities
-            vectorCursor.setBufferCache(tree.bufferCache);
-            vectorCursor.setFileId(tree.getFileId());
-            vectorCursor.setRootPageId(tree.rootPage);
+            // For memory components: use static structure for tree navigation, VBC for data
+            if (tree.staticBufferCache != null) {
+                vectorCursor.setBufferCache(tree.staticBufferCache);
+                vectorCursor.setFileId(tree.staticFileId);
+                vectorCursor.setRootPageId(tree.staticRootPage);
+                vectorCursor.setDataBufferCache(tree.bufferCache, tree.getFileId());
+                vectorCursor.setCentroidDirPageMap(tree.centroidDirPageMap, tree.firstLeafCentroidIdMem);
+            } else {
+                vectorCursor.setBufferCache(tree.bufferCache);
+                vectorCursor.setFileId(tree.getFileId());
+                vectorCursor.setRootPageId(tree.rootPage);
+                // For disk components, data pages use the same buffer cache
+                vectorCursor.setDataBufferCache(tree.bufferCache, tree.getFileId());
+            }
             vectorCursor.setFrameFactories(tree.interiorFrameFactory, tree.leafFrameFactory, tree.metadataFrameFactory,
                     tree.dataFrameFactory);
 
@@ -1342,9 +1428,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                             factoryObj.getClass().getMethod("createDistanceFunction", String.class);
                     distanceFunction = (IVectorDistanceFunction) createMethod.invoke(factoryObj, distanceMetric);
                 } catch (Exception e) {
-                    System.err.println(
-                            "WARNING: Failed to use distance function factory, falling back to local implementation: "
-                                    + e.getMessage());
+                    LOGGER.warn("Failed to use distance function factory, falling back to local implementation: {}",
+                            e.getMessage());
                     distanceFunction = convertDistanceMetricToFunction(distanceMetric);
                 }
             } else {
@@ -1391,7 +1476,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     initialState.setQuantizedQueryVector(quantizer.quantize(queryVector));
                     initialState.setQuantizer(quantizer);
                 } catch (Exception e) {
-                    System.err.println("WARNING: Failed to create quantizer via reflection: " + e.getMessage());
+                    LOGGER.warn("Failed to create quantizer via reflection: {}", e.getMessage());
                 }
             }
 

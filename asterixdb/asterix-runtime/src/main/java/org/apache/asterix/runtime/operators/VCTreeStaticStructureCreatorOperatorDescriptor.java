@@ -112,11 +112,12 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     // private final UUID materializedDataUUID;
     private final UUID scalarValuesUUID;
     private final RecordDescriptor inputRecordDescriptor; // Store for CreateStructureActivity
+    private final int[][] partitionsMap; // Maps task partition to storage partition(s)
 
     public VCTreeStaticStructureCreatorOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID, UUID scalarValuesUUID,
-            RecordDescriptor scalarRecDesc) {
+            RecordDescriptor scalarRecDesc, int[][] partitionsMap) {
         super(spec, 1, 1);
         this.indexHelperFactory = indexHelperFactory;
         this.maxEntriesPerPage = maxEntriesPerPage;
@@ -125,6 +126,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         // this.materializedDataUUID = materializedDataUUID;
         this.scalarValuesUUID = scalarValuesUUID;
         this.inputRecordDescriptor = inputRecordDescriptor; // Store for CreateStructureActivity
+        this.partitionsMap = partitionsMap; // Store partition mapping
         // PassThroughActivity outputs scalar values, so use scalarRecDesc
         // CreateStructureActivity uses inputRecordDescriptor (stored separately)
         this.outRecDescs[0] = scalarRecDesc != null ? scalarRecDesc : inputRecordDescriptor;
@@ -757,9 +759,6 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private IPointable centroidIdVal;
                 private Map<Integer, Integer> levelDistribution = null;
                 private Map<String, Map<Integer, Integer>> clusterDistribution = null;
-                private IIndexBulkLoader bulkLoader;
-                private ILSMIndex lsmIndex;
-                private IIndexDataflowHelper indexHelper;
                 // private MaterializerTaskState materializedData;
 
                 // Quantization-related instance variables
@@ -772,9 +771,14 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private int sampleCount = 0;
                 private boolean quantizationParamsLoaded = false;
 
+                // Get all storage partitions for this compute partition
+                private final int[] storagePartitions = partitionsMap[partition];
+
                 @Override
                 public void open() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity OPENING ===");
+                    System.err.println("Task partition: " + partition + ", Storage partitions: "
+                            + java.util.Arrays.toString(storagePartitions));
                     try {
                         EvaluatorContext evalCtx = new EvaluatorContext(ctx);
                         levelEval = new ColumnAccessEvalFactory(0).createScalarEvaluator(evalCtx); // treeLevel
@@ -806,9 +810,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 private void readQuantizationParamsFromMetadata(IHyracksTaskContext taskCtx)
                         throws HyracksDataException {
                     try {
-                        // Create index helper to access the resource (use partition from outer scope)
-                        IIndexDataflowHelper tempHelper =
-                                indexHelperFactory.create(taskCtx.getJobletContext().getServiceContext(), partition);
+                        // Create index helper to access the resource (use first storage partition to read metadata)
+                        IIndexDataflowHelper tempHelper = indexHelperFactory
+                                .create(taskCtx.getJobletContext().getServiceContext(), storagePartitions[0]);
 
                         // Get the local resource from the helper
                         LocalResource localResource = tempHelper.getResource();
@@ -851,11 +855,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         sampleCount = sc;
                                     }
 
-                                    quantizationParamsLoaded = true;
-                                    System.err.println("Quantization params loaded: bits=" + quantizationBits
-                                            + ", confidenceInterval=" + confidenceInterval + ", minQuantile="
-                                            + minQuantile + ", maxQuantile=" + maxQuantile + ", alpha=" + alpha
-                                            + ", sampleCount=" + sampleCount);
+                                    quantizationParamsLoaded = vcTreeResource.hasQuantizationParams();
+                                    System.err.println("Quantization params loaded=" + quantizationParamsLoaded
+                                            + ": bits=" + quantizationBits + ", confidenceInterval="
+                                            + confidenceInterval + ", minQuantile=" + minQuantile + ", maxQuantile="
+                                            + maxQuantile + ", alpha=" + alpha + ", sampleCount=" + sampleCount);
                                 }
                             }
                         }
@@ -927,6 +931,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         tupleCount++;
 
                         // Log progress every 5000 tuples to reduce noise
+                        if (tupleCount % 5000 == 0) {
+                            System.err.println("Partition " + partition + " processed " + tupleCount + " tuples");
+                        }
 
                     } catch (Exception e) {
                         System.err.println("ERROR: Failed to process tuple: " + e.getMessage());
@@ -1086,33 +1093,13 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                 @Override
                 public void close() throws HyracksDataException {
-                    //                    System.err.println("=== CreateStructureActivity CLOSING ===");
-                    //                    System.err.println("Total tuples collected: " + tupleCount);
-                    //                    System.err.println("Frames accumulated: " + frameAccumulator.size());
+                    System.err.println("Partition " + partition + " finished processing. Total tuples: " + tupleCount);
 
-                    // Note: Partitioning is now handled by VCTreeBulkLoaderAndGroupingOperatorDescriptor
-                    //                    System.err.println("=== PARTITIONING HANDLED BY BULK LOADER OPERATOR ===");
-
-                    // Process all accumulated tuples and create static structure
-                    //                    System.err.println("=== STARTING HIERARCHICAL CLUSTERING ANALYSIS ===");
-                    //                    System.err.println("Analyzing " + tupleCount + " tuples to determine structure...");
                     try {
                         createStaticStructure();
-                        //                        System.err.println("=== HIERARCHICAL CLUSTERING ANALYSIS COMPLETE ===");
                     } finally {
-                        // Ensure indexHelper is closed even if createStaticStructure() throws
-                        if (indexHelper != null) {
-                            try {
-                                indexHelper.close();
-                                //                                System.err.println("IndexHelper closed successfully");
-                            } catch (Exception e) {
-                                //                                System.err.println("ERROR: Failed to close index helper: " + e.getMessage());
-                                // Don't throw - cleanup failures shouldn't mask original exceptions
-                            }
-                        }
+                        // indexHelper cleanup is now handled inside createStaticStructure per storage partition
                     }
-
-                    // Signal Branch 2 that structure creation is complete
 
                     System.err.println("=== CreateStructureActivity COMPLETE ===");
                 }
@@ -1195,12 +1182,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 }
 
                 private void createStaticStructure() throws HyracksDataException {
-                    //                    System.err.println("=== CREATING STATIC STRUCTURE USING LSM PATTERN ===");
-                    //                    System.err.println("Processing " + frameAccumulator.size() + " accumulated frames");
-                    //                    System.err.println("Total tuples to process: " + tupleCount);
-
                     try {
-                        // Analyze collected data to determine structure
+                        // Analyze collected data to determine structure (once for all partitions)
                         System.err.println("Analyzing collected data to determine hierarchical structure...");
                         StructureInfo structureInfo = buildStructureInfo();
                         List<Integer> clustersPerLevel = structureInfo.clustersPerLevel;
@@ -1210,44 +1193,71 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         maxLevel = levelDistribution.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
                         System.err.println("Stored maxLevel=" + maxLevel + " for leaf-only quantization");
 
-                        // Open index via IndexDataflowHelper to get LSMVCTree instance
-                        System.err.println("Opening index via IndexDataflowHelper...");
-                        indexHelper = indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), partition);
+                        // Pre-convert all tuples once (identical for all storage partitions)
+                        List<ITupleReference> convertedTuples = new ArrayList<>();
+                        for (ByteBuffer frameBuffer : frameAccumulator) {
+                            FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecordDescriptor);
+                            frameFta.reset(frameBuffer);
+                            for (int i = 0; i < frameFta.getTupleCount(); i++) {
+                                tuple.reset(frameFta, i);
+                                convertedTuples.add(convertToVCTreeBuilderFormat(tuple));
+                            }
+                        }
 
-                        // Check LocalResource type before opening
-                        LocalResource resource = indexHelper.getResource();
-                        System.err.println("LocalResource type: "
+                        // Build the static structure on EACH storage partition
+                        System.err.println("Building static structure on " + storagePartitions.length
+                                + " storage partitions: " + java.util.Arrays.toString(storagePartitions));
+                        for (int sp = 0; sp < storagePartitions.length; sp++) {
+                            int storagePartition = storagePartitions[sp];
+                            System.err.println("Building static structure on storage partition " + storagePartition
+                                    + " (" + (sp + 1) + "/" + storagePartitions.length + ")");
+                            buildStaticStructureOnPartition(storagePartition, clustersPerLevel, centroidsPerCluster,
+                                    convertedTuples);
+                        }
+
+                        LOGGER.info("=== STATIC STRUCTURE PARAMETERS ===");
+                        LOGGER.info("clustersPerLevel: {}", clustersPerLevel);
+                        LOGGER.info("centroidsPerCluster: {}", centroidsPerCluster);
+                        LOGGER.info("=== END STATIC STRUCTURE PARAMETERS ===");
+                        System.err.println("STATIC STRUCTURE CREATED SUCCESSFULLY on all " + storagePartitions.length
+                                + " storage partitions");
+
+                    } catch (Exception e) {
+                        throw HyracksDataException.create(e);
+                    }
+                }
+
+                /**
+                 * Build the static structure on a single storage partition.
+                 */
+                private void buildStaticStructureOnPartition(int storagePartition, List<Integer> clustersPerLevel,
+                        List<List<Integer>> centroidsPerCluster, List<ITupleReference> convertedTuples)
+                        throws HyracksDataException {
+                    IIndexDataflowHelper partitionHelper = null;
+                    try {
+                        partitionHelper =
+                                indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
+
+                        LocalResource resource = partitionHelper.getResource();
+                        System.err.println("Storage partition " + storagePartition + " LocalResource type: "
                                 + (resource != null ? resource.getResource().getClass().getName() : "null"));
 
-                        indexHelper.open();
+                        partitionHelper.open();
 
-                        // Get index instance and check type
-                        IIndex indexInstance = indexHelper.getIndexInstance();
-                        //                        System.err.println("Index instance type: "
-                        //                                + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
-
-                        // Get LSMVCTree instance
+                        IIndex indexInstance = partitionHelper.getIndexInstance();
                         if (!(indexInstance instanceof ILSMIndex)) {
                             throw new HyracksDataException("Index is not an ILSMIndex instance, got: "
                                     + (indexInstance != null ? indexInstance.getClass().getName() : "null"));
                         }
-                        this.lsmIndex = (ILSMIndex) indexInstance;
+                        ILSMIndex partitionLsmIndex = (ILSMIndex) indexInstance;
 
-                        if (!(this.lsmIndex instanceof LSMVCTree)) {
+                        if (!(partitionLsmIndex instanceof LSMVCTree)) {
                             throw new HyracksDataException("Index is not an LSMVCTree instance, got: "
-                                    + this.lsmIndex.getClass().getName() + ", LocalResource type: "
-                                    + (resource != null ? resource.getResource().getClass().getName() : "null"));
+                                    + partitionLsmIndex.getClass().getName());
                         }
-                        //                        System.err.println("LSMVCTree instance obtained successfully");
 
-                        // Reduce maxEntriesPerPage for large-dimensional vectors to fit in frame
                         int adjustedMaxEntriesPerPage = Math.min(maxEntriesPerPage, 10);
-                        //                        System.err.println(
-                        //                                "Creating static structure bulk loader with " + clustersPerLevel.size() + " levels...");
-                        //                        System.err.println("Adjusted maxEntriesPerPage from " + maxEntriesPerPage + " to "
-                        //                                + adjustedMaxEntriesPerPage + " for large-dimensional vectors");
 
-                        // Build parameters map for static structure creation
                         Map<String, Object> parameters = new HashMap<>();
                         parameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID,
                                 LSMComponentId.DEFAULT_COMPONENT_ID);
@@ -1256,67 +1266,41 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         parameters.put("centroidsPerCluster", centroidsPerCluster);
                         parameters.put("maxEntriesPerPage", adjustedMaxEntriesPerPage);
 
-                        // Use LSM bulk loader infrastructure to create static structure
-                        bulkLoader = this.lsmIndex.createBulkLoader(fillFactor, false, 0L, false, parameters);
+                        IIndexBulkLoader partitionBulkLoader =
+                                partitionLsmIndex.createBulkLoader(fillFactor, false, 0L, false, parameters);
 
-                        //                        System.err.println("Processing " + frameAccumulator.size() + " accumulated frames...");
-                        // Process all accumulated tuples
                         int totalTuplesProcessed = 0;
-                        for (ByteBuffer frameBuffer : frameAccumulator) {
-                            // Use inputRecordDescriptor for reading hierarchical data frames
-                            FrameTupleAccessor frameFta = new FrameTupleAccessor(inputRecordDescriptor);
-                            frameFta.reset(frameBuffer);
-
-                            //                            System.err.println("Frame has " + frameFta.getTupleCount() + " tuples");
-
-                            for (int i = 0; i < frameFta.getTupleCount(); i++) {
-                                tuple.reset(frameFta, i);
-
-                                // Debug the tuple being processed
-                                //                                System.err.println(
-                                //                                        "=== PROCESSING TUPLE " + totalTuplesProcessed + " FOR STATIC STRUCTURE ===");
-                                //                                System.err.println("Input tuple field count: " + tuple.getFieldCount());
-
-                                // Convert 4-field tuple to 2-field tuple for static structure builder
-                                ITupleReference convertedTuple = convertToVCTreeBuilderFormat(tuple);
-                                //                                System.err.println("Converted tuple field count: " + convertedTuple.getFieldCount());
-
-                                bulkLoader.add(convertedTuple);
-                                totalTuplesProcessed++;
-                            }
-
-                            // Process all tuples for static structure creation
+                        for (ITupleReference convertedTuple : convertedTuples) {
+                            partitionBulkLoader.add(convertedTuple);
+                            totalTuplesProcessed++;
                         }
 
-                        //                        System.err.println("Finalizing static structure...");
-                        // Finalize the structure - LSM bulk loader handles component registration
-                        bulkLoader.end();
-                        LOGGER.info("STATIC STRUCTURE FINALIZED SUCCESSFULLY");
+                        partitionBulkLoader.end();
+                        LOGGER.info("Static structure finalized on storage partition {} ({} tuples)", storagePartition,
+                                totalTuplesProcessed);
 
-                        // Print structure parameters
-                        LOGGER.info("=== STATIC STRUCTURE PARAMETERS ===");
-                        LOGGER.info("clustersPerLevel: {}", clustersPerLevel);
-                        LOGGER.info("centroidsPerCluster: {}", centroidsPerCluster);
-                        LOGGER.info("=== END STATIC STRUCTURE PARAMETERS ===");
-                        LOGGER.info("Processed {} tuples for static structure creation", totalTuplesProcessed);
-
-                        System.err.println("STATIC STRUCTURE CREATED SUCCESSFULLY using LSM component system");
-
-                        // Print BFS traversal of static structure
-                        try {
-                            LSMVCTreeDiskComponent component =
-                                    (LSMVCTreeDiskComponent) ((LSMIndexDiskComponentBulkLoader) bulkLoader)
-                                            .getComponent();
-                            printStaticStructureBFS(component, null);
-                        } catch (Exception e) {
-                            //                            System.err.println("WARNING: Failed to print static structure BFS: " + e.getMessage());
-                            // Don't fail structure creation if logging fails
+                        // Print BFS traversal of static structure (only for first partition to reduce log noise)
+                        if (storagePartition == storagePartitions[0]) {
+                            try {
+                                LSMVCTreeDiskComponent component =
+                                        (LSMVCTreeDiskComponent) ((LSMIndexDiskComponentBulkLoader) partitionBulkLoader)
+                                                .getComponent();
+                                printStaticStructureBFS(component, null);
+                            } catch (Exception e) {
+                                // Don't fail structure creation if logging fails
+                            }
                         }
 
                     } catch (Exception e) {
-                        //                        System.err.println("ERROR: Failed to create static structure: " + e.getMessage());
-                        //                        e.printStackTrace();
                         throw HyracksDataException.create(e);
+                    } finally {
+                        if (partitionHelper != null) {
+                            try {
+                                partitionHelper.close();
+                            } catch (Exception e) {
+                                // Don't throw - cleanup failures shouldn't mask original exceptions
+                            }
+                        }
                     }
                 }
 
@@ -1505,22 +1489,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                 public void fail() throws HyracksDataException {
                     System.err.println("=== CreateStructureActivity FAILING ===");
                     System.err.println("Total tuples processed before failure: " + tupleCount);
-
-                    if (bulkLoader != null) {
-                        try {
-                            bulkLoader.abort();
-                        } catch (Exception e) {
-                            System.err.println("ERROR: Failed to abort bulk loader: " + e.getMessage());
-                        }
-                    }
-
-                    if (indexHelper != null) {
-                        try {
-                            indexHelper.close();
-                        } catch (Exception e) {
-                            System.err.println("ERROR: Failed to close index helper: " + e.getMessage());
-                        }
-                    }
+                    // Index helpers and bulk loaders are managed per-partition in
+                    // buildStaticStructureOnPartition with try/finally cleanup
 
                     // if (materializedData != null) {
                     //     try {
