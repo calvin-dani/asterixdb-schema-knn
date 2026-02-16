@@ -69,14 +69,14 @@ public class SerializableDistanceFunctions {
     }
 
     /**
-     * Cosine similarity function implementation
+     * Cosine distance (1 - cosine similarity) implementation. Lower = more similar.
      */
     public static class CosineDistanceFunction implements DistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.cosine(a, b);
+            return VectorDistanceArrCalculation.cosineDistance(a, b);
         }
     }
 
