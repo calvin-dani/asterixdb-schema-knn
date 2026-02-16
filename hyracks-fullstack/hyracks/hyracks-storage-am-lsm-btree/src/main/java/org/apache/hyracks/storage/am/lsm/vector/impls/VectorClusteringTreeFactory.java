@@ -44,13 +44,14 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
     private final IVectorBinaryAccessorFactory vectorAccessorFactory;
     private final IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
     private final float[] quantizationParams;
+    private final String distanceMetric;
 
     public VectorClusteringTreeFactory(IIOManager ioManager, IBufferCache bufferCache,
             IPageManagerFactory freePageManagerFactory, ITreeIndexFrameFactory interiorFrameFactory,
             ITreeIndexFrameFactory leafFrameFactory, ITreeIndexFrameFactory metadataFrameFactory,
             ITreeIndexFrameFactory dataFrameFactory, IBinaryComparatorFactory[] cmpFactories, int fieldCount,
             int vectorDimensions, IVectorBinaryAccessorFactory vectorAccessorFactory,
-            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, float[] quantizationParams) {
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, float[] quantizationParams, String distanceMetric) {
         super(ioManager, bufferCache, freePageManagerFactory, interiorFrameFactory, leafFrameFactory, cmpFactories,
                 fieldCount);
         this.metadataFrameFactory = metadataFrameFactory;
@@ -59,6 +60,7 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.dataTupleCreatorFactory = dataTupleCreatorFactory;
         this.quantizationParams = quantizationParams;
+        this.distanceMetric = distanceMetric;
     }
 
     @Override
@@ -66,6 +68,6 @@ public class VectorClusteringTreeFactory extends TreeIndexFactory<VectorClusteri
         return new VectorClusteringTree(bufferCache, freePageManagerFactory.createPageManager(bufferCache),
                 interiorFrameFactory, leafFrameFactory, metadataFrameFactory, dataFrameFactory, cmpFactories,
                 vectorDimensions, vectorDimensions, file, vectorAccessorFactory, dataTupleCreatorFactory,
-                quantizationParams);
+                quantizationParams, distanceMetric);
     }
 }

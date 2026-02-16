@@ -30,7 +30,7 @@ import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
  * primary index.
  *
  * Input:  [vector, include_fields(numIncludeFields), pk]
- * Output: <distance, centroidId, vector, pk, include_fields...>
+ * Output: <distance, centroidId, quantized_distance, quantized_embedding, pk, include_fields...>
  */
 public class QuantizedVCTreeDataTupleCreatorFactory implements IVCTreeDataTupleCreatorFactory {
 

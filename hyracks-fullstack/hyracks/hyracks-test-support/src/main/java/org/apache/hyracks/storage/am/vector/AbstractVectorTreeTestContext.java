@@ -71,6 +71,7 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
     private int queryK = 5; // default K
     private List<String> expectedPrimaryKeys = new ArrayList<>();
     private List<String> excludedPrimaryKeys;
+    private int pkStartField = 2; // Default: non-quantized format (field 2). Set to 4 for quantized format.
 
     public AbstractVectorTreeTestContext(ISerializerDeserializer[] fieldSerdes, IIndex index, boolean filtered,
             int vectorDimensions) throws HyracksDataException {
@@ -143,5 +144,13 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
 
     public void setExcludedPrimaryKeys(List<String> excludedPrimaryKeys) {
         this.excludedPrimaryKeys = excludedPrimaryKeys;
+    }
+
+    public int getPkStartField() {
+        return pkStartField;
+    }
+
+    public void setPkStartField(int pkStartField) {
+        this.pkStartField = pkStartField;
     }
 }

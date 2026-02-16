@@ -23,24 +23,25 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.UTF8StringSerializerDeserializer;
 import org.apache.hyracks.storage.am.lsm.vector.util.VectorTestStructure.BulkLoadRecordFormat;
+import org.apache.hyracks.util.encoding.VarLenIntEncoderDecoder;
 import org.junit.Test;
 
 /**
  * Test driver for optimized search (LSMVCTreeBlockedCursor) tests.
  *
- * Generates test data with tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
+ * Generates test data with tuple format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
  * This format includes the vector field required for computing D(q, x) during optimized search.
  *
  * Separated from VectorIndexTestDriver to avoid tuple format conflicts with bulk load tests.
  */
 @SuppressWarnings("rawtypes")
-public abstract class OptimizedSearchTestDriver {
+public abstract class QuantizedSearchTestDriver {
 
     /**
      * A single query case: query vector, K, expected primary keys, and optionally excluded primary keys.
@@ -121,7 +122,7 @@ public abstract class OptimizedSearchTestDriver {
      * Records placed at integer distances 1-20 along x-axis.
      * Query at [5, 0, 0] gives D(q, C) = 5.0, pivot between records at D(x,C)=5 and D(x,C)=6.
      *
-     * Tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
+     * Tuple format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
      */
     @Test
     public void optimizedSearchThreeDimension() throws Exception {
@@ -148,7 +149,7 @@ public abstract class OptimizedSearchTestDriver {
      * - Level 1: 4 clusters with 4 centroids each (16 leaf centroids total)
      *
      * Data records: 50 records per leaf centroid = 800 total records
-     * Tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
+     * Tuple format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
      */
     @Test
     public void twoDimensionTwoLevels() throws Exception {
@@ -227,17 +228,18 @@ public abstract class OptimizedSearchTestDriver {
 
     /**
      * Helper method to create a record tuple for optimized search testing.
-     * Format: <distance_to_centroid, centroid_id, vector, primary_key>
+     * Format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
      *
      * This format allows LSMVCTreeBlockedCursor to:
      * 1. Extract D(x,C) from field 0 for pivot finding and priority queue ordering
      * 2. Extract centroid_id from field 1 for cluster validation
-     * 3. Extract vector from field 2 for computing D(q,x) via IVectorBinaryAccessor
-     * 4. Extract primary key from field 3 for result identification
+     * 3. Extract quantized_distance from field 2 for pruning
+     * 4. Extract quantized_embedding from field 3 for computing D(q,x) via IVectorBinaryAccessor
+     * 5. Extract primary key from field 4 for result identification
      */
     private ITupleReference createOptimizedSearchRecordTuple(double distance, int centroidId, double[] vector,
             String primaryKey) throws Exception {
-        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+        ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(5);
         ArrayTupleReference tupleRef = new ArrayTupleReference();
 
         // Field 0: distance_to_centroid (raw double - 8 bytes)
@@ -248,11 +250,24 @@ public abstract class OptimizedSearchTestDriver {
         tupleBuilder.getDataOutput().writeInt(centroidId);
         tupleBuilder.addFieldEndOffset();
 
-        // Field 2: vector (serialized with DoubleArraySerializerDeserializer)
-        DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
+        // Field 2: quantized_distance (same as distance in test mode)
+        tupleBuilder.getDataOutput().writeDouble(distance);
         tupleBuilder.addFieldEndOffset();
 
-        // Field 3: primary_key (UTF8 string)
+        // Field 3: quantized_embedding as ByteArrayPointable (VarLen prefix + raw big-endian doubles)
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(vector.length * Double.BYTES);
+        for (double d : vector) {
+            buf.putDouble(d);
+        }
+        byte[] rawDoubles = buf.array();
+        int metaLen = ByteArrayPointable.getNumberBytesToStoreMeta(rawDoubles.length);
+        byte[] meta = new byte[metaLen];
+        VarLenIntEncoderDecoder.encode(rawDoubles.length, meta, 0);
+        tupleBuilder.getDataOutput().write(meta);
+        tupleBuilder.getDataOutput().write(rawDoubles);
+        tupleBuilder.addFieldEndOffset();
+
+        // Field 4: primary_key (UTF8 string)
         new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
         tupleBuilder.addFieldEndOffset();
 

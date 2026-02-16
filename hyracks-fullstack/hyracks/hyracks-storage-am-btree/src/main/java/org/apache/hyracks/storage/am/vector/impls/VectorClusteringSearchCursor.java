@@ -37,8 +37,9 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationState;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
+import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -101,7 +102,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     /* Flag when no more clusters available */
     private boolean exhaustedAllClusters;
     /* DFS navigation state for query mode */
-    private VCTreeNavigationUtils.NavigationState iteratorState;
+    private VCTreeNavigationState iteratorState;
     /* Count of clusters scanned */
     private int clustersProbed;
 
@@ -316,11 +317,11 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Create navigation state for iterative DFS with shared visited set
             if (sharedVisitedSet != null) {
-                this.iteratorState = new VCTreeNavigationUtils.NavigationState(bufferCache, fileId, rootPageId,
-                        interiorFrameFactory, leafFrameFactory, queryVector, sharedVisitedSet);
+                this.iteratorState = new VCTreeNavigationState(bufferCache, fileId, rootPageId, interiorFrameFactory,
+                        leafFrameFactory, queryVector, sharedVisitedSet);
             } else {
-                this.iteratorState = new VCTreeNavigationUtils.NavigationState(bufferCache, fileId, rootPageId,
-                        interiorFrameFactory, leafFrameFactory, queryVector);
+                this.iteratorState = new VCTreeNavigationState(bufferCache, fileId, rootPageId, interiorFrameFactory,
+                        leafFrameFactory, queryVector);
             }
 
             // Initialize DFS iterator and get first (closest) cluster

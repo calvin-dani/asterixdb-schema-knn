@@ -57,8 +57,8 @@ import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VectorClusteringTupleUtils;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
+import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
@@ -92,6 +92,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     // Raw quantization params: {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
     // null = non-quantized index. Quantizer is created lazily at query time using distanceMetric.
     private final float[] quantizationParams;
+    private final String distanceMetric;
+    private final IVectorDistanceFunction distanceFunction;
 
     // Add missing frameTuple declaration
     private ITreeIndexTupleReference frameTuple;
@@ -118,7 +120,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             ITreeIndexFrameFactory metadataFrameFactory, ITreeIndexFrameFactory dataFrameFactory,
             IBinaryComparatorFactory[] cmpFactories, int fieldCount, int vectorDimensions, FileReference file,
             org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
-            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, float[] quantizationParams) {
+            IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory, float[] quantizationParams, String distanceMetric) {
         super(bufferCache, freePageManager, interiorFrameFactory, leafFrameFactory, cmpFactories, fieldCount, file);
         this.vectorDimensions = vectorDimensions;
         this.metadataFrameFactory = metadataFrameFactory;
@@ -126,6 +128,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.dataTupleCreatorFactory = dataTupleCreatorFactory;
         this.quantizationParams = quantizationParams;
+        this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
+        this.distanceFunction = convertDistanceMetricToFunction(this.distanceMetric);
     }
 
     /**
@@ -209,7 +213,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Calculate distance to cluster centroid and get centroid ID
             double[] centroidDouble = accessResult.clusterResult.centroid;
-            double distance = VectorUtils.calculateEuclideanDistance(vector, centroidDouble);
+            double distance = distanceFunction.apply(vector, centroidDouble);
             int centroidId = accessResult.clusterResult.centroidId;
 
             // Insert into appropriate data page based on distance
@@ -513,7 +517,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         try {
             // Calculate distance to centroid
             double[] centroid = accessResult.clusterResult.centroid;
-            double distance = VectorUtils.calculateEuclideanDistance(vector, centroid);
+            double distance = distanceFunction.apply(vector, centroid);
             int centroidId = accessResult.clusterResult.centroidId;
 
             // Try to find and physically delete tuple from data pages (Scenarios 2 & 3)
@@ -1052,6 +1056,14 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         return quantizationParams;
     }
 
+    public String getDistanceMetric() {
+        return distanceMetric;
+    }
+
+    public IVectorDistanceFunction getDistanceFunction() {
+        return distanceFunction;
+    }
+
     public boolean isInitialized() {
         return initialized;
     }
@@ -1205,9 +1217,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
 
         // Find the closest cluster by traversing from root to leaf
-        // Use default Euclidean distance for internal operations (backward compatibility)
-        IVectorDistanceFunction defaultDistanceFunction = VectorUtils::calculateEuclideanDistance;
-        ClusterSearchResult clusterResult = findClosestClusterFromRoot(vector, ctx, defaultDistanceFunction);
+        ClusterSearchResult clusterResult = findClosestClusterFromRoot(vector, ctx, distanceFunction);
         if (clusterResult == null) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No cluster found for vector");
         }
@@ -1439,7 +1449,13 @@ public class VectorClusteringTree extends AbstractTreeIndex {
 
             // Create initial state with query vector and distance function
             VectorCursorInitialState initialState = new VectorCursorInitialState(ctx.getAccessor());
-            initialState.setRootPageId(tree.rootPage);
+            // For memory components, use staticRootPage (the static structure's root);
+            // for disk components, use the tree's own rootPage
+            if (tree.staticBufferCache != null) {
+                initialState.setRootPageId(tree.staticRootPage);
+            } else {
+                initialState.setRootPageId(tree.rootPage);
+            }
             if (queryVector != null) {
                 initialState.setQueryVector(queryVector);
             }
@@ -1477,6 +1493,20 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     initialState.setQuantizer(quantizer);
                 } catch (Exception e) {
                     LOGGER.warn("Failed to create quantizer via reflection: {}", e.getMessage());
+                }
+            }
+
+            // If reflection-based quantizer not available, check IAP for pre-configured quantizer
+            if (initialState.getQuantizer() == null && queryVector != null) {
+                IVectorQuantizer iapQuantizer =
+                        (IVectorQuantizer) iap.getParameters().get(HyracksConstants.VECTOR_QUANTIZER);
+                if (iapQuantizer != null) {
+                    try {
+                        initialState.setQuantizedQueryVector(iapQuantizer.quantize(queryVector));
+                        initialState.setQuantizer(iapQuantizer);
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to use IAP quantizer: {}", e.getMessage());
+                    }
                 }
             }
 

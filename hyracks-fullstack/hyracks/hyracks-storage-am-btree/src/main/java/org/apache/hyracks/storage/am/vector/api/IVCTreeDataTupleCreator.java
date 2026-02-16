@@ -51,6 +51,30 @@ public interface IVCTreeDataTupleCreator {
             throws HyracksDataException;
 
     /**
+     * Create a data tuple for VectorClusteringTree storage with quantized fields.
+     *
+     * Input tuple format: [vector, include_fields..., pk]
+     * Output format for quantized: <distance, centroidId, quantized_distance, quantized_embedding, pk, include_fields...>
+     *
+     * Default implementation delegates to the 4-arg method (ignoring quantized params).
+     * Override in quantized implementations to produce the correct format.
+     *
+     * @param vector the vector array extracted from the input tuple
+     * @param distance the computed distance from the vector to its assigned centroid
+     * @param centroidId the ID of the assigned leaf centroid
+     * @param originalTuple the original input tuple containing vector, include fields, and primary key
+     * @param quantizedDistance the quantized distance value
+     * @param quantizedEmbedding the quantized embedding bytes
+     * @return ITupleReference representing the data tuple in storage format
+     * @throws HyracksDataException if tuple creation fails
+     */
+    default ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
+            ITupleReference originalTuple, double quantizedDistance, byte[] quantizedEmbedding)
+            throws HyracksDataException {
+        return createDataTuple(vector, distance, centroidId, originalTuple);
+    }
+
+    /**
      * Returns the field index of the primary key in the output data tuple.
      * Callers use this to locate the PK when reading stored tuples.
      *

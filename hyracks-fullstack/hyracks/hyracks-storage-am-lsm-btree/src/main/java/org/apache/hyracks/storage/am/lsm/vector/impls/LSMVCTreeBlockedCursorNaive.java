@@ -45,6 +45,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -598,15 +599,19 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
      * against the quantized query vector.
      */
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
-        // Read quantized bytes from field 3 (quantized_embedding)
-        // Field is serialized by ByteArraySerializerDeserializer with a VarLen length prefix
-        int vectorFieldIndex = 3;
+        // Read quantized embedding bytes from field 3 (Q_QUANTIZED_EMBEDDING_FIELD).
+        // Field 3 uses ByteArrayPointable serialization: VarLen length prefix + content bytes.
+        // Strip the prefix and pass raw content bytes to the quantizer.
+        int vectorFieldIndex = VCTreeDataTupleConstants.Q_QUANTIZED_EMBEDDING_FIELD;
         byte[] data = tuple.getFieldData(vectorFieldIndex);
         int offset = tuple.getFieldStart(vectorFieldIndex);
+
         int contentLength = ByteArrayPointable.getContentLength(data, offset);
-        int metaLength = ByteArrayPointable.getNumberBytesToStoreMeta(contentLength);
+        int prefixSize = ByteArrayPointable.getNumberBytesToStoreMeta(contentLength);
+        int contentOffset = offset + prefixSize;
+
         byte[] qBytes = new byte[contentLength];
-        System.arraycopy(data, offset + metaLength, qBytes, 0, contentLength);
+        System.arraycopy(data, contentOffset, qBytes, 0, contentLength);
         double[] dequantized = quantizer.dequantize(qBytes);
         return distanceFunction.apply(quantizedQueryVector, dequantized);
     }

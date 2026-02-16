@@ -57,7 +57,8 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.am.vector.utils.NoOpVectorQuantizer;
+import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -506,13 +507,17 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
+        predicate.setPkStartField(ctx.getPkStartField());
 
         // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
         // Set USE_NAIVE_BLOCKED_SEARCH flag to enable LSMVCTreeBlockedCursorNaive
+        // Pass NoOpVectorQuantizer so the cursor can dequantize test embeddings
+        // (test mode stores full-precision vectors as "quantized" embeddings)
         IndexAccessParameters iap =
                 new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
         iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUANTIZER, NoOpVectorQuantizer.INSTANCE);
 
         IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
         IIndexCursor cursor = accessor.createSearchCursor(false);
@@ -658,6 +663,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
+        predicate.setPkStartField(ctx.getPkStartField());
 
         // Create accessor with vector accessor factory
         IndexAccessParameters iap =
@@ -736,30 +742,40 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     }
 
     /**
-     * Extract vector (field 2) from optimized search tuple.
-     * Tuple format: <distance, centroid_id, vector, primary_key>
+     * Extract vector (field 3: quantized_embedding) from optimized search tuple.
+     * Tuple format: <distance, centroid_id, quantized_distance, quantized_embedding, primary_key>
+     * Field 3 is stored as ByteArrayPointable: VarLen length prefix + raw big-endian doubles.
      */
     private double[] extractVectorFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
-        ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE, // Field 0: distance
-                IntegerSerializerDeserializer.INSTANCE, // Field 1: centroidId
-                DoubleArraySerializerDeserializer.INSTANCE // Field 2: vector
-        };
-        Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-        return (double[]) values[2];
+        int fieldIndex = 3;
+        byte[] data = tuple.getFieldData(fieldIndex);
+        int offset = tuple.getFieldStart(fieldIndex);
+        int contentLength = org.apache.hyracks.data.std.primitive.ByteArrayPointable.getContentLength(data, offset);
+        int prefixSize =
+                org.apache.hyracks.data.std.primitive.ByteArrayPointable.getNumberBytesToStoreMeta(contentLength);
+        int contentOffset = offset + prefixSize;
+        int count = contentLength / Double.BYTES;
+        double[] vector = new double[count];
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(data, contentOffset, contentLength);
+        for (int i = 0; i < count; i++) {
+            vector[i] = buf.getDouble();
+        }
+        return vector;
     }
 
     /**
-     * Extract primary_key (field 3) from optimized search tuple.
-     * Tuple format: <distance, centroid_id, vector, primary_key>
+     * Extract primary_key (field 4) from optimized search tuple.
+     * Tuple format: <distance, centroid_id, quantized_distance, quantized_embedding, primary_key>
      */
     public String extractPrimaryKeyFromOptimizedTuple(ITupleReference tuple) throws HyracksDataException {
         ISerializerDeserializer[] fieldSerdes = { DoubleSerializerDeserializer.INSTANCE, // Field 0: distance
                 IntegerSerializerDeserializer.INSTANCE, // Field 1: centroidId
-                DoubleArraySerializerDeserializer.INSTANCE, // Field 2: vector
-                new UTF8StringSerializerDeserializer() // Field 3: primary_key
+                DoubleSerializerDeserializer.INSTANCE, // Field 2: quantized_distance
+                org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer.INSTANCE, // Field 3: quantized_embedding
+                new UTF8StringSerializerDeserializer() // Field 4: primary_key
         };
         Object[] values = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-        return (String) values[3];
+        return (String) values[4];
     }
 
     /**

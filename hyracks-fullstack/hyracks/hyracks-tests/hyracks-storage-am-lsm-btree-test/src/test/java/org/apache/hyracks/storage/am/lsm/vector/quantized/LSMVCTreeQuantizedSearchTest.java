@@ -26,26 +26,27 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestContext;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestHarness;
-import org.apache.hyracks.storage.am.lsm.vector.util.OptimizedSearchTestDriver;
+import org.apache.hyracks.storage.am.lsm.vector.util.QuantizedSearchTestDriver;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.junit.Before;
 
 /**
- * LSMVCTree optimized search test.
- * Tests the LSMVCTreeBlockedCursor with bidirectional traversal and triangle inequality termination.
+ * LSMVCTree quantized search test.
+ * Tests the LSMVCTreeBlockedCursorNaive with sequential cluster scanning and top-K window collection.
  *
- * Uses test data from OptimizedSearchTestDriver.optimizedSearchThreeDimension():
+ * Uses test data from QuantizedSearchTestDriver.quantizedSearchThreeDimension():
  * - Single centroid at origin [0, 0, 0]
  * - 20 records at integer distances 1-20 along x-axis
  * - Query at [5, 0, 0] gives D(q, C) = 5.0
  *
- * Tuple format: <distance_to_centroid, centroid_id, vector, primary_key>
+ * Tuple format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
  */
-public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
+public class LSMVCTreeQuantizedSearchTest extends QuantizedSearchTestDriver {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -72,14 +73,16 @@ public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
                     numClustersPerLevel.size(), centroids.size(), leafRecords.size(), vectorDimension);
         }
 
-        // Create test context with the new tuple format (4 fields: distance, centroidId, vector, pk)
+        // Create test context with quantized tuple format (5 fields: distance, centroidId, quantized_distance, quantized_embedding, pk)
         AbstractVectorTreeTestContext ctx = LSMVCTreeTestContext.create(harness.getNcConfig(), harness.getIOManager(),
                 harness.getVirtualBufferCaches(), harness.getFileReference(), harness.getDiskBufferCache(),
                 dataRecordSerdes, vectorDimension, harness.getMergePolicy(), harness.getOperationTracker(),
                 harness.getIOScheduler(), harness.getIOOperationCallbackFactory(),
-                harness.getPageWriteCallbackFactory(), harness.getMetadataPageManagerFactory());
+                harness.getPageWriteCallbackFactory(), harness.getMetadataPageManagerFactory(),
+                harness.getDataTupleCreatorFactory());
 
-        // Set test data in context
+        // Set test data in context (quantized format: PK starts at field 4)
+        ctx.setPkStartField(VCTreeDataTupleConstants.Q_PK_START_FIELD);
         ctx.setStaticStructureCentroids(centroids);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
@@ -109,20 +112,6 @@ public class LSMVCTreeOptimizedSearchTest extends OptimizedSearchTestDriver {
             }
 
             // 4. Validate: optimized search for each query case
-            for (int i = 0; i < queryCases.size(); i++) {
-                QueryCase qc = queryCases.get(i);
-                ctx.setQueryVector(qc.queryVector);
-                ctx.setQueryK(qc.queryK);
-                ctx.setExpectedPrimaryKeys(qc.expectedPrimaryKeys);
-                testUtils.optimizedSearch(ctx);
-
-                if (LOGGER.isInfoEnabled()) {
-                    LOGGER.info("Query case {}/{} (optimized) succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
-                }
-            }
-
-            // 5. Validate: naive blocked search for same query cases
-            // LSMVCTreeBlockedCursorNaive should return the same results as LSMVCTreeBlockedCursor
             for (int i = 0; i < queryCases.size(); i++) {
                 QueryCase qc = queryCases.get(i);
                 ctx.setQueryVector(qc.queryVector);

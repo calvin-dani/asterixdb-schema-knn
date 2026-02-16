@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.hyracks.storage.am.vector;
+package org.apache.hyracks.storage.am.vector.utils;
 
 /**
  * Constants for VCTree data tuple field layout.

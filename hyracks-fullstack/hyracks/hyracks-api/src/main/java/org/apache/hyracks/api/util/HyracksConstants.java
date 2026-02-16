@@ -49,6 +49,9 @@ public class HyracksConstants {
     // Flag to enable naive blocked search (top-K window with quantized distance, no bidirectional pruning)
     public static final String USE_NAIVE_BLOCKED_SEARCH = "USE_NAIVE_BLOCKED_SEARCH";
 
+    // Pre-configured vector quantizer (IVectorQuantizer) to use when reflection-based creation is unavailable
+    public static final String VECTOR_QUANTIZER = "VECTOR_QUANTIZER";
+
     private HyracksConstants() {
     }
 }
