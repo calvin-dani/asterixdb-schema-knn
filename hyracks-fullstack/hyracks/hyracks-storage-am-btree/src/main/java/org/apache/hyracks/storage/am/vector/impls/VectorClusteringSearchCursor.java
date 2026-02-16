@@ -355,7 +355,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     @Override
     public boolean hasNext() throws HyracksDataException {
         if (!isOpen) {
-            // System.err.println("[VectorClusteringSearchCursor.hasNext] Cursor not open, returning false");
             return false;
         }
 
@@ -366,14 +365,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Current page exhausted, try to move to next data page in same cluster
         if (moveToNextDataPage()) {
-            // System.err.println(String.format(
-            //         "[VectorClusteringSearchCursor.hasNext] Moved to next data page, tupleCount=%d", tupleCount));
-            return true; // Found more data pages in current cluster
+            return true;
         }
-
-        // System.err.println(String.format(
-        //        "[VectorClusteringSearchCursor.hasNext] Current cluster exhausted | recordsIterated=%d, exhaustedAllClusters=%s",
-        //        recordsIterated, exhaustedAllClusters));
 
         // Current cluster exhausted - return false
         // Let the LSM layer decide whether to advance to next cluster
@@ -425,8 +418,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Then: leftmost leaf → next leaf → ... → last leaf (following nextLeaf pointers)
      */
     private void navigateToFirstCluster() throws HyracksDataException {
-        // System.err.println("[VectorClusteringSearchCursor.navigateToFirstCluster] Starting navigation to cluster 0...");
-
         // Step 1: Navigate to leftmost leaf page
         int currentPageId = rootPageId;
 
@@ -438,12 +429,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 IVectorClusteringInteriorFrame interiorFrame = createInteriorFrame();
                 interiorFrame.setPage(page);
 
-                // Always take FIRST child to reach leftmost leaf
                 if (interiorFrame.getTupleCount() > 0) {
                     currentPageId = interiorFrame.getChildPageId(0);
-                    // System.err.println(String.format(
-                    //        "[VectorClusteringSearchCursor.navigateToFirstCluster] Interior page, taking first child -> pageId=%d",
-                    //        currentPageId));
                 } else {
                     throw HyracksDataException
                             .create(new IllegalStateException("Empty interior page encountered during navigation"));
@@ -510,9 +497,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
                 Double.NaN // No quantized distance in full-scan mode
         );
 
-        // System.err.println(String.format(
-        //          "[VectorClusteringSearchCursor.navigateToFirstCluster] Successfully opened cluster 0, tupleCount=%d",
-        //      tupleCount));
     }
 
     /**
@@ -543,9 +527,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Used by full-scan mode for sequential cluster iteration.
      */
     private void openClusterByDirectoryPage(long directoryPageId) throws HyracksDataException {
-        // System.err.println(String.format(
-        //     "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Opening directoryPage=%d", directoryPageId));
-
         this.targetMetadataPageId = directoryPageId;
 
         // Guard: directoryPageId=-1 means empty cluster (no data assigned during bulk loading)
@@ -565,9 +546,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             int metadataTupleCount = metadataFrame.getTupleCount();
             if (metadataTupleCount == 0) {
-                // Empty cluster - no data pages
-                // System.err.println(
-                //      "[VectorClusteringSearchCursor.openClusterByDirectoryPage] Empty cluster (no metadata entries)");
                 this.currentDataPageId = -1;
                 this.tupleCount = 0;
                 this.currentTupleIndex = 0;
@@ -604,26 +582,16 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * @return true if successfully moved to next cluster, false if no more clusters available
      */
     public boolean advanceToNextCluster() throws HyracksDataException {
-        // System.err.println("[VectorClusteringSearchCursor.advanceToNextCluster] Looking for next cluster...");
-
         if (fullScanMode) {
             // Full-scan mode: Sequential iteration through clusters
             currentSequentialClusterIndex++;
 
             if (currentSequentialClusterIndex >= totalLeafClusters) {
                 exhaustedAllClusters = true;
-                // System.err.println(String.format(
-                //    "[VectorClusteringSearchCursor.advanceToNextCluster] Full-scan exhausted all %d clusters",
-                // totalLeafClusters));
-                return false; // No more clusters
+                return false;
             }
 
-            // Get directory page ID from collected list (handles multiple leaf pages)
             long nextDirectoryPageId = allDirectoryPageIds.get(currentSequentialClusterIndex);
-            // System.err.println(String.format(
-            //     "[VectorClusteringSearchCursor.advanceToNextCluster] Full-scan advancing to cluster %d (directoryPage=%d)",
-            //         currentSequentialClusterIndex, nextDirectoryPageId));
-
             openClusterByDirectoryPage(nextDirectoryPageId);
 
             // Create ClusterSearchResult for this sequential cluster
@@ -649,17 +617,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             if (nextCluster == null) {
                 exhaustedAllClusters = true;
-                // System.err.println(
-                //      "[VectorClusteringSearchCursor.advanceToNextCluster] No more clusters, marking exhausted");
-                return false; // No more clusters available
+                return false;
             }
 
-            // Open next cluster (even if it might be empty)
             openCluster(nextCluster);
-            boolean hasData = currentTupleIndex < tupleCount;
-            // System.err.println(String.format(
-            //         "[VectorClusteringSearchCursor.advanceToNextCluster] Opened cluster %d (centroidId=%d, distance=%.4f), hasData=%s, tupleCount=%d",
-            //        clustersProbed, nextCluster.centroidId, nextCluster.distance, hasData, tupleCount));
 
             // Return true even if cluster is empty - let LSMVCTreeSearchCursor handle it
             // This ensures cluster synchronization across all LSM components
@@ -793,8 +754,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             // Get the next page ID from the current data frame's linked list pointer
             int nextDataPageId = dataFrame.getNextPage();
             if (nextDataPageId == -1) {
-                //                // System.err.println("[VectorClusteringSearchCursor.moveToNextDataPage] "
-                //                        + "Reached end of data page chain, no more pages");
                 return false; // Reached end of chain
             }
 
@@ -804,22 +763,10 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
             // Check if this page has tuples
             if (this.tupleCount > 0) {
-                //                System.err
-                //                        .println(String.format(
-                //                                "[VectorClusteringSearchCursor.moveToNextDataPage] "
-                //                                        + "Found non-empty data page %d with %d tuples",
-                //                                nextDataPageId, this.tupleCount));
                 return true; // Found non-empty page
             }
 
             // Page is empty after deletion - continue to next page
-            //            System.err
-            //                    .println(
-            //                            String.format(
-            //                                    "[VectorClusteringSearchCursor.moveToNextDataPage] "
-            //                                            + "Data page %d is empty (after deletion), skipping to next page",
-            //                                    nextDataPageId));
-            // Loop continues to next page
         }
     }
 
@@ -862,11 +809,6 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
         }
 
         this.currentTupleIndex = 0;
-
-        // Log cluster probing
-        // System.err.println(String.format(
-        //             "[VectorClusteringSearchCursor] Opened cluster %d (centroidId=%d, distance=%.4f) | Total clusters probed: %d | Records iterated so far: %d",
-        //       clustersProbed, cluster.centroidId, cluster.distance, clustersProbed, recordsIterated));
     }
 
     /**
@@ -1016,18 +958,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
     @Override
     public void close() throws HyracksDataException {
-        // Debug: log who is calling close() to help track unexpected closure
-        //        // System.err.println(
-        //                String.format("[VectorClusteringSearchCursor.close] Called on cursor (isOpen=%s, recordsIterated=%d)",
-        //                        isOpen, recordsIterated));
-
         if (isOpen) {
             closeCurrentPage();
-
-            // Log final statistics
-            //            // System.err.println(String.format(
-            //                    "[VectorClusteringSearchCursor] Search completed | Total clusters probed: %d | Total records iterated: %d | Exhausted all clusters: %s",
-            //                    clustersProbed, recordsIterated, exhaustedAllClusters));
         }
         this.isOpen = false;
         this.currentTuple = null;

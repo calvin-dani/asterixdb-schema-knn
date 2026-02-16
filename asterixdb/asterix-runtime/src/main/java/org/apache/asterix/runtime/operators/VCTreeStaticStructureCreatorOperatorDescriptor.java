@@ -855,11 +855,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         sampleCount = sc;
                                     }
 
-                                    quantizationParamsLoaded = true;
-                                    System.err.println("Quantization params loaded: bits=" + quantizationBits
-                                            + ", confidenceInterval=" + confidenceInterval + ", minQuantile="
-                                            + minQuantile + ", maxQuantile=" + maxQuantile + ", alpha=" + alpha
-                                            + ", sampleCount=" + sampleCount);
+                                    quantizationParamsLoaded = vcTreeResource.hasQuantizationParams();
+                                    System.err.println("Quantization params loaded=" + quantizationParamsLoaded
+                                            + ": bits=" + quantizationBits + ", confidenceInterval="
+                                            + confidenceInterval + ", minQuantile=" + minQuantile + ", maxQuantile="
+                                            + maxQuantile + ", alpha=" + alpha + ", sampleCount=" + sampleCount);
                                 }
                             }
                         }
