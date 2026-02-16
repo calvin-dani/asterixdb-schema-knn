@@ -210,7 +210,7 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
                 null, // filterManager
                 null, // filterHelper
                 durable, metadataPageManagerFactory, atomic, null, accessorFactory, numPrimaryKeyFields,
-                numIncludeFields, dataTupleCreatorFactory, quantizationParams);
+                numIncludeFields, dataTupleCreatorFactory, quantizationParams, "euclidean"); // TODO: Store distanceMetric in LSMVCTreeLocalResource and propagate from Index metadata
     }
 
     /**

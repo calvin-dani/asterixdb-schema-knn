@@ -28,9 +28,10 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestContext;
 import org.apache.hyracks.storage.am.lsm.vector.util.LSMVCTreeTestHarness;
-import org.apache.hyracks.storage.am.lsm.vector.util.OptimizedSearchTestDriver;
+import org.apache.hyracks.storage.am.lsm.vector.util.QuantizedSearchTestDriver;
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
@@ -40,7 +41,7 @@ import org.junit.Before;
  * LSMVCTree delete test with quantized vector embedding.
  * Tests delete operations after bulk loading the first disk component.
  *
- * Inherits two test cases from OptimizedSearchTestDriver:
+ * Inherits two test cases from QuantizedSearchTestDriver:
  * - optimizedSearchThreeDimension(): 3D single-centroid structure (1 level, 20 bulk-loaded records)
  * - twoDimensionTwoLevels(): 2D two-layer structure (2 levels, 16 leaf centroids, 800 bulk-loaded records)
  *
@@ -51,7 +52,7 @@ import org.junit.Before;
  * Data tuple format (quantized): <distance, centroid_id, vector, primary_key>
  * Delete tuple format: <vector, primary_key> (same as insert)
  */
-public class LSMVCTreeDeleteQuantizedTest extends OptimizedSearchTestDriver {
+public class LSMVCTreeDeleteQuantizedTest extends QuantizedSearchTestDriver {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -69,7 +70,7 @@ public class LSMVCTreeDeleteQuantizedTest extends OptimizedSearchTestDriver {
     }
 
     /**
-     * Implementation of runTest from OptimizedSearchTestDriver.
+     * Implementation of runTest from QuantizedSearchTestDriver.
      * Performs: build static structure → bulk load → delete → verify with delete-aware query cases.
      *
      * After deleting specific records, antimatter tuples in the memory component cancel
@@ -92,7 +93,8 @@ public class LSMVCTreeDeleteQuantizedTest extends OptimizedSearchTestDriver {
                 harness.getPageWriteCallbackFactory(), harness.getMetadataPageManagerFactory(),
                 harness.getDataTupleCreatorFactory());
 
-        // Set test data in context
+        // Set test data in context (quantized format: PK starts at field 4)
+        ctx.setPkStartField(VCTreeDataTupleConstants.Q_PK_START_FIELD);
         ctx.setStaticStructureCentroids(centroids);
         ctx.setNumClustersPerLevel(numClustersPerLevel);
         ctx.setNumCentroidsPerLevel(centroidsPerCluster);
@@ -125,8 +127,8 @@ public class LSMVCTreeDeleteQuantizedTest extends OptimizedSearchTestDriver {
                 ctx.setQueryK(qc.queryK);
                 ctx.setExpectedPrimaryKeys(qc.expectedPrimaryKeys);
                 ctx.setExcludedPrimaryKeys(qc.excludedPrimaryKeys);
-                testUtils.optimizedSearch(ctx);
-                LOGGER.info("Query case {}/{} succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
+                testUtils.naiveBlockedSearch(ctx);
+                LOGGER.info("Query case {}/{} (naive blocked) succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
             }
 
         } finally {

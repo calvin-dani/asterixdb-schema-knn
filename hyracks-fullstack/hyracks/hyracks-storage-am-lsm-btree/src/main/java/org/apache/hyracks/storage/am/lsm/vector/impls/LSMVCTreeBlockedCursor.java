@@ -43,6 +43,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
 import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -802,18 +803,15 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
      * Compute distance D(q, x) between query vector and tuple's vector.
      * Uses IVectorBinaryAccessor to extract the vector from the tuple.
      *
-     * Tuple format:
-     * - Field 0: distance_to_centroid (double)
-     * - Field 1: centroid_id (int)
-     * - Field 2: vector (stored in format handled by IVectorBinaryAccessor)
-     * - Field 3: primary_key
+     * Non-quantized format: | distance(0) | centroidId(1) | PK...(2+) |
+     * Quantized format:     | distance(0) | centroidId(1) | quantized_distance(2) | quantized_embedding(3) | PK...(4+) |
      */
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
         // When quantized, compute the approximate distance from the quantized representations
         if (quantizedQueryVector != null && quantizer != null) {
             // Read quantized bytes from field 3 (Q_QUANTIZED_EMBEDDING_FIELD)
             // Field is serialized by ByteArraySerializerDeserializer with a VarLen length prefix
-            int vectorFieldIndex = 3;
+            int vectorFieldIndex = VCTreeDataTupleConstants.Q_QUANTIZED_EMBEDDING_FIELD;
             byte[] data = tuple.getFieldData(vectorFieldIndex);
             int offset = tuple.getFieldStart(vectorFieldIndex);
             int contentLength = ByteArrayPointable.getContentLength(data, offset);
@@ -824,8 +822,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             return distanceFunction.apply(quantizedQueryVector, dequantized);
         }
 
-        // Full-precision fallback: extract vector from field 2 using the vector accessor
-        int vectorFieldIndex = 2;
+        // Full-precision fallback: extract vector using the vector accessor
+        // For quantized format (pkStartField == 4), vector is at field 3 (quantized_embedding)
+        // For non-quantized format (pkStartField == 2), this path should not be reached
+        int vectorFieldIndex = VCTreeDataTupleConstants.Q_QUANTIZED_EMBEDDING_FIELD;
         byte[] data = tuple.getFieldData(vectorFieldIndex);
         int offset = tuple.getFieldStart(vectorFieldIndex);
         int length = tuple.getFieldLength(vectorFieldIndex);

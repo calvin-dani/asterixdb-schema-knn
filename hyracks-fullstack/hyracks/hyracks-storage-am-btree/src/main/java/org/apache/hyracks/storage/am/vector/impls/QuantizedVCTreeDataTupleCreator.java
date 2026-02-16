@@ -20,38 +20,44 @@
 package org.apache.hyracks.storage.am.vector.impls;
 
 import java.io.DataOutput;
+import java.nio.ByteBuffer;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreator;
+import org.apache.hyracks.util.encoding.VarLenIntEncoderDecoder;
 
 /**
  * Quantized data tuple creator for VectorClusteringTree.
  *
- * Includes the vector embedding in the data tuple so that search cursors
- * (e.g., LSMVCTreeBlockedCursor) can compute D(q, x) from the stored vector
- * without needing to fetch from the primary index.
+ * Includes quantized distance and quantized embedding in the data tuple so that
+ * search cursors (e.g., LSMVCTreeBlockedCursor) can compute approximate D(q, x)
+ * from the stored quantized data without needing to fetch from the primary index.
  *
  * In the unit test framework, the actual vector embedding is used as the
- * "quantized vector" (no real quantization is performed).
+ * "quantized embedding" and the full distance as the "quantized distance"
+ * (no real quantization is performed). The embedding is serialized as raw
+ * big-endian doubles, consistent with the production byte[] format.
  *
  * Input tuple format: [vector, include_fields..., pk]
  * - Field 0: vector
  * - Fields 1 to numIncludeFields: include fields (optional)
  * - Field (1 + numIncludeFields): primary key (single field)
  *
- * Output data tuple format: <distance, centroidId, vector, pk, include_fields...>
+ * Output data tuple format: <distance, centroidId, quantized_distance, quantized_embedding, pk, include_fields...>
  * - Field 0: distance (raw double, 8 bytes, no type tag)
  * - Field 1: centroidId (raw int, 4 bytes, no type tag)
- * - Field 2: vector (copied from input field 0)
- * - Field 3: primary key
- * - Fields 4+: include fields
+ * - Field 2: quantized_distance (raw double, 8 bytes, no type tag)
+ * - Field 3: quantized_embedding (ByteArrayPointable: VarLen length prefix + content bytes)
+ * - Field 4: primary key
+ * - Fields 5+: include fields
  */
 public class QuantizedVCTreeDataTupleCreator implements IVCTreeDataTupleCreator {
 
-    private static final int PK_FIELD_INDEX = 3;
+    private static final int PK_FIELD_INDEX = 4;
     private final int numIncludeFields;
 
     public QuantizedVCTreeDataTupleCreator(int numIncludeFields) {
@@ -61,9 +67,21 @@ public class QuantizedVCTreeDataTupleCreator implements IVCTreeDataTupleCreator 
     @Override
     public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
             ITupleReference originalTuple) throws HyracksDataException {
+        // Test mode pass-through: serialize the full-precision vector as raw big-endian doubles
+        ByteBuffer buf = ByteBuffer.allocate(vector.length * Double.BYTES);
+        for (double d : vector) {
+            buf.putDouble(d);
+        }
+        return createDataTuple(vector, distance, centroidId, originalTuple, distance, buf.array());
+    }
+
+    @Override
+    public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
+            ITupleReference originalTuple, double quantizedDistance, byte[] quantizedEmbedding)
+            throws HyracksDataException {
         try {
-            // Total fields: distance + centroidId + vector + pk + include_fields
-            int dataFieldCount = 4 + numIncludeFields;
+            // Total fields: distance + centroidId + quantized_distance + quantized_embedding + pk + include_fields
+            int dataFieldCount = 5 + numIncludeFields;
             ArrayTupleBuilder dataTupleBuilder = new ArrayTupleBuilder(dataFieldCount);
             DataOutput dos = dataTupleBuilder.getDataOutput();
 
@@ -75,16 +93,25 @@ public class QuantizedVCTreeDataTupleCreator implements IVCTreeDataTupleCreator 
             dos.writeInt(centroidId);
             dataTupleBuilder.addFieldEndOffset();
 
-            // Field 2: vector (copied from originalTuple field 0)
-            dataTupleBuilder.addField(originalTuple.getFieldData(0), originalTuple.getFieldStart(0),
-                    originalTuple.getFieldLength(0));
+            // Field 2: quantized_distance as raw double (8 bytes, no type tag)
+            dos.writeDouble(quantizedDistance);
+            dataTupleBuilder.addFieldEndOffset();
 
-            // Field 3: primary key (at position 1 + numIncludeFields in input)
+            // Field 3: quantized_embedding with ByteArrayPointable serialization
+            // (VarLen length prefix + content bytes, consistent with production bulk load format)
+            int metaLen = ByteArrayPointable.getNumberBytesToStoreMeta(quantizedEmbedding.length);
+            byte[] meta = new byte[metaLen];
+            VarLenIntEncoderDecoder.encode(quantizedEmbedding.length, meta, 0);
+            dos.write(meta);
+            dos.write(quantizedEmbedding);
+            dataTupleBuilder.addFieldEndOffset();
+
+            // Field 4: primary key (at position 1 + numIncludeFields in input)
             int pkFieldIndex = 1 + numIncludeFields;
             dataTupleBuilder.addField(originalTuple.getFieldData(pkFieldIndex),
                     originalTuple.getFieldStart(pkFieldIndex), originalTuple.getFieldLength(pkFieldIndex));
 
-            // Fields 4+: include fields (from originalTuple fields 1 to numIncludeFields)
+            // Fields 5+: include fields (from originalTuple fields 1 to numIncludeFields)
             for (int i = 0; i < numIncludeFields; i++) {
                 int srcFieldIndex = 1 + i;
                 dataTupleBuilder.addField(originalTuple.getFieldData(srcFieldIndex),

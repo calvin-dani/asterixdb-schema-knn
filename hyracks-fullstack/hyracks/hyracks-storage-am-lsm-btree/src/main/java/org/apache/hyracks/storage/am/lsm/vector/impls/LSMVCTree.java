@@ -114,6 +114,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     // Raw quantization params for lazy quantizer creation at query time (null = non-quantized path)
     protected final float[] quantizationParams;
+    protected final String distanceMetric;
 
     protected LSMVCTreeDiskComponent staticStructure;
 
@@ -130,7 +131,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             boolean needKeyDupCheck, int vectorDimensions, int[] vectorFields, int[] filterFields, boolean durable,
             boolean atomic, org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
             int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory,
-            float[] quantizationParams) throws HyracksDataException {
+            float[] quantizationParams, String distanceMetric) throws HyracksDataException {
 
         super(storageConfig, ioManager, virtualBufferCaches, diskBufferCache, fileManager, bloomFilterFalsePositiveRate,
                 mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, componentFactory,
@@ -149,6 +150,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
         this.numIncludeFields = numIncludeFields;
         this.dataTupleCreatorFactory = dataTupleCreatorFactory;
         this.quantizationParams = quantizationParams;
+        this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
 
         int i = 0;
         for (IVirtualBufferCache virtualBufferCache : virtualBufferCaches) {
@@ -158,7 +160,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             VectorClusteringTree vcTree = new VectorClusteringTree(virtualBufferCache,
                     new VirtualFreePageManager(virtualBufferCache), interiorFrameFactory, leafFrameFactory,
                     metadataFrameFactory, insertDataFrameFactory, cmpFactories, 1, vectorDimensions, virtualFileRef,
-                    vectorAccessorFactory, dataTupleCreatorFactory, quantizationParams);
+                    vectorAccessorFactory, dataTupleCreatorFactory, quantizationParams, this.distanceMetric);
             LSMVCTreeMemoryComponent mutableComponent = new LSMVCTreeMemoryComponent(this, vcTree, virtualBufferCache,
                     filterHelper == null ? null : filterHelper.createFilter());
             memoryComponents.add(mutableComponent);
@@ -295,6 +297,10 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      */
     public float[] getQuantizationParams() {
         return quantizationParams;
+    }
+
+    public String getDistanceMetric() {
+        return distanceMetric;
     }
 
     @Override

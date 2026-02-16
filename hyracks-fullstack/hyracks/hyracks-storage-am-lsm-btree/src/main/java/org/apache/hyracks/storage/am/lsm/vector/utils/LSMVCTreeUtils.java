@@ -112,7 +112,7 @@ public class LSMVCTreeUtils {
             IMetadataPageManagerFactory metadataPageManagerFactory, boolean atomic, RecordDescriptor inputRecDesc,
             org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory vectorAccessorFactory,
             int numPrimaryKeyFields, int numIncludeFields, IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory,
-            float[] quantizationParams) throws HyracksDataException {
+            float[] quantizationParams, String distanceMetric) throws HyracksDataException {
 
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: Method started");
@@ -197,7 +197,7 @@ public class LSMVCTreeUtils {
         VectorClusteringTreeFactory vctreeFactory = new VectorClusteringTreeFactory(ioManager, diskBufferCache,
                 metadataPageManagerFactory, interiorFrameFactory, leafFrameFactory, metadataFrameFactory,
                 insertDataFrameFactory, cmpFactories, 4, vectorDimensions, vectorAccessorFactory,
-                dataTupleCreatorFactory, quantizationParams);
+                dataTupleCreatorFactory, quantizationParams, distanceMetric);
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: VectorClusteringTreeFactory created");
         // Create file manager for LSM components
@@ -219,7 +219,7 @@ public class LSMVCTreeUtils {
                 bloomFilterFalsePositiveRate, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields, durable,
                 atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory,
-                quantizationParams);
+                quantizationParams, distanceMetric);
         //        System.err.println("[THREAD:" + Thread.currentThread().getId() + "] [TIME:" + System.currentTimeMillis()
         //                + "] LSMVCTreeUtils.createLSMTree: LSMVCTree instance created successfully");
         return result;
@@ -278,6 +278,6 @@ public class LSMVCTreeUtils {
                 pageWriteCallbackFactory, needKeyDupCheck, vectorDimensions, vectorFields, filterFields,
                 filterFrameFactory, filterManager, filterHelper, durable, metadataPageManagerFactory, atomic,
                 inputRecDesc, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory,
-                null);
+                null, "euclidean");
     }
 }

@@ -29,6 +29,7 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
@@ -306,7 +307,7 @@ public class VectorTestStructure {
      * Generate bulk load records for all leaf centroids.
      * Records arranged in concentric rings around each centroid.
      *
-     * @param format NAIVE creates {@code <dist, cid, pk>}, QUANTIZED creates {@code <dist, cid, vector, pk>}
+     * @param format NAIVE creates {@code <dist, cid, pk>}, QUANTIZED creates {@code <dist, cid, quantized_dist, quantized_embedding, pk>}
      * @param recordsPerCentroid Number of records per leaf centroid
      * @return Records grouped by leaf centroid
      */
@@ -509,8 +510,8 @@ public class VectorTestStructure {
             }
             case QUANTIZED:
                 return new ISerializerDeserializer[] { DoubleSerializerDeserializer.INSTANCE,
-                        IntegerSerializerDeserializer.INSTANCE, DoubleArraySerializerDeserializer.INSTANCE,
-                        new UTF8StringSerializerDeserializer() };
+                        IntegerSerializerDeserializer.INSTANCE, DoubleSerializerDeserializer.INSTANCE,
+                        ByteArraySerializerDeserializer.INSTANCE, new UTF8StringSerializerDeserializer() };
             default:
                 throw new UnsupportedOperationException("Format not yet supported: " + format);
         }
@@ -586,20 +587,39 @@ public class VectorTestStructure {
     }
 
     /**
-     * Create quantized bulk load record: {@code <distance: raw double, centroid_id: raw int, vector: double[], pk: UTF8String>}
+     * Create quantized bulk load record:
+     * {@code <distance: raw double, centroid_id: raw int, quantized_distance: raw double, quantized_embedding: ByteArrayPointable(raw doubles), pk: UTF8String>}
      */
     static ITupleReference createQuantizedBulkLoadRecord(double distance, int centroidId, double[] vector,
             String primaryKey) throws HyracksDataException {
         try {
-            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(4);
+            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(5);
             ArrayTupleReference tupleRef = new ArrayTupleReference();
 
+            // Field 0: distance_to_centroid
             tupleBuilder.getDataOutput().writeDouble(distance);
             tupleBuilder.addFieldEndOffset();
+            // Field 1: centroid_id
             tupleBuilder.getDataOutput().writeInt(centroidId);
             tupleBuilder.addFieldEndOffset();
-            DoubleArraySerializerDeserializer.INSTANCE.serialize(vector, tupleBuilder.getDataOutput());
+            // Field 2: quantized_distance (same as distance in test mode)
+            tupleBuilder.getDataOutput().writeDouble(distance);
             tupleBuilder.addFieldEndOffset();
+            // Field 3: quantized_embedding as ByteArrayPointable (VarLen prefix + raw doubles)
+            // Consistent with production format (ByteArraySerializerDeserializer)
+            java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(vector.length * Double.BYTES);
+            for (double d : vector) {
+                buf.putDouble(d);
+            }
+            byte[] rawDoubles = buf.array();
+            int metaLen = org.apache.hyracks.data.std.primitive.ByteArrayPointable
+                    .getNumberBytesToStoreMeta(rawDoubles.length);
+            byte[] meta = new byte[metaLen];
+            org.apache.hyracks.util.encoding.VarLenIntEncoderDecoder.encode(rawDoubles.length, meta, 0);
+            tupleBuilder.getDataOutput().write(meta);
+            tupleBuilder.getDataOutput().write(rawDoubles);
+            tupleBuilder.addFieldEndOffset();
+            // Field 4: primary_key
             new UTF8StringSerializerDeserializer().serialize(primaryKey, tupleBuilder.getDataOutput());
             tupleBuilder.addFieldEndOffset();
 

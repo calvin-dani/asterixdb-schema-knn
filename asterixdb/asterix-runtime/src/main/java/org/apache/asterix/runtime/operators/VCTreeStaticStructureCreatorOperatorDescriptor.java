@@ -87,7 +87,7 @@ import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
+import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IResource;

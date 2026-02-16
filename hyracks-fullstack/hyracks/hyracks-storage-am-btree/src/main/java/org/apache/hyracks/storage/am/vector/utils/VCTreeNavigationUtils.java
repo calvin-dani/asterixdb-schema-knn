@@ -21,11 +21,8 @@ package org.apache.hyracks.storage.am.vector.utils;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
@@ -42,7 +39,6 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
-import org.apache.hyracks.storage.am.vector.util.VectorUtils;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
@@ -55,28 +51,7 @@ import org.apache.logging.log4j.Logger;
  */
 public class VCTreeNavigationUtils {
 
-    /**
-     * Find the closest centroid by traversing the tree from root to leaf.
-     * 
-     * @param bufferCache Buffer cache for page access
-     * @param fileId File ID for page identification
-     * @param rootPageId Root page ID to start traversal
-     * @param interiorFrameFactory Factory for creating interior frames
-     * @param leafFrameFactory Factory for creating leaf frames
-     * @param queryVector Query vector to find closest centroid for
-     * @param distanceFunction Distance function to use for centroid finding
-     * @return ClusterSearchResult containing closest centroid information
-     * @throws HyracksDataException if any error occurs during traversal
-     */
-
     private static final Logger LOGGER = LogManager.getLogger();
-
-    public static ClusterSearchResult findClosestCentroid(IBufferCache bufferCache, int fileId, int rootPageId,
-            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
-            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
-        return findClosestCentroid(bufferCache, fileId, rootPageId, interiorFrameFactory, leafFrameFactory, queryVector,
-                distanceFunction, null, null);
-    }
 
     /**
      * Find the closest centroid by traversing the tree from root to leaf,
@@ -121,27 +96,31 @@ public class VCTreeNavigationUtils {
                 leafFrame.setPage(page);
                 boolean isLeaf = leafFrame.isLeaf();
 
-                Map<String, Object> pageVisitFields = new HashMap<>();
-
                 if (isLeaf) {
-                    // Leaf level - find closest centroid
-                    bestResult = findClosestInLeafPage(bufferCache, fileId, queryVector, currentPageId, leafFrame,
-                            leafFrameFactory, distanceFunction, quantizedQueryVector, quantizer);
+                    // Leaf level - collect all centroids and pick the closest
+                    List<VCTreeLeafCentroid> sortedCentroids =
+                            collectAllLeafCentroids(bufferCache, fileId, queryVector, currentPageId, leafFrame,
+                                    leafFrameFactory, distanceFunction, quantizedQueryVector, quantizer);
+                    if (!sortedCentroids.isEmpty()) {
+                        VCTreeLeafCentroid best = sortedCentroids.get(0);
+                        bestResult = ClusterSearchResult.create(best.pageId, best.tupleIndex, best.centroid,
+                                best.distance, best.centroidId, best.directoryPageId, best.quantizedDistance);
+                    }
                     break; // Found leaf level result
 
                 } else {
-                    // Interior level - find closest centroid and descend
+                    // Interior level - collect all children and descend to closest
                     IVectorClusteringInteriorFrame interiorFrame =
                             (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
-                    int nextPageId = findClosestInInteriorPage(bufferCache, fileId, queryVector, currentPageId,
-                            interiorFrame, interiorFrameFactory, distanceFunction);
-                    if (nextPageId == -1) {
+                    List<VCTreeChildCentroid> sortedChildren = collectAllChildCentroids(bufferCache, fileId,
+                            queryVector, currentPageId, interiorFrame, interiorFrameFactory, distanceFunction);
+                    if (sortedChildren.isEmpty()) {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                                 "No valid centroid found in interior cluster");
                     }
 
-                    currentPageId = nextPageId;
+                    currentPageId = sortedChildren.get(0).childPageId;
                 }
 
             } finally {
@@ -174,241 +153,33 @@ public class VCTreeNavigationUtils {
     }
 
     /**
-     * Format a double array as a JSON array string.
-     * 
-     * @param vector Double array to format
-     * @return JSON array string like "[1.23,4.56,7.89]"
-     */
-    private static String formatVectorAsJsonArray(double[] vector) {
-        if (vector == null) {
-            return "[]";
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("[");
-        for (int i = 0; i < vector.length; i++) {
-            if (i > 0) {
-                sb.append(",");
-            }
-            sb.append(vector[i]);
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /**
-     * Log a traversal event as a single-line JSON object to System.err.
-     * 
-     * @param eventType Event type identifier
-     * @param fields Map of field names to values
-     */
-    private static void logTraversalEvent(String eventType, Map<String, Object> fields) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"event\":\"");
-        sb.append(eventType);
-        sb.append("\"");
-
-        for (Map.Entry<String, Object> entry : fields.entrySet()) {
-            sb.append(",\"");
-            sb.append(entry.getKey());
-            sb.append("\":");
-
-            Object value = entry.getValue();
-            if (value instanceof String) {
-                sb.append("\"");
-                sb.append(value);
-                sb.append("\"");
-            } else if (value instanceof Boolean) {
-                sb.append(value);
-            } else if (value instanceof double[]) {
-                sb.append(formatVectorAsJsonArray((double[]) value));
-            } else {
-                sb.append(value);
-            }
-        }
-
-        sb.append("}");
-        // System.err.println(sb.toString());
-    }
-
-    /**
-     * Find the closest centroid in a leaf cluster, handling overflow pages.
-     * Unified loop iterates through all pages in the overflow chain (e.g., p10 -> p20 -> p21).
+     * Collect all child centroids from an interior page and its overflow chain, sorted by distance.
+     * Unified method that replaces findClosestInInteriorPage, collectAndSortChildren,
+     * collectChildrenFromOverflow, and collectChildrenForLevelWise.
      *
      * @param bufferCache Buffer cache for page access
      * @param fileId File ID for page identification
-     * @param queryVector Query vector to find closest centroid for
-     * @param startPageId Starting page ID of the leaf cluster
-     * @param initialLeafFrame Leaf frame already set to the initial page (already pinned by caller)
-     * @param leafFrameFactory Factory for creating leaf frames for overflow pages
-     * @return ClusterSearchResult containing closest centroid information (pageId, tupleIndex, centroid, distance, centroidId)
-     * @param distanceFunction Distance function to use for distance calculation
-     * @return ClusterSearchResult containing closest centroid information
-     * @throws HyracksDataException if any error occurs during search
-     */
-    private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
-            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory,
-            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
-        return findClosestInLeafPage(bufferCache, fileId, queryVector, startPageId, initialLeafFrame, leafFrameFactory,
-                distanceFunction, null, null);
-    }
-
-    /**
-     * Find the closest centroid in a leaf cluster, handling overflow pages.
-     * Optionally computes a quantized distance for the best result.
-     *
-     * @param bufferCache Buffer cache for page access
-     * @param fileId File ID for page identification
-     * @param queryVector Query vector to find closest centroid for
-     * @param startPageId Starting page ID of the leaf cluster
-     * @param initialLeafFrame Leaf frame already set to the initial page (already pinned by caller)
-     * @param leafFrameFactory Factory for creating leaf frames for overflow pages
-     * @param distanceFunction Distance function to use for distance calculation
-     * @param quantizedQueryVector Quantized form of queryVector (nullable)
-     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable)
-     * @return ClusterSearchResult containing closest centroid information
-     * @throws HyracksDataException if any error occurs during search
-     */
-    private static ClusterSearchResult findClosestInLeafPage(IBufferCache bufferCache, int fileId, double[] queryVector,
-            int startPageId, IVectorClusteringLeafFrame initialLeafFrame, ITreeIndexFrameFactory leafFrameFactory,
-            IVectorDistanceFunction distanceFunction, double[] quantizedQueryVector, IVectorQuantizer quantizer)
-            throws HyracksDataException {
-
-        double bestDistance = Double.MAX_VALUE;
-        int bestTupleIndex = -1;
-        int bestPageId = -1;
-        double[] bestCentroid = null;
-        int bestCentroidId = -1;
-        long bestDirectoryPageId = -1;
-        byte[] bestQuantizedCentroidBytes = null;
-        int candidatesProcessed = 0;
-        int pagesProcessed = 0;
-
-        // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
-        int currentPageId = startPageId;
-        IVectorClusteringLeafFrame currentFrame = initialLeafFrame;
-        boolean isFirstPage = true;
-        ICachedPage currentPage = null;
-
-        while (currentPageId != -1) {
-            try {
-                // For the first page, use the frame passed by caller (already pinned/latched)
-                // For overflow pages, pin and latch them ourselves
-                if (!isFirstPage) {
-                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
-                    currentPage.acquireReadLatch();
-                    currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
-                    currentFrame.setPage(currentPage);
-                }
-
-                int tupleCount = currentFrame.getTupleCount();
-                boolean hasOverflow = currentFrame.getOverflowFlagBit();
-                int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
-                pagesProcessed++;
-
-                // Search all centroids in this page
-                for (int i = 0; i < tupleCount; i++) {
-                    try {
-                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(currentFrame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-                        int centroidID = currentFrame.getCentroidId(i);
-
-                        // Check vector dimensionality before distance calculation
-                        if (centroid.length != queryVector.length) {
-                            continue;
-                        }
-
-                        double distance = distanceFunction.apply(queryVector, centroid);
-                        candidatesProcessed++;
-
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestTupleIndex = i;
-                            bestPageId = currentPageId;
-                            bestCentroid = centroid.clone();
-                            bestCentroidId = centroidID;
-                            bestDirectoryPageId = currentFrame.getMetadataPagePointer(i);
-                            // Capture quantized centroid bytes when best is updated
-                            if (quantizer != null) {
-                                bestQuantizedCentroidBytes = currentFrame.getQuantizedCentroidBytes(i);
-                            }
-                        }
-                    } catch (Exception e) {
-                        // System.err.println(
-                        // "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
-                        continue;
-                    }
-                }
-
-                // Move to next page in chain
-                currentPageId = nextPageId;
-                isFirstPage = false;
-
-            } finally {
-                // Only unpin/unlatch overflow pages, not the first page (caller handles that)
-                if (!isFirstPage && currentPage != null) {
-                    currentPage.releaseReadLatch();
-                    bufferCache.unpin(currentPage);
-                    currentPage = null;
-                }
-            }
-        }
-
-        if (bestTupleIndex >= 0) {
-            // Compute quantized distance for best result only (after loop)
-            double quantizedDistance = Double.NaN;
-            if (quantizer != null && quantizedQueryVector != null && bestQuantizedCentroidBytes != null) {
-                double[] dequantizedCentroid = quantizer.dequantize(bestQuantizedCentroidBytes);
-                quantizedDistance = distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
-            }
-
-            return ClusterSearchResult.create(bestPageId, bestTupleIndex, bestCentroid, bestDistance, bestCentroidId,
-                    bestDirectoryPageId, quantizedDistance);
-        }
-        // TODO : SOME RETURN EMPTY
-        return null;
-    }
-
-    /**
-     * Find the closest centroid in an interior cluster and return child page ID, handling overflow pages.
-     * Unified loop iterates through all pages in the overflow chain (e.g., p10 -> p20 -> p21).
-     *
-     * @param bufferCache Buffer cache for page access
-     * @param fileId File ID for page identification
-     * @param queryVector Query vector to find closest centroid for
-     * @param startPageId Starting page ID of the interior cluster
-     * @param initialInteriorFrame Interior frame already set to the initial page (already pinned by caller)
+     * @param queryVector Query vector to compute distances against
+     * @param startPageId Starting page ID of the interior page
+     * @param initialFrame Interior frame already set to the initial page (already pinned by caller)
      * @param interiorFrameFactory Factory for creating interior frames for overflow pages
-     * @param distanceFunction Distance function to use for distance calculation
-     * @return Child page ID to descend to, or -1 if no valid child found
-     * @throws HyracksDataException if any error occurs during search
+     * @param distanceFunction Distance function to use
+     * @return List of child centroids sorted by distance (closest first)
+     * @throws HyracksDataException if any error occurs
      */
-    private static int findClosestInInteriorPage(IBufferCache bufferCache, int fileId, double[] queryVector,
-            int startPageId, IVectorClusteringInteriorFrame initialInteriorFrame,
+    private static List<VCTreeChildCentroid> collectAllChildCentroids(IBufferCache bufferCache, int fileId,
+            double[] queryVector, int startPageId, IVectorClusteringInteriorFrame initialFrame,
             ITreeIndexFrameFactory interiorFrameFactory, IVectorDistanceFunction distanceFunction)
             throws HyracksDataException {
 
-        double bestDistance = Double.MAX_VALUE;
-        int bestChildPageId = -1;
-        int candidatesProcessed = 0;
-        int pagesProcessed = 0;
-
-        //        Map<String, Object> searchStartFields = new HashMap<>();
-        //        searchStartFields.put("startPageId", startPageId);
-        //        searchStartFields.put("vectorDim", queryVector.length);
-        //        searchStartFields.put("queryVector", queryVector);
-        //        logTraversalEvent("interior_search_start", searchStartFields);
-
-        // Unified loop: iterate through all pages in the overflow chain (p10 -> p20 -> p21)
+        List<VCTreeChildCentroid> children = new ArrayList<>();
         int currentPageId = startPageId;
-        IVectorClusteringInteriorFrame currentFrame = initialInteriorFrame;
+        IVectorClusteringInteriorFrame currentFrame = initialFrame;
         boolean isFirstPage = true;
         ICachedPage currentPage = null;
 
         while (currentPageId != -1) {
             try {
-                // For the first page, use the frame passed by caller (already pinned/latched)
-                // For overflow pages, pin and latch them ourselves
                 if (!isFirstPage) {
                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
                     currentPage.acquireReadLatch();
@@ -419,57 +190,29 @@ public class VCTreeNavigationUtils {
                 int tupleCount = currentFrame.getTupleCount();
                 boolean hasOverflow = currentFrame.getOverflowFlagBit();
                 int nextPageId = hasOverflow ? currentFrame.getNextPage() : -1;
-                pagesProcessed++;
 
-                //                Map<String, Object> pageFields = new HashMap<>();
-                //                pageFields.put("pageId", currentPageId);
-                //                pageFields.put("tupleCount", tupleCount);
-                //                pageFields.put("hasOverflow", hasOverflow);
-                //                pageFields.put("nextPageId", nextPageId);
-                //                pageFields.put("isFirstPage", isFirstPage);
-                //                logTraversalEvent("interior_page_search", pageFields);
-
-                // Search all centroids in this page
                 for (int i = 0; i < tupleCount; i++) {
                     try {
-                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(currentFrame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+                        ITreeIndexTupleReference tuple = currentFrame.createTupleReference();
+                        tuple.resetByTupleIndex(currentFrame, i);
+                        double[] centroid = extractCentroidFromInteriorTuple(tuple);
 
-                        // Check vector dimensionality before distance calculation
                         if (centroid.length != queryVector.length) {
                             continue;
                         }
 
                         double distance = distanceFunction.apply(queryVector, centroid);
                         int childPageId = currentFrame.getChildPageId(i);
-                        candidatesProcessed++;
-
-                        //                        Map<String, Object> candidateFields = new HashMap<>();
-                        //                        candidateFields.put("pageId", currentPageId);
-                        //                        candidateFields.put("tupleIndex", i);
-                        //                        candidateFields.put("centroidDim", centroid.length);
-                        //                        candidateFields.put("distance", distance);
-                        //                        candidateFields.put("childPageId", childPageId);
-                        //                        logTraversalEvent("interior_candidate", candidateFields);
-
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            bestChildPageId = childPageId;
-                        }
+                        children.add(new VCTreeChildCentroid(childPageId, distance, i));
                     } catch (Exception e) {
-                        // System.err.println(
-                        // "ERROR processing tuple " + i + " on page " + currentPageId + ": " + e.getMessage());
                         continue;
                     }
                 }
 
-                // Move to next page in chain
                 currentPageId = nextPageId;
                 isFirstPage = false;
 
             } finally {
-                // Only unpin/unlatch overflow pages, not the first page (caller handles that)
                 if (!isFirstPage && currentPage != null) {
                     currentPage.releaseReadLatch();
                     bufferCache.unpin(currentPage);
@@ -478,363 +221,99 @@ public class VCTreeNavigationUtils {
             }
         }
 
-        //        Map<String, Object> searchSelectFields = new HashMap<>();
-        //        searchSelectFields.put("selectedChildPageId", bestChildPageId);
-        //        searchSelectFields.put("bestDistance", bestDistance);
-        //        searchSelectFields.put("candidatesProcessed", candidatesProcessed);
-        //        searchSelectFields.put("pagesProcessed", pagesProcessed);
-        //        logTraversalEvent("interior_search_select", searchSelectFields);
-
-        return bestChildPageId;
+        children.sort(Comparator.comparingDouble(c -> c.distance));
+        return children;
     }
 
     /**
-     * Extract centroid from a leaf frame tuple (format: <cid, centroid, metadata_ptr>).
-     * Uses direct byte parsing to match the tuple writer's getCentroid() method.
+     * Collect all leaf centroids from a leaf page and its overflow chain, sorted by distance.
+    * Optionally computes quantized D(q,C) for each centroid when quantizer is provided.
+     * Unified method that replaces findClosestInLeafPage, collectAndSortLeafCentroids,
+     * collectCentroidsFromOverflow, and collectLeafCentroidsForLevelWise.
      *
-     * @param tuple Leaf frame tuple
-     * @return Centroid vector
+     * @param bufferCache Buffer cache for page access
+     * @param fileId File ID for page identification
+     * @param queryVector Query vector to compute distances against
+     * @param startPageId Starting page ID of the leaf page
+     * @param initialFrame Leaf frame already set to the initial page (already pinned by caller)
+     * @param leafFrameFactory Factory for creating leaf frames for overflow pages
+     * @param distanceFunction Distance function to use
+     * @param quantizedQueryVector Quantized form of queryVector (nullable — pass null to skip)
+     * @param quantizer Quantizer for dequantizing leaf centroid bytes (nullable — pass null to skip)
+     * @return List of leaf centroids sorted by distance (closest first)
+     * @throws HyracksDataException if any error occurs
      */
+    private static List<VCTreeLeafCentroid> collectAllLeafCentroids(IBufferCache bufferCache, int fileId,
+            double[] queryVector, int startPageId, IVectorClusteringLeafFrame initialFrame,
+            ITreeIndexFrameFactory leafFrameFactory, IVectorDistanceFunction distanceFunction,
+            double[] quantizedQueryVector, IVectorQuantizer quantizer) throws HyracksDataException {
 
-    /**
-     * Perform a breadth-first traversal of the static structure starting at root and print
-     * a human-readable dump of all interior/leaf pages and their tuples. Distances are computed
-     * w.r.t the provided query vector when dimensionality matches; otherwise marked as NA.
-     */
-    public static void bfsPrintStaticStructure(IBufferCache bufferCache, int fileId, int rootPageId,
-            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
-            int embeddingPrintLimit) throws HyracksDataException {
+        List<VCTreeLeafCentroid> centroids = new ArrayList<>();
+        int currentPageId = startPageId;
+        IVectorClusteringLeafFrame currentFrame = initialFrame;
+        boolean isFirstPage = true;
+        ICachedPage currentPage = null;
 
-        if (bufferCache == null || interiorFrameFactory == null || leafFrameFactory == null) {
-            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Required components are not initialized");
-        }
-
-        final int printLimit = embeddingPrintLimit > 0 ? embeddingPrintLimit : 8;
-
-        Queue<int[]> queue = new ArrayDeque<>();
-        Set<Integer> visited = new HashSet<>();
-        queue.add(new int[] { rootPageId, 0 });
-        visited.add(rootPageId);
-
-        int visitedPages = 0;
-        long processedTuples = 0L;
-
-        while (!queue.isEmpty()) {
-            int[] entry = queue.poll();
-            int currentPageId = entry[0];
-            int level = entry[1];
-
-            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+        while (currentPageId != -1) {
             try {
-                page.acquireReadLatch();
+                if (!isFirstPage) {
+                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    currentPage.acquireReadLatch();
+                    currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
+                    currentFrame.setPage(currentPage);
+                }
 
-                IVectorClusteringLeafFrame leafFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
-                leafFrame.setPage(page);
-                boolean isLeaf = leafFrame.isLeaf();
+                int tupleCount = currentFrame.getTupleCount();
+                boolean hasOverflow = currentFrame.getOverflowFlagBit();
+                int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
 
-                if (isLeaf) {
-                    LOGGER.info("=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: LEAF ===");
-                    int tupleCount = leafFrame.getTupleCount();
-                    for (int i = 0; i < tupleCount; i++) {
-                        try {
-                            ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
-                            frameTuple.resetByTupleIndex(leafFrame, i);
+                for (int i = 0; i < tupleCount; i++) {
+                    try {
+                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
+                        frameTuple.resetByTupleIndex(currentFrame, i);
+                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+                        int centroidId = currentFrame.getCentroidId(i);
+                        long directoryPageId = currentFrame.getMetadataPagePointer(i);
 
-                            ISerializerDeserializer<?>[] serdes = new ISerializerDeserializer<?>[3];
-                            serdes[0] = IntegerSerializerDeserializer.INSTANCE;
-                            serdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
-                            serdes[2] = IntegerSerializerDeserializer.INSTANCE;
-                            Object[] fields = TupleUtils.deserializeTuple(frameTuple, serdes);
-
-                            int cid = (Integer) fields[0];
-                            double[] centroid = (double[]) fields[1];
-                            int metadataPtr = (Integer) fields[2];
-                            int centroidId = leafFrame.getCentroidId(i);
-
-                            String centroidStr = formatCentroid(centroid, printLimit);
-                            String distStr = computeDistanceString(queryVector, centroid);
-
-                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroidId=" + centroidId + " | centroid="
-                                    + centroidStr + " | dist=" + distStr + " | metadata=" + metadataPtr);
-                            processedTuples++;
-                        } catch (Exception e) {
-                            // System.err.println("ERROR processing leaf tuple " + i + " on page " + currentPageId + ": "
-                            //              + e.getMessage());
+                        if (centroid.length != queryVector.length) {
+                            continue;
                         }
-                    }
 
-                    int nextLeaf = leafFrame.getNextLeaf();
-                    if (nextLeaf != -1 && visited.add(nextLeaf)) {
-                        queue.add(new int[] { nextLeaf, level });
-                    }
+                        double distance = distanceFunction.apply(queryVector, centroid);
 
-                } else {
-                    IVectorClusteringInteriorFrame interiorFrame =
-                            (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
-                    interiorFrame.setPage(page);
-                    LOGGER.info("=== LEVEL " + level + " | PAGE " + currentPageId + " | TYPE: INTERIOR ===");
-                    int tupleCount = interiorFrame.getTupleCount();
-                    for (int i = 0; i < tupleCount; i++) {
-                        try {
-                            ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
-                            frameTuple.resetByTupleIndex(interiorFrame, i);
-
-                            ISerializerDeserializer<?>[] serdes = new ISerializerDeserializer<?>[3];
-                            serdes[0] = IntegerSerializerDeserializer.INSTANCE;
-                            serdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
-                            serdes[2] = IntegerSerializerDeserializer.INSTANCE;
-                            Object[] fields = TupleUtils.deserializeTuple(frameTuple, serdes);
-
-                            int cid = (Integer) fields[0];
-                            double[] centroid = (double[]) fields[1];
-                            int childPageId = interiorFrame.getChildPageId(i);
-
-                            String centroidStr = formatCentroid(centroid, printLimit);
-                            String distStr = computeDistanceString(queryVector, centroid);
-
-                            LOGGER.info("tuple=" + i + " | cid=" + cid + " | centroid=" + centroidStr + " | dist="
-                                    + distStr + " | child=" + childPageId);
-                            processedTuples++;
-
-                            if (childPageId != -1 && visited.add(childPageId)) {
-                                queue.add(new int[] { childPageId, level + 1 });
+                        double quantizedDistance = Double.NaN;
+                        if (quantizer != null && quantizedQueryVector != null) {
+                            byte[] quantizedCentroidBytes = currentFrame.getQuantizedCentroidBytes(i);
+                            if (quantizedCentroidBytes != null) {
+                                double[] dequantizedCentroid = quantizer.dequantize(quantizedCentroidBytes);
+                                quantizedDistance = distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
                             }
-                        } catch (Exception e) {
-                            // System.err.println("ERROR processing interior tuple " + i + " on page " + currentPageId
-                            //           + ": " + e.getMessage());
                         }
-                    }
 
-                    int nextPage = interiorFrame.getNextPage();
-                    if (nextPage != 0 && visited.add(nextPage)) {
-                        queue.add(new int[] { nextPage, level });
+                        centroids.add(new VCTreeLeafCentroid(centroidId, distance, i, currentPageId, centroid.clone(),
+                                directoryPageId, quantizedDistance));
+                    } catch (Exception e) {
+                        continue;
                     }
                 }
 
-                visitedPages++;
+                currentPageId = nextPageId;
+                isFirstPage = false;
+
             } finally {
-                page.releaseReadLatch();
-                bufferCache.unpin(page);
+                if (!isFirstPage && currentPage != null) {
+                    currentPage.releaseReadLatch();
+                    bufferCache.unpin(currentPage);
+                    currentPage = null;
+                }
             }
         }
 
-        // System.err.println("=== BFS PRINT COMPLETE | pages=" + visitedPages + " | tuples=" + processedTuples + " ===");
-    }
-
-    private static String computeDistanceString(double[] queryVector, double[] centroid) {
-        if (queryVector == null || centroid == null) {
-            return "NA";
-        }
-        if (centroid.length != queryVector.length) {
-            return "NA (dim mismatch)";
-        }
-        double d = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
-        return String.format("%.4f", d);
-    }
-
-    private static String formatCentroid(double[] centroid, int limit) {
-        if (centroid == null) {
-            return "null";
-        }
-        int n = centroid.length;
-        int toPrint = Math.min(limit, n);
-        StringBuilder sb = new StringBuilder();
-        sb.append('[');
-        for (int i = 0; i < toPrint; i++) {
-            if (i > 0) {
-                sb.append(", ");
-            }
-            sb.append(String.format("%.4f", centroid[i]));
-        }
-        sb.append(']');
-        if (n > toPrint) {
-            sb.append(" (+").append(n - toPrint).append(" more)");
-        }
-        return sb.toString();
+        centroids.sort(Comparator.comparingDouble(c -> c.distance));
+        return centroids;
     }
 
     // ==================== Multi-Cluster Iterative DFS Support ====================
-
-    /**
-     * Represents a child centroid with its distance to query vector.
-     * Used for sorting children by distance at interior nodes.
-     */
-    public static class ChildCentroid {
-        public final int childPageId;
-        public final double distance;
-        public final int tupleIndex; // Index in parent page
-
-        public ChildCentroid(int childPageId, double distance, int tupleIndex) {
-            this.childPageId = childPageId;
-            this.distance = distance;
-            this.tupleIndex = tupleIndex;
-        }
-    }
-
-    /**
-     * Represents a leaf centroid with its metadata.
-     * Used for iterating through centroids in a leaf page.
-     */
-    public static class LeafCentroid {
-        public final int centroidId;
-        public final double distance;
-        public final int tupleIndex;
-        public final int pageId;
-        public final double[] centroid;
-        public final long directoryPageId; // Direct pointer to cluster's directory page
-        public final double quantizedDistance; // D(q̃, C̃) — NaN if not computed
-
-        public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid,
-                long directoryPageId, double quantizedDistance) {
-            this.centroidId = centroidId;
-            this.distance = distance;
-            this.tupleIndex = tupleIndex;
-            this.pageId = pageId;
-            this.centroid = centroid;
-            this.directoryPageId = directoryPageId;
-            this.quantizedDistance = quantizedDistance;
-        }
-
-        public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid,
-                long directoryPageId) {
-            this(centroidId, distance, tupleIndex, pageId, centroid, directoryPageId, Double.NaN);
-        }
-
-        // Legacy constructor for backwards compatibility
-        public LeafCentroid(int centroidId, double distance, int tupleIndex, int pageId, double[] centroid) {
-            this(centroidId, distance, tupleIndex, pageId, centroid, -1, Double.NaN);
-        }
-    }
-
-    /**
-     * Stack frame for DFS navigation through the tree.
-     * Each frame represents a node (interior or leaf level) in the traversal path.
-     */
-    public static class NavigationFrame {
-        public final int pageId;
-        public final boolean isLeaf;
-        public final List<ChildCentroid> sortedChildren; // For interior nodes
-        public final List<LeafCentroid> sortedCentroids; // For leaf nodes
-        public int nextIndex; // Next child/centroid to explore
-
-        // Constructor for interior frame
-        public NavigationFrame(int pageId, List<ChildCentroid> sortedChildren) {
-            this.pageId = pageId;
-            this.isLeaf = false;
-            this.sortedChildren = sortedChildren;
-            this.sortedCentroids = null;
-            this.nextIndex = 0;
-        }
-
-        // Constructor for leaf frame
-        public NavigationFrame(int pageId, List<LeafCentroid> sortedCentroids, boolean isLeaf) {
-            this.pageId = pageId;
-            this.isLeaf = isLeaf;
-            this.sortedChildren = null;
-            this.sortedCentroids = sortedCentroids;
-            this.nextIndex = 0;
-        }
-
-        public boolean hasNext() {
-            if (isLeaf) {
-                return sortedCentroids != null && nextIndex < sortedCentroids.size();
-            } else {
-                return sortedChildren != null && nextIndex < sortedChildren.size();
-            }
-        }
-
-        public ChildCentroid nextChild() {
-            if (!isLeaf && hasNext()) {
-                return sortedChildren.get(nextIndex++);
-            }
-            return null;
-        }
-
-        public LeafCentroid nextCentroid() {
-            if (isLeaf && hasNext()) {
-                return sortedCentroids.get(nextIndex++);
-            }
-            return null;
-        }
-    }
-
-    /**
-     * State for iterative DFS navigation through the tree.
-     * Maintains the navigation stack for finding clusters in distance order.
-     * Also tracks visited centroids to avoid duplicates when using level-wise + DFS fallback.
-     */
-    public static class NavigationState {
-        public final IBufferCache bufferCache;
-        public final int fileId;
-        public final int rootPageId;
-        public final ITreeIndexFrameFactory interiorFrameFactory;
-        public final ITreeIndexFrameFactory leafFrameFactory;
-        public final double[] queryVector;
-        public final Deque<NavigationFrame> stack;
-        public boolean initialized;
-
-        // Visited centroid tracking (can be shared across LSM components)
-        private Set<Integer> visitedCentroidIds;
-
-        public NavigationState(IBufferCache bufferCache, int fileId, int rootPageId,
-                ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
-                double[] queryVector) {
-            this(bufferCache, fileId, rootPageId, interiorFrameFactory, leafFrameFactory, queryVector, new HashSet<>());
-        }
-
-        /**
-         * Constructor with shared visited set.
-         * Use this when sharing visited tracking across multiple LSM components.
-         */
-        public NavigationState(IBufferCache bufferCache, int fileId, int rootPageId,
-                ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory,
-                double[] queryVector, Set<Integer> sharedVisitedSet) {
-            this.bufferCache = bufferCache;
-            this.fileId = fileId;
-            this.rootPageId = rootPageId;
-            this.interiorFrameFactory = interiorFrameFactory;
-            this.leafFrameFactory = leafFrameFactory;
-            this.queryVector = queryVector;
-            this.stack = new ArrayDeque<>();
-            this.initialized = false;
-            this.visitedCentroidIds = sharedVisitedSet != null ? sharedVisitedSet : new HashSet<>();
-        }
-
-        /**
-         * Check if a centroid has already been visited.
-         */
-        public boolean isVisited(int centroidId) {
-            return visitedCentroidIds.contains(centroidId);
-        }
-
-        /**
-         * Mark a centroid as visited.
-         */
-        public void markVisited(int centroidId) {
-            visitedCentroidIds.add(centroidId);
-        }
-
-        /**
-         * Set the visited set (for sharing with other components).
-         */
-        public void setVisitedSet(Set<Integer> visitedSet) {
-            this.visitedCentroidIds = visitedSet;
-        }
-
-        /**
-         * Get the visited set.
-         */
-        public Set<Integer> getVisitedSet() {
-            return visitedCentroidIds;
-        }
-
-        /**
-         * Get the count of visited centroids.
-         */
-        public int getVisitedCount() {
-            return visitedCentroidIds.size();
-        }
-    }
 
     /**
      * Initialize the cluster iterator by building navigation stack from root to first leaf.
@@ -844,7 +323,7 @@ public class VCTreeNavigationUtils {
      * @return The first (closest) cluster, or null if tree is empty
      * @throws HyracksDataException if any error occurs
      */
-    public static ClusterSearchResult initializeClusterIterator(NavigationState state,
+    public static ClusterSearchResult initializeClusterIterator(VCTreeNavigationState state,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
         if (state.initialized) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Iterator already initialized");
@@ -869,19 +348,21 @@ public class VCTreeNavigationUtils {
 
                 if (isLeaf) {
                     // At leaf level: collect and sort all centroids in this page (including overflow)
-                    List<LeafCentroid> sortedCentroids =
-                            collectAndSortLeafCentroids(state, currentPageId, leafFrame, distanceFunction);
+                    List<VCTreeLeafCentroid> sortedCentroids =
+                            collectAllLeafCentroids(state.bufferCache, state.fileId, state.queryVector, currentPageId,
+                                    leafFrame, state.leafFrameFactory, distanceFunction, null, null);
 
                     if (sortedCentroids.isEmpty()) {
                         return null; // Empty tree
                     }
 
                     // Push leaf frame onto stack
-                    NavigationFrame leafFrame_nav = new NavigationFrame(currentPageId, sortedCentroids, true);
+                    VCTreeNavigationFrame leafFrame_nav =
+                            new VCTreeNavigationFrame(currentPageId, sortedCentroids, true);
                     state.stack.push(leafFrame_nav);
 
                     // Return first centroid as closest cluster
-                    LeafCentroid first = leafFrame_nav.nextCentroid();
+                    VCTreeLeafCentroid first = leafFrame_nav.nextCentroid();
                     return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid, first.distance,
                             first.centroidId, first.directoryPageId);
 
@@ -891,8 +372,9 @@ public class VCTreeNavigationUtils {
                             (IVectorClusteringInteriorFrame) state.interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
 
-                    List<ChildCentroid> sortedChildren =
-                            collectAndSortChildren(state, currentPageId, interiorFrame, distanceFunction);
+                    List<VCTreeChildCentroid> sortedChildren =
+                            collectAllChildCentroids(state.bufferCache, state.fileId, state.queryVector, currentPageId,
+                                    interiorFrame, state.interiorFrameFactory, distanceFunction);
 
                     if (sortedChildren.isEmpty()) {
                         throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
@@ -900,11 +382,11 @@ public class VCTreeNavigationUtils {
                     }
 
                     // Push interior frame onto stack
-                    NavigationFrame interiorFrame_nav = new NavigationFrame(currentPageId, sortedChildren);
+                    VCTreeNavigationFrame interiorFrame_nav = new VCTreeNavigationFrame(currentPageId, sortedChildren);
                     state.stack.push(interiorFrame_nav);
 
                     // Descend to closest child
-                    ChildCentroid closest = interiorFrame_nav.nextChild();
+                    VCTreeChildCentroid closest = interiorFrame_nav.nextChild();
                     currentPageId = closest.childPageId;
                 }
 
@@ -929,7 +411,7 @@ public class VCTreeNavigationUtils {
      * @return Next closest cluster, or null if all clusters exhausted
      * @throws HyracksDataException if any error occurs
      */
-    public static ClusterSearchResult findNextClosestCluster(NavigationState state,
+    public static ClusterSearchResult findNextClosestCluster(VCTreeNavigationState state,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
         if (!state.initialized) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
@@ -937,12 +419,12 @@ public class VCTreeNavigationUtils {
         }
 
         while (!state.stack.isEmpty()) {
-            NavigationFrame topFrame = state.stack.peek();
+            VCTreeNavigationFrame topFrame = state.stack.peek();
 
             if (topFrame.isLeaf) {
                 // At leaf level: try next centroid in current page, skipping visited ones
                 while (topFrame.hasNext()) {
-                    LeafCentroid next = topFrame.nextCentroid();
+                    VCTreeLeafCentroid next = topFrame.nextCentroid();
 
                     // Skip if already visited (e.g., by level-wise exploration)
                     if (state.isVisited(next.centroidId)) {
@@ -962,23 +444,13 @@ public class VCTreeNavigationUtils {
                 }
 
                 // All centroids in this leaf exhausted or visited, backtrack
-                {
-                    // Current leaf exhausted, backtrack
-                    // System.err.println(String.format(
-                    //         "[DFS] Leaf frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
-                    //        topFrame.pageId, topFrame.nextIndex, topFrame.sortedCentroids.size(), state.stack.size()));
-                    state.stack.pop();
-                    continue;
-                }
+                state.stack.pop();
+                continue;
 
             } else {
                 // At interior level: try next child
                 if (topFrame.hasNext()) {
-                    ChildCentroid nextChild = topFrame.nextChild();
-                    // System.err.println(String.format(
-                    //      "[DFS] Interior frame pageId=%d exploring child: childPageId=%d, distance=%.4f, nextIndex=%d/%d",
-                    //          topFrame.pageId, nextChild.childPageId, nextChild.distance, topFrame.nextIndex,
-                    //topFrame.sortedChildren.size()));
+                    VCTreeChildCentroid nextChild = topFrame.nextChild();
 
                     // Descend to this child and navigate to leaf
                     ClusterSearchResult result = descendToLeaf(state, nextChild.childPageId, distanceFunction);
@@ -986,16 +458,10 @@ public class VCTreeNavigationUtils {
                         return result;
                     }
                     // If descend failed, continue with next child
-                    // System.err.println(
-                    //   String.format("[DFS] descendToLeaf returned null for childPageId=%d, trying next child",
-                    //             nextChild.childPageId)//);
                     continue;
 
                 } else {
                     // All children explored, backtrack
-                    // System.err.println(String.format(
-                    //          "[DFS] Interior frame pageId=%d exhausted (nextIndex=%d, size=%d), popping stack (depth=%d)",
-                    //       topFrame.pageId, topFrame.nextIndex, topFrame.sortedChildren.size(), state.stack.size()));
                     state.stack.pop();
                     continue;
                 }
@@ -1016,7 +482,7 @@ public class VCTreeNavigationUtils {
      * @return First centroid at leaf level, or null if no valid path
      * @throws HyracksDataException if any error occurs
      */
-    private static ClusterSearchResult descendToLeaf(NavigationState state, int startPageId,
+    private static ClusterSearchResult descendToLeaf(VCTreeNavigationState state, int startPageId,
             IVectorDistanceFunction distanceFunction) throws HyracksDataException {
 
         int currentPageId = startPageId;
@@ -1034,20 +500,22 @@ public class VCTreeNavigationUtils {
 
                 if (isLeaf) {
                     // Reached leaf: collect and sort centroids
-                    List<LeafCentroid> sortedCentroids =
-                            collectAndSortLeafCentroids(state, currentPageId, leafFrame, distanceFunction);
+                    List<VCTreeLeafCentroid> sortedCentroids =
+                            collectAllLeafCentroids(state.bufferCache, state.fileId, state.queryVector, currentPageId,
+                                    leafFrame, state.leafFrameFactory, distanceFunction, null, null);
 
                     if (sortedCentroids.isEmpty()) {
                         return null; // Empty leaf
                     }
 
                     // Push leaf frame onto stack
-                    NavigationFrame leafFrame_nav = new NavigationFrame(currentPageId, sortedCentroids, true);
+                    VCTreeNavigationFrame leafFrame_nav =
+                            new VCTreeNavigationFrame(currentPageId, sortedCentroids, true);
                     state.stack.push(leafFrame_nav);
 
                     // Find first unvisited centroid
                     while (leafFrame_nav.hasNext()) {
-                        LeafCentroid first = leafFrame_nav.nextCentroid();
+                        VCTreeLeafCentroid first = leafFrame_nav.nextCentroid();
                         if (!state.isVisited(first.centroidId)) {
                             state.markVisited(first.centroidId);
                             return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid,
@@ -1066,233 +534,22 @@ public class VCTreeNavigationUtils {
                             (IVectorClusteringInteriorFrame) state.interiorFrameFactory.createFrame();
                     interiorFrame.setPage(page);
 
-                    List<ChildCentroid> sortedChildren =
-                            collectAndSortChildren(state, currentPageId, interiorFrame, distanceFunction);
+                    List<VCTreeChildCentroid> sortedChildren =
+                            collectAllChildCentroids(state.bufferCache, state.fileId, state.queryVector, currentPageId,
+                                    interiorFrame, state.interiorFrameFactory, distanceFunction);
 
                     if (sortedChildren.isEmpty()) {
                         return null; // No valid children
                     }
 
                     // Push interior frame
-                    NavigationFrame interiorFrame_nav = new NavigationFrame(currentPageId, sortedChildren);
+                    VCTreeNavigationFrame interiorFrame_nav = new VCTreeNavigationFrame(currentPageId, sortedChildren);
                     state.stack.push(interiorFrame_nav);
 
                     // Descend to closest child
-                    ChildCentroid closest = interiorFrame_nav.nextChild();
+                    VCTreeChildCentroid closest = interiorFrame_nav.nextChild();
                     currentPageId = closest.childPageId;
                 }
-
-            } finally {
-                page.releaseReadLatch();
-                state.bufferCache.unpin(page);
-            }
-        }
-    }
-
-    /**
-     * Collect and sort all children in an interior page by distance to query.
-     * Handles overflow pages if present.
-     *
-     * @param state Navigation state
-     * @param startPageId Starting page ID
-     * @param initialFrame Initial interior frame (already set to first page)
-     * @return List of children sorted by distance (closest first)
-     * @throws HyracksDataException if any error occurs
-     */
-    private static List<ChildCentroid> collectAndSortChildren(NavigationState state, int startPageId,
-            IVectorClusteringInteriorFrame initialFrame, IVectorDistanceFunction distanceFunction)
-            throws HyracksDataException {
-
-        List<ChildCentroid> children = new ArrayList<>();
-
-        // Collect from first page (already have frame)
-        int tupleCount = initialFrame.getTupleCount();
-        LOGGER.warn(String.format("[collectAndSortChildren] pageId=%d, tupleCount=%d, queryDim=%d", startPageId,
-                tupleCount, state.queryVector.length));
-
-        for (int i = 0; i < tupleCount; i++) {
-            try {
-                ITreeIndexTupleReference tuple = initialFrame.createTupleReference();
-                tuple.resetByTupleIndex(initialFrame, i);
-                double[] centroid = extractCentroidFromInteriorTuple(tuple);
-
-                if (centroid != null && centroid.length == state.queryVector.length) {
-                    double distance = distanceFunction.apply(state.queryVector, centroid);
-                    int childPageId = initialFrame.getChildPageId(i);
-                    children.add(new ChildCentroid(childPageId, distance, i));
-                }
-            } catch (Exception e) {
-                LOGGER.warn(String.format("[collectAndSortChildren] Skipping tuple %d on page %d: %s", i, startPageId,
-                        e.getMessage()));
-            }
-        }
-
-        // Handle overflow pages
-        boolean hasOverflow = initialFrame.getOverflowFlagBit();
-        int nextPageId = hasOverflow ? initialFrame.getNextPage() : -1;
-        LOGGER.warn(String.format("[collectAndSortChildren] pageId=%d, hasOverflow=%b, nextPageId=%d", startPageId,
-                hasOverflow, nextPageId));
-
-        if (hasOverflow) {
-            collectChildrenFromOverflow(state, nextPageId, children, distanceFunction);
-        }
-
-        // Sort by distance (ascending)
-        children.sort(Comparator.comparingDouble(c -> c.distance));
-        return children;
-    }
-
-    /**
-     * Collect children from overflow pages.
-     */
-    private static void collectChildrenFromOverflow(NavigationState state, int pageId, List<ChildCentroid> children,
-            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
-
-        int currentPageId = pageId;
-        int overflowPageCount = 0;
-        while (currentPageId != -1) {
-            overflowPageCount++;
-            ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
-            try {
-                page.acquireReadLatch();
-                IVectorClusteringInteriorFrame frame =
-                        (IVectorClusteringInteriorFrame) state.interiorFrameFactory.createFrame();
-                frame.setPage(page);
-
-                int tupleCount = frame.getTupleCount();
-                LOGGER.warn(String.format("[collectChildrenFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
-                        overflowPageCount, currentPageId, tupleCount));
-
-                for (int i = 0; i < tupleCount; i++) {
-                    try {
-                        ITreeIndexTupleReference tuple = frame.createTupleReference();
-                        tuple.resetByTupleIndex(frame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(tuple);
-
-                        if (centroid != null && centroid.length == state.queryVector.length) {
-                            double distance = distanceFunction.apply(state.queryVector, centroid);
-                            int childPageId = frame.getChildPageId(i);
-                            children.add(new ChildCentroid(childPageId, distance, i));
-                        }
-                    } catch (Exception e) {
-                        LOGGER.warn(
-                                String.format("[collectChildrenFromOverflow] Skipping tuple %d on overflow page %d: %s",
-                                        i, currentPageId, e.getMessage()));
-                    }
-                }
-
-                boolean hasOverflow = frame.getOverflowFlagBit();
-                int nextPageId = hasOverflow ? frame.getNextPage() : -1;
-                LOGGER.warn(String.format("[collectChildrenFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
-                        currentPageId, hasOverflow, nextPageId));
-                currentPageId = nextPageId;
-
-            } finally {
-                page.releaseReadLatch();
-                state.bufferCache.unpin(page);
-            }
-        }
-    }
-
-    /**
-     * Collect and sort all centroids in a leaf page by distance to query.
-     * Handles overflow pages if present.
-     *
-     * @param state Navigation state
-     * @param startPageId Starting page ID
-     * @param initialFrame Initial leaf frame (already set to first page)
-     * @return List of centroids sorted by distance (closest first)
-     * @throws HyracksDataException if any error occurs
-     */
-    private static List<LeafCentroid> collectAndSortLeafCentroids(NavigationState state, int startPageId,
-            IVectorClusteringLeafFrame initialFrame, IVectorDistanceFunction distanceFunction)
-            throws HyracksDataException {
-
-        List<LeafCentroid> centroids = new ArrayList<>();
-
-        // Collect from first page
-        int tupleCount = initialFrame.getTupleCount();
-        LOGGER.warn(String.format("[collectAndSortLeafCentroids] pageId=%d, tupleCount=%d, queryDim=%d", startPageId,
-                tupleCount, state.queryVector.length));
-
-        for (int i = 0; i < tupleCount; i++) {
-            try {
-                ITreeIndexTupleReference tuple = initialFrame.createTupleReference();
-                tuple.resetByTupleIndex(initialFrame, i);
-                double[] centroid = extractCentroidFromInteriorTuple(tuple);
-
-                if (centroid != null && centroid.length == state.queryVector.length) {
-                    double distance = distanceFunction.apply(state.queryVector, centroid);
-                    int centroidId = initialFrame.getCentroidId(i);
-                    long directoryPageId = initialFrame.getMetadataPagePointer(i);
-                    centroids.add(new LeafCentroid(centroidId, distance, i, startPageId, centroid, directoryPageId));
-                }
-            } catch (Exception e) {
-                LOGGER.warn(String.format("[collectAndSortLeafCentroids] Skipping tuple %d on page %d: %s", i,
-                        startPageId, e.getMessage()));
-            }
-        }
-
-        // Handle overflow pages
-        boolean hasOverflow = initialFrame.getOverflowFlagBit();
-        int nextPageId = hasOverflow ? initialFrame.getNextLeaf() : -1;
-        LOGGER.warn(String.format("[collectAndSortLeafCentroids] pageId=%d, hasOverflow=%b, nextPageId=%d", startPageId,
-                hasOverflow, nextPageId));
-
-        if (hasOverflow) {
-            collectCentroidsFromOverflow(state, nextPageId, centroids, distanceFunction);
-        }
-
-        // Sort by distance (ascending)
-        centroids.sort(Comparator.comparingDouble(c -> c.distance));
-        return centroids;
-    }
-
-    /**
-     * Collect centroids from overflow pages.
-     */
-    private static void collectCentroidsFromOverflow(NavigationState state, int pageId, List<LeafCentroid> centroids,
-            IVectorDistanceFunction distanceFunction) throws HyracksDataException {
-
-        int currentPageId = pageId;
-        int overflowPageCount = 0;
-        while (currentPageId != -1) {
-            overflowPageCount++;
-            ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
-            try {
-                page.acquireReadLatch();
-                IVectorClusteringLeafFrame frame = (IVectorClusteringLeafFrame) state.leafFrameFactory.createFrame();
-                frame.setPage(page);
-
-                int tupleCount = frame.getTupleCount();
-                LOGGER.warn(String.format("[collectCentroidsFromOverflow] overflowPage #%d: pageId=%d, tupleCount=%d",
-                        overflowPageCount, currentPageId, tupleCount));
-
-                for (int i = 0; i < tupleCount; i++) {
-                    try {
-                        ITreeIndexTupleReference tuple = frame.createTupleReference();
-                        tuple.resetByTupleIndex(frame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(tuple);
-
-                        if (centroid != null && centroid.length == state.queryVector.length) {
-                            double distance = distanceFunction.apply(state.queryVector, centroid);
-                            int centroidId = frame.getCentroidId(i);
-                            long directoryPageId = frame.getMetadataPagePointer(i);
-                            centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid,
-                                    directoryPageId));
-                        }
-                    } catch (Exception e) {
-                        LOGGER.warn(String.format(
-                                "[collectCentroidsFromOverflow] Skipping tuple %d on overflow page %d: %s", i,
-                                currentPageId, e.getMessage()));
-                    }
-                }
-
-                boolean hasOverflow = frame.getOverflowFlagBit();
-                int nextPageId = hasOverflow ? frame.getNextLeaf() : -1;
-                LOGGER.warn(String.format("[collectCentroidsFromOverflow] pageId=%d, hasOverflow=%b, nextPageId=%d",
-                        currentPageId, hasOverflow, nextPageId));
-                currentPageId = nextPageId;
 
             } finally {
                 page.releaseReadLatch();
@@ -1348,13 +605,13 @@ public class VCTreeNavigationUtils {
 
         List<ClusterSearchResult> allCentroids = new ArrayList<>();
         Set<Integer> visitedLeafPages = new HashSet<>();
-        Queue<LevelNode> queue = new ArrayDeque<>();
-        queue.add(new LevelNode(rootPageId, 0));
+        Queue<VCTreeLevelNode> queue = new ArrayDeque<>();
+        queue.add(new VCTreeLevelNode(rootPageId, 0));
 
         // Phase 1: Collect all centroids from all reachable leaf pages
         while (!queue.isEmpty()) {
             int currentLevel = queue.peek().level;
-            List<LevelNode> currentLevelNodes = new ArrayList<>();
+            List<VCTreeLevelNode> currentLevelNodes = new ArrayList<>();
 
             // Collect all nodes at current level
             while (!queue.isEmpty() && queue.peek().level == currentLevel) {
@@ -1362,7 +619,7 @@ public class VCTreeNavigationUtils {
             }
 
             // Process all nodes at current level
-            for (LevelNode node : currentLevelNodes) {
+            for (VCTreeLevelNode node : currentLevelNodes) {
                 ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, node.pageId));
                 try {
                     page.acquireReadLatch();
@@ -1377,16 +634,16 @@ public class VCTreeNavigationUtils {
                             continue; // Already visited
                         }
 
-                        LeafCollectionStats stats =
-                                collectLeafCentroidsForLevelWise(bufferCache, fileId, queryVector, node.pageId,
-                                        leafFrame, leafFrameFactory, distanceFunction, quantizedQueryVector, quantizer);
+                        List<VCTreeLeafCentroid> leafCentroids =
+                                collectAllLeafCentroids(bufferCache, fileId, queryVector, node.pageId, leafFrame,
+                                        leafFrameFactory, distanceFunction, quantizedQueryVector, quantizer);
 
-                        if (stats.centroids.isEmpty()) {
+                        if (leafCentroids.isEmpty()) {
                             continue;
                         }
 
                         // Add ALL centroids from this leaf page to global collection
-                        for (LeafCentroid centroid : stats.centroids) {
+                        for (VCTreeLeafCentroid centroid : leafCentroids) {
                             allCentroids.add(ClusterSearchResult.create(centroid.pageId, centroid.tupleIndex,
                                     centroid.centroid, centroid.distance, centroid.centroidId, centroid.directoryPageId,
                                     centroid.quantizedDistance));
@@ -1398,7 +655,7 @@ public class VCTreeNavigationUtils {
                                 (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
                         interiorFrame.setPage(page);
 
-                        List<ChildCentroid> sortedChildren = collectChildrenForLevelWise(bufferCache, fileId,
+                        List<VCTreeChildCentroid> sortedChildren = collectAllChildCentroids(bufferCache, fileId,
                                 queryVector, node.pageId, interiorFrame, interiorFrameFactory, distanceFunction);
 
                         if (sortedChildren.isEmpty()) {
@@ -1408,9 +665,9 @@ public class VCTreeNavigationUtils {
                         double closestDistance = sortedChildren.get(0).distance;
                         double localThreshold = closestDistance + epsilon;
 
-                        for (ChildCentroid child : sortedChildren) {
+                        for (VCTreeChildCentroid child : sortedChildren) {
                             if (child.distance <= localThreshold) {
-                                queue.add(new LevelNode(child.childPageId, currentLevel + 1));
+                                queue.add(new VCTreeLevelNode(child.childPageId, currentLevel + 1));
                             } else {
                                 break; // Children are sorted, no more qualify
                             }
@@ -1453,185 +710,4 @@ public class VCTreeNavigationUtils {
         return allCentroids;
     }
 
-    /**
-     * Collect all centroids from a leaf page and its overflow chain for level-wise traversal.
-     */
-    private static LeafCollectionStats collectLeafCentroidsForLevelWise(IBufferCache bufferCache, int fileId,
-            double[] queryVector, int startPageId, IVectorClusteringLeafFrame initialLeafFrame,
-            ITreeIndexFrameFactory leafFrameFactory, IVectorDistanceFunction distanceFunction)
-            throws HyracksDataException {
-        return collectLeafCentroidsForLevelWise(bufferCache, fileId, queryVector, startPageId, initialLeafFrame,
-                leafFrameFactory, distanceFunction, null, null);
-    }
-
-    /**
-     * Collect all centroids from a leaf page and its overflow chain for level-wise traversal.
-     * When quantizer is provided, also computes quantized D(q,C) for each centroid.
-     */
-    private static LeafCollectionStats collectLeafCentroidsForLevelWise(IBufferCache bufferCache, int fileId,
-            double[] queryVector, int startPageId, IVectorClusteringLeafFrame initialLeafFrame,
-            ITreeIndexFrameFactory leafFrameFactory, IVectorDistanceFunction distanceFunction,
-            double[] quantizedQueryVector, IVectorQuantizer quantizer) throws HyracksDataException {
-
-        List<LeafCentroid> centroids = new ArrayList<>();
-        int currentPageId = startPageId;
-        IVectorClusteringLeafFrame currentFrame = initialLeafFrame;
-        boolean isFirstPage = true;
-        ICachedPage currentPage = null;
-        int candidatesProcessed = 0;
-        int pagesProcessed = 0;
-
-        while (currentPageId != -1) {
-            try {
-                if (!isFirstPage) {
-                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
-                    currentPage.acquireReadLatch();
-                    currentFrame = (IVectorClusteringLeafFrame) leafFrameFactory.createFrame();
-                    currentFrame.setPage(currentPage);
-                }
-
-                int tupleCount = currentFrame.getTupleCount();
-                boolean hasOverflow = currentFrame.getOverflowFlagBit();
-                int nextPageId = hasOverflow ? currentFrame.getNextLeaf() : -1;
-                pagesProcessed++;
-
-                for (int i = 0; i < tupleCount; i++) {
-                    try {
-                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(currentFrame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-                        int centroidId = currentFrame.getCentroidId(i);
-                        long directoryPageId = currentFrame.getMetadataPagePointer(i);
-
-                        if (centroid.length != queryVector.length) {
-                            continue;
-                        }
-
-                        double distance = distanceFunction.apply(queryVector, centroid);
-                        candidatesProcessed++;
-
-                        // Compute quantized distance if quantizer is available
-                        double quantizedDistance = Double.NaN;
-                        if (quantizer != null && quantizedQueryVector != null) {
-                            byte[] quantizedCentroidBytes = currentFrame.getQuantizedCentroidBytes(i);
-                            if (quantizedCentroidBytes != null) {
-                                double[] dequantizedCentroid = quantizer.dequantize(quantizedCentroidBytes);
-                                quantizedDistance = distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
-                            }
-                        }
-
-                        centroids.add(new LeafCentroid(centroidId, distance, i, currentPageId, centroid.clone(),
-                                directoryPageId, quantizedDistance));
-                    } catch (Exception e) {
-                        // Skip malformed tuples
-                        continue;
-                    }
-                }
-
-                currentPageId = nextPageId;
-                isFirstPage = false;
-
-            } finally {
-                if (!isFirstPage && currentPage != null) {
-                    currentPage.releaseReadLatch();
-                    bufferCache.unpin(currentPage);
-                    currentPage = null;
-                }
-            }
-        }
-
-        centroids.sort(Comparator.comparingDouble(c -> c.distance));
-        return new LeafCollectionStats(centroids, candidatesProcessed, pagesProcessed);
-    }
-
-    /**
-     * Collect all children from an interior page and its overflow chain for level-wise traversal.
-     */
-    private static List<ChildCentroid> collectChildrenForLevelWise(IBufferCache bufferCache, int fileId,
-            double[] queryVector, int startPageId, IVectorClusteringInteriorFrame initialFrame,
-            ITreeIndexFrameFactory interiorFrameFactory, IVectorDistanceFunction distanceFunction)
-            throws HyracksDataException {
-
-        List<ChildCentroid> children = new ArrayList<>();
-        int currentPageId = startPageId;
-        IVectorClusteringInteriorFrame currentFrame = initialFrame;
-        boolean isFirstPage = true;
-        ICachedPage currentPage = null;
-
-        while (currentPageId != -1) {
-            try {
-                if (!isFirstPage) {
-                    currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
-                    currentPage.acquireReadLatch();
-                    currentFrame = (IVectorClusteringInteriorFrame) interiorFrameFactory.createFrame();
-                    currentFrame.setPage(currentPage);
-                }
-
-                int tupleCount = currentFrame.getTupleCount();
-                boolean hasOverflow = currentFrame.getOverflowFlagBit();
-                int nextPageId = hasOverflow ? currentFrame.getNextPage() : -1;
-
-                for (int i = 0; i < tupleCount; i++) {
-                    try {
-                        ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
-                        frameTuple.resetByTupleIndex(currentFrame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
-
-                        if (centroid.length != queryVector.length) {
-                            continue;
-                        }
-
-                        double distance = distanceFunction.apply(queryVector, centroid);
-                        int childPageId = currentFrame.getChildPageId(i);
-
-                        children.add(new ChildCentroid(childPageId, distance, i));
-                    } catch (Exception e) {
-                        // Skip malformed tuples
-                    }
-                }
-
-                currentPageId = nextPageId;
-                isFirstPage = false;
-
-            } finally {
-                if (!isFirstPage && currentPage != null) {
-                    currentPage.releaseReadLatch();
-                    bufferCache.unpin(currentPage);
-                    currentPage = null;
-                }
-            }
-        }
-
-        // Sort children by distance
-        children.sort(Comparator.comparingDouble(c -> c.distance));
-        return children;
-    }
-
-    /**
-     * Statistics from collecting leaf centroids.
-     */
-    private static class LeafCollectionStats {
-        public final List<LeafCentroid> centroids;
-        public final int candidatesProcessed;
-        public final int pagesProcessed;
-
-        private LeafCollectionStats(List<LeafCentroid> centroids, int candidatesProcessed, int pagesProcessed) {
-            this.centroids = centroids;
-            this.candidatesProcessed = candidatesProcessed;
-            this.pagesProcessed = pagesProcessed;
-        }
-    }
-
-    /**
-     * Node in the level-wise traversal queue.
-     */
-    private static class LevelNode {
-        public final int pageId;
-        public final int level;
-
-        private LevelNode(int pageId, int level) {
-            this.pageId = pageId;
-            this.level = level;
-        }
-    }
 }

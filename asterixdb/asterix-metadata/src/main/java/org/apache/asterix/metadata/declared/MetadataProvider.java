@@ -178,7 +178,7 @@ import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.IFullTextConfigE
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.IBinaryTokenizerFactory;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.VectorSearchOperatorDescriptor;
 import org.apache.hyracks.storage.am.rtree.dataflow.RTreeSearchOperatorDescriptor;
-import org.apache.hyracks.storage.am.vector.VCTreeDataTupleConstants;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
@@ -838,6 +838,15 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         boolean isQuantized = (quantization != null);
         int numSecondaryKeys = isQuantized ? VCTreeDataTupleConstants.Q_NUM_SECONDARY_FIELDS
                 : VCTreeDataTupleConstants.NQ_NUM_SECONDARY_FIELDS;
+
+        // Auto-select cursor based on quantization:
+        // - Quantized indexes always use naive blocked (LSMVCTreeBlockedCursorNaive)
+        // - Non-quantized indexes always use naive streaming (LSMVCTreeSearchCursor)
+        if (isQuantized) {
+            searchApproach = 3; // naive blocked (LSMVCTreeBlockedCursorNaive)
+        } else {
+            searchApproach = 0; // naive streaming (LSMVCTreeSearchCursor)
+        }
 
         // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples
         // This factory is serializable and passed through the job pipeline
