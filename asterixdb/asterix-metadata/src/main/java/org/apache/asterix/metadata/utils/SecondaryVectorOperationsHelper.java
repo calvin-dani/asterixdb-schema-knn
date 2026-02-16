@@ -230,10 +230,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             K = withObjectNode.getOptionalInt("num_clusters", 20);
         }
 
-        // Distance metric from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.)
-        String distanceMetric =
-                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
-
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)

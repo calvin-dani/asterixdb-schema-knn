@@ -83,7 +83,7 @@ public class VectorDistanceFunctionFactory implements Serializable {
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.cosineDistance(a, b);
+            return VectorDistanceArrCalculation.cosine(a, b);
         }
     }
 
