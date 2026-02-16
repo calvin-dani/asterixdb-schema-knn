@@ -127,7 +127,7 @@ class CosineDistanceFunction implements DistanceFunction, Serializable {
 
     @Override
     public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.cosine(a, b);
+        return VectorDistanceArrCalculation.cosineDistance(a, b);
     }
 }
 

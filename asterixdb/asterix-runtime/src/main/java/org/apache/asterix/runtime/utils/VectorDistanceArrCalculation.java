@@ -195,6 +195,16 @@ public class VectorDistanceArrCalculation {
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
+    /**
+     * Cosine distance = 1 - cosine similarity. Range [0, 2]; lower = more similar.
+     * Aligns with Spark and common vector DBs so "minimize distance" = "maximize similarity".
+     * Returns NaN if cosine(a,b) is NaN (e.g. zero norm).
+     */
+    public static double cosineDistance(double[] a, double[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
+    }
+
     public static double cosine(int[] a, int[] b) {
         long dot = 0L;
         long normA = 0L;
