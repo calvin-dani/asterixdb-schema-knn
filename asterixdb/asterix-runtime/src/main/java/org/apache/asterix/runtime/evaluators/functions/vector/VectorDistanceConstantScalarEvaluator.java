@@ -97,8 +97,8 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
             VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(), VectorDistanceArrCalculation::euclidean,
             EUCLIDEAN_DISTANCE_L2.hash(), VectorDistanceArrCalculation::euclidean, EUCLIDEAN_DISTANCE_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, EUCLIDEAN_DISTANCE_L2_SQUARED.hash(),
-            VectorDistanceArrCalculation::euclidean_squared, COSINE_FORMAT.hash(), VectorDistanceArrCalculation::cosine,
-            DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
+            VectorDistanceArrCalculation::euclidean_squared, COSINE_FORMAT.hash(),
+            VectorDistanceArrCalculation::cosineDistance, DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
 
     public final ListAccessor[] listAccessorConstant = new ListAccessor[2];
     public double[][] primitiveArrayConstant = new double[2][];

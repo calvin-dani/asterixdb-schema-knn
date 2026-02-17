@@ -230,6 +230,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             K = withObjectNode.getOptionalInt("num_clusters", 20);
         }
 
+        // Distance metric from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.)
+        String distanceMetric =
+                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
+
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
@@ -273,7 +277,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
                         new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
-                        partitioningProperties.getComputeStorageMap());
+                        partitioningProperties.getComputeStorageMap(), distanceMetric);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
