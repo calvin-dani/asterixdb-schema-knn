@@ -842,7 +842,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap,String distanceMetric) {
+            int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap,
+            String distanceMetric) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -1656,11 +1657,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             }
                             // Weighted distance: weight[j] * D(c_j)
                             weightedDistances[j] = weights[j] * minDist;
-                            totalWeighte\dDistance += weightedDistances[j];
+                            totalWeightedDistance += weightedDistances[j];
                         }
 
                         if (totalWeightedDistance <= 0) {
-                            b//ak;
+                            break;
                         }
 
                         // Weighted random selection
