@@ -22,6 +22,9 @@ package org.apache.hyracks.storage.am.lsm.vector.impls;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
@@ -42,6 +45,8 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
  * - All components advance through clusters TOGETHER in lock-step
  */
 public class SequentialClusterSelectionStrategy implements IClusterSelectionStrategy {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // First component cursor for sequential cluster iteration
     private VectorClusteringSearchCursor firstCursor;
@@ -72,14 +77,14 @@ public class SequentialClusterSelectionStrategy implements IClusterSelectionStra
 
         // Check if there are more clusters available
         if (!firstCursor.hasMoreClusters()) {
-            System.err.println("[SequentialStrategy] No more clusters");
+            LOGGER.trace("No more clusters");
             return null;
         }
 
         // Advance the first cursor to the next cluster (sequential iteration)
         boolean advanced = firstCursor.advanceToNextCluster();
         if (!advanced) {
-            System.err.println("[SequentialStrategy] Failed to advance to next cluster");
+            LOGGER.trace("Failed to advance to next cluster");
             return null;
         }
 
@@ -87,11 +92,9 @@ public class SequentialClusterSelectionStrategy implements IClusterSelectionStra
         ClusterSearchResult next = firstCursor.getCurrentClusterResult();
 
         if (next != null) {
-            System.err.println(String.format("[SequentialStrategy] Next cluster: cid=%d, dirPage=%d", next.centroidId,
-                    next.directoryPageId));
+            LOGGER.trace("Next cluster: cid={}, dirPage={}", next.centroidId, next.directoryPageId);
         } else {
-            System.err
-                    .println("[SequentialStrategy] advanceToNextCluster succeeded but getCurrentClusterResult is null");
+            LOGGER.trace("advanceToNextCluster succeeded but getCurrentClusterResult is null");
         }
 
         return next;

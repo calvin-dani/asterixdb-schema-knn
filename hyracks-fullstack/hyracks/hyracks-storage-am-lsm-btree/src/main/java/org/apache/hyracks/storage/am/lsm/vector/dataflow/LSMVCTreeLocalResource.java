@@ -23,7 +23,9 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
@@ -59,7 +61,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedResource {
 
     private static final long serialVersionUID = 2L;
-    private static final Logger LOGGER = Logger.getLogger(LSMVCTreeLocalResource.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger();
 
     /** Prefix for quantization sidecar files: .quantization_<indexName> */
     public static final String QUANTIZATION_FILE_PREFIX = ".quantization_";
@@ -233,10 +235,10 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
             String sidecarFileName = QUANTIZATION_FILE_PREFIX + indexName;
             FileReference sidecarFile = datasetDir.getChild(sidecarFileName);
 
-            LOGGER.info("[LSMVCTreeLocalResource] Looking for sidecar file: " + sidecarFile.getAbsolutePath());
+            LOGGER.log(Level.TRACE, "[LSMVCTreeLocalResource] Looking for sidecar file: " + sidecarFile.getAbsolutePath());
 
             if (!ioManager.exists(sidecarFile)) {
-                LOGGER.info(
+                LOGGER.log(Level.TRACE,
                         "[LSMVCTreeLocalResource] Sidecar file not found, index will be created without quantization");
                 return;
             }
@@ -253,20 +255,20 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
             this.confidenceInterval = dis.readFloat();
             this.sampleCount = dis.readInt();
 
-            LOGGER.info("[LSMVCTreeLocalResource] Read quantization constants from sidecar file: " + "minQ="
+            LOGGER.log(Level.TRACE, "[LSMVCTreeLocalResource] Read quantization constants from sidecar file: " + "minQ="
                     + minQuantile + ", maxQ=" + maxQuantile + ", alpha=" + alpha + ", bits=" + bits + ", sampleCount="
                     + sampleCount);
 
             // Delete the sidecar file after reading (cleanup)
             try {
                 ioManager.delete(sidecarFile);
-                LOGGER.info("[LSMVCTreeLocalResource] Deleted sidecar file: " + sidecarFile.getAbsolutePath());
+                LOGGER.log(Level.TRACE, "[LSMVCTreeLocalResource] Deleted sidecar file: " + sidecarFile.getAbsolutePath());
             } catch (Exception e) {
-                LOGGER.warning("[LSMVCTreeLocalResource] Failed to delete sidecar file: " + e.getMessage());
+                LOGGER.log(Level.TRACE, "[LSMVCTreeLocalResource] Failed to delete sidecar file: " + e.getMessage());
             }
 
         } catch (IOException e) {
-            LOGGER.warning("[LSMVCTreeLocalResource] Error reading sidecar file: " + e.getMessage());
+            LOGGER.log(Level.TRACE, "[LSMVCTreeLocalResource] Error reading sidecar file: " + e.getMessage());
             // Continue without quantization - not a fatal error
         }
     }

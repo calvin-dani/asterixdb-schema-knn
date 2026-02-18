@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
@@ -44,7 +47,7 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorSearchPredicate;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -74,7 +77,9 @@ import org.apache.hyracks.storage.common.util.IndexCursorUtils;
  * "Blocked" means all search work is done in open(), and results are stored in topKWindow.
  * Calls to hasNext()/next()/getTuple() simply drain the window.
  */
-public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
+public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Operation context
     private ILSMIndexOperationContext opCtx;
@@ -140,7 +145,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
     private int antimatterCancellations;
     private int tuplesFilteredOut;
 
-    public LSMVCTreeBlockedCursorNaive(ILSMIndexOperationContext opCtx) {
+    public LSMVCTreeBlockedNaiveCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
         this.isOpen = false;
     }
@@ -160,7 +165,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
         this.numComponents = operationalComponents.size();
 
         // Extract search parameters from predicate
-        VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
+        VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
         this.K = vectorPred.getK();
         this.nprobe = vectorPred.getNprobe();
         this.epsilon = vectorPred.getEpsilon();
@@ -170,10 +175,9 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
         this.tupleFilter = vectorPred.getTupleFilter();
         if (this.tupleFilter != null) {
             this.referenceFilterTuple = new ReferenceFrameTupleReference();
-            System.err.println(
-                    "[LSMVCTreeBlockedCursorNaive] Tuple filter is SET - will filter INCLUDE field predicates");
+            LOGGER.trace("Tuple filter is SET - will filter INCLUDE field predicates");
         } else {
-            System.err.println("[LSMVCTreeBlockedCursorNaive] Tuple filter is NULL - no INCLUDE field filtering");
+            LOGGER.trace("Tuple filter is NULL - no INCLUDE field filtering");
         }
 
         // Get index access parameters
@@ -250,8 +254,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
             if (firstCluster != null) {
                 ClusterSearchResult dfsCluster = firstSearchCursor.getCurrentClusterResult();
                 if (dfsCluster != null && dfsCluster.centroidId != firstCluster.centroidId) {
-                    System.err.printf(
-                            "[LSMVCTreeBlockedCursorNaive] DFS found cid=%d but level-wise[0] is cid=%d - re-opening%n",
+                    LOGGER.trace("DFS found cid={} but level-wise[0] is cid={} - re-opening",
                             dfsCluster.centroidId, firstCluster.centroidId);
                     for (int i = 0; i < numComponents; i++) {
                         if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
@@ -261,8 +264,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
                         }
                     }
                 }
-                System.err.printf(
-                        "[LSMVCTreeBlockedCursorNaive] Initialized with K=%d, nprobe=%d, epsilon=%.4f, level-wise clusters=%d%n",
+                LOGGER.trace("Initialized with K={}, nprobe={}, epsilon={}, level-wise clusters={}",
                         K, nprobe, epsilon, clusterStrategy.getLevelWiseClusterCount());
             }
         }
@@ -273,9 +275,8 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
         // Perform the blocked search: drain all clusters and collect results
         performBlockedSearch();
 
-        System.err.println(String.format(
-                "[LSMVCTreeBlockedCursorNaive] Search complete: topK=%d, processed=%d, filtered=%d, cancellations=%d, clusters=%d",
-                topKWindow.size(), totalTuplesProcessed, tuplesFilteredOut, antimatterCancellations, clustersExplored));
+        LOGGER.trace("Search complete: topK={}, processed={}, filtered={}, cancellations={}, clusters={}",
+                topKWindow.size(), totalTuplesProcessed, tuplesFilteredOut, antimatterCancellations, clustersExplored);
     }
 
     /**
@@ -340,15 +341,13 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
             int minClustersExplored = getMinClustersProbed();
             if (clusterStrategy.shouldStopAdvancing(minClustersExplored, topKWindow.size())) {
                 stopAdvancing = true;
-                System.err
-                        .println(String.format("[LSMVCTreeBlockedCursorNaive] Early termination: clusters=%d, topK=%d",
-                                minClustersExplored, topKWindow.size()));
+                LOGGER.trace("Early termination: clusters={}, topK={}", minClustersExplored, topKWindow.size());
                 break;
             }
 
             // Try to advance to next cluster
             if (!clusterStrategy.hasMoreClusters()) {
-                System.err.println("[LSMVCTreeBlockedCursorNaive] No more clusters available");
+                LOGGER.trace("No more clusters available");
                 break;
             }
 
@@ -441,15 +440,14 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
 
             ClusterSearchResult nextCluster = clusterStrategy.getNextCluster();
             if (nextCluster == null) {
-                System.err.println("[LSMVCTreeBlockedCursorNaive] No more clusters available globally");
+                LOGGER.trace("No more clusters available globally");
                 Arrays.fill(clusterExhausted, true);
                 stopAdvancing = true;
                 return;
             }
 
-            System.err.println(String.format(
-                    "[LSMVCTreeBlockedCursorNaive] Advancing to cluster cid=%d, distance=%.4f, dirPage=%d",
-                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId));
+            LOGGER.trace("Advancing to cluster cid={}, distance={}, dirPage={}",
+                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId);
 
             // Open all components to this cluster
             for (int i = 0; i < numComponents; i++) {
@@ -579,8 +577,7 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
         try {
             long pkValue =
                     LongPointable.getLong(tuple.getFieldData(pkStartField), tuple.getFieldStart(pkStartField) + 1);
-            System.err.println(String.format("[LSMVCTreeBlockedCursorNaive] Tuple FILTERED OUT (total: %d) | pk=%d",
-                    tuplesFilteredOut, pkValue));
+            LOGGER.trace("Tuple filtered out (total: {}) | pk={}", tuplesFilteredOut, pkValue);
         } catch (Exception e) {
             // Ignore logging errors
         }
@@ -663,15 +660,13 @@ public class LSMVCTreeBlockedCursorNaive implements IIndexCursor {
     @Override
     public void close() throws HyracksDataException {
         if (isOpen) {
-            // Print final summary
-            System.err.println("\n========== LSMVCTreeBlockedCursorNaive Search Summary ==========");
-            System.err.println(String.format("K=%d, nprobe=%d, epsilon=%.4f", K, nprobe, epsilon));
-            System.err.println(String.format("Clusters explored:          %d", clustersExplored));
-            System.err.println(String.format("Total tuples processed:     %d", totalTuplesProcessed));
-            System.err.println(String.format("Antimatter cancellations:   %d", antimatterCancellations));
-            System.err.println(String.format("Tuples filtered out:        %d", tuplesFilteredOut));
-            System.err.println(String.format("Results returned (next()):   %d", nextCallCount));
-            System.err.println("================================================================\n");
+            // Log final summary
+            LOGGER.trace("Search Summary: K={}, nprobe={}, epsilon={}", K, nprobe, epsilon);
+            LOGGER.trace("Clusters explored:          {}", clustersExplored);
+            LOGGER.trace("Total tuples processed:     {}", totalTuplesProcessed);
+            LOGGER.trace("Antimatter cancellations:   {}", antimatterCancellations);
+            LOGGER.trace("Tuples filtered out:        {}", tuplesFilteredOut);
+            LOGGER.trace("Results returned (next()):   {}", nextCallCount);
 
             // Close all component cursors
             for (int i = 0; i < numComponents; i++) {

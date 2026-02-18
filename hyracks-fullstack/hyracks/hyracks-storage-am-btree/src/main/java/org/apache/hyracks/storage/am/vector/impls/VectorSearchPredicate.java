@@ -33,7 +33,7 @@ import org.apache.hyracks.storage.common.MultiComparator;
  *
  * For top-K ANN queries, also includes the k parameter (number of nearest neighbors).
  */
-public class VectorPointPredicate implements ISearchPredicate {
+public class VectorSearchPredicate implements ISearchPredicate {
     private static final long serialVersionUID = 1L;
 
     private ITupleReference queryTuple;
@@ -46,7 +46,7 @@ public class VectorPointPredicate implements ISearchPredicate {
     private int searchApproach; // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
     private int pkStartField; // Field index where primary keys start (2 for non-quantized, 4 for quantized)
 
-    public VectorPointPredicate() {
+    public VectorSearchPredicate() {
         // Empty constructor for initialization
         this.distanceMetric = null;
         this.k = Integer.MAX_VALUE; // Default: no limit
@@ -56,7 +56,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.pkStartField = 2; // Default: non-quantized format
     }
 
-    public VectorPointPredicate(int k) {
+    public VectorSearchPredicate(int k) {
         // Constructor for ANN queries with K parameter
         this.k = k;
         this.distanceMetric = null;
@@ -66,7 +66,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.pkStartField = 2;
     }
 
-    public VectorPointPredicate(int k, int nprobe, double epsilon) {
+    public VectorSearchPredicate(int k, int nprobe, double epsilon) {
         // Constructor for ANN queries with K, nprobe, and epsilon parameters
         this.k = k;
         this.nprobe = nprobe;
@@ -76,7 +76,7 @@ public class VectorPointPredicate implements ISearchPredicate {
         this.pkStartField = 2;
     }
 
-    public VectorPointPredicate(double[] queryVector) {
+    public VectorSearchPredicate(double[] queryVector) {
         // Constructor kept for compatibility with tests
         // In runtime, query data comes via setQueryTuple()
         this.k = Integer.MAX_VALUE; // Default: no limit

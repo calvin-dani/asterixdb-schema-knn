@@ -46,7 +46,7 @@ import org.apache.hyracks.storage.am.lsm.vector.util.VectorTestStructure.Include
 import org.apache.hyracks.storage.am.vector.AbstractVectorTreeTestContext;
 import org.apache.hyracks.storage.am.vector.TestDoubleArrayVectorAccessor;
 import org.apache.hyracks.storage.am.vector.VectorTreeTestUtils;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorSearchPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.logging.log4j.LogManager;
@@ -196,7 +196,7 @@ public class LSMVCTreeInsertIncludeTest {
         ArrayTupleReference queryTuple = new ArrayTupleReference();
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
-        VectorPointPredicate predicate = new VectorPointPredicate();
+        VectorSearchPredicate predicate = new VectorSearchPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");

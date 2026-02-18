@@ -68,7 +68,7 @@ import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeFlushLoader;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorSearchPredicate;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -79,6 +79,7 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.util.trace.ITracer;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -421,7 +422,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 // Use VectorPointPredicate for merge (full scan mode)
                 // K=MAX_VALUE to scan all records, nprobe=MAX_VALUE to probe all clusters,
                 // epsilon=0.0 to disable level-wise (use sequential iteration)
-                VectorPointPredicate mergePred = new VectorPointPredicate();
+                VectorSearchPredicate mergePred = new VectorSearchPredicate();
                 mergePred.setNprobe(Integer.MAX_VALUE);
                 mergePred.setEpsilon(0.0);
 
@@ -659,7 +660,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
      * @return naive blocked search cursor
      */
     public IIndexCursor createNaiveBlockedSearchCursor(ILSMIndexOperationContext opCtx) {
-        return new LSMVCTreeBlockedCursorNaive(opCtx);
+        return new LSMVCTreeBlockedNaiveCursor(opCtx);
     }
 
     @Override
@@ -670,7 +671,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 staticStructure.deactivateAndPurge();
             } catch (Exception e) {
                 // Log but don't fail deactivation if static structure cleanup fails
-                LOGGER.warn("Failed to deactivate static structure component: {}", e.getMessage());
+                LOGGER.log(Level.TRACE, "Failed to deactivate static structure component: {}", e.getMessage());
             }
             staticStructure = null; // Clear reference after deactivation
         }
@@ -685,7 +686,7 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
                 staticStructure.destroy();
             } catch (Exception e) {
                 // Log but don't fail destruction if static structure cleanup fails
-                LOGGER.warn("Failed to destroy static structure component: {}", e.getMessage());
+                LOGGER.log(Level.TRACE, "Failed to destroy static structure component: {}", e.getMessage());
             }
             staticStructure = null; // Clear reference after destruction
         }

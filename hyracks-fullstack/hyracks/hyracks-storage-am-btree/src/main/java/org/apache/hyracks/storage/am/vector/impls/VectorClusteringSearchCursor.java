@@ -249,8 +249,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Extract nprobe value from search predicate.
      */
     private int extractNprobe(ISearchPredicate searchPred) {
-        if (searchPred instanceof VectorPointPredicate) {
-            return ((VectorPointPredicate) searchPred).getNprobe();
+        if (searchPred instanceof VectorSearchPredicate) {
+            return ((VectorSearchPredicate) searchPred).getNprobe();
         }
         return 1; // Default: probe 1 cluster
     }
@@ -259,8 +259,8 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Extract epsilon value from search predicate.
      */
     private double extractEpsilon(ISearchPredicate searchPred) {
-        if (searchPred instanceof VectorPointPredicate) {
-            return ((VectorPointPredicate) searchPred).getEpsilon();
+        if (searchPred instanceof VectorSearchPredicate) {
+            return ((VectorSearchPredicate) searchPred).getEpsilon();
         }
         return 0.0; // Default: no epsilon
     }

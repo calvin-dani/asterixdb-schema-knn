@@ -43,6 +43,8 @@ import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.IAType;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableObject;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalExpression;
@@ -98,6 +100,8 @@ import org.apache.hyracks.algebricks.rewriter.rules.InlineVariablesRule;
  * in ORDER BY clauses.
  */
 public class VectorIndexAccessMethod implements IAccessMethod {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     public static final VectorIndexAccessMethod INSTANCE = new VectorIndexAccessMethod();
 
@@ -222,10 +226,10 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             OptimizableOperatorSubTree subTree, Index chosenIndex, AccessMethodAnalysisContext analysisCtx,
             IOptimizationContext context, SelectOperator selectOp) throws AlgebricksException {
 
-        System.err.println("=== VectorIndexAccessMethod.createIndexSearchPlan CALLED ===");
-        System.err.println("Dataset: " + subTree.getDataset().getDatasetName());
-        System.err.println("Vector Index: " + chosenIndex.getIndexName());
-        System.err.println("SelectOp present: " + (selectOp != null));
+        LOGGER.trace("createIndexSearchPlan called");
+        LOGGER.trace("Dataset: {}", subTree.getDataset().getDatasetName());
+        LOGGER.trace("Vector Index: {}", chosenIndex.getIndexName());
+        LOGGER.trace("SelectOp present: {}", selectOp != null);
 
         // Get dataset metadata
         Dataset dataset = subTree.getDataset();
@@ -357,7 +361,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 false // anyRealTypeConvertedToIntegerType
         );
 
-        System.err.println("=== Vector index search plan created successfully ===");
+        LOGGER.trace("Vector index search plan created successfully");
         return primaryIndexUnnestOp;
     }
 
@@ -585,11 +589,11 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         List<List<String>> includeFieldNames = vectorDetails.getIncludeFieldNames();
 
         if (includeFieldNames == null || includeFieldNames.isEmpty()) {
-            System.err.println("=== No INCLUDE fields in vector index, skipping filter pushdown ===");
+            LOGGER.trace("No INCLUDE fields in vector index, skipping filter pushdown");
             return false;
         }
 
-        System.err.println("=== Vector index has INCLUDE fields: " + includeFieldNames + " ===");
+        LOGGER.trace("Vector index has INCLUDE fields: {}", includeFieldNames);
 
         // Clone the selectCondition
         ILogicalExpression selectCondition = selectOp.getCondition().getValue();
@@ -599,7 +603,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         Set<LogicalVariable> selectedVariables = new HashSet<>();
         selectConditionRef.getValue().getUsedVariables(selectedVariables);
 
-        System.err.println("=== Select condition uses variables: " + selectedVariables + " ===");
+        LOGGER.trace("Select condition uses variables: {}", selectedVariables);
 
         // Following PushLimitIntoPrimarySearchRule pattern: inline variables from ASSIGN operators
         // This replaces variable references with their field-access expressions
@@ -627,11 +631,11 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 }
                 selectedVariables.clear();
                 selectConditionRef.getValue().getUsedVariables(selectedVariables);
-                System.err.println("=== After inlining, condition uses variables: " + selectedVariables + " ===");
+                LOGGER.trace("After inlining, condition uses variables: {}", selectedVariables);
             }
         }
 
-        System.err.println("=== Inlined selectCondition: " + selectConditionRef.getValue() + " ===");
+        LOGGER.trace("Inlined selectCondition: {}", selectConditionRef.getValue());
 
         // Check that all filter fields are in the INCLUDE list
         // Build mapping: field name -> include field index
@@ -645,12 +649,12 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         // Extract field names used in the filter condition
         Set<String> filterFieldNames = new HashSet<>();
         extractFieldNamesFromExpression(selectConditionRef.getValue(), recordType, filterFieldNames);
-        System.err.println("=== Filter uses fields: " + filterFieldNames + " ===");
+        LOGGER.trace("Filter uses fields: {}", filterFieldNames);
 
         // Verify all filter fields are in the INCLUDE list
         for (String fieldName : filterFieldNames) {
             if (!fieldNameToIncludeIndex.containsKey(fieldName)) {
-                System.err.println("=== Field " + fieldName + " is not in INCLUDE list, skipping filter pushdown ===");
+                LOGGER.trace("Field {} is not in INCLUDE list, skipping filter pushdown", fieldName);
                 return false;
             }
         }
@@ -667,8 +671,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         //
         // Future solution: Bypass the Algebricks type system by passing filter info
         // through VectorJobGenParams and creating TupleFilter directly at physical layer.
-        System.err.println("=== Filter pushdown DISABLED due to type inference issue ===");
-        System.err.println("=== All filter fields are in INCLUDE list, but cannot set selectCondition ===");
+        LOGGER.trace("Filter pushdown DISABLED due to type inference issue");
+        LOGGER.trace("All filter fields are in INCLUDE list, but cannot set selectCondition");
         return false;
     }
 
@@ -801,8 +805,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                         String[] fieldNames = subTree.getRecordType().getFieldNames();
                         if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
                             String fieldName = fieldNames[fieldIndex];
-                            System.err.println("=== Resolved field-access-by-index in filter: index " + fieldIndex
-                                    + " -> field '" + fieldName + "' ===");
+                            LOGGER.trace("Resolved field-access-by-index in filter: index {} -> field '{}'",
+                                    fieldIndex, fieldName);
                             return fieldName;
                         }
                     }
