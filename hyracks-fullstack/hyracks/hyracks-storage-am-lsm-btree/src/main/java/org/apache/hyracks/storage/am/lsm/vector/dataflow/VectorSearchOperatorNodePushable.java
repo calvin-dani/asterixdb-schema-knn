@@ -229,8 +229,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             }
         } catch (Exception e) {
             // If extraction fails, default to euclidean
-            LOGGER.trace("Failed to extract distance metric from tuple, defaulting to euclidean: {}",
-                    e.getMessage());
+            LOGGER.trace("Failed to extract distance metric from tuple, defaulting to euclidean: {}", e.getMessage());
         }
         return "euclidean"; // Default fallback
     }

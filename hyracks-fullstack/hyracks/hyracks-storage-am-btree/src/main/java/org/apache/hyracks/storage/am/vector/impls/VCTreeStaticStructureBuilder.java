@@ -406,7 +406,8 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                     int nextClusterPageId = computeCurrentClusterPageId();
                     leafFrame.setNextLeaf(nextClusterPageId);
                     leafFrame.setOverflowFlagBit(false);
-                    LOGGER.log(Level.TRACE, "Linking leaf page to next cluster: current page -> page {}", nextClusterPageId);
+                    LOGGER.log(Level.TRACE, "Linking leaf page to next cluster: current page -> page {}",
+                            nextClusterPageId);
                 }
 
                 // Create page for new cluster
@@ -445,7 +446,8 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
 
         int nextDirectoryPageId = metaFrame.getMaxPage() + 1;
 
-        LOGGER.log(Level.TRACE, "Starting directory page ID: {}, processing {} leaf pages", nextDirectoryPageId, leafPages.size());
+        LOGGER.log(Level.TRACE, "Starting directory page ID: {}, processing {} leaf pages", nextDirectoryPageId,
+                leafPages.size());
 
         // Process each leaf page
         for (int pageIndex = 0; pageIndex < leafPages.size(); pageIndex++) {
@@ -466,8 +468,8 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
             LOGGER.log(Level.TRACE, "Completed updating leaf page {} with {} tuples", pageIndex, tupleCount);
         }
 
-        LOGGER.log(Level.TRACE, "Updated all {} leaf pages with directory page pointers from {} to {}", leafPages.size(),
-                metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
+        LOGGER.log(Level.TRACE, "Updated all {} leaf pages with directory page pointers from {} to {}",
+                leafPages.size(), metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
     }
 
     /**

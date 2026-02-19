@@ -24,9 +24,6 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
@@ -55,6 +52,8 @@ import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.util.IndexCursorUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Naive blocked cursor for vector ANN search.
@@ -257,8 +256,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
             if (firstCluster != null) {
                 ClusterSearchResult dfsCluster = firstSearchCursor.getCurrentClusterResult();
                 if (dfsCluster != null && dfsCluster.centroidId != firstCluster.centroidId) {
-                    LOGGER.trace("DFS found cid={} but level-wise[0] is cid={} - re-opening",
-                            dfsCluster.centroidId, firstCluster.centroidId);
+                    LOGGER.trace("DFS found cid={} but level-wise[0] is cid={} - re-opening", dfsCluster.centroidId,
+                            firstCluster.centroidId);
                     for (int i = 0; i < numComponents; i++) {
                         if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
                             VectorClusteringSearchCursor vcCursor = (VectorClusteringSearchCursor) rangeCursors[i];
@@ -267,8 +266,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
                         }
                     }
                 }
-                LOGGER.trace("Initialized with K={}, nprobe={}, epsilon={}, level-wise clusters={}",
-                        K, nprobe, epsilon, clusterStrategy.getLevelWiseClusterCount());
+                LOGGER.trace("Initialized with K={}, nprobe={}, epsilon={}, level-wise clusters={}", K, nprobe, epsilon,
+                        clusterStrategy.getLevelWiseClusterCount());
             }
         }
 
@@ -449,8 +448,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
                 return;
             }
 
-            LOGGER.trace("Advancing to cluster cid={}, distance={}, dirPage={}",
-                    nextCluster.centroidId, nextCluster.distance, nextCluster.directoryPageId);
+            LOGGER.trace("Advancing to cluster cid={}, distance={}, dirPage={}", nextCluster.centroidId,
+                    nextCluster.distance, nextCluster.directoryPageId);
 
             // Open all components to this cluster
             for (int i = 0; i < numComponents; i++) {

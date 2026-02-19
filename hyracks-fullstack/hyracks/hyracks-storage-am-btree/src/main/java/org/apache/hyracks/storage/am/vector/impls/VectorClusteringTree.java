@@ -448,7 +448,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         long targetMetadataPageId = ctx.getMetadataPageId();
 
         if (targetMetadataPageId == -1) {
-            LOGGER.log(Level.TRACE, "Could not find metadata page containing originalDataPageId={}", originalDataPageId);
+            LOGGER.log(Level.TRACE, "Could not find metadata page containing originalDataPageId={}",
+                    originalDataPageId);
             return; // Could not find the metadata page
         }
 

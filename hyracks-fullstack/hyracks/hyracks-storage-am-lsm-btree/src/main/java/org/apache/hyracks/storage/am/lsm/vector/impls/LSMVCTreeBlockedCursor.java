@@ -825,19 +825,11 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             return distanceFunction.apply(quantizedQueryVector, dequantized);
         }
 
-        // Full-precision fallback: extract vector using the vector accessor
-        // For quantized format (pkStartField == 4), vector is at field 3 (quantized_embedding)
-        // For non-quantized format (pkStartField == 2), this path should not be reached
-        int vectorFieldIndex = VCTreeDataTupleConstants.Q_QUANTIZED_EMBEDDING_FIELD;
-        byte[] data = tuple.getFieldData(vectorFieldIndex);
-        int offset = tuple.getFieldStart(vectorFieldIndex);
-        int length = tuple.getFieldLength(vectorFieldIndex);
-
-        vectorAccessor.reset(data, offset, length);
-        double[] tupleVector = vectorAccessor.getVector();
-
-        // Compute distance using the configured distance function (from first cursor)
-        return distanceFunction.apply(queryVector, tupleVector);
+        // Fallback: quantizer is null but we have quantized data format — this is a misconfiguration.
+        // The caller must set VECTOR_QUANTIZER in index access parameters.
+        throw HyracksDataException.create(new IllegalStateException(
+                "computeApproximateDistance: quantizer is null but quantized data format detected. "
+                        + "Ensure VECTOR_QUANTIZER is set in index access parameters."));
     }
 
     /**

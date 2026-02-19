@@ -388,13 +388,17 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
+        predicate.setPkStartField(ctx.getPkStartField());
 
         // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
         // Also set USE_OPTIMIZED_SEARCH flag to enable LSMVCTreeBlockedCursor
+        // Pass NoOpVectorQuantizer so the cursor can dequantize test embeddings
+        // (test mode stores full-precision vectors as "quantized" embeddings)
         IndexAccessParameters iap =
                 new IndexAccessParameters(TestOperationCallback.INSTANCE, TestOperationCallback.INSTANCE);
         iap.getParameters().put(HyracksConstants.VECTOR_QUERY, TestDoubleArrayVectorAccessor.Factory.INSTANCE);
         iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
+        iap.getParameters().put(HyracksConstants.VECTOR_QUANTIZER, NoOpVectorQuantizer.INSTANCE);
 
         IIndexAccessor accessor = ctx.getIndex().createAccessor(iap);
         IIndexCursor cursor = accessor.createSearchCursor(false);
