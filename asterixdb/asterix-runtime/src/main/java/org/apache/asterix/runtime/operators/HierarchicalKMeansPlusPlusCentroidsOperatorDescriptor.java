@@ -708,17 +708,18 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     /**
      * Whether the current distance function requires centroids to be L2-normalized after each
-     * Lloyd update (e.g. cosine similarity, dot product on unit vectors). Aligns with FAISS
-     * spherical k-means and Spark's CosineDistanceMeasure.
+     * Lloyd update. Normalization is required only for cosine (spherical k-means); aligns with
+     * FAISS spherical k-means and Spark's CosineDistanceMeasure. Dot product (MIPS) uses raw
+     * centroids and does not require normalization.
      */
     private boolean requiresNormalizedCentroids() {
-        return distanceFunction instanceof CosineDistanceFunction
-                || distanceFunction instanceof DotProductDistanceFunction;
+        return distanceFunction instanceof CosineDistanceFunction;
     }
 
     /**
-     * Normalizes centroid in place to unit L2 norm when using cosine similarity or dot product,
-     * so that centroid semantics match FAISS/Spark (spherical k-means). No-op for other metrics.
+     * Normalizes centroid in place to unit L2 norm when using cosine similarity (spherical
+     * k-means), so that centroid semantics match FAISS/Spark. Dot product is not normalized.
+     * No-op for other metrics.
      */
     private void maybeNormalizeCentroid(double[] centroid) {
         if (centroid != null && requiresNormalizedCentroids()) {

@@ -486,6 +486,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private OptimizedScalarQuantizationSampleFile.Params quantizationParams;
         private ScalarVectorQuantizer quantizer; // nullable — created only for quantized indexes
 
+        /** Default epsilon for level-wise centroid search (findCloseCentroidsLevelWiseGlobalSort). */
+        private static final double DEFAULT_LEVELWISE_EPSILON = 0.25;
+
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
             this.ctx = ctx;
@@ -1028,8 +1031,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                     quantizedEmbedding = quantizer.quantize(embedding);
                                 }
 
-                                // Find closest centroid (full-precision navigation + quantized distance output)
-                                ClusterSearchResult result = findClosestCentroid(embedding, quantizedEmbedding);
+                                // Find close centroids via level-wise global sort (epsilon = 0.25), use first for assignment
+                                List<ClusterSearchResult> closeResults =
+                                        findCloseCentroidsLevelWise(embedding, DEFAULT_LEVELWISE_EPSILON);
+                                ClusterSearchResult result =
+                                        (closeResults != null && !closeResults.isEmpty()) ? closeResults.get(0) : null;
                                 if (result != null) {
                                     successfulQueries++;
 

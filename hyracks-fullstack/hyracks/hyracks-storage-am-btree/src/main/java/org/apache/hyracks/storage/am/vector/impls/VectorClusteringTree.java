@@ -1601,9 +1601,27 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             throw new UnsupportedOperationException("Cross-Pollination is not supported");
         }
 
+        /**
+         * Find close leaf centroids using level-wise traversal with epsilon threshold
+         * (VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort). Returns a list
+         * sorted by distance; caller may use the first element for centroid assignment.
+         */
         public List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector,
-                IVectorDistanceFunction hyracksDistanceFunction, double epi) {
-            throw new UnsupportedOperationException("Cross-Pollination is not supported");
+                IVectorDistanceFunction hyracksDistanceFunction, double epi) throws HyracksDataException {
+            if (destroyed) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
+            }
+            if (queryVector == null) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector cannot be null");
+            }
+            if (queryVector.length != tree.vectorDimensions) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Query vector dimension ("
+                        + queryVector.length + ") does not match tree dimension (" + tree.vectorDimensions + ")");
+            }
+            if (!tree.isStaticStructureInitialized()) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
+            }
+            return tree.findCloseCentroidsLevelWiseFromRoot(queryVector, ctx, hyracksDistanceFunction, epi);
         }
 
         public List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector,
