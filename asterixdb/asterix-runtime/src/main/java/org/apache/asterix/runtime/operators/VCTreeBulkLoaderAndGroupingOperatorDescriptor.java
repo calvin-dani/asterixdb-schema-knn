@@ -161,9 +161,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private static class DotProductDistanceFunction implements DistanceFunction, java.io.Serializable {
         private static final long serialVersionUID = 1L;
 
+        /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.dot(a, b);
+            return -VectorDistanceArrCalculation.dot(a, b);
         }
     }
 
@@ -946,7 +947,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
          * @return ClusterSearchResult containing closest centroid information
          * @throws HyracksDataException if search fails
          */
-        private List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector, double epi)
+        private List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSort(double[] queryVector, double epi)
                 throws HyracksDataException {
             try {
                 // Validate input vector
@@ -975,7 +976,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 }
 
                 List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsLevelWise(queryVector, hyracksDistanceFunction, epi);
+                        vcTreeAccessor.findCloseCentroidsLevelWiseGlobalSort(queryVector, hyracksDistanceFunction, epi);
 
                 if (result == null) {
                     System.err.println("WARNING: No closest centroid found for query vector");
@@ -1033,7 +1034,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                                 // Find close centroids via level-wise global sort (epsilon = 0.25), use first for assignment
                                 List<ClusterSearchResult> closeResults =
-                                        findCloseCentroidsLevelWise(embedding, DEFAULT_LEVELWISE_EPSILON);
+                                        findCloseCentroidsLevelWiseGlobalSort(embedding, DEFAULT_LEVELWISE_EPSILON);
                                 ClusterSearchResult result =
                                         (closeResults != null && !closeResults.isEmpty()) ? closeResults.get(0) : null;
                                 if (result != null) {
@@ -1102,7 +1103,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             } else if (crossPollinate && interiorPollinate) {
                                 // FUTURE: Implement cross-partition centroid search
                                 int count = 0;
-                                List<ClusterSearchResult> result = findCloseCentroidsLevelWise(embedding, 0.15);
+                                List<ClusterSearchResult> result = findCloseCentroidsLevelWiseGlobalSort(embedding, 0.15);
                                 if (result != null) {
                                     successfulQueries++;
 

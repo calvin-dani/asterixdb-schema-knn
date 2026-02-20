@@ -90,9 +90,10 @@ public class VectorDistanceFunctionFactory implements Serializable {
     private static class DotProductDistanceFunction implements DistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
+        /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.dot(a, b);
+            return -VectorDistanceArrCalculation.dot(a, b);
         }
     }
 

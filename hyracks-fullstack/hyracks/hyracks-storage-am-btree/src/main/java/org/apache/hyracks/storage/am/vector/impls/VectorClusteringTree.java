@@ -1009,10 +1009,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
     }
 
     /**
-     * Find the closest cluster starting from root and traversing down to leaf level. Handles overflow pages for both
+     * Find close centroids via level-wise traversal with global sort (delegates to
+     * VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort). Handles overflow pages for both
      * interior and leaf frames.
      */
-    public List<ClusterSearchResult> findCloseCentroidsLevelWiseFromRoot(double[] queryVector,
+    public List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSortFromRoot(double[] queryVector,
             VectorClusteringOpContext ctx, IVectorDistanceFunction distanceFunction, double ep)
             throws HyracksDataException {
 
@@ -1021,7 +1022,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         int navFileId = (staticBufferCache != null) ? staticFileId : getFileId();
         int navRoot = (staticBufferCache != null) ? staticRootPage : rootPage;
 
-        LOGGER.debug("Starting findCloseCentroidsLevelWiseFromRoot with navRoot={}", navRoot);
+        LOGGER.debug("Starting findCloseCentroidsLevelWiseGlobalSortFromRoot with navRoot={}", navRoot);
 
         List<ClusterSearchResult> results =
                 VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(navBC, navFileId, navRoot,
@@ -1602,11 +1603,11 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         }
 
         /**
-         * Find close leaf centroids using level-wise traversal with epsilon threshold
+         * Find close leaf centroids using level-wise traversal with global sort
          * (VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort). Returns a list
          * sorted by distance; caller may use the first element for centroid assignment.
          */
-        public List<ClusterSearchResult> findCloseCentroidsLevelWise(double[] queryVector,
+        public List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSort(double[] queryVector,
                 IVectorDistanceFunction hyracksDistanceFunction, double epi) throws HyracksDataException {
             if (destroyed) {
                 throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Accessor has been destroyed");
@@ -1621,7 +1622,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             if (!tree.isStaticStructureInitialized()) {
                 throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Tree static structure is not initialized");
             }
-            return tree.findCloseCentroidsLevelWiseFromRoot(queryVector, ctx, hyracksDistanceFunction, epi);
+            return tree.findCloseCentroidsLevelWiseGlobalSortFromRoot(queryVector, ctx, hyracksDistanceFunction, epi);
         }
 
         public List<ClusterSearchResult> findCloseCentroidsFrontier(double[] queryVector,
