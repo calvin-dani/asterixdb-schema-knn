@@ -31,11 +31,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Sequential cluster selection strategy for merge operations.
- *
- * This strategy iterates through all clusters in order (0 → 1 → 2 → ...),
- * without any early termination or distance-based selection. It is used for
- * merge operations where we need to process ALL data from all components.
+ * Sequential cluster selection strategy.
+ * Iterates through all clusters in order (0 → 1 → 2 → ...) without early termination.
+ * Used for:
+ * - Merge operations (process ALL data from all components)
+ * - Index-driven KNN (scan all clusters with bidirectional pruning within each)
  *
  * Key differences from NprobeClusterSelectionStrategy:
  * - No level-wise or DFS cluster selection

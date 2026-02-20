@@ -839,13 +839,13 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         int numSecondaryKeys = isQuantized ? VCTreeDataTupleConstants.Q_NUM_SECONDARY_FIELDS
                 : VCTreeDataTupleConstants.NQ_NUM_SECONDARY_FIELDS;
 
-        // Auto-select cursor based on quantization:
-        // - Quantized indexes always use naive blocked (LSMVCTreeBlockedCursorNaive)
-        // - Non-quantized indexes always use naive streaming (LSMVCTreeSearchCursor)
-        if (isQuantized) {
-            searchApproach = 3; // naive blocked (LSMVCTreeBlockedCursorNaive)
-        } else {
-            searchApproach = 0; // naive streaming (LSMVCTreeSearchCursor)
+        // Respect user-specified searchApproach (1, 2, 3, or 4).
+        // Only auto-select when searchApproach == 0 (default / not specified).
+        if (searchApproach == 0) {
+            if (isQuantized) {
+                searchApproach = 3; // naive blocked (LSMVCTreeBlockedCursorNaive)
+            }
+            // Non-quantized: keep 0 (naive streaming)
         }
 
         // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples

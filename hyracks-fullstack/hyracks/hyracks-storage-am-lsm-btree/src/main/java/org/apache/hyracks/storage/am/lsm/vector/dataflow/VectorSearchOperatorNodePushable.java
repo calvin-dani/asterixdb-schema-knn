@@ -271,9 +271,14 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // 1 = optimized bidirectional (LSMVCTreeBlockedCursor)
         // 2 = optimized bidirectional with inline filtering (LSMVCTreeBlockedCursor + ITupleFilter)
         // 3 = naive blocked (LSMVCTreeBlockedCursorNaive - top-K window, quantized distance, no pruning)
-        if (searchApproach == 1 || searchApproach == 2) {
+        // 4 = index-driven KNN (LSMVCTreeBlockedCursor + SequentialClusterSelectionStrategy)
+        if (searchApproach == 1 || searchApproach == 2 || searchApproach == 4) {
             iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
-        } else if (searchApproach == 3) {
+        }
+        if (searchApproach == 4) {
+            iap.getParameters().put(HyracksConstants.USE_SEQUENTIAL_SCAN, Boolean.TRUE);
+        }
+        if (searchApproach == 3) {
             iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
         }
     }

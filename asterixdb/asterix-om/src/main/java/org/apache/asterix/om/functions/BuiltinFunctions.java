@@ -1161,7 +1161,8 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("get-overlapping-interval", 2);
 
     //Vector functions
-    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY = FunctionConstants.newAsterix("vector-distance", 3);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY =
+            FunctionConstants.newAsterix("vector-distance", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
             FunctionConstants.newAsterix("vector-distance-constant", 3);
     // Vector search functions

@@ -105,10 +105,12 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
     public static final VectorIndexAccessMethod INSTANCE = new VectorIndexAccessMethod();
 
-    // ANN_DISTANCE function - used in ORDER BY clauses for top-k queries
-    // The second boolean (true) indicates that approximate search may need verification
+    // Optimizable functions for vector index:
+    // - ANN_DISTANCE: approximate nearest neighbor search (probes nprobe clusters)
+    // - VECTOR_DISTANCE_ARRAY: index-driven KNN when 4th arg is true (scans all clusters)
     private static final List<Pair<FunctionIdentifier, Boolean>> FUNC_IDENTIFIERS =
-            Collections.unmodifiableList(Arrays.asList(new Pair<>(BuiltinFunctions.ANN_DISTANCE, true)));
+            Collections.unmodifiableList(Arrays.asList(new Pair<>(BuiltinFunctions.ANN_DISTANCE, true),
+                    new Pair<>(BuiltinFunctions.VECTOR_DISTANCE_ARRAY, true)));
 
     @Override
     public List<Pair<FunctionIdentifier, Boolean>> getOptimizableFunctions() {
@@ -120,16 +122,17 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             List<AbstractLogicalOperator> assignsAndUnnests, AccessMethodAnalysisContext analysisCtx,
             IOptimizationContext context, IVariableTypeEnvironment typeEnvironment) throws AlgebricksException {
 
-        // Validate: ANN_DISTANCE(vectorField, queryVector, distanceMetric [, nprobe, epsilon, searchApproach])
-        // arg0: field reference to vector field (e.g., reviewEmbedding)
-        // arg1: query vector (constant array or parameter)
-        // arg2: distance metric (string constant: "Euclidean", "Cosine", etc.)
-        // arg3 (optional): nprobe (int, default 10)
-        // arg4 (optional): epsilon (double, default 0.15)
-        // arg5 (optional): search_approach (int: 0=naive, 1=optimized, default 0)
-
-        if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 6) {
-            return false;
+        FunctionIdentifier fid = funcExpr.getFunctionIdentifier();
+        if (fid.equals(BuiltinFunctions.VECTOR_DISTANCE_ARRAY)) {
+            // vector_distance(vectorField, queryVector, metric, true) - need >= 4 args for index hint
+            if (funcExpr.getArguments().size() < 4) {
+                return false;
+            }
+        } else {
+            // ann_distance(vectorField, queryVector, metric [, nprobe, epsilon, searchApproach])
+            if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 6) {
+                return false;
+            }
         }
 
         // Use utility method to validate:
@@ -267,31 +270,39 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         queryVarList.add(distanceMetricVar);
         queryExprList.add(new MutableObject<>(distanceMetricExpr.cloneExpression()));
 
-        // Add nprobe variable (arg 3, default 10)
+        // Determine if this is VECTOR_DISTANCE_ARRAY (index-driven KNN) vs ANN_DISTANCE
+        boolean isVectorDistance =
+                annDistanceExpr.getFunctionIdentifier().equals(BuiltinFunctions.VECTOR_DISTANCE_ARRAY);
+
+        // Add nprobe variable (arg 3 for ANN_DISTANCE, default 10)
         // SQL++ parser creates AInt64 for integer literals; convert to AInt32 for IntegerPointable at runtime
         LogicalVariable nprobeVar = context.newVar();
         queryVarList.add(nprobeVar);
-        if (annDistanceExpr.getArguments().size() > 3) {
+        if (!isVectorDistance && annDistanceExpr.getArguments().size() > 3) {
             ILogicalExpression nprobeExpr = annDistanceExpr.getArguments().get(3).getValue().cloneExpression();
             queryExprList.add(new MutableObject<>(ensureInt32Constant(nprobeExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(10)))));
         }
 
-        // Add epsilon variable (arg 4, default 0.15)
+        // Add epsilon variable (arg 4 for ANN_DISTANCE, default 0.15)
         LogicalVariable epsilonVar = context.newVar();
         queryVarList.add(epsilonVar);
-        if (annDistanceExpr.getArguments().size() > 4) {
+        if (!isVectorDistance && annDistanceExpr.getArguments().size() > 4) {
             queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(4).getValue().cloneExpression()));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(0.15)))));
         }
 
-        // Add search_approach variable (arg 5, default 0 = naive)
+        // Add search_approach variable (arg 5 for ANN_DISTANCE, default 0 = naive)
+        // For VECTOR_DISTANCE_ARRAY: searchApproach = 4 (index-driven KNN with sequential scan)
         // SQL++ parser creates AInt64 for integer literals; convert to AInt32 for IntegerPointable at runtime
         LogicalVariable searchApproachVar = context.newVar();
         queryVarList.add(searchApproachVar);
-        if (annDistanceExpr.getArguments().size() > 5) {
+        if (isVectorDistance) {
+            // Index-driven KNN: sequential scan of all clusters with bidirectional pruning
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(4)))));
+        } else if (annDistanceExpr.getArguments().size() > 5) {
             ILogicalExpression searchApproachExpr = annDistanceExpr.getArguments().get(5).getValue().cloneExpression();
             queryExprList.add(new MutableObject<>(ensureInt32Constant(searchApproachExpr)));
         } else {
@@ -416,6 +427,16 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             if (!normalizedQueryMetric.equals(indexMetric)) {
                 // Field matches but distance metric doesn't - reject this index
                 return false;
+            }
+        }
+
+        // Index-driven KNN (VECTOR_DISTANCE_ARRAY) requires quantized vector index
+        if (optFuncExpr.getFuncExpr().getFunctionIdentifier().equals(BuiltinFunctions.VECTOR_DISTANCE_ARRAY)) {
+            Index.VectorIndexDetails vectorDetails2 = (Index.VectorIndexDetails) index.getIndexDetails();
+            AdmObjectNode withNode = vectorDetails2.getWithObjectNode();
+            String quantization = (withNode != null) ? withNode.getOptionalString("quantization", null) : null;
+            if (quantization == null) {
+                return false; // Non-quantized index can't do index-driven KNN
             }
         }
 

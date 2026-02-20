@@ -192,8 +192,13 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             this.vectorAccessor = vectorAccessorFactory.createAccessor();
         }
 
-        // Create cluster selection strategy (nprobe + DFS fallback)
-        this.clusterStrategy = new NprobeClusterSelectionStrategy(nprobe, epsilon);
+        // Create cluster selection strategy
+        Boolean useSequentialScan = (Boolean) iap.getParameters().get(HyracksConstants.USE_SEQUENTIAL_SCAN);
+        if (Boolean.TRUE.equals(useSequentialScan)) {
+            this.clusterStrategy = new SequentialClusterSelectionStrategy();
+        } else {
+            this.clusterStrategy = new NprobeClusterSelectionStrategy(nprobe, epsilon);
+        }
 
         // Initialize priority queues
         initializePriorityQueues();
