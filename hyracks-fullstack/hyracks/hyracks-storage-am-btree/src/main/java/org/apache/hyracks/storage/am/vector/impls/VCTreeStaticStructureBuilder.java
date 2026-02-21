@@ -49,6 +49,7 @@ import org.apache.hyracks.storage.common.buffercache.PageWriteFailureCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.compression.file.ICompressedPageWriter;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -143,19 +144,19 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
             totalClusters += clustersPerLevel.get(level);
         }
 
-        LOGGER.debug("Total clusters in structure: {}", totalClusters);
+        LOGGER.log(Level.TRACE, "Total clusters in structure: {}", totalClusters);
 
         // Call freePageManager.takePage() for each cluster to update metadata frame
         for (int i = 0; i < totalClusters; i++) {
             int allocatedPageId = freePageManager.takePage(metaFrame);
-            LOGGER.debug("Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
+            LOGGER.log(Level.TRACE, "Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
         }
 
         // Create first page (root page) - page ID 0
         createNewPage(0);
 
-        LOGGER.debug("VCTreeStaticStructureLoader initialized");
-        LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
+        LOGGER.log(Level.TRACE, "VCTreeStaticStructureLoader initialized");
+        LOGGER.log(Level.TRACE, "numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
         printStructureInfo();
     }
 
@@ -178,8 +179,8 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
             totalPagesUpToLevel[level + 1] = totalPagesUpToLevel[level] + clustersPerLevel.get(level);
         }
 
-        LOGGER.debug("totalCentroidsUpToLevel: {}", Arrays.toString(totalCentroidsUpToLevel));
-        LOGGER.debug("totalPagesUpToLevel: {}", Arrays.toString(totalPagesUpToLevel));
+        LOGGER.log(Level.TRACE, "totalCentroidsUpToLevel: {}", Arrays.toString(totalCentroidsUpToLevel));
+        LOGGER.log(Level.TRACE, "totalPagesUpToLevel: {}", Arrays.toString(totalPagesUpToLevel));
     }
 
     @Override
@@ -265,7 +266,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
         int centroidId = (Integer) baseFieldValues[0];
         double[] embedding = (double[]) baseFieldValues[1];
 
-        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId,
+        LOGGER.log(Level.TRACE, "Adding centroid {} at level={}, cluster={}, position={}, inputFields={}", centroidId,
                 currentLevel, currentClusterInLevel, currentCentroidInCluster, inputFieldCount);
 
         try {
@@ -280,7 +281,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                 Object[] fullFieldValues = TupleUtils.deserializeTuple(tuple, fullFieldSerdes);
                 byte[] quantizedBytes = (byte[]) fullFieldValues[2];
 
-                LOGGER.debug("Leaf tuple with quantization: centroidId={}, embeddingLen={}, quantizedLen={}",
+                LOGGER.log(Level.TRACE, "Leaf tuple with quantization: centroidId={}, embeddingLen={}, quantizedLen={}",
                         centroidId, embedding.length, quantizedBytes.length);
 
                 // Create 4-field output tuple: [centroidId, embedding, quantizedBytes, childPageId]
@@ -301,8 +302,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                         centroidId, embedding, childPageId);
             }
         } catch (Exception e) {
-            System.err.println("ERROR creating entry tuple: " + e.getMessage());
-            e.printStackTrace();
+            LOGGER.log(Level.TRACE, "Error creating entry tuple: {}", e.getMessage());
             throw new HyracksDataException("Failed to create entry tuple", e);
         }
     }
@@ -345,7 +345,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
         // Track page ID for this level (use computed ID)
         levelPageIds.get(currentLevel).add(computedPageId);
 
-        LOGGER.debug("Created new page {} for level {}", computedPageId, currentLevel);
+        LOGGER.log(Level.TRACE, "Created new page {} for level {}", computedPageId, currentLevel);
     }
 
     /**
@@ -369,7 +369,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
         // Create the new overflow page
         createNewPage(overflowPageId);
 
-        LOGGER.debug("Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
+        LOGGER.log(Level.TRACE, "Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
                 currentClusterInLevel);
     }
 
@@ -392,13 +392,13 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                 currentClusterInLevel = 0;
 
                 if (currentLevel < numLevels) {
-                    LOGGER.debug("Moving to level {}", currentLevel);
+                    LOGGER.log(Level.TRACE, "Moving to level {}", currentLevel);
                     // Create first page of new level
                     createNewPage(computeCurrentClusterPageId());
                 }
             } else {
                 // Start new cluster in same level
-                LOGGER.debug("Starting cluster {} in level {}", currentClusterInLevel, currentLevel);
+                LOGGER.log(Level.TRACE, "Starting cluster {} in level {}", currentClusterInLevel, currentLevel);
 
                 // For leaf level: chain last page of previous cluster to first page of new cluster
                 // NOTE: We set nextLeaf but keep overflow=false (overflow only for within-cluster pages)
@@ -406,7 +406,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                     int nextClusterPageId = computeCurrentClusterPageId();
                     leafFrame.setNextLeaf(nextClusterPageId);
                     leafFrame.setOverflowFlagBit(false);
-                    LOGGER.debug("Linking leaf page to next cluster: current page -> page {}", nextClusterPageId);
+                    LOGGER.log(Level.TRACE, "Linking leaf page to next cluster: current page -> page {}", nextClusterPageId);
                 }
 
                 // Create page for new cluster
@@ -439,13 +439,13 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
      */
     private void updateLeafPagesWithDirectoryPointers() throws HyracksDataException {
         if (leafPages.isEmpty()) {
-            LOGGER.warn("No leaf pages to update");
+            LOGGER.log(Level.TRACE, "No leaf pages to update");
             return;
         }
 
         int nextDirectoryPageId = metaFrame.getMaxPage() + 1;
 
-        LOGGER.debug("Starting directory page ID: {}, processing {} leaf pages", nextDirectoryPageId, leafPages.size());
+        LOGGER.log(Level.TRACE, "Starting directory page ID: {}, processing {} leaf pages", nextDirectoryPageId, leafPages.size());
 
         // Process each leaf page
         for (int pageIndex = 0; pageIndex < leafPages.size(); pageIndex++) {
@@ -455,7 +455,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
             leafFrame.setPage(leafPage);
 
             int tupleCount = leafFrame.getTupleCount();
-            LOGGER.debug("Processing leaf page {} with {} tuples", pageIndex, tupleCount);
+            LOGGER.log(Level.TRACE, "Processing leaf page {} with {} tuples", pageIndex, tupleCount);
 
             // Update each tuple in the leaf page
             for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
@@ -463,10 +463,10 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                 // Move to next directory page for next tuple
                 nextDirectoryPageId++;
             }
-            LOGGER.debug("Completed updating leaf page {} with {} tuples", pageIndex, tupleCount);
+            LOGGER.log(Level.TRACE, "Completed updating leaf page {} with {} tuples", pageIndex, tupleCount);
         }
 
-        LOGGER.debug("Updated all {} leaf pages with directory page pointers from {} to {}", leafPages.size(),
+        LOGGER.log(Level.TRACE, "Updated all {} leaf pages with directory page pointers from {} to {}", leafPages.size(),
                 metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
     }
 
@@ -500,7 +500,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
 
         // Write ALL pages in ascending page-ID order (0, 1, 2, 3, ...)
         for (Map.Entry<Integer, ICachedPage> entry : allPages.entrySet()) {
-            LOGGER.debug("Writing page {} sequentially", entry.getKey());
+            LOGGER.log(Level.TRACE, "Writing page {} sequentially", entry.getKey());
             write(entry.getValue());
         }
         allPages.clear();
@@ -508,7 +508,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
 
     @Override
     public void abort() throws HyracksDataException {
-        LOGGER.debug("VCTreeStaticStructureLoader aborted");
+        LOGGER.log(Level.TRACE, "VCTreeStaticStructureLoader aborted");
         compressedPageWriter.abort();
         // Return all buffered pages
         for (ICachedPage page : allPages.values()) {
@@ -532,7 +532,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
      * Print structure configuration for debugging.
      */
     private void printStructureInfo() {
-        LOGGER.debug("Structure configuration:");
+        LOGGER.log(Level.TRACE, "Structure configuration:");
         for (int level = 0; level < numLevels; level++) {
             StringBuilder sb = new StringBuilder();
             sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level))
@@ -545,7 +545,7 @@ public class VCTreeStaticStructureBuilder extends PageWriteFailureCallback imple
                 }
             }
             sb.append("]");
-            LOGGER.debug(sb.toString());
+            LOGGER.log(Level.TRACE, sb.toString());
         }
     }
 }

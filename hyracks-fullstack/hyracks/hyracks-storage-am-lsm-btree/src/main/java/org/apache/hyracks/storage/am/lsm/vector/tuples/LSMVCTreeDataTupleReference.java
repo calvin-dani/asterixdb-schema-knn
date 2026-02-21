@@ -68,10 +68,6 @@ public class LSMVCTreeDataTupleReference extends TypeAwareTupleReference impleme
         this.buf = buf;
         this.tupleStartOff = tupleStartOff;
 
-        // NOTE: Both matter and antimatter tuples have the same structure (all fields)
-        // The only difference is the antimatter bit (bit 7) in the null flags byte
-        // No field count adjustment needed - both have totalMatterFields (3 fields)
-
         super.resetByTupleOffset(buf, tupleStartOff);
     }
 
@@ -82,14 +78,12 @@ public class LSMVCTreeDataTupleReference extends TypeAwareTupleReference impleme
 
     @Override
     protected int getNullFlagsBytes() {
-        // number of fields + matter/antimatter bit
         int numBits = fieldCount + 1;
         return BitOperationUtils.getFlagBytes(numBits);
     }
 
     @Override
     public boolean isAntimatter() {
-        // Check antimatter bit (bit 7 in null flags byte)
         return BitOperationUtils.getBit(buf, tupleStartOff, ANTIMATTER_BIT_OFFSET);
     }
 
@@ -99,7 +93,6 @@ public class LSMVCTreeDataTupleReference extends TypeAwareTupleReference impleme
 
     @Override
     protected int getAdjustedFieldIdx(int fieldIdx) {
-        // 1 bit for antimatter (vector index doesn't use update-aware)
         return fieldIdx + 1;
     }
 }

@@ -33,11 +33,13 @@ import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorSearchPredicate;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Runtime operator for vector index search (ANN search).
@@ -57,6 +59,8 @@ import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
  * 4. addAdditionalIndexAccessorParams() - Add vector-specific params (if any)
  */
 public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePushable {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Field indexes in input tuple: [query_vector_field, k_field, metric_field]
     protected final int[] queryFields;
@@ -144,7 +148,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     protected ISearchPredicate createSearchPredicate(IIndex index) {
         // Create simple marker predicate
         // The actual query vector is passed via IIndexAccessParameters in addAdditionalIndexAccessorParams()
-        return new VectorPointPredicate();
+        return new VectorSearchPredicate();
     }
 
     @Override
@@ -155,7 +159,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
 
             // Update predicate with current tuple reference
             // Following RTree pattern: predicate holds reference, updated per-tuple
-            VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
+            VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
             vectorPred.setQueryTuple(queryParamsTuple);
             vectorPred.setQueryFieldIndex(0); // Field 0 is the vector field
             vectorPred.setPkStartField(numSecondaryKeys);
@@ -225,8 +229,8 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             }
         } catch (Exception e) {
             // If extraction fails, default to euclidean
-            System.err.println("WARNING: Failed to extract distance metric from tuple, defaulting to euclidean: "
-                    + e.getMessage());
+            LOGGER.trace("Failed to extract distance metric from tuple, defaulting to euclidean: {}",
+                    e.getMessage());
         }
         return "euclidean"; // Default fallback
     }

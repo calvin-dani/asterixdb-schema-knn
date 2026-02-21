@@ -52,6 +52,8 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperato
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator.IOrder;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperator;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Optimization rule for introducing vector index access for top-k ANN queries.
@@ -67,6 +69,8 @@ import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
  * The ORDER BY ANN_DISTANCE operator handles distance computation in both cases.
  */
 public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethodRule {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Operators representing the pattern to be matched
     protected Mutable<ILogicalOperator> limitRef = null;
@@ -134,11 +138,11 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             limitRef = opRef;
             limitOp = (LimitOperator) op;
 
-            System.err.println("=== Found LIMIT operator ===");
+            LOGGER.trace("Found LIMIT operator");
 
             // Check if already processed
             if (context.checkIfInDontApplySet(this, limitOp)) {
-                System.err.println("Already in don't apply set");
+                LOGGER.trace("Already in don't apply set");
                 return false;
             }
 
@@ -149,20 +153,20 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 orderRef = orderPair.first;
                 orderOp = orderPair.second;
 
-                System.err.println("=== Found ORDER operator ===");
-                System.err.println("ORDER expressions count: " + orderOp.getOrderExpressions().size());
+                LOGGER.trace("Found ORDER operator");
+                LOGGER.trace("ORDER expressions count: {}", orderOp.getOrderExpressions().size());
 
                 // Check if ORDER BY uses ANN_DISTANCE function
                 if (matchesAnnDistancePattern()) {
-                    System.err.println("=== Pattern matched! Calling analyzeAndTransform ===");
+                    LOGGER.trace("Pattern matched, calling analyzeAndTransform");
                     // Try to apply transformation
                     return analyzeAndTransform(context);
                 } else {
-                    System.err.println("Pattern did not match (not single ORDER BY expression)");
+                    LOGGER.trace("Pattern did not match (not single ORDER BY expression)");
                 }
             } else {
-                System.err.println("LIMIT child: " + (limitOp.getInputs().isEmpty() ? "NONE"
-                        : ((AbstractLogicalOperator) limitOp.getInputs().get(0).getValue()).getOperatorTag()));
+                LOGGER.trace("LIMIT child: {}", limitOp.getInputs().isEmpty() ? "NONE"
+                        : ((AbstractLogicalOperator) limitOp.getInputs().get(0).getValue()).getOperatorTag());
             }
         }
 
@@ -270,8 +274,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         findSelectOperatorInSubTree();
 
         if (selectOp != null) {
-            System.err.println("Query has WHERE clause (SELECT operator)");
-            System.err.println("Filter fields: " + filterFieldNames);
+            LOGGER.trace("Query has WHERE clause (SELECT operator)");
+            LOGGER.trace("Filter fields: {}", filterFieldNames);
         }
 
         // 5. Analyze ANN_DISTANCE function arguments
@@ -291,7 +295,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             // No vector index available (either none exists, or none has required INCLUDE fields)
             // Fall back to data scan + sort
             if (selectOp != null && filterFieldNames != null && !filterFieldNames.isEmpty()) {
-                System.err.println("No vector index with required INCLUDE fields - falling back to data scan");
+                LOGGER.trace("No vector index with required INCLUDE fields - falling back to data scan");
             }
             context.addToDontApplySet(this, limitOp);
             return false;
@@ -358,11 +362,11 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
      */
     protected Set<List<String>> extractFilterFieldsFromCondition(ILogicalExpression condition) {
         Set<List<String>> fields = new HashSet<>();
-        System.err.println("=== extractFilterFieldsFromCondition ===");
-        System.err.println("Condition: " + condition);
-        System.err.println("Condition tag: " + condition.getExpressionTag());
+        LOGGER.trace("extractFilterFieldsFromCondition");
+        LOGGER.trace("Condition: {}", condition);
+        LOGGER.trace("Condition tag: {}", condition.getExpressionTag());
         extractFieldsFromExpressionRecursive(condition, fields);
-        System.err.println("Extracted fields: " + fields);
+        LOGGER.trace("Extracted fields: {}", fields);
         return fields;
     }
 
@@ -393,18 +397,18 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             VariableReferenceExpression varRef = (VariableReferenceExpression) expr;
             LogicalVariable var = varRef.getVariableReference();
 
-            System.err.println("=== Found VARIABLE in condition: " + var + " ===");
-            System.err.println("subTree assigns count: " + subTree.getAssignsAndUnnests().size());
+            LOGGER.trace("Found VARIABLE in condition: {}", var);
+            LOGGER.trace("subTree assigns count: {}", subTree.getAssignsAndUnnests().size());
 
             // Search assigns for the variable definition
             // First check subTree assigns
             boolean found = findFieldFromAssigns(var, subTree.getAssignsAndUnnests(), fields);
-            System.err.println("Found in subTree assigns: " + found);
+            LOGGER.trace("Found in subTree assigns: {}", found);
 
             // If not found in subtree, search all operators from ORDER down to DATASOURCE_SCAN
             if (!found && orderOp != null) {
                 found = searchAssignsInPlan(var, orderOp, fields);
-                System.err.println("Found in plan search: " + found);
+                LOGGER.trace("Found in plan search: {}", found);
             }
         }
     }
@@ -424,11 +428,11 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     if (assignVars.get(i).equals(var)) {
                         // Found the assignment - recursively extract fields
                         ILogicalExpression assignExpr = assignExprs.get(i).getValue();
-                        System.err.println("=== Found assignment for " + var + ": " + assignExpr + " ===");
-                        System.err.println("=== Expression tag: " + assignExpr.getExpressionTag() + " ===");
+                        LOGGER.trace("Found assignment for {}: {}", var, assignExpr);
+                        LOGGER.trace("Expression tag: {}", assignExpr.getExpressionTag());
                         if (assignExpr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
                             AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) assignExpr;
-                            System.err.println("=== Function: " + funcExpr.getFunctionIdentifier() + " ===");
+                            LOGGER.trace("Function: {}", funcExpr.getFunctionIdentifier());
                         }
                         extractFieldsFromExpressionRecursive(assignExpr, fields);
                         return true;
@@ -516,8 +520,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
                         String fieldName = fieldNames[fieldIndex];
                         fieldPath.add(fieldName);
-                        System.err.println("=== Resolved field-access-by-index: index " + fieldIndex + " -> field '"
-                                + fieldName + "' ===");
+                        LOGGER.trace("Resolved field-access-by-index: index {} -> field '{}'", fieldIndex,
+                                fieldName);
                     }
                 }
             }
@@ -546,7 +550,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
 
         if (includeFieldNames == null || includeFieldNames.isEmpty()) {
             // Index has no INCLUDE fields - cannot support filters
-            System.err.println("Index " + index.getIndexName() + " has no INCLUDE fields, cannot support filter");
+            LOGGER.trace("Index {} has no INCLUDE fields, cannot support filter", index.getIndexName());
             return false;
         }
 
@@ -560,13 +564,13 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 }
             }
             if (!found) {
-                System.err.println("Filter field " + filterField + " not in index " + index.getIndexName()
-                        + " INCLUDE fields: " + includeFieldNames);
+                LOGGER.trace("Filter field {} not in index {} INCLUDE fields: {}", filterField,
+                        index.getIndexName(), includeFieldNames);
                 return false;
             }
         }
 
-        System.err.println("All filter fields found in index " + index.getIndexName() + " INCLUDE fields");
+        LOGGER.trace("All filter fields found in index {} INCLUDE fields", index.getIndexName());
         return true;
     }
 
@@ -577,31 +581,31 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
      * so we need to start from ORDER's child (usually ASSIGN).
      */
     protected boolean initializeSubTree() throws AlgebricksException {
-        System.err.println("=== initializeSubTree() called ===");
-        System.err.println("orderRef: " + orderRef.getValue().getOperatorTag());
+        LOGGER.trace("initializeSubTree() called");
+        LOGGER.trace("orderRef: {}", orderRef.getValue().getOperatorTag());
 
         // Get the child of ORDER operator (usually first ASSIGN)
         // OptimizableOperatorSubTree expects to start from operators like SELECT, ASSIGN, etc.
         // not from ORDER
         if (orderOp.getInputs().isEmpty()) {
-            System.err.println("ORDER has no children!");
+            LOGGER.trace("ORDER has no children");
             return false;
         }
 
         Mutable<ILogicalOperator> subTreeRoot = orderOp.getInputs().get(0);
-        System.err.println("Starting subtree from: " + subTreeRoot.getValue().getOperatorTag());
+        LOGGER.trace("Starting subtree from: {}", subTreeRoot.getValue().getOperatorTag());
 
         subTree.initFromSubTree(subTreeRoot);
 
         boolean hasDataSource = subTree.hasDataSourceScan();
-        System.err.println("hasDataSourceScan: " + hasDataSource);
+        LOGGER.trace("hasDataSourceScan: {}", hasDataSource);
 
         if (!hasDataSource) {
-            System.err.println("Subtree operators found:");
+            LOGGER.trace("Subtree operators found:");
             AbstractLogicalOperator current = (AbstractLogicalOperator) subTreeRoot.getValue();
             int depth = 0;
             while (current != null && depth < 10) {
-                System.err.println("  [" + depth + "] " + current.getOperatorTag());
+                LOGGER.trace("  [{}] {}", depth, current.getOperatorTag());
                 if (current.getInputs().isEmpty()) {
                     break;
                 }
@@ -642,13 +646,13 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                         .getStringConstant(new org.apache.commons.lang3.mutable.MutableObject<>(distanceMetricExpr));
                 if (queryDistanceMetric != null) {
                     queryDistanceMetric = VectorIndexAccessMethod.normalizeDistanceMetric(queryDistanceMetric);
-                    System.err.println("=== Extracted query distance metric: " + queryDistanceMetric + " ===");
+                    LOGGER.trace("Extracted query distance metric: {}", queryDistanceMetric);
                 }
             } catch (Exception e) {
                 // If we can't extract the metric, continue without metric-aware selection
                 // This maintains backward compatibility
                 queryDistanceMetric = null;
-                System.err.println("=== Could not extract distance metric from query, using field-only matching ===");
+                LOGGER.trace("Could not extract distance metric from query, using field-only matching");
             }
         }
 
@@ -752,8 +756,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 // If query has filter, check if index has required INCLUDE fields
                 if (hasFilter && !indexHasIncludeFields(index, filterFieldNames)) {
                     // Skip this index - it doesn't have required INCLUDE fields for the filter
-                    System.err.println(
-                            "Skipping index " + index.getIndexName() + " - missing required INCLUDE fields for filter");
+                    LOGGER.trace("Skipping index {} - missing required INCLUDE fields for filter",
+                            index.getIndexName());
                     continue;
                 }
 
@@ -763,8 +767,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     if (queryDistanceMetric.equals(indexMetric)) {
                         // Exact match: field name AND distance metric match (AND INCLUDE fields if needed)
                         exactMatch = new Pair<>(VectorIndexAccessMethod.INSTANCE, index);
-                        System.err.println("=== Found exact match: index " + index.getIndexName() + " with metric "
-                                + indexMetric + " ===");
+                        LOGGER.trace("Found exact match: index {} with metric {}", index.getIndexName(),
+                                indexMetric);
                         break; // Prefer exact match, use first one found
                     } else {
                         // Field matches but metric doesn't - store as fallback only if no exact match
@@ -783,10 +787,10 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         // Select best match: exact match preferred, fallback to field match
         if (exactMatch != null) {
             result.add(exactMatch);
-            System.err.println("=== Selected index with matching distance metric ===");
+            LOGGER.trace("Selected index with matching distance metric");
         } else if (fieldMatch != null) {
             result.add(fieldMatch);
-            System.err.println("=== Selected index with matching field (metric mismatch, may affect accuracy) ===");
+            LOGGER.trace("Selected index with matching field (metric mismatch, may affect accuracy)");
         }
     }
 
@@ -809,10 +813,10 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
     protected boolean applyTopKPlanTransformation(Index vectorIndex, AccessMethodAnalysisContext analysisCtx,
             IOptimizationContext context) throws AlgebricksException {
 
-        System.err.println("=== VECTOR INDEX TOP-K OPTIMIZATION MATCHED ===");
-        System.err.println("Dataset: " + subTree.getDataset().getDatasetName());
-        System.err.println("Vector Index: " + vectorIndex.getIndexName());
-        System.err.println("Limit: " + limitOp.getMaxObjects().getValue());
+        LOGGER.trace("VECTOR INDEX TOP-K OPTIMIZATION MATCHED");
+        LOGGER.trace("Dataset: {}", subTree.getDataset().getDatasetName());
+        LOGGER.trace("Vector Index: {}", vectorIndex.getIndexName());
+        LOGGER.trace("Limit: {}", limitOp.getMaxObjects().getValue());
 
         // Call VectorIndexAccessMethod to create the index search plan
         // This creates UNNEST-MAP operator that returns candidate tuples from vector index
@@ -821,7 +825,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 annDistanceExpr, subTree, vectorIndex, analysisCtx, context, selectOp);
 
         if (indexSearchOp == null) {
-            System.err.println("Plan transformation not yet implemented");
+            LOGGER.trace("Plan transformation not yet implemented");
             return false;
         }
 
@@ -830,7 +834,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         // Pattern follows InvertedIndexAccessMethod.applySelectPlanTransformation:498
         subTree.getDataSourceRef().setValue(indexSearchOp);
 
-        System.err.println("=== VECTOR INDEX TOP-K OPTIMIZATION APPLIED ===");
+        LOGGER.trace("VECTOR INDEX TOP-K OPTIMIZATION APPLIED");
         return true;
     }
 

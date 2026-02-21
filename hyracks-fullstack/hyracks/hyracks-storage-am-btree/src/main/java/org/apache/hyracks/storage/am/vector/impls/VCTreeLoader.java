@@ -41,6 +41,7 @@ import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -150,19 +151,19 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             totalClusters += clustersPerLevel.get(level);
         }
 
-        LOGGER.debug("Total clusters in structure: {}", totalClusters);
+        LOGGER.log(Level.TRACE,"Total clusters in structure: {}", totalClusters);
 
         // Call freePageManager.takePage() for each cluster to update metadata frame
         for (int i = 0; i < totalClusters; i++) {
             int allocatedPageId = freePageManager.takePage(metaFrame);
-            LOGGER.debug("Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
+            LOGGER.log(Level.TRACE,"Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
         }
 
         // Create first page (root page) - computed page ID 0
         createNewPage(computeCurrentClusterPageId());
 
-        LOGGER.debug("VCTreeStaticStructureLoader initialized");
-        LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
+        LOGGER.log(Level.TRACE,"VCTreeStaticStructureLoader initialized");
+        LOGGER.log(Level.TRACE,"numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
         printStructureInfo();
     }
 
@@ -220,19 +221,19 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             totalClusters += clustersPerLevel.get(level);
         }
 
-        LOGGER.debug("Total clusters in structure: {}", totalClusters);
+        LOGGER.log(Level.TRACE,"Total clusters in structure: {}", totalClusters);
 
         // Call freePageManager.takePage() for each cluster to update metadata frame
         for (int i = 0; i < totalClusters; i++) {
             int allocatedPageId = freePageManager.takePage(metaFrame);
-            LOGGER.debug("Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
+            LOGGER.log(Level.TRACE,"Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
         }
 
         // Create first page (root page) - computed page ID 0
         createNewPage(computeCurrentClusterPageId());
 
-        LOGGER.debug("VCTreeLoader initialized with LSM parameters");
-        LOGGER.debug("numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
+        LOGGER.log(Level.TRACE,"VCTreeLoader initialized with LSM parameters");
+        LOGGER.log(Level.TRACE,"numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
         printStructureInfo();
     }
 
@@ -255,8 +256,8 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             totalPagesUpToLevel[level + 1] = totalPagesUpToLevel[level] + clustersPerLevel.get(level);
         }
 
-        LOGGER.debug("totalCentroidsUpToLevel: {}", Arrays.toString(totalCentroidsUpToLevel));
-        LOGGER.debug("totalPagesUpToLevel: {}", Arrays.toString(totalPagesUpToLevel));
+        LOGGER.log(Level.TRACE,"totalCentroidsUpToLevel: {}", Arrays.toString(totalCentroidsUpToLevel));
+        LOGGER.log(Level.TRACE,"totalPagesUpToLevel: {}", Arrays.toString(totalPagesUpToLevel));
     }
 
     @Override
@@ -301,7 +302,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Child page ID = offset for next level + cluster index within that level
         int childPageId = totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
 
-        LOGGER.debug("Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
+        LOGGER.log(Level.TRACE,"Centroid at level {} points to cluster {} -> page {}", currentLevel, childClusterIndex,
                 childPageId);
 
         return childPageId;
@@ -349,7 +350,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         int centroidId = (Integer) fieldValues[0];
         float[] embedding = (float[]) fieldValues[1];
 
-        LOGGER.debug("Adding centroid {} at level={}, cluster={}, position={}", centroidId, currentLevel,
+        LOGGER.log(Level.TRACE,"Adding centroid {} at level={}, cluster={}, position={}", centroidId, currentLevel,
                 currentClusterInLevel, currentCentroidInCluster);
 
         try {
@@ -394,7 +395,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             // Track page ID for this level (use computed ID)
             levelPageIds.get(currentLevel).add(computedPageId);
 
-            LOGGER.debug("Created new page {} for level {}", computedPageId, currentLevel);
+            LOGGER.log(Level.TRACE,"Created new page {} for level {}", computedPageId, currentLevel);
         } catch (Exception e) {
             throw e;
         }
@@ -420,7 +421,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Create the new overflow page
         createNewPage(overflowPageId);
 
-        LOGGER.debug("Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
+        LOGGER.log(Level.TRACE,"Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
                 currentClusterInLevel);
     }
 
@@ -443,13 +444,13 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
                 currentClusterInLevel = 0;
 
                 if (currentLevel < numLevels) {
-                    LOGGER.debug("Moving to level {}", currentLevel);
+                    LOGGER.log(Level.TRACE,"Moving to level {}", currentLevel);
                     // Create first page of new level
                     createNewPage(computeCurrentClusterPageId());
                 }
             } else {
                 // Start new cluster in same level
-                LOGGER.debug("Starting cluster {} in level {}", currentClusterInLevel, currentLevel);
+                LOGGER.log(Level.TRACE,"Starting cluster {} in level {}", currentClusterInLevel, currentLevel);
                 // Create page for new cluster
                 createNewPage(computeCurrentClusterPageId());
             }
@@ -467,14 +468,14 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         finishCurrentPage();
         // Set root page ID (always page 0)
         setRootPageId(0);
-        LOGGER.debug("Set root page ID: 0");
+        LOGGER.log(Level.TRACE,"Set root page ID: 0");
 
         // Create metadata pages for leaf clusters
         createMetadataPages();
         createNewDataPage();
 
         state = loadState.BULKLOADING;
-        LOGGER.debug("VCTreeStaticStructureLoader completed successfully");
+        LOGGER.log(Level.TRACE,"VCTreeStaticStructureLoader completed successfully");
         printFinalStructure();
     }
 
@@ -497,7 +498,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             currentDirectoryFrame.initBuffer((byte) 0);
             directoryPages.add(directoryPage);
 
-            LOGGER.debug("Created directory page {} for leaf centroid {}", metadataPageId, leafCentroidId);
+            LOGGER.log(Level.TRACE,"Created directory page {} for leaf centroid {}", metadataPageId, leafCentroidId);
         }
 
         // Initialize bulk loading state - start with first leaf cluster
@@ -505,7 +506,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             entriesInCurrentDirectoryPage = 0;
             // Initialize data page state
             entriesInCurrentDataPage = 0;
-            LOGGER.debug("Initialized bulk loading with {} directory pages", directoryPages.size());
+            LOGGER.log(Level.TRACE,"Initialized bulk loading with {} directory pages", directoryPages.size());
         }
     }
 
@@ -547,7 +548,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             ((IVectorClusteringDataFrame) currentDataFrame).insertSorted(tuple);
             entriesInCurrentDataPage++;
 
-            LOGGER.debug("Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex,
+            LOGGER.log(Level.TRACE,"Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex,
                     entriesInCurrentDataPage);
         } catch (HyracksDataException | RuntimeException e) {
             // Log state for debugging - following BTreeNSMBulkLoader pattern
@@ -582,7 +583,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         // Reset data page state for new cluster
         entriesInCurrentDataPage = 0;
 
-        LOGGER.debug("Moved to leaf cluster {}", currentLeafClusterIndex);
+        LOGGER.log(Level.TRACE,"Moved to leaf cluster {}", currentLeafClusterIndex);
     }
 
     /**
@@ -610,7 +611,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         currentDataFrame.initBuffer((byte) 0);
         entriesInCurrentDataPage = 0;
 
-        LOGGER.debug("Created new data page {} for leaf cluster {}", dataPageId, currentLeafClusterIndex);
+        LOGGER.log(Level.TRACE,"Created new data page {} for leaf cluster {}", dataPageId, currentLeafClusterIndex);
     }
 
     /**
@@ -642,7 +643,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
             ((IVectorClusteringFrame) currentDirectoryFrame).insertSorted(directoryEntry);
             entriesInCurrentDirectoryPage++;
 
-            LOGGER.debug("Added directory entry for data page {} to directory page, entries: {}", currentDataPageId,
+            LOGGER.log(Level.TRACE,"Added directory entry for data page {} to directory page, entries: {}", currentDataPageId,
                     entriesInCurrentDirectoryPage);
 
         } catch (Exception e) {
@@ -666,7 +667,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         currentDataFrame.initBuffer((byte) 0);
         entriesInCurrentDataPage = 0;
 
-        LOGGER.debug("Created new data page {} for leaf cluster {}", currentDataPageId, currentLeafClusterIndex);
+        LOGGER.log(Level.TRACE,"Created new data page {} for leaf cluster {}", currentDataPageId, currentLeafClusterIndex);
     }
 
     /**
@@ -692,7 +693,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
         currentDirectoryFrame.initBuffer((byte) 0);
         entriesInCurrentDirectoryPage = 0;
 
-        LOGGER.debug("Created overflow directory page {} for leaf cluster {}", nextDirectoryPageId,
+        LOGGER.log(Level.TRACE,"Created overflow directory page {} for leaf cluster {}", nextDirectoryPageId,
                 currentLeafClusterIndex);
     }
 
@@ -707,7 +708,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
                 int spaceNeeded = tupleWriter.bytesRequired(tuple) + slotSize;
                 int spaceUsed = currentDataFrame.getBuffer().capacity() - currentDataFrame.getTotalFreeSpace();
 
-                LOGGER.error(
+                LOGGER.log(Level.TRACE,
                         "Data page state - tupleSize: {}, spaceNeeded: {}, spaceUsed: {}, entriesInCurrentDataPage: {}",
                         tupleSize, spaceNeeded, spaceUsed, entriesInCurrentDataPage);
             }
@@ -726,7 +727,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
 
     @Override
     public void abort() throws HyracksDataException {
-        LOGGER.debug("VCTreeStaticStructureLoader aborted");
+        LOGGER.log(Level.TRACE,"VCTreeStaticStructureLoader aborted");
         super.handleException();
     }
 
@@ -734,7 +735,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
      * Print structure configuration for debugging.
      */
     private void printStructureInfo() {
-        LOGGER.debug("Structure configuration:");
+        LOGGER.log(Level.TRACE,"Structure configuration:");
         for (int level = 0; level < numLevels; level++) {
             StringBuilder sb = new StringBuilder();
             sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level))
@@ -747,7 +748,7 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
                 }
             }
             sb.append("]");
-            LOGGER.debug(sb.toString());
+            LOGGER.log(Level.TRACE,sb.toString());
         }
     }
 
@@ -755,12 +756,12 @@ public class VCTreeLoader extends AbstractTreeIndexBulkLoader {
      * Print final structure for debugging.
      */
     private void printFinalStructure() {
-        LOGGER.debug("Final structure:");
+        LOGGER.log(Level.TRACE,"Final structure:");
         for (int level = 0; level < numLevels; level++) {
             List<Integer> pageIds = levelPageIds.get(level);
-            LOGGER.debug("Level {} pages: {}", level, pageIds);
+            LOGGER.log(Level.TRACE,"Level {} pages: {}", level, pageIds);
         }
-        LOGGER.debug("First leaf centroid ID: {}", getFirstLeafCentroidId());
+        LOGGER.log(Level.TRACE,"First leaf centroid ID: {}", getFirstLeafCentroidId());
     }
 
     /**
