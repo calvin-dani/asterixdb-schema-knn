@@ -42,7 +42,7 @@ import org.apache.hyracks.storage.am.vector.impls.VectorClusteringBidirectionCur
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringSearchCursor;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree.VectorClusteringTreeAccessor;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorSearchPredicate;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.ICursorInitialState;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -165,7 +165,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.numComponents = operationalComponents.size();
 
         // Extract search parameters from predicate
-        VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
+        VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
         this.K = vectorPred.getK();
         this.candidateLimit = 2 * K; // Send 2*K to PK for reranking (hardcoded; later from query/SET)
         this.nprobe = vectorPred.getNprobe();
@@ -176,10 +176,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.tupleFilter = vectorPred.getTupleFilter();
         if (this.tupleFilter != null) {
             this.referenceFilterTuple = new ReferenceFrameTupleReference();
-            LOGGER.log(Level.INFO,
+            LOGGER.log(Level.TRACE,
                     "[LSMVCTreeBlockedCursor] Tuple filter is SET - will filter INCLUDE field predicates");
         } else {
-            LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] Tuple filter is NULL - no INCLUDE field filtering");
+            LOGGER.log(Level.TRACE, "[LSMVCTreeBlockedCursor] Tuple filter is NULL - no INCLUDE field filtering");
         }
 
         // Get index access parameters
@@ -247,9 +247,9 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             // Sync visited set so DFS fallback skips clusters already returned by level-wise
             firstSearchCursor.setSharedVisitedSet(clusterStrategy.getVisitedCentroidIds());
 
-            LOGGER.log(Level.INFO,
-                    "[LSMVCTreeBlockedCursor] Initialized with queryVector dim={}, K={}, candidateLimit={}, nprobe={}, epsilon={}",
-                    queryVector.length, K, candidateLimit, nprobe, epsilon);
+            LOGGER.log(Level.TRACE,
+                    "[LSMVCTreeBlockedCursor] Initialized with queryVector dim={}, K={}, nprobe={}, epsilon={}",
+                    queryVector.length, K, nprobe, epsilon);
         }
 
         // Get first cluster from strategy (level-wise selection)
@@ -257,7 +257,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
 
         if (firstCluster == null) {
             // No clusters available - empty tree
-            LOGGER.log(Level.INFO, "[LSMVCTreeBlockedCursor] No clusters available (empty tree)");
+            LOGGER.log(Level.TRACE, "[LSMVCTreeBlockedCursor] No clusters available (empty tree)");
             return;
         }
 
@@ -269,7 +269,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             this.dqc = firstCluster.distance;
         }
 
-        LOGGER.log(Level.DEBUG,
+        LOGGER.log(Level.TRACE,
                 "[LSMVCTreeBlockedCursor] First cluster: cid={}, D(q,C)_full={}, D(q,C)_quant={}, dqc_used={}, dirPage={}, levelWise={}",
                 firstCluster.centroidId, firstCluster.distance,
                 firstCluster.hasQuantizedDistance() ? firstCluster.quantizedDistance : Double.NaN, dqc,
@@ -297,7 +297,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                 break;
             }
 
-            LOGGER.log(Level.DEBUG,
+            LOGGER.log(Level.TRACE,
                     "[LSMVCTreeBlockedCursor] Advancing to cluster: cid={}, D(q,C)_full={}, D(q,C)_quant={}, dirPage={}",
                     nextCluster.centroidId, nextCluster.distance,
                     nextCluster.hasQuantizedDistance() ? nextCluster.quantizedDistance : Double.NaN,
@@ -307,7 +307,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             clustersExplored++;
         }
 
-        LOGGER.log(Level.INFO,
+        LOGGER.log(Level.TRACE,
                 "[LSMVCTreeBlockedCursor] open() COMPLETE: {} clusters probed, topKWindow.size()={} (BEFORE consumption)",
                 clustersExplored, topKWindow.size());
     }
@@ -452,7 +452,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                 ITupleReference rightTuple = getNextValidTuple(rightCtx);
                 // Debug: log first few tuples to verify getNextValidTuple is working
                 if (iterCount < 3) {
-                    LOGGER.log(Level.INFO, "[bidir] RIGHT iter={}, tupleReturned={}, fields={}", iterCount,
+                    LOGGER.log(Level.TRACE, "[bidir] RIGHT iter={}, tupleReturned={}, fields={}", iterCount,
                             rightTuple != null, rightTuple != null ? rightTuple.getFieldCount() : -1);
                 }
                 if (rightTuple != null) {
@@ -486,7 +486,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                 ITupleReference leftTuple = getNextValidTuple(leftCtx);
                 // Debug: log first few tuples to verify getNextValidTuple is working
                 if (iterCount < 3) {
-                    LOGGER.log(Level.INFO, "[bidir] LEFT iter={}, tupleReturned={}, fields={}", iterCount,
+                    LOGGER.log(Level.TRACE, "[bidir] LEFT iter={}, tupleReturned={}, fields={}", iterCount,
                             leftTuple != null, leftTuple != null ? leftTuple.getFieldCount() : -1);
                 }
                 if (leftTuple != null) {
@@ -520,7 +520,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         }
 
         // Summary log kept for diagnostics
-        LOGGER.log(Level.DEBUG, "[LSMVCTreeBlockedCursor] Search complete: topK={}, processed={}, cancellations={}",
+        LOGGER.log(Level.TRACE, "[LSMVCTreeBlockedCursor] Search complete: topK={}, processed={}, cancellations={}",
                 topKWindow.size(), totalTuplesProcessed, antimatterCancellations);
     }
 
@@ -738,8 +738,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         addToTopKWindowCallCount++;
         // Log first few calls to see if we're even getting here
         if (addToTopKWindowCallCount <= 3) {
-            LOGGER.log(Level.INFO, "[addToTopKWindow] call #{}, dqx={}, topKSize={}, candidateLimit={}, tupleFields={}",
-                    addToTopKWindowCallCount, dqx, topKWindow.size(), candidateLimit, tuple.getFieldCount());
+            LOGGER.log(Level.TRACE, "[addToTopKWindow] call #{}, dqx={}, topKSize={}, K={}, tupleFields={}",
+                    addToTopKWindowCallCount, dqx, topKWindow.size(), K, tuple.getFieldCount());
         }
         if (topKWindow.size() < candidateLimit) {
             // Copy tuple before storing - the original buffer will be reused
@@ -855,7 +855,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     @Override
     public boolean hasNext() throws HyracksDataException {
         boolean result = !topKWindow.isEmpty();
-        LOGGER.log(Level.INFO, "[hasNext] called, topKWindow.size()={}, returning={}", topKWindow.size(), result);
+        LOGGER.log(Level.TRACE, "[hasNext] called, topKWindow.size()={}, returning={}", topKWindow.size(), result);
         return result;
     }
 
@@ -876,7 +876,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     public void close() throws HyracksDataException {
         if (isOpen) {
             // Summary logging via LOGGER (not stderr to avoid blocking)
-            LOGGER.log(Level.INFO,
+            LOGGER.log(Level.TRACE,
                     "[LSMVCTreeBlockedCursor] Summary: K={}, nprobe={}, clusters={}, processed={}, addToTopKCalls={}, cancellations={}, filtered={}, topK={}",
                     K, nprobe, clustersExplored, totalTuplesProcessed, addToTopKWindowCallCount,
                     antimatterCancellations, tuplesFilteredOut, topKWindow.size());

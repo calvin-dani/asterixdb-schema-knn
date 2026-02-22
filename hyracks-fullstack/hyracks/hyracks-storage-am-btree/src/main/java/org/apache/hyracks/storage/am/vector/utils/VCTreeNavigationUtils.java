@@ -42,6 +42,7 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -428,14 +429,14 @@ public class VCTreeNavigationUtils {
 
                     // Skip if already visited (e.g., by level-wise exploration)
                     if (state.isVisited(next.centroidId)) {
-                        LOGGER.warn(String.format("[DFS] Skipping visited centroid: cid=%d, distance=%.4f",
+                        LOGGER.log(Level.TRACE, String.format("[DFS] Skipping visited centroid: cid=%d, distance=%.4f",
                                 next.centroidId, next.distance));
                         continue;
                     }
 
                     // Mark as visited and return
                     state.markVisited(next.centroidId);
-                    LOGGER.warn(
+                    LOGGER.log(Level.TRACE,
                             String.format("[DFS] Returning centroid: cid=%d, distance=%.4f, pageId=%d, nextIndex=%d/%d",
                                     next.centroidId, next.distance, topFrame.pageId, topFrame.nextIndex,
                                     topFrame.sortedCentroids.size()));
@@ -469,7 +470,7 @@ public class VCTreeNavigationUtils {
         }
 
         // Stack exhausted, no more clusters
-        LOGGER.warn("[DFS] Stack exhausted, no more clusters available");
+        LOGGER.log(Level.TRACE, "[DFS] Stack exhausted, no more clusters available");
         return null;
     }
 
@@ -522,7 +523,7 @@ public class VCTreeNavigationUtils {
                                     first.distance, first.centroidId, first.directoryPageId);
                         }
                         // Skip visited centroid
-                        LOGGER.warn(String.format("[DFS descendToLeaf] Skipping visited centroid: cid=%d",
+                        LOGGER.log(Level.TRACE, String.format("[DFS descendToLeaf] Skipping visited centroid: cid=%d",
                                 first.centroidId));
                     }
                     // All centroids in this leaf are visited

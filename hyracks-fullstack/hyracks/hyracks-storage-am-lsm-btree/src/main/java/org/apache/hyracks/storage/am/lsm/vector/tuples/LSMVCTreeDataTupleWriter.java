@@ -85,16 +85,10 @@ public class LSMVCTreeDataTupleWriter extends TypeAwareTupleWriter implements IL
 
     @Override
     public int writeTuple(ITupleReference tuple, byte[] targetBuf, int targetOff) {
-        // Write all fields (same for matter and antimatter)
         int bytesWritten = super.writeTuple(tuple, targetBuf, targetOff);
 
-        //        System.err.println("[LSMVCTreeDataTupleWriter.writeTuple] isAntimatter=" + isAntimatter +
-        //                          ", Thread=" + Thread.currentThread().getId());
-
         if (isAntimatter) {
-            // Only difference: set antimatter bit (bit 7) in null flags byte
             BitOperationUtils.setBit(targetBuf, targetOff, ANTIMATTER_BIT_OFFSET);
-            //            System.err.println("[LSMVCTreeDataTupleWriter.writeTuple] ANTIMATTER BIT SET!");
         }
 
         return bytesWritten;
@@ -107,7 +101,6 @@ public class LSMVCTreeDataTupleWriter extends TypeAwareTupleWriter implements IL
 
     @Override
     protected int getAdjustedFieldIdx(int fieldIdx) {
-        // 1 bit for antimatter (vector index doesn't use update-aware)
         return fieldIdx + 1;
     }
 }

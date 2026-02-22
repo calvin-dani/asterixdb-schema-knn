@@ -34,6 +34,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.IndexComponentFileReferenc
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -121,7 +122,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         // Validate the single shared static structure file (one per index, not per component)
         FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
         if (!validateStaticStructureFile(staticStructureFile)) {
-            LOGGER.warn("Invalid or missing shared .staticstructure file: {}", staticStructureFile.getAbsolutePath());
+            LOGGER.log(Level.TRACE, "Invalid or missing shared .staticstructure file: {}", staticStructureFile.getAbsolutePath());
             // Clean up all VCTree files since they can't work without the static structure
             for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
                 cleanupOrphanedVCTreeFile(vcTreeFile.getFileRef());
@@ -132,7 +133,7 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         // Process each VCTree file - all share the same static structure
         for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
             String baseName = vcTreeFile.getSequence();
-            LOGGER.debug("Valid VCTree component found: {} (using shared .staticstructure)", baseName);
+            LOGGER.log(Level.TRACE, "Valid VCTree component found: {} (using shared .staticstructure)", baseName);
             validFiles.add(new LSMComponentFileReferences(vcTreeFile.getFileRef(), null, staticStructureFile));
         }
 
@@ -188,15 +189,15 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         try {
             // Check if file exists
             if (!ioManager.exists(staticStructureFile)) {
-                LOGGER.debug("Static structure file does not exist: {}", staticStructureFile.getAbsolutePath());
+                LOGGER.log(Level.TRACE, "Static structure file does not exist: {}", staticStructureFile.getAbsolutePath());
                 return false;
             }
 
-            LOGGER.debug("Static structure file is valid: {}", staticStructureFile.getAbsolutePath());
+            LOGGER.log(Level.TRACE, "Static structure file is valid: {}", staticStructureFile.getAbsolutePath());
             return true;
 
         } catch (Exception e) {
-            LOGGER.debug("Error validating static structure file {}: {}", staticStructureFile.getAbsolutePath(),
+            LOGGER.log(Level.TRACE, "Error validating static structure file {}: {}", staticStructureFile.getAbsolutePath(),
                     e.getMessage());
             return false;
         }
@@ -220,10 +221,10 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
      */
     private void cleanupOrphanedVCTreeFile(FileReference vcTreeFile) {
         try {
-            LOGGER.info("Cleaning up orphaned VCTree file: {}", vcTreeFile.getAbsolutePath());
+            LOGGER.log(Level.TRACE, "Cleaning up orphaned VCTree file: {}", vcTreeFile.getAbsolutePath());
             ioManager.delete(vcTreeFile);
         } catch (Exception e) {
-            LOGGER.warn("Failed to clean up orphaned VCTree file {}: {}", vcTreeFile.getAbsolutePath(), e.getMessage());
+            LOGGER.log(Level.TRACE, "Failed to clean up orphaned VCTree file {}: {}", vcTreeFile.getAbsolutePath(), e.getMessage());
         }
     }
 }

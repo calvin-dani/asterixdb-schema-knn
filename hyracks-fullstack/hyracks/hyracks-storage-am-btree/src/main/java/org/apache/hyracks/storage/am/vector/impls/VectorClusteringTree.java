@@ -68,6 +68,7 @@ import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -447,7 +448,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         long targetMetadataPageId = ctx.getMetadataPageId();
 
         if (targetMetadataPageId == -1) {
-            LOGGER.warn("Could not find metadata page containing originalDataPageId={}", originalDataPageId);
+            LOGGER.log(Level.TRACE, "Could not find metadata page containing originalDataPageId={}", originalDataPageId);
             return; // Could not find the metadata page
         }
 
@@ -919,7 +920,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     return -dotProduct; // Negate for minimization
                 };
             default:
-                LOGGER.warn("Unsupported distance function: {}, defaulting to euclidean", distanceMetric);
+                LOGGER.log(Level.TRACE, "Unsupported distance function: {}, defaulting to euclidean", distanceMetric);
                 return VectorUtils::calculateEuclideanDistance;
         }
     }
@@ -953,7 +954,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         int navFileId = (staticBufferCache != null) ? staticFileId : getFileId();
         int navRoot = (staticBufferCache != null) ? staticRootPage : rootPage;
 
-        LOGGER.debug("Starting findClosestClusterFromRoot with navRoot={}, isMemoryComponent={}", navRoot,
+        LOGGER.log(Level.TRACE, "Starting findClosestClusterFromRoot with navRoot={}, isMemoryComponent={}", navRoot,
                 staticBufferCache != null);
 
         ClusterSearchResult result =
@@ -1022,7 +1023,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         int navFileId = (staticBufferCache != null) ? staticFileId : getFileId();
         int navRoot = (staticBufferCache != null) ? staticRootPage : rootPage;
 
-        LOGGER.debug("Starting findCloseCentroidsLevelWiseGlobalSortFromRoot with navRoot={}", navRoot);
+        LOGGER.log(Level.TRACE, "Starting findCloseCentroidsLevelWiseFromRoot with navRoot={}", navRoot);
 
         List<ClusterSearchResult> results =
                 VCTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(navBC, navFileId, navRoot,
@@ -1117,7 +1118,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             directoryFrame.initBuffer((byte) 0);
             bufferCache.unpin(targetPage);
 
-            LOGGER.debug("Created directory page {} for leaf centroid {}", dirPageId, i);
+            LOGGER.log(Level.TRACE, "Created directory page {} for leaf centroid {}", dirPageId, i);
         }
 
         initialized = true;
@@ -1400,8 +1401,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
             // The predicate holds the tuple reference (updated per-tuple in resetSearchPredicate)
             double[] queryVector = null;
             String distanceMetric = null;
-            if (searchPred instanceof VectorPointPredicate) {
-                VectorPointPredicate vectorPred = (VectorPointPredicate) searchPred;
+            if (searchPred instanceof VectorSearchPredicate) {
+                VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
                 ITupleReference queryTuple = vectorPred.getQueryTuple();
                 int queryFieldIndex = vectorPred.getQueryFieldIndex();
 
@@ -1439,7 +1440,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                             factoryObj.getClass().getMethod("createDistanceFunction", String.class);
                     distanceFunction = (IVectorDistanceFunction) createMethod.invoke(factoryObj, distanceMetric);
                 } catch (Exception e) {
-                    LOGGER.warn("Failed to use distance function factory, falling back to local implementation: {}",
+                    LOGGER.log(Level.TRACE,
+                            "Failed to use distance function factory, falling back to local implementation: {}",
                             e.getMessage());
                     distanceFunction = convertDistanceMetricToFunction(distanceMetric);
                 }
@@ -1493,7 +1495,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     initialState.setQuantizedQueryVector(quantizer.quantize(queryVector));
                     initialState.setQuantizer(quantizer);
                 } catch (Exception e) {
-                    LOGGER.warn("Failed to create quantizer via reflection: {}", e.getMessage());
+                    LOGGER.log(Level.TRACE, "Failed to create quantizer via reflection: {}", e.getMessage());
                 }
             }
 
@@ -1506,7 +1508,7 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                         initialState.setQuantizedQueryVector(iapQuantizer.quantize(queryVector));
                         initialState.setQuantizer(iapQuantizer);
                     } catch (Exception e) {
-                        LOGGER.warn("Failed to use IAP quantizer: {}", e.getMessage());
+                        LOGGER.log(Level.TRACE, "Failed to use IAP quantizer: {}", e.getMessage());
                     }
                 }
             }

@@ -33,7 +33,6 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
-import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
@@ -55,8 +54,7 @@ import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVCTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTree;
-import org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer;
-import org.apache.hyracks.storage.am.vector.impls.VectorPointPredicate;
+import org.apache.hyracks.storage.am.vector.impls.VectorSearchPredicate;
 import org.apache.hyracks.storage.am.vector.utils.NoOpVectorQuantizer;
 import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.IIndexAccessor;
@@ -70,9 +68,6 @@ import org.apache.logging.log4j.Logger;
 public class VectorTreeTestUtils extends TreeIndexTestUtils {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final int VECTOR_DIMENSIONS = 4;
-
-    // Static initializer for creating predictable test structures
-    private static VectorClusteringTreeStaticInitializer staticInitializer;
 
     private static class TestClusterData {
         final double[] clusterCentroid;
@@ -175,7 +170,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
         // 2. Set up predicate with query tuple reference (following RTree pattern)
-        VectorPointPredicate predicate = new VectorPointPredicate();
+        VectorSearchPredicate predicate = new VectorSearchPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0); // Vector is at field 0
         predicate.setDistanceMetric("euclidean");
@@ -275,7 +270,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
         // 2. Set up predicate with query tuple reference and K value
-        VectorPointPredicate predicate = new VectorPointPredicate();
+        VectorSearchPredicate predicate = new VectorSearchPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
@@ -388,7 +383,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
         // 2. Set up predicate with query tuple reference and K value
-        VectorPointPredicate predicate = new VectorPointPredicate();
+        VectorSearchPredicate predicate = new VectorSearchPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
@@ -502,7 +497,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
         // 2. Set up predicate with query tuple reference and K value
-        VectorPointPredicate predicate = new VectorPointPredicate();
+        VectorSearchPredicate predicate = new VectorSearchPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
@@ -658,7 +653,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         queryTuple.reset(queryTupleBuilder.getFieldEndOffsets(), queryTupleBuilder.getByteArray());
 
         // Set up predicate
-        VectorPointPredicate predicate = new VectorPointPredicate();
+        VectorSearchPredicate predicate = new VectorSearchPredicate();
         predicate.setQueryTuple(queryTuple);
         predicate.setQueryFieldIndex(0);
         predicate.setDistanceMetric("euclidean");
@@ -923,155 +918,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         return true;
     }
 
-    /**
-     * Generate random vector tuples and insert them into the index
-     */
-    @SuppressWarnings("unchecked")
-    public void insertVectorTuples(AbstractVectorTreeTestContext ctx, int numTuples, Random rnd) throws Exception {
-        int fieldCount = ctx.getFieldCount();
-        int numKeyFields = ctx.getKeyFieldCount();
-        int vectorDimensions = ctx.getVectorDimensions();
-
-        for (int i = 0; i < numTuples; i++) {
-            if (LOGGER.isInfoEnabled()) {
-                if ((i + 1) % (numTuples / Math.min(10, numTuples)) == 0) {
-                    LOGGER.info("Inserting Vector Tuple " + (i + 1) + "/" + numTuples);
-                }
-            }
-
-            // Create random vector data
-            Object[] fieldValues = new Object[fieldCount];
-
-            // Set vector fields
-            for (int j = 0; j < numKeyFields; j++) {
-                if (ctx.getFieldSerdes()[j] instanceof DoubleArraySerializerDeserializer) {
-                    double[] vector = generateRandomVector(vectorDimensions, rnd);
-                    fieldValues[j] = vector;
-                } else {
-                    // String field
-                    fieldValues[j] = generateRandomString(5 + rnd.nextInt(10), rnd);
-                }
-            }
-
-            // Set metadata fields
-            for (int j = numKeyFields; j < fieldCount; j++) {
-                if (ctx.getFieldSerdes()[j] instanceof DoubleArraySerializerDeserializer) {
-                    double[] vector = generateRandomVector(vectorDimensions, rnd);
-                    fieldValues[j] = vector;
-                } else {
-                    // String metadata
-                    fieldValues[j] = "metadata_" + i + "_" + j;
-                }
-            }
-
-            // Create tuple and insert
-            TupleUtils.createTuple(ctx.getTupleBuilder(), ctx.getTuple(), ctx.getFieldSerdes(), fieldValues);
-
-            try {
-                ctx.getIndexAccessor().insert(ctx.getTuple());
-
-                // Create check tuple for validation
-                VectorCheckTuple checkTuple = new VectorCheckTuple(fieldCount, numKeyFields);
-                for (Object value : fieldValues) {
-                    if (value instanceof double[]) {
-                        checkTuple.appendField(new VectorCheckTuple.DoubleArrayWrapper((double[]) value));
-                    } else {
-                        checkTuple.appendField((Comparable) value);
-                    }
-                }
-                ctx.insertCheckTuple(checkTuple, ctx.getCheckTuples());
-
-            } catch (HyracksDataException e) {
-                // Ignore duplicate key insertions
-                if (!e.matches(ErrorCode.DUPLICATE_KEY)) {
-                    throw e;
-                }
-            }
-        }
-    }
-
-    /**
-     * Insert mixed vector and string tuples
-     */
-    public void insertMixedTuples(AbstractVectorTreeTestContext ctx, int numTuples, Random rnd) throws Exception {
-        insertVectorTuples(ctx, numTuples, rnd);
-    }
-
-    /**
-     * Insert edge case vectors (zero vectors, unit vectors, etc.)
-     */
-    @SuppressWarnings("unchecked")
-    public void insertEdgeCaseVectors(AbstractVectorTreeTestContext ctx, int numTuples, Random rnd) throws Exception {
-        int fieldCount = ctx.getFieldCount();
-        int numKeyFields = ctx.getKeyFieldCount();
-        int vectorDimensions = ctx.getVectorDimensions();
-
-        for (int i = 0; i < numTuples; i++) {
-            Object[] fieldValues = new Object[fieldCount];
-
-            // Set vector fields with edge cases
-            for (int j = 0; j < numKeyFields; j++) {
-                if (ctx.getFieldSerdes()[j] instanceof DoubleArraySerializerDeserializer) {
-                    double[] vector;
-                    int caseType = i % 4;
-                    switch (caseType) {
-                        case 0: // Zero vector
-                            vector = new double[vectorDimensions];
-                            break;
-                        case 1: // Unit vector
-                            vector = generateUnitVector(vectorDimensions, rnd);
-                            break;
-                        case 2: // Large values
-                            vector = generateLargeVector(vectorDimensions, rnd);
-                            break;
-                        default: // Small values
-                            vector = generateSmallVector(vectorDimensions, rnd);
-                            break;
-                    }
-                    fieldValues[j] = vector;
-                } else {
-                    fieldValues[j] = "edge_case_" + i + "_" + j;
-                }
-            }
-
-            // Set metadata fields
-            for (int j = numKeyFields; j < fieldCount; j++) {
-                fieldValues[j] = "edge_metadata_" + i + "_" + j;
-            }
-
-            TupleUtils.createTuple(ctx.getTupleBuilder(), ctx.getTuple(), ctx.getFieldSerdes(), fieldValues);
-
-            try {
-                ctx.getIndexAccessor().insert(ctx.getTuple());
-
-                VectorCheckTuple checkTuple = new VectorCheckTuple(fieldCount, numKeyFields);
-                for (Object value : fieldValues) {
-                    if (value instanceof double[]) {
-                        checkTuple.appendField(new VectorCheckTuple.DoubleArrayWrapper((double[]) value));
-                    } else {
-                        checkTuple.appendField((Comparable) value);
-                    }
-                }
-                ctx.insertCheckTuple(checkTuple, ctx.getCheckTuples());
-
-            } catch (HyracksDataException e) {
-                if (!e.matches(ErrorCode.DUPLICATE_KEY)) {
-                    throw e;
-                }
-            }
-        }
-    }
-
-    /**
-     * Placeholder implementations for required abstract methods from TreeIndexTestUtils
-     */
-    public void checkPointSearches(AbstractVectorTreeTestContext ctx) throws Exception {
-        if (LOGGER.isInfoEnabled()) {
-            LOGGER.info("Testing Vector Point Searches (placeholder).");
-        }
-        // TODO: Implement vector-specific point searches
-    }
-
     public void checkScan(AbstractVectorTreeTestContext ctx) throws Exception {
         if (LOGGER.isInfoEnabled()) {
             LOGGER.info("Testing Vector Scan (placeholder).");
@@ -1143,63 +989,6 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
     }
 
     /**
-     * Initialize static tree structure using VectorClusteringTreeStaticInitializer
-     * Fixed to use proper cluster tuple format for leaf frames
-     */
-    public static void initializeStaticStructure(AbstractVectorTreeTestContext ctx,
-            org.apache.hyracks.storage.am.vector.impls.VectorClusteringTreeStaticInitializer.TreeStructureConfig config)
-            throws Exception {
-
-        // Create cluster tuples for leaf frames instead of data tuples  
-        // Leaf frames expect format: <cid, centroid, metadata_pointer>
-        List<ITupleReference> clusterTuples = new ArrayList<>();
-
-        int totalTuples = config.numLeafPages * config.tuplesPerLeaf;
-        for (int i = 0; i < totalTuples; i++) {
-            int clusterId = 200 + i; // Arbitrary cluster IDs starting from 200
-            double[] centroid = generatePredictableVector(4, i); // 4D vectors
-            int metadataPointer = 1000 + i; // Arbitrary metadata pointers
-
-            clusterTuples.add(createClusterTuple(clusterId, centroid, metadataPointer));
-        }
-
-        // Initialize the static structure
-        VectorClusteringTree vectorTree = (VectorClusteringTree) ctx.getIndex();
-
-        VectorClusteringTreeStaticInitializer initializer = new VectorClusteringTreeStaticInitializer(vectorTree);
-
-        initializer.initializeStaticStructure(config, clusterTuples);
-        staticInitializer = initializer;
-    }
-
-    /**
-     * Generate predictable vector for testing
-     */
-    private static double[] generatePredictableVector(int dimensions, int index) {
-        double[] vector = new double[dimensions];
-        for (int i = 0; i < dimensions; i++) {
-            vector[i] = (float) (index + i * 0.1);
-        }
-        return vector;
-    }
-
-    /**
-     * Get the current static initializer
-     */
-    public static VectorClusteringTreeStaticInitializer getStaticInitializer() {
-        return staticInitializer;
-    }
-
-    /**
-     * Clean up static initializer
-     */
-    public static void cleanupStaticInitializer() throws Exception {
-        if (staticInitializer != null) {
-            staticInitializer = null;
-        }
-    }
-
-    /**
      * Create a tuple reference containing a vector and metadata
      * This is a utility method for creating test tuples in vector cursor tests
      */
@@ -1220,54 +1009,5 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         TupleUtils.createTuple(tupleBuilder, tuple, fieldSerdes, fieldValues);
 
         return tuple;
-    }
-
-    /**
-     * Create a cluster tuple for leaf frames with format: <cid, centroid, metadata_pointer>
-     */
-    public static ITupleReference createClusterTuple(int clusterId, double[] centroid, int metadataPointer)
-            throws HyracksDataException {
-        try {
-            // Use ArrayTupleBuilder to create proper cluster tuple
-            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(3);
-
-            // Add CID field (field 0) - using IntegerSerializerDeserializer.INSTANCE
-            tupleBuilder.addField(
-                    org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer.INSTANCE,
-                    clusterId);
-
-            // Add centroid field (field 1) - using DoubleArraySerializerDeserializer.INSTANCE
-            tupleBuilder.addField(DoubleArraySerializerDeserializer.INSTANCE, centroid);
-
-            // Add metadata pointer field (field 2)
-            tupleBuilder.addField(
-                    org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer.INSTANCE,
-                    metadataPointer);
-
-            // Create the tuple reference
-            ArrayTupleReference tupleRef = new ArrayTupleReference();
-            tupleRef.reset(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray());
-
-            return tupleRef;
-        } catch (Exception e) {
-            throw new HyracksDataException("Failed to create cluster tuple", e);
-        }
-    }
-
-    /**
-     * Initialize the default 3-level tree structure for comprehensive testing:
-     * - Root: 2 centroids  
-     * - Interior: 4 centroids (2 per root)
-     * - Leaf: 8 clusters (2 per interior)
-     * Each level uses 4D centroids
-     */
-    public static void initializeThreeLevelStructure(AbstractVectorTreeTestContext ctx) throws Exception {
-        VectorClusteringTree vectorTree = (VectorClusteringTree) ctx.getIndex();
-
-        VectorClusteringTreeStaticInitializer initializer = new VectorClusteringTreeStaticInitializer(vectorTree);
-
-        // Use the specialized 3-level structure directly
-        initializer.initializeThreeLevelStructure();
-        staticInitializer = initializer;
     }
 }
