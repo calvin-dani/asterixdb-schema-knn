@@ -97,6 +97,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     // Search parameters
     private double dqc; // D(q, C) - distance from query to centroid
     private int K;
+    /** Number of candidates to send to PK for reranking (hardcoded 2*K for now). */
+    private int candidateLimit;
     private int nprobe;
     private double epsilon;
     private double[] queryVector;
@@ -165,6 +167,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         // Extract search parameters from predicate
         VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
         this.K = vectorPred.getK();
+        this.candidateLimit = 2 * K; // Send 2*K to PK for reranking (hardcoded; later from query/SET)
         this.nprobe = vectorPred.getNprobe();
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
@@ -235,8 +238,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                 clusterStrategy.setQuantizer(quantizedQueryVector, quantizer);
             }
 
-            // Initialize cluster selection strategy with first component's tree
-            clusterStrategy.initialize(vcTree, queryVector, distanceFunction, K);
+            // Initialize cluster selection strategy with first component's tree (candidateLimit so we collect 2*K for reranking)
+            clusterStrategy.initialize(vcTree, queryVector, distanceFunction, candidateLimit);
 
             // Set first cursor for DFS fallback (like LSMVCTreeSearchCursor does)
             clusterStrategy.setFirstCursorForDFS(firstSearchCursor);
@@ -403,8 +406,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         leftCtx = new DirectionContext(Direction.LEFT,
                 new PriorityQueue<>(queueSize, new DirectionalQueueComparator(false)), leftPqes);
 
-        // Top-K window: max-heap by D(q,x)
-        topKWindow = new PriorityQueue<>(Math.max(K, 1), (a, b) -> Double.compare(b.dqx, a.dqx));
+        // Top-K window: max-heap by D(q,x); capacity = candidateLimit (2*K) for reranking
+        topKWindow = new PriorityQueue<>(Math.max(candidateLimit, 1), (a, b) -> Double.compare(b.dqx, a.dqx));
     }
 
     /**
@@ -466,7 +469,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                     // Per-tuple logging removed to avoid stderr blocking with large clusters
 
                     // Check right termination: D(x',C) > max{D(q,x)} + D(q,C)
-                    if (topKWindow.size() >= K && !rightCtx.queue.isEmpty()) {
+                    if (topKWindow.size() >= candidateLimit && !rightCtx.queue.isEmpty()) {
                         double nextDxc = rightCtx.queue.peek().dxc;
                         double threshold = topKWindow.peek().dqx + dqc;
                         if (nextDxc > threshold) {
@@ -502,7 +505,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                     // Check left termination: D(x',C) < D(q,C) - max{D(q,x)}
                     // Note: When threshold is negative (kth_dqx > dqc), left cannot terminate early
                     // and must scan all tuples. This is expected when query is far from centroid.
-                    if (topKWindow.size() >= K && !leftCtx.queue.isEmpty()) {
+                    if (topKWindow.size() >= candidateLimit && !leftCtx.queue.isEmpty()) {
                         double nextDxc = leftCtx.queue.peek().dxc;
                         double threshold = dqc - topKWindow.peek().dqx;
                         if (nextDxc < threshold) {
@@ -738,7 +741,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             LOGGER.log(Level.TRACE, "[addToTopKWindow] call #{}, dqx={}, topKSize={}, K={}, tupleFields={}",
                     addToTopKWindowCallCount, dqx, topKWindow.size(), K, tuple.getFieldCount());
         }
-        if (topKWindow.size() < K) {
+        if (topKWindow.size() < candidateLimit) {
             // Copy tuple before storing - the original buffer will be reused
             ITupleReference tupleCopy = TupleUtils.copyTuple(tuple);
             topKWindow.offer(new ResultEntry(tupleCopy, dqx));

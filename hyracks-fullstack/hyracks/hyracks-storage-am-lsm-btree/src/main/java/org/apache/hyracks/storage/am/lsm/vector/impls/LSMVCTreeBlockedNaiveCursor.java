@@ -104,6 +104,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
 
     // Search parameters
     private int K;
+    /** Number of candidates to send to PK for reranking (hardcoded 2*K for now). */
+    private int candidateLimit;
     private int nprobe;
     private double epsilon;
     private double[] queryVector;
@@ -167,6 +169,7 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
         // Extract search parameters from predicate
         VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
         this.K = vectorPred.getK();
+        this.candidateLimit = 2 * K; // Send 2*K to PK for reranking (hardcoded; later from query/SET)
         this.nprobe = vectorPred.getNprobe();
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
@@ -193,8 +196,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
         // Create cluster selection strategy (nprobe + DFS fallback)
         this.clusterStrategy = new NprobeClusterSelectionStrategy(nprobe, epsilon);
 
-        // Initialize top-K window: max-heap by D(q,x)
-        topKWindow = new PriorityQueue<>(Math.max(K, 1), (a, b) -> Double.compare(b.dqx, a.dqx));
+        // Top-K window: capacity = candidateLimit (2*K) for reranking
+        topKWindow = new PriorityQueue<>(Math.max(candidateLimit, 1), (a, b) -> Double.compare(b.dqx, a.dqx));
 
         // Initialize cluster tracking arrays
         currentClusterIndex = new int[numComponents];
@@ -233,10 +236,10 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
                         .create(new IllegalArgumentException("Query vector must be provided for naive blocked search"));
             }
 
-            // Initialize strategy with first component's tree
+            // Initialize strategy with first component's tree (candidateLimit so we collect 2*K for reranking)
             ILSMComponent firstComponent = operationalComponents.get(0);
             VectorClusteringTree vcTree = (VectorClusteringTree) firstComponent.getIndex();
-            clusterStrategy.initialize(vcTree, queryVector, distanceFunction, K);
+            clusterStrategy.initialize(vcTree, queryVector, distanceFunction, candidateLimit);
 
             // Set first cursor for DFS fallback
             clusterStrategy.setFirstCursorForDFS(firstSearchCursor);
@@ -626,7 +629,7 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
      * Add tuple to top-K window if it improves the results.
      */
     private void addToTopKWindow(ITupleReference tuple, double dqx) throws HyracksDataException {
-        if (topKWindow.size() < K) {
+        if (topKWindow.size() < candidateLimit) {
             ITupleReference tupleCopy = TupleUtils.copyTuple(tuple);
             topKWindow.offer(new ResultEntry(tupleCopy, dqx));
         } else if (dqx < topKWindow.peek().dqx) {
