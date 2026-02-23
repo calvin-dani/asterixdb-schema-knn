@@ -28,6 +28,7 @@ import static org.apache.hyracks.control.common.config.OptionTypes.INTEGER_BYTE_
 import static org.apache.hyracks.control.common.config.OptionTypes.LONG_BYTE_UNIT;
 import static org.apache.hyracks.control.common.config.OptionTypes.NONNEGATIVE_INTEGER;
 import static org.apache.hyracks.control.common.config.OptionTypes.POSITIVE_INTEGER;
+import static org.apache.hyracks.control.common.config.OptionTypes.POSITIVE_INTEGER_BYTE_UNIT;
 import static org.apache.hyracks.control.common.config.OptionTypes.STRING;
 import static org.apache.hyracks.control.common.config.OptionTypes.getRangedIntegerType;
 import static org.apache.hyracks.util.StorageUtil.StorageUnit.KILOBYTE;
@@ -67,7 +68,7 @@ public class CompilerProperties extends AbstractProperties {
                 StorageUtil.getIntSizeInBytes(8, KILOBYTE),
                 "The memory budget (in bytes) for an external scan operator instance in a partition"),
         COMPILER_FRAMESIZE(
-                INTEGER_BYTE_UNIT,
+                POSITIVE_INTEGER_BYTE_UNIT,
                 StorageUtil.getIntSizeInBytes(32, KILOBYTE),
                 "The page size (in bytes) for computation"),
         COMPILER_MIN_SORTMEMORY(
@@ -102,7 +103,7 @@ public class CompilerProperties extends AbstractProperties {
                 POSITIVE_INTEGER,
                 AlgebricksConfig.SORT_SAMPLES_DEFAULT,
                 "The number of samples which parallel sorting should take from each partition"),
-        COMPILER_INDEXONLY(BOOLEAN, AlgebricksConfig.INDEX_ONLY_DEFAULT, "Enabling/disabling index-only plans"),
+        COMPILER_INDEX_COVERING(BOOLEAN, AlgebricksConfig.INDEX_ONLY_DEFAULT, "Enabling/disabling index-only plans"),
         COMPILER_INTERNAL_SANITYCHECK(
                 BOOLEAN,
                 AlgebricksConfig.SANITYCHECK_DEFAULT,
@@ -196,6 +197,8 @@ public class CompilerProperties extends AbstractProperties {
         }
     }
 
+    public static final String COMPILER_FRAMESIZE_KEY = Option.COMPILER_FRAMESIZE.ini();
+
     public static final String COMPILER_SORTMEMORY_KEY = Option.COMPILER_SORTMEMORY.ini();
 
     public static final String COMPILER_GROUPMEMORY_KEY = Option.COMPILER_GROUPMEMORY.ini();
@@ -212,7 +215,7 @@ public class CompilerProperties extends AbstractProperties {
 
     public static final String COMPILER_SORT_SAMPLES_KEY = Option.COMPILER_SORT_SAMPLES.ini();
 
-    public static final String COMPILER_INDEXONLY_KEY = Option.COMPILER_INDEXONLY.ini();
+    public static final String COMPILER_INDEXONLY_KEY = Option.COMPILER_INDEX_COVERING.ini();
 
     public static final String COMPILER_INTERNAL_SANITYCHECK_KEY = Option.COMPILER_INTERNAL_SANITYCHECK.ini();
 
@@ -311,7 +314,7 @@ public class CompilerProperties extends AbstractProperties {
     }
 
     public boolean isIndexOnly() {
-        return accessor.getBoolean(Option.COMPILER_INDEXONLY);
+        return accessor.getBoolean(Option.COMPILER_INDEX_COVERING);
     }
 
     public boolean isSanityCheck() {

@@ -842,6 +842,8 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("win-mark-first-missing-impl", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier WIN_MARK_FIRST_NULL_IMPL =
             FunctionConstants.newAsterix("win-mark-first-null-impl", FunctionIdentifier.VARARGS);
+    public static final FunctionIdentifier WIN_MARK_VALID_TUPLES_IMPL =
+            FunctionConstants.newAsterix("win-mark-valid-tuple-impl", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier WIN_PARTITION_LENGTH_IMPL =
             FunctionConstants.newAsterix("win-partition-length-impl", 0);
 
@@ -1926,6 +1928,7 @@ public class BuiltinFunctions {
         addFunction(PERCENT_RANK_IMPL, ADoubleTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_MARK_FIRST_MISSING_IMPL, ABooleanTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_MARK_FIRST_NULL_IMPL, ABooleanTypeComputer.INSTANCE, false);
+        addPrivateFunction(WIN_MARK_VALID_TUPLES_IMPL, ABooleanTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_PARTITION_LENGTH_IMPL, AInt64TypeComputer.INSTANCE, false);
 
         // Similarity functions
@@ -3003,6 +3006,7 @@ public class BuiltinFunctions {
         addWindowFunction(ROW_NUMBER, ROW_NUMBER_IMPL, NO_FRAME_CLAUSE);
         addWindowFunction(null, WIN_MARK_FIRST_MISSING_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
         addWindowFunction(null, WIN_MARK_FIRST_NULL_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
+        addWindowFunction(null, WIN_MARK_VALID_TUPLES_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
         addWindowFunction(null, WIN_PARTITION_LENGTH_IMPL, NO_FRAME_CLAUSE, MATERIALIZE_PARTITION);
     }
 
