@@ -88,7 +88,7 @@ public class SerializableDistanceFunctions {
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.dot(a, b);
+            return -VectorDistanceArrCalculation.dot(a, b);
         }
     }
 }

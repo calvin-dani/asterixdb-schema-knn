@@ -540,13 +540,14 @@ public final class OptimizedScalarQuantizationSampleFile {
      * quantized data.
      * 
      * <p>
-     * Example: quantized [71, 9, 88, 63] → dequantized [71.0, 9.0, 88.0, 63.0]
-     * 
+     * Example: quantized [71, 9, 88, 63] with alpha=2.0, minQuantile=-1.0
+     *          → dequantized [34.5, 3.5, 43.0, 30.5]
+     *
      * @param quantizedBytes The quantized vector as byte[], short[], or int[]
-     * @param params         Quantization parameters (used to determine expected
-     *                       array length and data type)
-     * @return double[] array where each element is the quantized integer value as a
-     *         double
+     * @param params         Quantization parameters (alpha and minQuantile used for
+     *                       inverse mapping; bits and vectorDimensions for validation)
+     * @return double[] array where each element approximates the original value via
+     *         inverse quantization: value = quantizedInt / alpha + minQuantile
      * @throws IllegalArgumentException if inputs are null or array length doesn't
      *                                  match params
      */
@@ -574,7 +575,7 @@ public final class OptimizedScalarQuantizationSampleFile {
                 throw new IllegalArgumentException("Array length mismatch: expected " + dims + ", got " + bytes.length);
             }
             for (int i = 0; i < dims; i++) {
-                result[i] = (double) (bytes[i] & 0xFF); // unsigned byte to double
+                result[i] = ((double) (bytes[i] & 0xFF)) / params.alpha + params.minQuantile;
             }
         } else if (bits <= 16) {
             // short[] - treat as unsigned
@@ -588,7 +589,7 @@ public final class OptimizedScalarQuantizationSampleFile {
                         "Array length mismatch: expected " + dims + ", got " + shorts.length);
             }
             for (int i = 0; i < dims; i++) {
-                result[i] = (double) (shorts[i] & 0xFFFF); // unsigned short to double
+                result[i] = ((double) (shorts[i] & 0xFFFF)) / params.alpha + params.minQuantile;
             }
         } else if (bits <= 32) {
             // int[] - treat as unsigned
@@ -601,7 +602,7 @@ public final class OptimizedScalarQuantizationSampleFile {
                 throw new IllegalArgumentException("Array length mismatch: expected " + dims + ", got " + ints.length);
             }
             for (int i = 0; i < dims; i++) {
-                result[i] = (double) (ints[i] & 0xFFFFFFFFL); // unsigned int to double
+                result[i] = ((double) (ints[i] & 0xFFFFFFFFL)) / params.alpha + params.minQuantile;
             }
         } else {
             throw new IllegalArgumentException("bits must be <= 32, got " + bits);
