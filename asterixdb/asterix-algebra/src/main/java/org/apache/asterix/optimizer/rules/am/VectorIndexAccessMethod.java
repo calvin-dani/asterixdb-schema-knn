@@ -43,8 +43,6 @@ import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.IAType;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableObject;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.core.algebra.base.ILogicalExpression;
@@ -68,6 +66,8 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperat
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOperator;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorManipulationUtil;
 import org.apache.hyracks.algebricks.rewriter.rules.InlineVariablesRule;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Access method for vector indexes.
@@ -129,8 +129,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 return false;
             }
         } else {
-            // ann_distance(vectorField, queryVector, metric [, nprobe, epsilon, searchApproach])
-            if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 6) {
+            // ann_distance(vectorField, queryVector, metric [, nprobe, epsilon])
+            if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 5) {
                 return false;
             }
         }
@@ -294,17 +294,13 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(0.15)))));
         }
 
-        // Add search_approach variable (arg 5 for ANN_DISTANCE, default 0 = naive)
-        // For VECTOR_DISTANCE_ARRAY: searchApproach = 4 (index-driven KNN with sequential scan)
-        // SQL++ parser creates AInt64 for integer literals; convert to AInt32 for IntegerPointable at runtime
+        // Add search_approach variable (always 0 for ann_distance, 4 for vector_distance)
+        // Cursor selection is controlled by SET compiler.vector.prunedsearch, not by query args
         LogicalVariable searchApproachVar = context.newVar();
         queryVarList.add(searchApproachVar);
         if (isVectorDistance) {
             // Index-driven KNN: sequential scan of all clusters with bidirectional pruning
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(4)))));
-        } else if (annDistanceExpr.getArguments().size() > 5) {
-            ILogicalExpression searchApproachExpr = annDistanceExpr.getArguments().get(5).getValue().cloneExpression();
-            queryExprList.add(new MutableObject<>(ensureInt32Constant(searchApproachExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(0)))));
         }
@@ -826,8 +822,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                         String[] fieldNames = subTree.getRecordType().getFieldNames();
                         if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
                             String fieldName = fieldNames[fieldIndex];
-                            LOGGER.trace("Resolved field-access-by-index in filter: index {} -> field '{}'",
-                                    fieldIndex, fieldName);
+                            LOGGER.trace("Resolved field-access-by-index in filter: index {} -> field '{}'", fieldIndex,
+                                    fieldName);
                             return fieldName;
                         }
                     }

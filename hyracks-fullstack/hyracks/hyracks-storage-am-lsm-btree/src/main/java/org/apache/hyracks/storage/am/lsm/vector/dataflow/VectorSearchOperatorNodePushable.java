@@ -194,13 +194,6 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 vectorPred.setEpsilon(epsilon);
             }
 
-            // Extract searchApproach from field 5 (int, +1 to skip type tag)
-            if (queryFields.length > 5) {
-                int searchApproach = IntegerPointable.getInteger(queryParamsTuple.getFieldData(5),
-                        queryParamsTuple.getFieldStart(5) + 1);
-                vectorPred.setSearchApproach(searchApproach);
-            }
-
             // Set tuple filter for INCLUDE field predicates (e.g., year > 2000)
             // This filter is applied at cursor level for proper K counting
             if (tupleFilter != null) {

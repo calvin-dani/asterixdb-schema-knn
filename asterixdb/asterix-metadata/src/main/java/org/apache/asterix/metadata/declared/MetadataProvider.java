@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 
 import org.apache.asterix.common.api.INamespaceResolver;
 import org.apache.asterix.common.cluster.PartitioningProperties;
+import org.apache.asterix.common.config.CompilerProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
 import org.apache.asterix.common.config.StorageProperties;
@@ -181,8 +182,12 @@ import org.apache.hyracks.storage.am.rtree.dataflow.RTreeSearchOperatorDescripto
 import org.apache.hyracks.storage.am.vector.utils.VCTreeDataTupleConstants;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class MetadataProvider implements IMetadataProvider<DataSourceId, String> {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     /** Key for storing computed QuantizationConstants in the config map */
     public static final String KEY_QUANTIZATION_CONSTANTS = "quantization.constants";
@@ -842,10 +847,23 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // Respect user-specified searchApproach (1, 2, 3, or 4).
         // Only auto-select when searchApproach == 0 (default / not specified).
         if (searchApproach == 0) {
-            if (isQuantized) {
-                searchApproach = 3; // naive blocked (LSMVCTreeBlockedCursorNaive)
+            // Check session-level SET property for pruned search
+            String pruned = (String) getConfig().get(CompilerProperties.COMPILER_VECTOR_PRUNEDSEARCH_KEY);
+            if ("true".equalsIgnoreCase(pruned)) {
+                if (isQuantized) {
+                    searchApproach = 1; // Bidirectional pruning (LSMVCTreeBlockedCursor)
+                } else {
+                    LOGGER.warn(
+                            "SET compiler.vector.prunedsearch is enabled but index '{}' is non-quantized. "
+                                    + "Pruned search requires quantized embeddings in data tuples. Ignoring.",
+                            indexName);
+                }
             }
-            // Non-quantized: keep 0 (naive streaming)
+            // Auto-selection fallback (only if still 0)
+            if (searchApproach == 0 && isQuantized) {
+                searchApproach = 3; // Default for quantized: naive blocked
+            }
+            // Non-quantized without SET: keep 0 (naive streaming)
         }
 
         // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples

@@ -833,6 +833,22 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     /**
+     * Resolve the directory (metadata) page ID for a cluster in this component.
+     * The ClusterSearchResult's directoryPageId may come from a different LSM component
+     * (e.g., level-wise computation navigates component 0's tree). This method resolves
+     * the correct directoryPageId for THIS component.
+     *
+     * Used by LSMVCTreeBlockedCursor to resolve per-component directory page IDs
+     * before opening bidirectional cursors.
+     *
+     * @param cluster the cluster search result (may have directoryPageId from another component)
+     * @return the resolved directoryPageId for this component
+     */
+    public long resolveDirectoryPageId(ClusterSearchResult cluster) throws HyracksDataException {
+        return getMetadataPageIdFromCluster(cluster);
+    }
+
+    /**
      * Get metadata page ID from cluster search result.
      *
      * For memory components: uses centroidDirPageMap for O(1) lookup (the map

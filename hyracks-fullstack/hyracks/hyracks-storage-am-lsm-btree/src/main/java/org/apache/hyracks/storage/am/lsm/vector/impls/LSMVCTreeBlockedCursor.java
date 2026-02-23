@@ -120,6 +120,13 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     // First component's search cursor (for query vector/distance function extraction and DFS fallback)
     private VectorClusteringSearchCursor firstSearchCursor;
 
+    // Per-component resolver cursors for directory page resolution.
+    // Each LSM component may have different directory page IDs for the same cluster
+    // (memory components use centroidDirPageMap, disk components have their own leaf page layout).
+    // The cluster strategy navigates only component 0's tree, so its directoryPageId may be
+    // invalid for other components. These cursors resolve the correct local directoryPageId.
+    private VectorClusteringSearchCursor[] resolverCursors;
+
     // Cursor state
     private boolean isOpen;
     private ResultEntry currentResult;
@@ -203,15 +210,19 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         // Initialize priority queues
         initializePriorityQueues();
 
-        // Create accessors and bidirectional cursors for each component
+        // Create accessors, bidirectional cursors, and resolver cursors for each component
         vcbCursors = new VectorClusteringBidirectionCursor[numComponents];
         vcTreeAccessors = new VectorClusteringTreeAccessor[numComponents];
+        resolverCursors = new VectorClusteringSearchCursor[numComponents];
 
         for (int i = 0; i < numComponents; i++) {
             ILSMComponent component = operationalComponents.get(i);
             VectorClusteringTree vcTree = (VectorClusteringTree) component.getIndex();
             vcTreeAccessors[i] = (VectorClusteringTreeAccessor) vcTree.createAccessor(iap);
             vcbCursors[i] = (VectorClusteringBidirectionCursor) vcTreeAccessors[i].createBidirectionCursor();
+            // Create resolver cursor for per-component directory page resolution.
+            // NOT opened for search — only used for resolveDirectoryPageId().
+            resolverCursors[i] = (VectorClusteringSearchCursor) vcTreeAccessors[i].createSearchCursor(false);
         }
 
         // Following LSMVCTreeSearchCursor pattern:
@@ -340,8 +351,13 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
 
         // Open all VCB cursors for this cluster.
         // Use full-precision distance for pivot positioning (data pages sorted by full-precision D(x,C)).
+        // IMPORTANT: Resolve directoryPageId per-component because each LSM component may have
+        // different directory page IDs (memory components use centroidDirPageMap, disk components
+        // have their own leaf page layout). The cluster's directoryPageId comes from the strategy
+        // which navigated only component 0's tree.
         for (int i = 0; i < numComponents; i++) {
-            vcbCursors[i].openCluster(cluster.directoryPageId, cluster.distance);
+            long resolvedDirPageId = resolverCursors[i].resolveDirectoryPageId(cluster);
+            vcbCursors[i].openCluster(resolvedDirPageId, cluster.distance);
         }
 
         // Seed the priority queues
@@ -377,8 +393,10 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
 
         // Open all VCB cursors for this cluster (same cluster for all components).
         // Use full-precision distance for pivot positioning (data pages sorted by full-precision D(x,C)).
+        // Resolve directoryPageId per-component (same reason as openClusterAndSearch).
         for (int i = 0; i < numComponents; i++) {
-            vcbCursors[i].openCluster(cluster.directoryPageId, cluster.distance);
+            long resolvedDirPageId = resolverCursors[i].resolveDirectoryPageId(cluster);
+            vcbCursors[i].openCluster(resolvedDirPageId, cluster.distance);
         }
 
         // Seed the priority queues
@@ -882,6 +900,14 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
             for (int i = 0; i < numComponents; i++) {
                 if (vcbCursors[i] != null) {
                     vcbCursors[i].close();
+                }
+            }
+            // Close resolver cursors (not opened for search, but may hold lazy-built local maps)
+            if (resolverCursors != null) {
+                for (int i = 0; i < numComponents; i++) {
+                    if (resolverCursors[i] != null) {
+                        resolverCursors[i].close();
+                    }
                 }
             }
             // Close first search cursor (used for query vector/distance function extraction and DFS fallback)
