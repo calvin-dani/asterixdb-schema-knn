@@ -192,7 +192,7 @@ public class BTreeAccessMethod implements IAccessMethod {
 
         if (dataset.getDatasetType() == DatasetType.INTERNAL && !chosenIndex.isPrimaryIndex()) {
             AccessMethodUtils.indexOnlyPlanCheck(afterSelectRefs, selectRef, subTree, null, chosenIndex, analysisCtx,
-                    context, indexOnlyPlanInfo);
+                    context, indexOnlyPlanInfo, false);
             isIndexOnlyPlan = indexOnlyPlanInfo.getFirst();
         }
 
@@ -294,7 +294,7 @@ public class BTreeAccessMethod implements IAccessMethod {
         }
 
         boolean canContinue = AccessMethodUtils.setIndexOnlyPlanInfo(afterJoinRefs, joinRef, probeSubTree, indexSubTree,
-                chosenIndex, analysisCtx, context, funcExpr, FUNC_IDENTIFIERS);
+                chosenIndex, analysisCtx, context, funcExpr, FUNC_IDENTIFIERS, true);
         if (!canContinue) {
             return false;
         }
@@ -314,8 +314,7 @@ public class BTreeAccessMethod implements IAccessMethod {
 
     /**
      * Creates an index utilization plan optimization - in case of an index-only select plan:
-     * union < project < select < assign? < unnest-map(pidx) < split < unnest-map(sidx) < assign? < datasource-scan
-     * ..... < project < ................................... <
+     *  < project < select < distint < sort < unnest-map(sidx) < assign? < datasource-scan
      */
     @Override
     public ILogicalOperator createIndexSearchPlan(List<Mutable<ILogicalOperator>> afterTopOpRefs,
@@ -358,13 +357,6 @@ public class BTreeAccessMethod implements IAccessMethod {
         // Whether the given plan is an index-only plan or not.
         Quadruple<Boolean, Boolean, Boolean, Boolean> indexOnlyPlanInfo = analysisCtx.getIndexOnlyPlanInfo();
         boolean isIndexOnlyPlan = indexOnlyPlanInfo.getFirst();
-
-        // We only apply index-only plan for an internal dataset.
-        boolean generateInstantTrylockResultFromIndexSearch = false;
-        if (dataset.getDatasetType() == DatasetType.INTERNAL && isIndexOnlyPlan) {
-            generateInstantTrylockResultFromIndexSearch = true;
-        }
-
         // List of function expressions that will be replaced by the secondary-index search.
         // These func exprs will be removed from the select condition at the very end of this method.
         Set<ILogicalExpression> replacedFuncExprs = new HashSet<>();
@@ -599,12 +591,26 @@ public class BTreeAccessMethod implements IAccessMethod {
             }
         }
 
-        // determine cases when prefix search could be applied
-        for (int i = 1; i < lowKeyExprs.length; i++) {
-            if (lowKeyLimits[0] == null && lowKeyLimits[i] != null || lowKeyLimits[0] != null && lowKeyLimits[i] == null
-                    || highKeyLimits[0] == null && highKeyLimits[i] != null
-                    || highKeyLimits[0] != null && highKeyLimits[i] == null) {
-                numSecondaryKeys = i;
+        int numLowKeys = 0;
+        for (LimitType limitType : lowKeyLimits) {
+            if (limitType != null) {
+                numLowKeys++;
+            } else {
+                break;
+            }
+        }
+
+        int numHighKeys = 0;
+        for (LimitType limitType : highKeyLimits) {
+            if (limitType != null) {
+                numHighKeys++;
+            } else {
+                break;
+            }
+        }
+
+        for (int i = 0; i < lowKeyExprs.length; i++) {
+            if (lowKeyLimits[i] != null && i >= numLowKeys || highKeyLimits[i] != null && i >= numHighKeys) {
                 primaryIndexPostProccessingIsNeeded = true;
                 break;
             }
@@ -629,11 +635,12 @@ public class BTreeAccessMethod implements IAccessMethod {
         // List of variables and expressions for the assign.
         ArrayList<LogicalVariable> assignKeyVarList = new ArrayList<>();
         ArrayList<Mutable<ILogicalExpression>> assignKeyExprList = new ArrayList<>();
-        int numLowKeys = createKeyVarsAndExprs(numSecondaryKeys, lowKeyLimits, lowKeyExprs, assignKeyVarList,
-                assignKeyExprList, keyVarList, context, lowKeyConstAtRuntimeExpressions, lowKeyConstAtRuntimeExprVars);
-        int numHighKeys = createKeyVarsAndExprs(numSecondaryKeys, highKeyLimits, highKeyExprs, assignKeyVarList,
-                assignKeyExprList, keyVarList, context, highKeyConstantAtRuntimeExpressions,
-                highKeyConstAtRuntimeExprVars);
+
+        numLowKeys = createKeyVarsAndExprs(numLowKeys, lowKeyLimits, lowKeyExprs, assignKeyVarList, assignKeyExprList,
+                keyVarList, context, lowKeyConstAtRuntimeExpressions, lowKeyConstAtRuntimeExprVars);
+        numHighKeys =
+                createKeyVarsAndExprs(numHighKeys, highKeyLimits, highKeyExprs, assignKeyVarList, assignKeyExprList,
+                        keyVarList, context, highKeyConstantAtRuntimeExpressions, highKeyConstAtRuntimeExprVars);
 
         BTreeJobGenParams jobGenParams =
                 new BTreeJobGenParams(chosenIndex.getIndexName(), IndexType.BTREE, dataset.getDatabaseName(),
@@ -687,10 +694,9 @@ public class BTreeAccessMethod implements IAccessMethod {
         }
 
         // Creates an unnest-map for the secondary index search.
-        // The result: SK, PK, [Optional - the result of an instantTrylock on PK]
-        ILogicalOperator secondaryIndexUnnestOp = AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType,
-                metaRecordType, chosenIndex, inputOp, jobGenParams, context, retainInput, retainMissing,
-                generateInstantTrylockResultFromIndexSearch, leftOuterMissingValue);
+        ILogicalOperator secondaryIndexUnnestOp =
+                AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType, metaRecordType, chosenIndex,
+                        inputOp, jobGenParams, context, retainInput, retainMissing, leftOuterMissingValue);
 
         // Generate the rest of the upstream plan which feeds the search results into the primary index.
         ILogicalOperator indexSearchOp = null;
