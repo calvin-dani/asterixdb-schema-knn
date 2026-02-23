@@ -122,7 +122,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         // Validate the single shared static structure file (one per index, not per component)
         FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
         if (!validateStaticStructureFile(staticStructureFile)) {
-            LOGGER.log(Level.TRACE, "Invalid or missing shared .staticstructure file: {}", staticStructureFile.getAbsolutePath());
+            LOGGER.log(Level.TRACE, "Invalid or missing shared .staticstructure file: {}",
+                    staticStructureFile.getAbsolutePath());
             // Clean up all VCTree files since they can't work without the static structure
             for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
                 cleanupOrphanedVCTreeFile(vcTreeFile.getFileRef());
@@ -189,7 +190,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
         try {
             // Check if file exists
             if (!ioManager.exists(staticStructureFile)) {
-                LOGGER.log(Level.TRACE, "Static structure file does not exist: {}", staticStructureFile.getAbsolutePath());
+                LOGGER.log(Level.TRACE, "Static structure file does not exist: {}",
+                        staticStructureFile.getAbsolutePath());
                 return false;
             }
 
@@ -197,8 +199,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
             return true;
 
         } catch (Exception e) {
-            LOGGER.log(Level.TRACE, "Error validating static structure file {}: {}", staticStructureFile.getAbsolutePath(),
-                    e.getMessage());
+            LOGGER.log(Level.TRACE, "Error validating static structure file {}: {}",
+                    staticStructureFile.getAbsolutePath(), e.getMessage());
             return false;
         }
     }
@@ -224,7 +226,8 @@ public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
             LOGGER.log(Level.TRACE, "Cleaning up orphaned VCTree file: {}", vcTreeFile.getAbsolutePath());
             ioManager.delete(vcTreeFile);
         } catch (Exception e) {
-            LOGGER.log(Level.TRACE, "Failed to clean up orphaned VCTree file {}: {}", vcTreeFile.getAbsolutePath(), e.getMessage());
+            LOGGER.log(Level.TRACE, "Failed to clean up orphaned VCTree file {}: {}", vcTreeFile.getAbsolutePath(),
+                    e.getMessage());
         }
     }
 }

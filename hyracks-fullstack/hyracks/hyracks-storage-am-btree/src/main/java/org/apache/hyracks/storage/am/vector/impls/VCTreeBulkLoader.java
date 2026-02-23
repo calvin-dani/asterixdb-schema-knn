@@ -151,7 +151,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
             clusterFirstDirPageId[i] = -1;
         }
 
-        LOGGER.log(Level.TRACE, "VCTreeBulkLoader initialized: numLeafCentroid={}, firstLeafCentroidId={}, numStaticPages={}",
+        LOGGER.log(Level.TRACE,
+                "VCTreeBulkLoader initialized: numLeafCentroid={}, firstLeafCentroidId={}, numStaticPages={}",
                 numLeafCentroid, firstLeafCentroidId, numStaticPages);
     }
 
@@ -260,7 +261,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
         currentDataFrame.initBuffer((byte) 0);
         entriesInCurrentDataPage = 0;
 
-        LOGGER.log(Level.TRACE, "Created new data page {} for leaf cluster {}", currentDataPageId, currentLeafClusterIndex);
+        LOGGER.log(Level.TRACE, "Created new data page {} for leaf cluster {}", currentDataPageId,
+                currentLeafClusterIndex);
     }
 
     /**
@@ -300,7 +302,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
             currentDataFrame.initBuffer((byte) 0);
             entriesInCurrentDataPage = 0;
 
-            LOGGER.log(Level.TRACE, "Created new data page {} for leaf cluster {}", currentDataPageId, currentLeafClusterIndex);
+            LOGGER.log(Level.TRACE, "Created new data page {} for leaf cluster {}", currentDataPageId,
+                    currentLeafClusterIndex);
         }
 
         // Add directory entry for the written data page
@@ -326,13 +329,14 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
                 pendingDirectoryPages.add(currentDirectoryPage);
                 createDirectoryPage();
 
-                LOGGER.log(Level.TRACE, "Directory page full for cluster {}, created overflow", currentLeafClusterIndex);
+                LOGGER.log(Level.TRACE, "Directory page full for cluster {}, created overflow",
+                        currentLeafClusterIndex);
             }
 
             ((IVectorClusteringFrame) currentDirectoryFrame).insertSorted(directoryEntry);
 
-            LOGGER.log(Level.TRACE, "Added directory entry for data page {} (maxDist={}) to directory, cluster {}", dataPageId,
-                    maxDistance, currentLeafClusterIndex);
+            LOGGER.log(Level.TRACE, "Added directory entry for data page {} (maxDist={}) to directory, cluster {}",
+                    dataPageId, maxDistance, currentLeafClusterIndex);
 
         } catch (HyracksDataException e) {
             throw e;
@@ -392,8 +396,8 @@ public class VCTreeBulkLoader extends PageWriteFailureCallback implements IIndex
         clusterFirstDirPageId[currentLeafClusterIndex] = dirPageIds[0];
         pendingDirectoryPages.clear();
 
-        LOGGER.log(Level.TRACE, "Finalized directory for cluster {}: {} pages, first dir page = {}", currentLeafClusterIndex,
-                numDirPages, dirPageIds[0]);
+        LOGGER.log(Level.TRACE, "Finalized directory for cluster {}: {} pages, first dir page = {}",
+                currentLeafClusterIndex, numDirPages, dirPageIds[0]);
     }
 
     private void logDataPageState(ITupleReference tuple, Exception e) {

@@ -167,7 +167,6 @@ public class LSMVCTreeUtils {
         LSMVCTreeDataTupleWriterFactory deleteDataTupleWriterFactory =
                 new LSMVCTreeDataTupleWriterFactory(dataTypeTraits, true, nullTypeTraits, nullIntrospector);
 
-
         ITreeIndexTupleWriter interiorTupleWriter = interiorTupleWriterFactory.createTupleWriter();
         ITreeIndexTupleWriter leafTupleWriter = leafTupleWriterFactory.createTupleWriter();
         ITreeIndexTupleWriter metadataTupleWriter = metadataTupleWriterFactory.createTupleWriter();

@@ -194,13 +194,6 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 vectorPred.setEpsilon(epsilon);
             }
 
-            // Extract searchApproach from field 5 (int, +1 to skip type tag)
-            if (queryFields.length > 5) {
-                int searchApproach = IntegerPointable.getInteger(queryParamsTuple.getFieldData(5),
-                        queryParamsTuple.getFieldStart(5) + 1);
-                vectorPred.setSearchApproach(searchApproach);
-            }
-
             // Set tuple filter for INCLUDE field predicates (e.g., year > 2000)
             // This filter is applied at cursor level for proper K counting
             if (tupleFilter != null) {
@@ -229,8 +222,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             }
         } catch (Exception e) {
             // If extraction fails, default to euclidean
-            LOGGER.trace("Failed to extract distance metric from tuple, defaulting to euclidean: {}",
-                    e.getMessage());
+            LOGGER.trace("Failed to extract distance metric from tuple, defaulting to euclidean: {}", e.getMessage());
         }
         return "euclidean"; // Default fallback
     }
@@ -272,9 +264,14 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // 1 = optimized bidirectional (LSMVCTreeBlockedCursor)
         // 2 = optimized bidirectional with inline filtering (LSMVCTreeBlockedCursor + ITupleFilter)
         // 3 = naive blocked (LSMVCTreeBlockedCursorNaive - top-K window, quantized distance, no pruning)
-        if (searchApproach == 1 || searchApproach == 2) {
+        // 4 = index-driven KNN (LSMVCTreeBlockedCursor + SequentialClusterSelectionStrategy)
+        if (searchApproach == 1 || searchApproach == 2 || searchApproach == 4) {
             iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
-        } else if (searchApproach == 3) {
+        }
+        if (searchApproach == 4) {
+            iap.getParameters().put(HyracksConstants.USE_SEQUENTIAL_SCAN, Boolean.TRUE);
+        }
+        if (searchApproach == 3) {
             iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
         }
     }

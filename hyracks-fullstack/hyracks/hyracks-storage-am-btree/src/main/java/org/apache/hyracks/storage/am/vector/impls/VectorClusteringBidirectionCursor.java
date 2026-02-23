@@ -42,12 +42,9 @@ import org.apache.hyracks.storage.common.file.BufferedFileHandle;
  * - Right direction: iterates tuples with D(x, C) >= D(q, C) in ascending order
  * - Left direction: iterates tuples with D(x, C) < D(q, C) in descending order
  *
- * Key design: Instead of pre-collecting all data page IDs, we store only directory page IDs
- * encountered during pivot finding. This minimizes memory usage:
- * - leftDirPageStack: Stack of directory page IDs to the left of pivot (accumulated naturally)
- * - currentDirPage: The directory page containing the pivot (kept pinned)
- * - Right navigation: Follow nextPage pointers in directory pages
- * - Left navigation: Pop from stack to get previous directory page
+ * Key design: Left and right directions each maintain their own directory page state so they
+ * can be on different directory pages simultaneously. During pivot finding, directory page IDs
+ * before the pivot page are accumulated in leftDirPageStack for left-ward navigation.
  *
  * Used by LSMVCTreeBlockedCursor for optimized search with triangle inequality pruning.
  */
@@ -59,15 +56,22 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
     private ITreeIndexFrameFactory metadataFrameFactory;
     private ITreeIndexFrameFactory dataFrameFactory;
 
-    // Directory page navigation
-    private Deque<Long> leftDirPageStack; // Stack of directory page IDs to the left
-    private long currentDirPageId;
-    private ICachedPage currentDirPage;
-    private IVectorClusteringMetadataFrame currentDirFrame;
+    // Left direction: stack of directory page IDs before the pivot page
+    private Deque<Long> leftDirPageStack;
 
-    // Position within current directory page
-    private int rightEntryIndex; // Entry index for right cursor
-    private int leftEntryIndex; // Entry index for left cursor
+    // Right directory page state (independent from left)
+    private long rightDirPageId;
+    private ICachedPage rightDirPage;
+    private IVectorClusteringMetadataFrame rightDirFrame;
+
+    // Left directory page state (independent from right)
+    private long leftDirPageId;
+    private ICachedPage leftDirPage;
+    private IVectorClusteringMetadataFrame leftDirFrame;
+
+    // Position within directory pages
+    private int rightEntryIndex; // Entry index for right cursor within rightDirFrame
+    private int leftEntryIndex; // Entry index for left cursor within leftDirFrame
 
     // Right data page state
     private long rightDataPageId;
@@ -144,7 +148,8 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
         this.leftExhausted = false;
 
         // Close any previously open pages
-        closeCurrentDirPage();
+        closeRightDirPage();
+        closeLeftDirPage();
         closeRightDataPage();
         closeLeftDataPage();
 
@@ -165,10 +170,19 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
                 double maxDist = dirFrame.getMaxDistance(i);
 
                 if (dqc <= maxDist) {
-                    // Found! This directory page contains the pivot
-                    currentDirPageId = dirPageId;
-                    currentDirPage = dirPage; // Keep pinned
-                    currentDirFrame = dirFrame;
+                    // Found! This directory page contains the pivot.
+                    // Pin it separately for both left and right directions.
+                    // Right gets the page we already have pinned.
+                    rightDirPageId = dirPageId;
+                    rightDirPage = dirPage; // Transfer ownership of this pin
+                    rightDirFrame = dirFrame;
+
+                    // Left needs its own independent pin of the same page.
+                    leftDirPageId = dirPageId;
+                    leftDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) dirPageId));
+                    leftDirPage.acquireReadLatch();
+                    leftDirFrame = createMetadataFrame();
+                    leftDirFrame.setPage(leftDirPage);
 
                     // Initialize cursors at this entry
                     initializeCursorsAtPivot(i, dqc);
@@ -189,18 +203,29 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
         // If we get here, dqc is larger than all max distances
         // Use the last directory page and last entry
         if (!leftDirPageStack.isEmpty()) {
-            currentDirPageId = leftDirPageStack.pop();
-            currentDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) currentDirPageId));
-            currentDirPage.acquireReadLatch();
-            currentDirFrame = createMetadataFrame();
-            currentDirFrame.setPage(currentDirPage);
+            long lastDirPageId = leftDirPageStack.pop();
 
-            int lastEntry = currentDirFrame.getTupleCount() - 1;
+            // Pin for right direction
+            rightDirPageId = lastDirPageId;
+            rightDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) lastDirPageId));
+            rightDirPage.acquireReadLatch();
+            rightDirFrame = createMetadataFrame();
+            rightDirFrame.setPage(rightDirPage);
+
+            // Pin for left direction
+            leftDirPageId = lastDirPageId;
+            leftDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) lastDirPageId));
+            leftDirPage.acquireReadLatch();
+            leftDirFrame = createMetadataFrame();
+            leftDirFrame.setPage(leftDirPage);
+
+            int lastEntry = rightDirFrame.getTupleCount() - 1;
             if (lastEntry >= 0) {
                 initializeCursorsAtPivot(lastEntry, dqc);
             } else {
                 // Empty metadata page - no data in this cluster for this component
-                closeCurrentDirPage();
+                closeRightDirPage();
+                closeLeftDirPage();
                 rightExhausted = true;
                 leftExhausted = true;
             }
@@ -215,8 +240,8 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
      * Initialize left and right cursors at the pivot entry.
      */
     private void initializeCursorsAtPivot(int pivotEntryIndex, double dqc) throws HyracksDataException {
-        // Get data page for pivot entry
-        long pivotDataPageId = currentDirFrame.getDataPagePointer(pivotEntryIndex);
+        // Get data page for pivot entry (use right dir frame — both point to same page here)
+        long pivotDataPageId = rightDirFrame.getDataPagePointer(pivotEntryIndex);
 
         // Open pivot data page to find exact tuple position
         ICachedPage pivotPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) pivotDataPageId));
@@ -314,13 +339,14 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
 
     /**
      * Move right cursor to next directory entry.
+     * Uses rightDirPage/rightDirFrame exclusively — never touches left's dir page.
      */
     private boolean moveRightToNextEntry() throws HyracksDataException {
         rightEntryIndex++;
 
-        // Check if still within current directory page
-        if (rightEntryIndex < currentDirFrame.getTupleCount()) {
-            long dataPageId = currentDirFrame.getDataPagePointer(rightEntryIndex);
+        // Check if still within current right directory page
+        if (rightEntryIndex < rightDirFrame.getTupleCount()) {
+            long dataPageId = rightDirFrame.getDataPagePointer(rightEntryIndex);
             closeRightDataPage();
             openRightDataPage(dataPageId);
             rightTupleIndex = 0;
@@ -328,32 +354,28 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
         }
 
         // Need to move to next directory page
-        long nextDirPageId = currentDirFrame.getNextPage();
+        long nextDirPageId = rightDirFrame.getNextPage();
 
         if (nextDirPageId == -1) {
             return false; // Exhausted
         }
 
-        // For right traversal, we don't modify leftDirPageStack
-        // We need to handle the case where left and right are in different dir pages
-        // For simplicity, we'll track right's directory page separately if needed
-        // But for now, since both start at same dir page, we can follow nextPage
+        // Close right's current dir page and open the next one
+        closeRightDirPage();
 
-        closeCurrentDirPage();
-
-        currentDirPageId = nextDirPageId;
-        currentDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) currentDirPageId));
-        currentDirPage.acquireReadLatch();
-        currentDirFrame = createMetadataFrame();
-        currentDirFrame.setPage(currentDirPage);
+        rightDirPageId = nextDirPageId;
+        rightDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) nextDirPageId));
+        rightDirPage.acquireReadLatch();
+        rightDirFrame = createMetadataFrame();
+        rightDirFrame.setPage(rightDirPage);
 
         rightEntryIndex = 0;
 
-        if (currentDirFrame.getTupleCount() == 0) {
+        if (rightDirFrame.getTupleCount() == 0) {
             return false;
         }
 
-        long dataPageId = currentDirFrame.getDataPagePointer(rightEntryIndex);
+        long dataPageId = rightDirFrame.getDataPagePointer(rightEntryIndex);
         closeRightDataPage();
         openRightDataPage(dataPageId);
         rightTupleIndex = 0;
@@ -418,13 +440,14 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
 
     /**
      * Move left cursor to previous directory entry.
+     * Uses leftDirPage/leftDirFrame exclusively — never touches right's dir page.
      */
     private boolean moveLeftToPreviousEntry() throws HyracksDataException {
         leftEntryIndex--;
 
-        // Check if still within current directory page
+        // Check if still within current left directory page
         if (leftEntryIndex >= 0) {
-            long dataPageId = currentDirFrame.getDataPagePointer(leftEntryIndex);
+            long dataPageId = leftDirFrame.getDataPagePointer(leftEntryIndex);
             closeLeftDataPage();
             openLeftDataPage(dataPageId);
             leftTupleIndex = leftDataFrame.getTupleCount() - 1;
@@ -436,34 +459,26 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
             return false; // Exhausted
         }
 
-        // Don't close current dir page if right cursor is still using it
-        // For simplicity in this implementation, we assume left/right track separately
-        // In practice, we may need separate dir page tracking for left vs right
-
         long prevDirPageId = leftDirPageStack.pop();
 
-        // Pin previous directory page
-        ICachedPage prevDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) prevDirPageId));
-        prevDirPage.acquireReadLatch();
-        IVectorClusteringMetadataFrame prevDirFrame = createMetadataFrame();
-        prevDirFrame.setPage(prevDirPage);
+        // Close left's current dir page and open the previous one
+        closeLeftDirPage();
 
-        // Get last entry of previous directory page
-        int lastEntryIndex = prevDirFrame.getTupleCount() - 1;
+        leftDirPageId = prevDirPageId;
+        leftDirPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) prevDirPageId));
+        leftDirPage.acquireReadLatch();
+        leftDirFrame = createMetadataFrame();
+        leftDirFrame.setPage(leftDirPage);
+
+        // Start at last entry of previous directory page
+        int lastEntryIndex = leftDirFrame.getTupleCount() - 1;
 
         if (lastEntryIndex < 0) {
-            prevDirPage.releaseReadLatch();
-            bufferCache.unpin(prevDirPage);
             return false;
         }
 
-        long dataPageId = prevDirFrame.getDataPagePointer(lastEntryIndex);
-
-        prevDirPage.releaseReadLatch();
-        bufferCache.unpin(prevDirPage);
-
-        // Update left entry tracking (we keep the ID for potential future use)
         leftEntryIndex = lastEntryIndex;
+        long dataPageId = leftDirFrame.getDataPagePointer(leftEntryIndex);
 
         closeLeftDataPage();
         openLeftDataPage(dataPageId);
@@ -510,12 +525,21 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
         }
     }
 
-    private void closeCurrentDirPage() throws HyracksDataException {
-        if (currentDirPage != null) {
-            currentDirPage.releaseReadLatch();
-            bufferCache.unpin(currentDirPage);
-            currentDirPage = null;
-            currentDirFrame = null;
+    private void closeRightDirPage() throws HyracksDataException {
+        if (rightDirPage != null) {
+            rightDirPage.releaseReadLatch();
+            bufferCache.unpin(rightDirPage);
+            rightDirPage = null;
+            rightDirFrame = null;
+        }
+    }
+
+    private void closeLeftDirPage() throws HyracksDataException {
+        if (leftDirPage != null) {
+            leftDirPage.releaseReadLatch();
+            bufferCache.unpin(leftDirPage);
+            leftDirPage = null;
+            leftDirFrame = null;
         }
     }
 
@@ -558,7 +582,8 @@ public class VectorClusteringBidirectionCursor implements IIndexCursor {
         if (isOpen) {
             closeRightDataPage();
             closeLeftDataPage();
-            closeCurrentDirPage();
+            closeRightDirPage();
+            closeLeftDirPage();
         }
         isOpen = false;
         leftDirPageStack.clear();

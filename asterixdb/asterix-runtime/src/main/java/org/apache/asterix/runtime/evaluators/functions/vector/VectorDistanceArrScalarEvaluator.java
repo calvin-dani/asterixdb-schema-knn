@@ -102,7 +102,8 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
             EUCLIDEAN_DISTANCE_L2.hash(), VectorDistanceArrCalculation::euclidean, EUCLIDEAN_DISTANCE_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, EUCLIDEAN_DISTANCE_L2_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, COSINE_FORMAT.hash(),
-            VectorDistanceArrCalculation::cosineDistance, DOT_PRODUCT_FORMAT.hash(), VectorDistanceArrCalculation::dot);
+            VectorDistanceArrCalculation::cosineDistance, DOT_PRODUCT_FORMAT.hash(),
+            (a, b) -> -VectorDistanceArrCalculation.dot(a, b));
 
     private static final Map<ATypeTag, TypeSpecificExtractor> HOMOGENEOUS_EXTRACTORS = new HashMap<>();
 

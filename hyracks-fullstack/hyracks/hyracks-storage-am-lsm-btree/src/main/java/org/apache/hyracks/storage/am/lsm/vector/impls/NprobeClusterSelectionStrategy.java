@@ -100,8 +100,9 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                     globalClusterIndex = 1; // Skip first cluster in getNextCluster()
                 }
 
-                LOGGER.log(Level.TRACE,String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
-                        globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
+                LOGGER.log(Level.TRACE,
+                        String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
+                                globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
             } catch (Exception e) {
                 LOGGER.log(Level.TRACE,
                         String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
@@ -122,14 +123,15 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
             // Mark visited for DFS fallback deduplication
             visitedCentroidIds.add(nextCluster.centroidId);
 
-            LOGGER.log(Level.TRACE,String.format("[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
-                    globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId, nextCluster.distance,
-                    nextCluster.directoryPageId));
+            LOGGER.log(Level.TRACE,
+                    String.format("[NprobeStrategy] Level-wise: cluster %d/%d (cid=%d, distance=%.4f, dirPage=%d)",
+                            globalClusterIndex, globalLevelWiseClusters.size(), nextCluster.centroidId,
+                            nextCluster.distance, nextCluster.directoryPageId));
 
             if (globalClusterIndex >= globalLevelWiseClusters.size()) {
                 levelWisePhaseComplete = true;
-                LOGGER.log(Level.TRACE,String.format("[NprobeStrategy] Level-wise phase COMPLETE. Visited centroids: %s",
-                        visitedCentroidIds));
+                LOGGER.log(Level.TRACE, String.format(
+                        "[NprobeStrategy] Level-wise phase COMPLETE. Visited centroids: %s", visitedCentroidIds));
             }
 
             return nextCluster;
@@ -145,13 +147,14 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         ClusterSearchResult next = firstCursor.findNextClusterDFS();
 
         if (next == null) {
-            LOGGER.log(Level.TRACE,String.format("[NprobeStrategy] DFS exhausted, no more clusters. Visited centroids: %s",
-                    visitedCentroidIds));
+            LOGGER.log(Level.TRACE, String.format(
+                    "[NprobeStrategy] DFS exhausted, no more clusters. Visited centroids: %s", visitedCentroidIds));
             return null;
         }
 
-        LOGGER.log(Level.TRACE,String.format("[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
-                next.centroidId, next.distance, next.directoryPageId));
+        LOGGER.log(Level.TRACE,
+                String.format("[NprobeStrategy] DFS fallback: cluster cid=%d, distance=%.4f, dirPage=%d",
+                        next.centroidId, next.distance, next.directoryPageId));
 
         return next;
     }

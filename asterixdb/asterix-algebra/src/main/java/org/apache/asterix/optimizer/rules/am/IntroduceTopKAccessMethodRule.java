@@ -30,6 +30,9 @@ import java.util.TreeMap;
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.om.base.ABoolean;
+import org.apache.asterix.om.base.IAObject;
+import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableObject;
@@ -42,6 +45,8 @@ import org.apache.hyracks.algebricks.core.algebra.base.LogicalExpressionTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalOperatorTag;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.AbstractFunctionCallExpression;
+import org.apache.hyracks.algebricks.core.algebra.expressions.ConstantExpression;
+import org.apache.hyracks.algebricks.core.algebra.expressions.IAlgebricksConstantValue;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IVariableTypeEnvironment;
 import org.apache.hyracks.algebricks.core.algebra.expressions.VariableReferenceExpression;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
@@ -520,8 +525,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     if (fieldIndex >= 0 && fieldIndex < fieldNames.length) {
                         String fieldName = fieldNames[fieldIndex];
                         fieldPath.add(fieldName);
-                        LOGGER.trace("Resolved field-access-by-index: index {} -> field '{}'", fieldIndex,
-                                fieldName);
+                        LOGGER.trace("Resolved field-access-by-index: index {} -> field '{}'", fieldIndex, fieldName);
                     }
                 }
             }
@@ -564,8 +568,8 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                 }
             }
             if (!found) {
-                LOGGER.trace("Filter field {} not in index {} INCLUDE fields: {}", filterField,
-                        index.getIndexName(), includeFieldNames);
+                LOGGER.trace("Filter field {} not in index {} INCLUDE fields: {}", filterField, index.getIndexName(),
+                        includeFieldNames);
                 return false;
             }
         }
@@ -684,7 +688,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         // Case 1: Direct function call
         if (orderExpr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
             AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) orderExpr;
-            if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.ANN_DISTANCE)) {
+            if (isAnnOrVectorDistanceWithIndexHint(funcExpr)) {
                 return funcExpr;
             }
             return null;
@@ -709,7 +713,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
 
                             if (assignExpr.getExpressionTag() == LogicalExpressionTag.FUNCTION_CALL) {
                                 AbstractFunctionCallExpression funcExpr = (AbstractFunctionCallExpression) assignExpr;
-                                if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.ANN_DISTANCE)) {
+                                if (isAnnOrVectorDistanceWithIndexHint(funcExpr)) {
                                     return funcExpr;
                                 }
                             }
@@ -721,6 +725,39 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
         }
 
         return null;
+    }
+
+    /**
+     * Checks if a function expression is ANN_DISTANCE or VECTOR_DISTANCE_ARRAY with 4th arg = true.
+     *
+     * VECTOR_DISTANCE_ARRAY with a boolean `true` 4th argument signals index-driven KNN:
+     * vector_distance(field, queryVec, metric, true) → scan all clusters with bidirectional pruning.
+     */
+    private boolean isAnnOrVectorDistanceWithIndexHint(AbstractFunctionCallExpression funcExpr) {
+        if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.ANN_DISTANCE)) {
+            return true;
+        }
+        if (funcExpr.getFunctionIdentifier().equals(BuiltinFunctions.VECTOR_DISTANCE_ARRAY)
+                && funcExpr.getArguments().size() >= 4 && isConstantTrue(funcExpr.getArguments().get(3).getValue())) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Checks if an expression is a boolean constant `true`.
+     */
+    private boolean isConstantTrue(ILogicalExpression expr) {
+        if (expr.getExpressionTag() != LogicalExpressionTag.CONSTANT) {
+            return false;
+        }
+        ConstantExpression constExpr = (ConstantExpression) expr;
+        IAlgebricksConstantValue constVal = constExpr.getValue();
+        if (constVal instanceof AsterixConstantValue) {
+            IAObject obj = ((AsterixConstantValue) constVal).getObject();
+            return obj instanceof ABoolean && ((ABoolean) obj).getBoolean();
+        }
+        return false;
     }
 
     /**
@@ -767,8 +804,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
                     if (queryDistanceMetric.equals(indexMetric)) {
                         // Exact match: field name AND distance metric match (AND INCLUDE fields if needed)
                         exactMatch = new Pair<>(VectorIndexAccessMethod.INSTANCE, index);
-                        LOGGER.trace("Found exact match: index {} with metric {}", index.getIndexName(),
-                                indexMetric);
+                        LOGGER.trace("Found exact match: index {} with metric {}", index.getIndexName(), indexMetric);
                         break; // Prefer exact match, use first one found
                     } else {
                         // Field matches but metric doesn't - store as fallback only if no exact match
