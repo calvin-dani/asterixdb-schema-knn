@@ -23,7 +23,6 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 
 import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
 import org.apache.asterix.om.base.AString;
@@ -58,7 +57,6 @@ import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
@@ -205,7 +203,7 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
                     new JSONRowSchemaADMRecordBuilderVisitor(rowMetaData.getFieldNamesDictionary());
             ArrayBackedValueStorage admResult = schemaADMBuilder.build(root);
 
-//            String jsonString = objectMapper.writeValueAsString(jsonNode);
+            //            String jsonString = objectMapper.writeValueAsString(jsonNode);
             if (root == null) {
                 throw new HyracksDataException("Cannot compute Schema on empty root.");
             } else {

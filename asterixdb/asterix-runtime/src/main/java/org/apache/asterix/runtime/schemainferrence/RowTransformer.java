@@ -65,7 +65,7 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
      * @param recType record recType
      * @return the estimated size (possibly overestimated) of the primary key(s) columns
      */
-    public int transform(ARecordType recType,boolean optional) throws HyracksDataException {
+    public int transform(ARecordType recType, boolean optional) throws HyracksDataException {
         this.optional = optional;
         transform(recType);
         this.optional = true;

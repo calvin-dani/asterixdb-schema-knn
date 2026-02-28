@@ -34,6 +34,7 @@ import org.apache.asterix.app.function.TPCDSSingleTableDataGeneratorRewriter;
 import org.apache.asterix.app.function.collectionschema.CollectionSchemaRewriter;
 import org.apache.asterix.app.function.collectionsize.StorageSizeRewriter;
 import org.apache.asterix.app.function.currentschema.SchemaRewriter;
+import org.apache.asterix.app.function.sampleschema.SampleSchemaRewriter;
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.typecomputer.impl.AInt64TypeComputer;
 import org.apache.asterix.om.utils.RecordUtil;
@@ -125,6 +126,11 @@ public class MetadataBuiltinFunctions {
         BuiltinFunctions.addFunction(SchemaRewriter.INDEX_SCHEMA, AInt64TypeComputer.INSTANCE, true);
         BuiltinFunctions.addUnnestFun(SchemaRewriter.INDEX_SCHEMA, true);
         BuiltinFunctions.addDatasourceFunction(SchemaRewriter.INDEX_SCHEMA, SchemaRewriter.INSTANCE);
+
+        // sample schema (schema inferred from dataset's sample index)
+        BuiltinFunctions.addFunction(SampleSchemaRewriter.SAMPLE_SCHEMA, AInt64TypeComputer.INSTANCE, true);
+        BuiltinFunctions.addUnnestFun(SampleSchemaRewriter.SAMPLE_SCHEMA, true);
+        BuiltinFunctions.addDatasourceFunction(SampleSchemaRewriter.SAMPLE_SCHEMA, SampleSchemaRewriter.INSTANCE);
     }
 
     private MetadataBuiltinFunctions() {
