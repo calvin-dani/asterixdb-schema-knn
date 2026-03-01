@@ -59,19 +59,19 @@ public class LSMVCTreeIndexAccessor extends LSMTreeIndexAccessor {
                 // searchApproach=1 or 2: optimized bidirectional (with optional filtering)
                 Boolean useOptimized = iap.getParameter(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.class);
                 if (Boolean.TRUE.equals(useOptimized)) {
-                    LOGGER.log(Level.TRACE,"ANN search cursor: LSMVCTreeBlockedCursor (bidirectional pruning)");
+                    LOGGER.log(Level.TRACE, "ANN search cursor: LSMVCTreeBlockedCursor (bidirectional pruning)");
                     return lsmVCTree.createBlockedSearchCursor(ctx);
                 }
                 // searchApproach=3: naive blocked (top-K window, quantized distance, no pruning)
                 Boolean useNaiveBlocked = iap.getParameter(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.class);
                 if (Boolean.TRUE.equals(useNaiveBlocked)) {
-                    LOGGER.log(Level.TRACE,"ANN search cursor: LSMVCTreeBlockedNaiveCursor (quantized, no pruning)");
+                    LOGGER.log(Level.TRACE, "ANN search cursor: LSMVCTreeBlockedNaiveCursor (quantized, no pruning)");
                     return lsmVCTree.createNaiveBlockedSearchCursor(ctx);
                 }
             }
         }
         // searchApproach=0: default naive streaming
-        LOGGER.log(Level.TRACE,"ANN search cursor: LSMVCTreeSearchCursor (naive streaming)");
+        LOGGER.log(Level.TRACE, "ANN search cursor: LSMVCTreeSearchCursor (naive streaming)");
         return super.createSearchCursor(exclusive);
     }
 

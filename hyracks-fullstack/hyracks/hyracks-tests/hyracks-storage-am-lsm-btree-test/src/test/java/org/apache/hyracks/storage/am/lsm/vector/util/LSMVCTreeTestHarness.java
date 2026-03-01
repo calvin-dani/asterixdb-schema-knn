@@ -101,7 +101,7 @@ public class LSMVCTreeTestHarness {
         this.diskNumPages = AccessMethodTestsConfig.LSM_BTREE_DISK_NUM_PAGES;
         this.diskMaxOpenFiles = AccessMethodTestsConfig.LSM_BTREE_DISK_MAX_OPEN_FILES;
         this.memPageSize = 512;
-        this.memNumPages = 1000;
+        this.memNumPages = 200;
         this.hyracksFrameSize = AccessMethodTestsConfig.LSM_BTREE_HYRACKS_FRAME_SIZE;
         this.bloomFilterFalsePositiveRate = AccessMethodTestsConfig.LSM_BTREE_BLOOMFILTER_FALSE_POSITIVE_RATE;
         this.ioScheduler = SynchronousSchedulerProvider.INSTANCE.getIoScheduler(null);

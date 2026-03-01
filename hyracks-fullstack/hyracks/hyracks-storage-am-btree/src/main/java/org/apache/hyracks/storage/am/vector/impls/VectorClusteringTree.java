@@ -1075,6 +1075,16 @@ public class VectorClusteringTree extends AbstractTreeIndex {
         initialized = true;
     }
 
+    /**
+     * Reset initialization state so that static structure directory pages
+     * can be re-created after a memory component flush/recycle.
+     */
+    public void resetInitialization() {
+        initialized = false;
+        centroidDirPageMap = null;
+        directoryPageIds = null;
+    }
+
     public synchronized void setStaticStructure(VectorClusteringTreeAccessor staticAccessor)
             throws HyracksDataException {
         if (initialized) {

@@ -139,7 +139,7 @@ public class LSMVCTreeInsertTest extends VectorIndexTestDriver {
         } finally {
             // Cleanup
             ctx.getIndex().deactivate();
-            ctx.getIndex().destroy();
+            //ctx.getIndex().destroy();
             LOGGER.info("Index deactivated and destroyed");
         }
     }

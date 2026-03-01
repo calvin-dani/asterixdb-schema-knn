@@ -192,14 +192,24 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             return; // Not yet loaded (during initial index creation)
         }
         for (ILSMMemoryComponent memComponent : memoryComponents) {
-            LSMVCTreeMemoryComponent vcMemComponent = (LSMVCTreeMemoryComponent) memComponent;
-            VectorClusteringTree vcTree = vcMemComponent.getIndex();
-            if (!vcTree.isInitialized()) {
-                VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
-                        (VectorClusteringTree.VectorClusteringTreeAccessor) staticStructure.getIndex()
-                                .createAccessor(NoOpIndexAccessParameters.INSTANCE);
-                vcTree.setStaticStructure(staticAccessor);
-            }
+            reinitializeMemoryComponent((LSMVCTreeMemoryComponent) memComponent);
+        }
+    }
+
+    /**
+     * Re-initialize a single memory component's static structure directory pages.
+     * Called during initial setup and after a memory component is recycled post-flush.
+     */
+    void reinitializeMemoryComponent(LSMVCTreeMemoryComponent memComponent) throws HyracksDataException {
+        if (staticStructure == null) {
+            return;
+        }
+        VectorClusteringTree vcTree = memComponent.getIndex();
+        if (!vcTree.isInitialized()) {
+            VectorClusteringTree.VectorClusteringTreeAccessor staticAccessor =
+                    (VectorClusteringTree.VectorClusteringTreeAccessor) staticStructure.getIndex()
+                            .createAccessor(NoOpIndexAccessParameters.INSTANCE);
+            vcTree.setStaticStructure(staticAccessor);
         }
     }
 
@@ -665,7 +675,9 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
 
     @Override
     public synchronized void deactivate(boolean flush) throws HyracksDataException {
-        // Clean up static structure component before parent deactivation
+        // Flush must happen before static structure cleanup because doFlush() needs staticStructure
+        super.deactivate(flush);
+        // Clean up static structure component after parent deactivation (including flush)
         if (staticStructure != null) {
             try {
                 staticStructure.deactivateAndPurge();
@@ -675,7 +687,6 @@ public class LSMVCTree extends AbstractLSMIndex implements ITreeIndex {
             }
             staticStructure = null; // Clear reference after deactivation
         }
-        super.deactivate(flush);
     }
 
     @Override
