@@ -66,6 +66,23 @@ public class LSMVCTreeMemoryComponent extends AbstractLSMMemoryComponent {
         return 0;
     }
 
+    @Override
+    public void cleanup() throws HyracksDataException {
+        // Reset VCTree initialization state before cleanup so that
+        // static structure directory pages are re-created when the
+        // recycled component is next allocated for writes.
+        vctree.resetInitialization();
+        super.cleanup();
+    }
+
+    @Override
+    protected void doAllocate() throws HyracksDataException {
+        super.doAllocate();
+        // After re-creating the index, re-initialize the static structure
+        // directory pages from the shared static structure disk component.
+        lsmTree.reinitializeMemoryComponent(this);
+    }
+
     /**
      * Gets the vector dimensions from the underlying vector clustering tree.
      */

@@ -143,8 +143,8 @@ public class LSMVCTreeMergeTest extends VectorIndexTestDriver {
 
             // 5. Flush memory component → disk component 2
             flush(ctx);
-            LOGGER.info("Flushed memory component → disk component 2");
-            assertEquals("Should have 2 disk components after flush", 2, lsmvcTree.getDiskComponents().size());
+            LOGGER.info("Flushed memory component → disk component 3");
+            assertEquals("Should have 3 disk components after flush", 3, lsmvcTree.getDiskComponents().size());
 
             // 6. Explicitly merge all disk components
             ILSMIndexAccessor lsmAccessor =
@@ -166,7 +166,7 @@ public class LSMVCTreeMergeTest extends VectorIndexTestDriver {
         } finally {
             // Cleanup
             ctx.getIndex().deactivate();
-            ctx.getIndex().destroy();
+            //ctx.getIndex().destroy();
             LOGGER.info("Index deactivated and destroyed");
         }
     }

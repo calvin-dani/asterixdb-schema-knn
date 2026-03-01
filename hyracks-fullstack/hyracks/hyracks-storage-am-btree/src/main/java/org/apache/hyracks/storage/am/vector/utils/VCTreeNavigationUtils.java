@@ -664,8 +664,8 @@ public class VCTreeNavigationUtils {
                         }
 
                         double closestDistance = sortedChildren.get(0).distance;
-                        double localThreshold = closestDistance < 0
-                                ? closestDistance * (1.0 - epsilon) : closestDistance + epsilon;
+                        double localThreshold =
+                                closestDistance < 0 ? closestDistance * (1.0 - epsilon) : closestDistance + epsilon;
 
                         for (VCTreeChildCentroid child : sortedChildren) {
                             if (child.distance <= localThreshold) {
@@ -693,8 +693,8 @@ public class VCTreeNavigationUtils {
         // Phase 3: Apply epsilon threshold based on globally closest centroid
         if (epsilon > 0.0) {
             double globalClosestDistance = allCentroids.get(0).distance;
-            double globalThreshold = globalClosestDistance < 0
-                    ? globalClosestDistance * (1.0 - epsilon) : globalClosestDistance + epsilon;
+            double globalThreshold = globalClosestDistance < 0 ? globalClosestDistance * (1.0 - epsilon)
+                    : globalClosestDistance + epsilon;
 
             // Filter centroids that exceed the global threshold
             List<ClusterSearchResult> filteredCentroids = new ArrayList<>();

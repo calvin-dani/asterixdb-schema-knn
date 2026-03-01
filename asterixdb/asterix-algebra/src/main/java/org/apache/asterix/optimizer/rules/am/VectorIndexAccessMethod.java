@@ -326,9 +326,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
         // Create UNNEST-MAP operator for vector index search
         // This returns: <pk> from the index (vector embeddings skipped to save memory)
-        ILogicalOperator secondaryIndexUnnestOp =
-                AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType, metaRecordType, chosenIndex,
-                        assignSearchKeys, jobGenParams, context, false, false, null);
+        ILogicalOperator secondaryIndexUnnestOp = AccessMethodUtils.createSecondaryIndexUnnestMap(dataset, recordType,
+                metaRecordType, chosenIndex, assignSearchKeys, jobGenParams, context, false, false, null);
 
         // Handle filter pushdown for INCLUDE fields
         // If there's a SELECT operator with filter on INCLUDE fields, we:

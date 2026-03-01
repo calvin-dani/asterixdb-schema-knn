@@ -1103,7 +1103,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                             } else if (crossPollinate && interiorPollinate) {
                                 // FUTURE: Implement cross-partition centroid search
                                 int count = 0;
-                                List<ClusterSearchResult> result = findCloseCentroidsLevelWiseGlobalSort(embedding, 0.15);
+                                List<ClusterSearchResult> result =
+                                        findCloseCentroidsLevelWiseGlobalSort(embedding, 0.15);
                                 if (result != null) {
                                     successfulQueries++;
 
