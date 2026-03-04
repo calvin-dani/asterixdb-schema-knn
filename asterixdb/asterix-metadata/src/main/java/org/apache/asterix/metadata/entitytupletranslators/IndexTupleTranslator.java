@@ -100,6 +100,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
     public static final String SAMPLE_CARDINALITY_TARGET = "SampleCardinalityTarget";
     public static final String SOURCE_CARDINALITY = "SourceCardinality";
     public static final String SOURCE_AVG_ITEM_SIZE = "SourceAvgItemSize";
+    public static final String SAMPLE_IS_FULL_SCAN = "SampleIsFullScan";
     public static final String INDEXES_STATS = "IndexStats";
     public static final String STATS_NUM_PAGES = "NumPages";
     public static final String STATS_INDEX_NAME = "IndexName";
@@ -513,6 +514,13 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                 }
                 int sourceAvgItemSize = ((AInt32) indexRecord.getValueByPos(sourceAvgItemSizePos)).getIntegerValue();
 
+                // Backward compatibility: sample indexes created before the full-scan flag was introduced won't
+                // have this field. Default to false (random sample) instead of failing to read the index. The flag
+                // is only consumed while (re)building the sample, so an old index's value is irrelevant afterwards.
+                int isFullScanPos = indexRecord.getType().getFieldIndex(SAMPLE_IS_FULL_SCAN);
+                boolean isFullScan =
+                        isFullScanPos >= 0 && ((ABoolean) indexRecord.getValueByPos(isFullScanPos)).getBoolean();
+
                 int indexesStatsPos = indexRecord.getType().getFieldIndex(INDEXES_STATS);
                 Map<String, IndexStats> indexesStats;
                 if (indexesStatsPos >= 0) {
@@ -532,7 +540,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                 }
 
                 indexDetails = new Index.SampleIndexDetails(keyFieldNames, keyFieldSourceIndicator, keyFieldTypes,
-                        sampleCardinalityTarget, sourceCardinality, sourceAvgItemSize, sampleSeed, indexesStats);
+                        sampleCardinalityTarget, sourceCardinality, sourceAvgItemSize, sampleSeed, isFullScan,
+                        indexesStats);
                 break;
             default:
                 throw new AsterixException(ErrorCode.METADATA_ERROR, indexType.toString());
@@ -987,6 +996,13 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             aString.setValue(SOURCE_AVG_ITEM_SIZE);
             stringSerde.serialize(aString, nameValue.getDataOutput());
             int32Serde.serialize(new AInt32(indexDetails.getSourceAvgItemSize()), fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+
+            nameValue.reset();
+            fieldValue.reset();
+            aString.setValue(SAMPLE_IS_FULL_SCAN);
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            booleanSerde.serialize(ABoolean.valueOf(indexDetails.isFullScan()), fieldValue.getDataOutput());
             recordBuilder.addField(nameValue, fieldValue);
 
             Map<String, IndexStats> indexesStats = indexDetails.getIndexesStats();

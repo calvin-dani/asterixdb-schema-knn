@@ -603,11 +603,12 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
         private final int sourceAvgItemSize;
 
         private final long sampleSeed;
+        private final boolean fullScan;
         private final Map<String, IndexStats> indexesStats;
 
         public SampleIndexDetails(List<List<String>> keyFieldNames, List<Integer> keyFieldSourceIndicators,
                 List<IAType> keyFieldTypes, int sampleCardinalityTarget, long sourceCardinality, int sourceAvgItemSize,
-                long sampleSeed, Map<String, IndexStats> indexesStats) {
+                long sampleSeed, boolean fullScan, Map<String, IndexStats> indexesStats) {
             this.keyFieldNames = keyFieldNames;
             this.keyFieldSourceIndicators = keyFieldSourceIndicators;
             this.keyFieldTypes = keyFieldTypes;
@@ -615,6 +616,7 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             this.sourceCardinality = sourceCardinality;
             this.sourceAvgItemSize = sourceAvgItemSize;
             this.sampleSeed = sampleSeed;
+            this.fullScan = fullScan;
             this.indexesStats = indexesStats;
         }
 
@@ -654,6 +656,10 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         public long getSampleSeed() {
             return sampleSeed;
+        }
+
+        public boolean isFullScan() {
+            return fullScan;
         }
 
         public Map<String, IndexStats> getIndexesStats() {
