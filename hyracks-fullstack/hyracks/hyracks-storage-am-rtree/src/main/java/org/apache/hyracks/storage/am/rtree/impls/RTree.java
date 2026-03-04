@@ -59,6 +59,7 @@ import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.IModificationOperationCallback;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
@@ -900,9 +901,9 @@ public class RTree extends AbstractTreeIndex {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+            boolean checkIfEmptyIndex, ISampler sampler, IPageWriteCallback callback) throws HyracksDataException {
         // TODO: verifyInput currently does nothing.
-        return new RTreeBulkLoader(fillFactor, callback);
+        return new RTreeBulkLoader(fillFactor, sampler, callback);
     }
 
     public class RTreeBulkLoader extends AbstractTreeIndexBulkLoader {
@@ -913,14 +914,16 @@ public class RTree extends AbstractTreeIndex {
         ByteBuffer mbr;
         List<Integer> prevNodeFrontierPages = new ArrayList<>();
 
-        public RTreeBulkLoader(float fillFactor, IPageWriteCallback callback) throws HyracksDataException {
-            super(fillFactor, callback, RTree.this);
+        public RTreeBulkLoader(float fillFactor, ISampler sampler, IPageWriteCallback callback)
+                throws HyracksDataException {
+            super(fillFactor, callback, RTree.this, sampler);
             prevInteriorFrame = interiorFrameFactory.createFrame();
         }
 
         @Override
         public void add(ITupleReference tuple) throws HyracksDataException {
             try {
+                sampler.addTuple(tuple);
                 int leafFrameTupleSize = leafFrame.getBytesRequiredToWriteTuple(tuple);
                 int interiorFrameTupleSize = interiorFrame.getBytesRequiredToWriteTuple(tuple);
                 int tupleSize = Math.max(leafFrameTupleSize, interiorFrameTupleSize);

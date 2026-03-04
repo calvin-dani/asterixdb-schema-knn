@@ -18,6 +18,8 @@
  */
 package org.apache.hyracks.api.io;
 
+import java.io.Serializable;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,7 +29,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * A IPersistedResourceRegistry is responsible for maintaining a mapping between classes and type ids
  * that are used for serialization.
  */
-public interface IPersistedResourceRegistry {
+public interface IPersistedResourceRegistry extends Serializable {
 
     String TYPE_FIELD_ID = "@type";
     String VERSION_FIELD_ID = "@version";
