@@ -6,7 +6,7 @@ distribute result [$$item] [cardinality: 3.0, doc-size: 106.0, op-cost: 0.0, tot
     -- STREAM_PROJECT  |PARTITIONED|
       exchange [cardinality: 3.0, doc-size: 106.0, op-cost: 0.0, total-cost: 10.75]
       -- SORT_MERGE_EXCHANGE [$$33(ASC), $$item(ASC) ]  |PARTITIONED|
-        order (ASC, $$33) (ASC, $$item) [cardinality: 3.0, doc-size: 106.0, op-cost: 4.75, total-cost: 10.75]
+        order (ASC, $$33) (ASC, $$item) [cardinality: 3.0, doc-size: 106.0, op-cost: 0.0, total-cost: 10.75]
         -- STABLE_SORT [$$33(ASC), $$item(ASC)]  |PARTITIONED|
           exchange [cardinality: 3.0, doc-size: 106.0, op-cost: 0.0, total-cost: 6.0]
           -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|

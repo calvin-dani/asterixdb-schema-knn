@@ -66,7 +66,8 @@ public class LSMColumnBTreeUtil {
     public static LSMBTree createLSMTree(NCConfig storageConfig, IIOManager ioManager,
             List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
             IColumnBufferPool columnBufferPool, ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories,
-            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, ILSMMergePolicy mergePolicy,
+            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, int thetaSketchK,
+            int maxSampleLeafAttempts, int sampleLeafDrawBatchSize, ILSMMergePolicy mergePolicy,
             ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
             int[] btreeFields, IMetadataPageManagerFactory freePageManagerFactory, boolean updateAware, ITracer tracer,
@@ -128,7 +129,8 @@ public class LSMColumnBTreeUtil {
 
         return new LSMColumnBTree(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory,
                 insertLeafFrameFactory, deleteLeafFrameFactory, diskBufferCache, columnBufferPool, fileNameManager,
-                flushComponentFactory, mergeComponentFactory, bulkLoadComponentFactory, bloomFilterFalsePositiveRate,
+                flushComponentFactory, mergeComponentFactory, bulkLoadComponentFactory, bloomFilterKeyFields,
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize,
                 typeTraits.length, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
                 pageWriteCallbackFactory, btreeFields, tracer, columnManager, atomic, diskCacheManager);
     }

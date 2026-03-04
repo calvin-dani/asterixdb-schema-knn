@@ -40,6 +40,7 @@ import org.apache.hyracks.storage.common.IStorageManager;
 public class LSMColumnBTreeLocalResourceFactory extends LSMBTreeLocalResourceFactory {
     private static final long serialVersionUID = -676367767925618165L;
     private final IColumnManagerFactory columnManagerFactory;
+    private final int columnSamplesPerPage;
 
     public LSMColumnBTreeLocalResourceFactory(IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -49,21 +50,25 @@ public class LSMColumnBTreeLocalResourceFactory extends LSMBTreeLocalResourceFac
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate,
+            int thetaSketchK, int maxSampleLeafAttempts, int sampleLeafDrawBatchSize, int columnSamplesPerPage,
             int[] btreeFields, ICompressorDecompressorFactory compressorDecompressorFactory, ITypeTraits nullTypeTraits,
             INullIntrospector nullIntrospector, boolean isSecondaryNoIncrementalMaintenance,
             IColumnManagerFactory columnManagerFactory, boolean atomic) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, true, bloomFilterKeyFields,
-                bloomFilterFalsePositiveRate, true, btreeFields, compressorDecompressorFactory, true, nullTypeTraits,
-                nullIntrospector, isSecondaryNoIncrementalMaintenance, atomic);
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize, true,
+                btreeFields, compressorDecompressorFactory, true, nullTypeTraits, nullIntrospector,
+                isSecondaryNoIncrementalMaintenance, atomic);
         this.columnManagerFactory = columnManagerFactory;
+        this.columnSamplesPerPage = columnSamplesPerPage;
     }
 
     @Override
     public LsmResource createResource(FileReference fileRef) {
         return new LSMColumnBTreeLocalResource(typeTraits, cmpFactories, bloomFilterKeyFields,
-                bloomFilterFalsePositiveRate, fileRef.getRelativePath(), storageManager, mergePolicyFactory,
+                bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize,
+                columnSamplesPerPage, fileRef.getRelativePath(), storageManager, mergePolicyFactory,
                 mergePolicyProperties, btreeFields, opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory,
                 metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, compressorDecompressorFactory,
                 nullTypeTraits, nullIntrospector, isSecondaryNoIncrementalMaintenance, columnManagerFactory, atomic);

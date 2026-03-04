@@ -596,15 +596,28 @@ public class InvertedIndexAccessMethod implements IAccessMethod {
             List<LogicalVariable> panicPlanLiveVars = new ArrayList<>();
             VariableUtilities.getLiveVariables(panicJoinRef.getValue(), panicPlanLiveVars);
             // Create variable mapping for union all operator.
+            // Each output variable must be a fresh variable so that produced variables are
+            // disjoint from used variables (SSA invariant enforced by PlanStructureVerifier).
             List<Triple<LogicalVariable, LogicalVariable, LogicalVariable>> varMap = new ArrayList<>();
+            Map<LogicalVariable, LogicalVariable> indexVarToOutVar = new HashMap<>();
             for (int i = 0; i < indexSubTreeLiveVars.size(); i++) {
                 LogicalVariable indexSubTreeVar = indexSubTreeLiveVars.get(i);
                 LogicalVariable panicPlanVar = panicVarMap.get(indexSubTreeVar);
                 if (panicPlanVar == null) {
                     panicPlanVar = indexSubTreeVar;
                 }
+                LogicalVariable outVar = context.newVar();
+                indexVarToOutVar.put(indexSubTreeVar, outVar);
                 varMap.add(new Triple<LogicalVariable, LogicalVariable, LogicalVariable>(indexSubTreeVar, panicPlanVar,
-                        indexSubTreeVar));
+                        outVar));
+            }
+            // Remap originalSubTreePKs to the UnionAll output variables so the downstream
+            // equi-join condition references the correct post-UnionAll variable names.
+            for (int i = 0; i < originalSubTreePKs.size(); i++) {
+                LogicalVariable outVar = indexVarToOutVar.get(originalSubTreePKs.get(i));
+                if (outVar != null) {
+                    originalSubTreePKs.set(i, outVar);
+                }
             }
             UnionAllOperator unionAllOp = new UnionAllOperator(varMap);
             unionAllOp.setSourceLocation(topOp.getSourceLocation());

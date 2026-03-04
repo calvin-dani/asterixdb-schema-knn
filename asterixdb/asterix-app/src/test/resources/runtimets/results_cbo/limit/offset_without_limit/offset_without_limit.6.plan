@@ -8,7 +8,7 @@ distribute result [$$18] [cardinality: 100.0, doc-size: 9.0, op-cost: 0.0, total
       -- ASSIGN  |PARTITIONED|
         exchange [cardinality: 100.0, doc-size: 9.0, op-cost: 0.0, total-cost: 764.39]
         -- SORT_MERGE_EXCHANGE [$$20(ASC) ]  |PARTITIONED|
-          order (ASC, $$20) [cardinality: 100.0, doc-size: 9.0, op-cost: 664.39, total-cost: 764.39]
+          order (ASC, $$20) [cardinality: 100.0, doc-size: 9.0, op-cost: 0.0, total-cost: 764.39]
           -- STABLE_SORT [$$20(ASC)]  |PARTITIONED|
             exchange [cardinality: 100.0, doc-size: 9.0, op-cost: 0.0, total-cost: 100.0]
             -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|

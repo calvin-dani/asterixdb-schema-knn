@@ -43,11 +43,11 @@ distribute result [$$117] [cardinality: 0.0, doc-size: 8.0, op-cost: 0.0, total-
                                         -- STREAM_PROJECT  |LOCAL|
                                           nested tuple source [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
                                           -- NESTED_TUPLE_SOURCE  |LOCAL|
-                                 } [cardinality: 0.0, doc-size: 8.0, op-cost: 2.25, total-cost: 6.5]
+                                 } [cardinality: 0.0, doc-size: 8.0, op-cost: 0.0, total-cost: 6.5]
                           -- PRE_CLUSTERED_GROUP_BY[$$128]  |PARTITIONED|
                             exchange [cardinality: 2.0, doc-size: 8.0, op-cost: 0.0, total-cost: 4.25]
                             -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-                              order (ASC, $$128) [cardinality: 2.0, doc-size: 8.0, op-cost: 2.25, total-cost: 4.25]
+                              order (ASC, $$128) [cardinality: 2.0, doc-size: 8.0, op-cost: 0.0, total-cost: 4.25]
                               -- STABLE_SORT [$$128(ASC)]  |PARTITIONED|
                                 exchange [cardinality: 2.0, doc-size: 8.0, op-cost: 0.0, total-cost: 2.0]
                                 -- HASH_PARTITION_EXCHANGE [$$128]  |PARTITIONED|

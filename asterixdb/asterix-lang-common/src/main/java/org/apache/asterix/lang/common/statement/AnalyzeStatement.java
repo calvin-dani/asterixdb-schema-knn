@@ -34,10 +34,12 @@ import org.apache.asterix.lang.common.util.ExpressionUtils;
 import org.apache.asterix.lang.common.util.LangRecordParseUtil;
 import org.apache.asterix.lang.common.visitor.base.ILangVisitor;
 import org.apache.asterix.object.base.AdmBigIntNode;
+import org.apache.asterix.object.base.AdmBooleanNode;
 import org.apache.asterix.object.base.AdmDoubleNode;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.object.base.AdmStringNode;
 import org.apache.asterix.object.base.IAdmNode;
+import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 
@@ -49,10 +51,11 @@ public class AnalyzeStatement extends AbstractStatement {
     private static final String SAMPLE_HIGH = "high";
     private static final int SAMPLE_LOW_SIZE = 1063;
     private static final int SAMPLE_MEDIUM_SIZE = SAMPLE_LOW_SIZE * 4;
-    private static final int SAMPLE_HIGH_SIZE = SAMPLE_MEDIUM_SIZE * 4;
+    private static final int SAMPLE_HIGH_SIZE = SAMPLE_MEDIUM_SIZE * 4 * 4;
     private static final int SAMPLE_DEFAULT_SIZE = SAMPLE_LOW_SIZE;
 
     private static final String SAMPLE_SEED_FIELD_NAME = "sample-seed";
+    private static final String SAMPLE_FULL_SCAN_FIELD_NAME = "full-scan";
 
     private final Namespace namespace;
     private final String datasetName;
@@ -81,6 +84,11 @@ public class AnalyzeStatement extends AbstractStatement {
                     if (value.getKind() != Expression.Kind.LITERAL_EXPRESSION
                             && value.getKind() != Expression.Kind.UNARY_EXPRESSION) {
                         throw new CompilationException(ErrorCode.INVALID_SAMPLE_SEED);
+                    }
+                    break;
+                case SAMPLE_FULL_SCAN_FIELD_NAME:
+                    if (value.getKind() != Expression.Kind.LITERAL_EXPRESSION) {
+                        throw new CompilationException(ErrorCode.INVALID_FULL_SCAN_OPTION);
                     }
                     break;
                 default:
@@ -169,12 +177,24 @@ public class AnalyzeStatement extends AbstractStatement {
         }
     }
 
+    public boolean isFullScan() throws CompilationException {
+        IAdmNode n = getOption(SAMPLE_FULL_SCAN_FIELD_NAME);
+        if (n == null) {
+            return false;
+        }
+        if (n.getType() != ATypeTag.BOOLEAN) {
+            throw new CompilationException(ErrorCode.WITH_FIELD_MUST_BE_OF_TYPE, SAMPLE_FULL_SCAN_FIELD_NAME,
+                    BuiltinType.ABOOLEAN.getTypeName(), n.getType().toString());
+        }
+        return ((AdmBooleanNode) n).get();
+    }
+
     private long createSampleSeed() {
         return System.nanoTime() + System.identityHashCode(this);
     }
 
     private boolean isValidSampleSize(int v) {
-        return v >= SAMPLE_LOW_SIZE && v <= SAMPLE_HIGH_SIZE;
+        return v >= SAMPLE_LOW_SIZE && v <= SAMPLE_HIGH_SIZE * 4;
     }
 
     private IAdmNode getOption(String optionName) {

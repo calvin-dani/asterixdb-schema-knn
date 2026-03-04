@@ -10,11 +10,11 @@ distribute result [$$117] [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-
         -- STABLE_SORT [$$248(ASC)]  |PARTITIONED|
           exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 9.5]
           -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-            distinct ([$$117]) [cardinality: 0.0, doc-size: 0.0, op-cost: 4.75, total-cost: 9.5]
+            distinct ([$$117]) [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 9.5]
             -- PRE_SORTED_DISTINCT_BY  |PARTITIONED|
               exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 4.75]
               -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-                order (ASC, $$117) [cardinality: 0.0, doc-size: 0.0, op-cost: 4.75, total-cost: 4.75]
+                order (ASC, $$117) [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 4.75]
                 -- STABLE_SORT [$$117(ASC)]  |PARTITIONED|
                   exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
                   -- HASH_PARTITION_EXCHANGE [$$117]  |PARTITIONED|

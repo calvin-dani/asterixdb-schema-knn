@@ -119,6 +119,8 @@
     "storage.format" : "row",
     "storage.global.cleanup.timeout" : 600,
     "storage.lsm.bloomfilter.falsepositiverate" : 0.01,
+    "storage.lsm.theta.sketch.k" : 1024,
+    "storage.max.sample.leaf.attempts" : 500,
     "storage.partitioning" : "dynamic",
     "storage.partitions.count" : 8,
     "txn\.commitprofiler\.enabled" : false,

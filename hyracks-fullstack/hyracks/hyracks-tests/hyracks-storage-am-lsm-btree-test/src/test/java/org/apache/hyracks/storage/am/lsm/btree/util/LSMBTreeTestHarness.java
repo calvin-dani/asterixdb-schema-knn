@@ -50,6 +50,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.NoOpPageWriteCallbackFacto
 import org.apache.hyracks.storage.am.lsm.common.impls.SynchronousSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.impls.ThreadCountingTracker;
 import org.apache.hyracks.storage.am.lsm.common.impls.VirtualBufferCache;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.common.buffercache.HeapBufferAllocator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.compression.SnappyCompressorDecompressorFactory;
@@ -119,6 +120,10 @@ public class LSMBTreeTestHarness {
     }
 
     public void setUp() throws HyracksDataException {
+        // Disable theta sampling for tests - the serialized data (~16KB) may not fit
+        // in small buffer cache pages used by tests
+        ThetaSampler.setSamplingEnabled(false);
+
         ioManager = TestStorageManagerComponentHolder.getIOManager();
         ioDeviceId = 0;
         onDiskDir = ioManager.getIODevices().get(ioDeviceId).getMount() + sep + "lsm_btree_"
@@ -154,6 +159,9 @@ public class LSMBTreeTestHarness {
             }
         }
         dir.delete();
+
+        // Re-enable theta sampling after test
+        ThetaSampler.setSamplingEnabled(true);
     }
 
     public int getDiskPageSize() {

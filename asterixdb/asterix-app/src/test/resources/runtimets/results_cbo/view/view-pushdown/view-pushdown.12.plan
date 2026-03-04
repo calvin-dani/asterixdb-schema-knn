@@ -6,7 +6,7 @@ distribute result [$$105] [cardinality: 6.0, doc-size: 15.0, op-cost: 0.0, total
     -- ASSIGN  |UNPARTITIONED|
       exchange [cardinality: 6.0, doc-size: 15.0, op-cost: 0.0, total-cost: 35.51]
       -- ONE_TO_ONE_EXCHANGE  |UNPARTITIONED|
-        order (ASC, $$108) [cardinality: 6.0, doc-size: 15.0, op-cost: 15.51, total-cost: 35.51]
+        order (ASC, $$108) [cardinality: 6.0, doc-size: 15.0, op-cost: 0.0, total-cost: 35.51]
         -- STABLE_SORT [$$108(ASC)]  |UNPARTITIONED|
           exchange [cardinality: 6.0, doc-size: 15.0, op-cost: 0.0, total-cost: 20.0]
           -- ONE_TO_ONE_EXCHANGE  |UNPARTITIONED|

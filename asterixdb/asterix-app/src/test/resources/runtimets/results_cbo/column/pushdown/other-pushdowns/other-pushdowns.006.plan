@@ -6,15 +6,15 @@ distribute result [$$p1] [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-c
     -- STREAM_PROJECT  |PARTITIONED|
       exchange [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 8.0]
       -- SORT_MERGE_EXCHANGE [$$18(ASC) ]  |PARTITIONED|
-        order (ASC, $$18) [cardinality: 2.0, doc-size: 0.0, op-cost: 2.0, total-cost: 8.0]
+        order (ASC, $$18) [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 8.0]
         -- STABLE_SORT [$$18(ASC)]  |PARTITIONED|
           exchange [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 6.0]
           -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-            distinct ([$$p1]) [cardinality: 2.0, doc-size: 0.0, op-cost: 2.0, total-cost: 6.0]
+            distinct ([$$p1]) [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 6.0]
             -- PRE_SORTED_DISTINCT_BY  |PARTITIONED|
               exchange [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 4.0]
               -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-                order (ASC, $$p1) [cardinality: 2.0, doc-size: 0.0, op-cost: 2.0, total-cost: 4.0]
+                order (ASC, $$p1) [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 4.0]
                 -- STABLE_SORT [$$p1(ASC)]  |PARTITIONED|
                   exchange [cardinality: 2.0, doc-size: 0.0, op-cost: 0.0, total-cost: 2.0]
                   -- HASH_PARTITION_EXCHANGE [$$p1]  |PARTITIONED|

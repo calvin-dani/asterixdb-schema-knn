@@ -37,6 +37,7 @@ import org.apache.hyracks.storage.am.common.api.INullIntrospector;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnManagerFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.utils.LSMColumnBTreeUtil;
 import org.apache.hyracks.storage.am.lsm.btree.dataflow.LSMBTreeLocalResource;
+import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTree;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
@@ -45,6 +46,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMOperationTrackerFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCacheProvider;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.compression.NoOpCompressorDecompressorFactory;
 import org.apache.hyracks.storage.common.disk.IDiskCacheMonitoringService;
@@ -54,9 +56,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class LSMColumnBTreeLocalResource extends LSMBTreeLocalResource {
     private final IColumnManagerFactory columnManagerFactory;
+    private final int columnSamplesPerPage;
 
     public LSMColumnBTreeLocalResource(ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories,
-            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, String path,
+            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, int thetaSketchK,
+            int maxSampleLeafAttempts, int sampleLeafDrawBatchSize, int columnSamplesPerPage, String path,
             IStorageManager storageManager, ILSMMergePolicyFactory mergePolicyFactory,
             Map<String, String> mergePolicyProperties, int[] btreeFields, ILSMOperationTrackerFactory opTrackerProvider,
             ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
@@ -65,22 +69,27 @@ public class LSMColumnBTreeLocalResource extends LSMBTreeLocalResource {
             ICompressorDecompressorFactory compressorDecompressorFactory, ITypeTraits nullTypeTraits,
             INullIntrospector nullIntrospector, boolean isSecondaryNoIncrementalMaintenance,
             IColumnManagerFactory columnManagerFactory, boolean atomic) {
-        super(typeTraits, cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate, true, path, storageManager,
-                mergePolicyFactory, mergePolicyProperties, null, null, btreeFields, null, opTrackerProvider,
-                ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider,
-                ioSchedulerProvider, true, compressorDecompressorFactory, true, nullTypeTraits, nullIntrospector,
+        super(typeTraits, cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate, thetaSketchK,
+                maxSampleLeafAttempts, sampleLeafDrawBatchSize, true, path, storageManager, mergePolicyFactory,
+                mergePolicyProperties, null, null, btreeFields, null, opTrackerProvider, ioOpCallbackFactory,
+                pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, true,
+                compressorDecompressorFactory, true, nullTypeTraits, nullIntrospector,
                 isSecondaryNoIncrementalMaintenance, atomic);
         this.columnManagerFactory = columnManagerFactory;
+        this.columnSamplesPerPage = columnSamplesPerPage;
     }
 
     private LSMColumnBTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int[] bloomFilterKeyFields,
-            double bloomFilterFalsePositiveRate, boolean isPrimary, int[] btreeFields,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts,
+            int sampleLeafDrawBatchSize, boolean isPrimary, int[] btreeFields,
             ICompressorDecompressorFactory compressorDecompressorFactory, boolean hasBloomFilter,
             boolean isSecondaryNoIncrementalMaintenance, IColumnManagerFactory columnManagerFactory, boolean atomic)
             throws HyracksDataException {
-        super(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate, isPrimary, btreeFields,
-                compressorDecompressorFactory, hasBloomFilter, isSecondaryNoIncrementalMaintenance, atomic);
+        super(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts,
+                sampleLeafDrawBatchSize, isPrimary, btreeFields, compressorDecompressorFactory, hasBloomFilter,
+                isSecondaryNoIncrementalMaintenance, atomic);
         this.columnManagerFactory = columnManagerFactory;
+        this.columnSamplesPerPage = getOrDefaultInt(json, "columnSamplesPerPage", 1);
     }
 
     @Override
@@ -92,20 +101,25 @@ public class LSMColumnBTreeLocalResource extends LSMBTreeLocalResource {
         ioOpCallbackFactory.initialize(serviceCtx, this);
         pageWriteCallbackFactory.initialize(serviceCtx, this);
         IDiskCacheMonitoringService diskCacheService = storageManager.getDiskCacheMonitoringService(serviceCtx);
-        return LSMColumnBTreeUtil.createLSMTree(config, ioManager, vbcs, file,
+        LSMBTree lsmBTree = (LSMBTree) LSMColumnBTreeUtil.createLSMTree(config, ioManager, vbcs, file,
                 storageManager.getBufferCache(serviceCtx), storageManager.getColumnBufferPool(serviceCtx), typeTraits,
-                cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
-                mergePolicyFactory.createMergePolicy(mergePolicyProperties, serviceCtx),
+                cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts,
+                sampleLeafDrawBatchSize, mergePolicyFactory.createMergePolicy(mergePolicyProperties, serviceCtx),
                 opTrackerProvider.getOperationTracker(serviceCtx, this), ioSchedulerProvider.getIoScheduler(serviceCtx),
                 ioOpCallbackFactory, pageWriteCallbackFactory, btreeFields, metadataPageManagerFactory, false,
                 serviceCtx.getTracer(), compressorDecompressorFactory, nullTypeTraits, nullIntrospector,
                 columnManagerFactory, atomic, diskCacheService);
+        lsmBTree.setColumnSamplesPerPage(columnSamplesPerPage);
+        return lsmBTree;
     }
 
     public static IJsonSerializable fromJson(IPersistedResourceRegistry registry, JsonNode json)
             throws HyracksDataException {
         int[] bloomFilterKeyFields = OBJECT_MAPPER.convertValue(json.get("bloomFilterKeyFields"), int[].class);
         double bloomFilterFalsePositiveRate = json.get("bloomFilterFalsePositiveRate").asDouble();
+        int thetaSketchK = getOrDefaultInt(json, "thetaSketchK", ThetaSampler.DEFAULT_K);
+        int maxSampleLeafAttempts = getOrDefaultInt(json, "maxSampleLeafAttempts", 500);
+        int sampleLeafDrawBatchSize = getOrDefaultInt(json, "sampleLeafDrawBatchSize", 32768);
         boolean isPrimary = json.get("isPrimary").asBoolean();
         boolean hasBloomFilter = getOrDefaultHasBloomFilter(json, isPrimary);
         int[] btreeFields = OBJECT_MAPPER.convertValue(json.get("btreeFields"), int[].class);
@@ -119,14 +133,15 @@ public class LSMColumnBTreeLocalResource extends LSMBTreeLocalResource {
         IColumnManagerFactory columnManagerFactory =
                 (IColumnManagerFactory) registry.deserialize(columnManagerFactoryNode);
         return new LSMColumnBTreeLocalResource(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
-                isPrimary, btreeFields, compDecompFactory, hasBloomFilter, isSecondaryNoIncrementalMaintenance,
-                columnManagerFactory, atomic);
+                thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize, isPrimary, btreeFields, compDecompFactory,
+                hasBloomFilter, isSecondaryNoIncrementalMaintenance, columnManagerFactory, atomic);
     }
 
     @Override
     protected void appendToJson(final ObjectNode json, IPersistedResourceRegistry registry)
             throws HyracksDataException {
         super.appendToJson(json, registry);
+        json.put("columnSamplesPerPage", columnSamplesPerPage);
         json.putPOJO("columnManagerFactory", columnManagerFactory.toJson(registry));
     }
 }

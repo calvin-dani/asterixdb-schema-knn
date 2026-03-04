@@ -115,6 +115,7 @@ import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDropOperatorDescriptor;
 import org.apache.hyracks.storage.am.common.impls.DefaultTupleProjectorFactory;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
+import org.apache.hyracks.storage.am.lsm.btree.dataflow.BTreeSampleCollectorOperatorDescriptor;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMTupleFilterCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LSMTreeIndexCompactOperatorDescriptor;
@@ -455,6 +456,31 @@ public class DatasetUtil {
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, primarySearchOp,
                 primaryPartitionConstraint);
         return primarySearchOp;
+    }
+
+    public static IOperatorDescriptor createSampleScanOp(JobSpecification spec, MetadataProvider metadataProvider,
+            Dataset dataset, int sampleCardinalityTargetPerPartition, long sampleSeed,
+            ITupleProjectorFactory projectorFactory) throws AlgebricksException {
+        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
+        IFileSplitProvider primaryFileSplitProvider = partitioningProperties.getSplitsProvider();
+        AlgebricksPartitionConstraint primaryPartitionConstraint = partitioningProperties.getConstraints();
+        // -Infinity
+        int[] lowKeyFields = null;
+        // +Infinity
+        int[] highKeyFields = null;
+        ITransactionSubsystemProvider txnSubsystemProvider = TransactionSubsystemProvider.INSTANCE;
+        ISearchOperationCallbackFactory searchCallbackFactory = new PrimaryIndexInstantSearchOperationCallbackFactory(
+                dataset.getDatasetId(), dataset.getPrimaryBloomFilterFields(), txnSubsystemProvider,
+                IRecoveryManager.ResourceType.LSM_BTREE);
+        IndexDataflowHelperFactory indexHelperFactory = new IndexDataflowHelperFactory(
+                metadataProvider.getStorageComponentProvider().getStorageManager(), primaryFileSplitProvider);
+        BTreeSampleCollectorOperatorDescriptor sampleOp = new BTreeSampleCollectorOperatorDescriptor(spec,
+                dataset.getPrimaryRecordDescriptor(metadataProvider), lowKeyFields, highKeyFields, true, true,
+                indexHelperFactory, false, false, null, searchCallbackFactory, null, null, false, null, null, -1, false,
+                null, null, projectorFactory, null, partitioningProperties.getComputeStorageMap(),
+                sampleCardinalityTargetPerPartition, sampleSeed);
+        AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, sampleOp, primaryPartitionConstraint);
+        return sampleOp;
     }
 
     /**

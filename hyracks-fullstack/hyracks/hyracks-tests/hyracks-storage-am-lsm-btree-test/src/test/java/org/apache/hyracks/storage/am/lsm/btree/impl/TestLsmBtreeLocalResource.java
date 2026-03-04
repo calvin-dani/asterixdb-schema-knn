@@ -60,8 +60,8 @@ public class TestLsmBtreeLocalResource extends LSMBTreeLocalResource {
             IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
             ILSMIOOperationSchedulerProvider ioSchedulerProvider, boolean durable, boolean hasBloomFilter,
             boolean isSecondaryNoIncrementalMaintenance) {
-        super(typeTraits, cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate, isPrimary, path,
-                storageManager, mergePolicyFactory, mergePolicyProperties, filterTypeTraits, filterCmpFactories,
+        super(typeTraits, cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate, 1024, 500, 32768, isPrimary,
+                path, storageManager, mergePolicyFactory, mergePolicyProperties, filterTypeTraits, filterCmpFactories,
                 btreeFields, filterFields, opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory,
                 metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, durable,
                 NoOpCompressorDecompressorFactory.INSTANCE, hasBloomFilter, null, null,
@@ -71,8 +71,9 @@ public class TestLsmBtreeLocalResource extends LSMBTreeLocalResource {
     protected TestLsmBtreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int[] bloomFilterKeyFields,
             double bloomFilterFalsePositiveRate, boolean isPrimary, int[] btreeFields, boolean hasBloomFilter,
             boolean isSecondaryNoIncrementalMaintenance) throws HyracksDataException {
-        super(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate, isPrimary, btreeFields,
-                NoOpCompressorDecompressorFactory.INSTANCE, hasBloomFilter, isSecondaryNoIncrementalMaintenance, false);
+        super(registry, json, bloomFilterKeyFields, bloomFilterFalsePositiveRate, 1024, 500, 32768, isPrimary,
+                btreeFields, NoOpCompressorDecompressorFactory.INSTANCE, hasBloomFilter,
+                isSecondaryNoIncrementalMaintenance, false);
     }
 
     @Override
