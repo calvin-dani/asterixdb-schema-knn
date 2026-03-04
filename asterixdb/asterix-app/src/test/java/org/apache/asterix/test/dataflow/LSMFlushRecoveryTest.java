@@ -70,10 +70,12 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
 import org.apache.hyracks.storage.am.lsm.common.impls.AsynchronousScheduler;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.util.OptionalBoolean;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -111,11 +113,17 @@ public class LSMFlushRecoveryTest {
 
     @BeforeClass
     public static void setUp() throws Exception {
+        ThetaSampler.setSamplingEnabled(false);
         System.out.println("SetUp: ");
         TestHelper.deleteExistingInstanceFiles();
         String configPath = System.getProperty("user.dir") + File.separator + "src" + File.separator + "test"
                 + File.separator + "resources" + File.separator + "cc.conf";
         nc = new TestNodeController(configPath, false);
+    }
+
+    @AfterClass
+    public static void tearDown() throws Exception {
+        ThetaSampler.setSamplingEnabled(true);
     }
 
     @Before

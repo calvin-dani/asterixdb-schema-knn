@@ -351,6 +351,7 @@ public enum ErrorCode implements IError {
     NOT_ICEBERG_CATALOG(1243),
     UPDATE_PRIMARY_KEY(1244),
     PARQUET_WRITER_ERROR(1245),
+    INVALID_FULL_SCAN_OPTION(1246),
 
     // Feed errors
     DATAFLOW_ILLEGAL_STATE(3001),

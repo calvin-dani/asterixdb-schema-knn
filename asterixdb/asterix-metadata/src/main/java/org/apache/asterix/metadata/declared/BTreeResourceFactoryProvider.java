@@ -78,6 +78,9 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
         IBinaryComparatorFactory[] cmpFactories = getCmpFactories(mdProvider, dataset, index, recordType, metaType);
         int[] bloomFilterFields = getBloomFilterFields(dataset, index);
         double bloomFilterFalsePositiveRate = mdProvider.getStorageProperties().getBloomFilterFalsePositiveRate();
+        int thetaSketchK = mdProvider.getStorageProperties().getThetaSketchK();
+        int maxSampleLeafAttempts = mdProvider.getStorageProperties().getMaxSampleLeafAttempts();
+        int sampleLeafDrawBatchSize = mdProvider.getStorageProperties().getSampleLeafDrawBatchSize();
         ILSMOperationTrackerFactory opTrackerFactory = dataset.getIndexOperationTrackerFactory(index);
         ILSMIOOperationCallbackFactory ioOpCallbackFactory = dataset.getIoOperationCallbackFactory(index);
         ILSMPageWriteCallbackFactory pageWriteCallbackFactory = dataset.getPageWriteCallbackFactory();
@@ -111,9 +114,10 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory,
                             pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                             mergePolicyFactory, mergePolicyProperties, true, bloomFilterFields,
-                            bloomFilterFalsePositiveRate, index.isPrimaryIndex(), btreeFields, compDecompFactory,
-                            hasBloomFilter, typeTraitProvider.getTypeTrait(BuiltinType.ANULL),
-                            NullIntrospector.INSTANCE, isSecondaryNoIncrementalMaintenance, dataset.isAtomic());
+                            bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize,
+                            index.isPrimaryIndex(), btreeFields, compDecompFactory, hasBloomFilter,
+                            typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE,
+                            isSecondaryNoIncrementalMaintenance, dataset.isAtomic());
                 } else {
                     //Column
                     List<Integer> keySourceIndicator =
@@ -127,7 +131,8 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             filterTypeTraits, filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory,
                             pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                             mergePolicyFactory, mergePolicyProperties, bloomFilterFields, bloomFilterFalsePositiveRate,
-                            btreeFields, compDecompFactory, typeTraitProvider.getTypeTrait(BuiltinType.ANULL),
+                            thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize, btreeFields,
+                            compDecompFactory, typeTraitProvider.getTypeTrait(BuiltinType.ANULL),
                             NullIntrospector.INSTANCE, isSecondaryNoIncrementalMaintenance, columnManagerFactory,
                             dataset.isAtomic());
                 }

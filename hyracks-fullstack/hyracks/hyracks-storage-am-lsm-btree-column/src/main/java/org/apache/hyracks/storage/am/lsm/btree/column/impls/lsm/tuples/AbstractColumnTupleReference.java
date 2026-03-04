@@ -170,6 +170,23 @@ public abstract class AbstractColumnTupleReference implements IColumnTupleIterat
         totalNumberOfMegaLeafNodes++;
     }
 
+    /**
+     * Positions the PK readers at the given index WITHOUT loading column
+     * mega-pages.  Used by sampling to perform PK-only checks (antimatter,
+     * newer-component existence) before committing to a full column load.
+     * <p>
+     * After this call, {@code isAntimatter()}, {@code getFieldStart(i)},
+     * {@code getFieldLength(i)} and {@code getFieldData(i)} are valid for
+     * primary-key fields.  Non-key field access is undefined.
+     *
+     * @param startIndex the tuple index to position at
+     */
+    public void resetPKOnly(int startIndex) throws HyracksDataException {
+        tupleIndex = startIndex;
+        unpinColumnsPages();
+        setPrimaryKeysAt(startIndex, startIndex);
+    }
+
     protected abstract void skipMegaLeafNode();
 
     @Override

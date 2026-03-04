@@ -468,6 +468,9 @@ public class MetadataBootstrap {
         if (createMetadataDataset) {
             final double bloomFilterFalsePositiveRate =
                     appContext.getStorageProperties().getBloomFilterFalsePositiveRate();
+            final int thetaSketchK = appContext.getStorageProperties().getThetaSketchK();
+            final int maxSampleLeafAttempts = appContext.getStorageProperties().getMaxSampleLeafAttempts();
+            final int sampleLeafDrawBatchSize = appContext.getStorageProperties().getSampleLeafDrawBatchSize();
             Map<String, String> defaultCompactionPolicyProperties =
                     StorageConstants.DEFAULT_COMPACTION_POLICY_PROPERTIES;
 
@@ -478,8 +481,8 @@ public class MetadataBootstrap {
                             new AsterixVirtualBufferCacheProvider(datasetId),
                             storageComponentProvider.getIoOperationSchedulerProvider(),
                             appContext.getMetadataMergePolicyFactory(), defaultCompactionPolicyProperties, true,
-                            bloomFilterKeyFields, bloomFilterFalsePositiveRate, true, null,
-                            NoOpCompressorDecompressorFactory.INSTANCE, true,
+                            bloomFilterKeyFields, bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts,
+                            sampleLeafDrawBatchSize, true, null, NoOpCompressorDecompressorFactory.INSTANCE, true,
                             TypeTraitProvider.INSTANCE.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE,
                             false, appContext.isCloudDeployment());
             DatasetLocalResourceFactory dsLocalResourceFactory =

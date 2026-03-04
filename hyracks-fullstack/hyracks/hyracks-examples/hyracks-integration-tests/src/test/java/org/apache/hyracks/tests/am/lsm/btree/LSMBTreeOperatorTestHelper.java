@@ -28,6 +28,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.NoOpIOOperationCallbackFac
 import org.apache.hyracks.storage.am.lsm.common.impls.NoOpPageWriteCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.SynchronousSchedulerProvider;
 import org.apache.hyracks.storage.am.lsm.common.impls.ThreadCountingOperationTrackerFactory;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.common.IResourceFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.compression.NoOpCompressorDecompressorFactory;
@@ -48,7 +49,8 @@ public class LSMBTreeOperatorTestHelper extends LSMTreeOperatorTestHelper {
                 NoOpIOOperationCallbackFactory.INSTANCE, NoOpPageWriteCallbackFactory.INSTANCE, pageManagerFactory,
                 getVirtualBufferCacheProvider(), SynchronousSchedulerProvider.INSTANCE, MERGE_POLICY_FACTORY,
                 MERGE_POLICY_PROPERTIES, DURABLE, bloomFilterKeyFields,
-                LSMTreeOperatorTestHelper.DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE, true, btreefields,
-                NoOpCompressorDecompressorFactory.INSTANCE, bloomFilterKeyFields != null, null, null, false, false);
+                LSMTreeOperatorTestHelper.DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE, ThetaSampler.DEFAULT_K, 500, 32768,
+                true, btreefields, NoOpCompressorDecompressorFactory.INSTANCE, bloomFilterKeyFields != null, null, null,
+                false, false);
     }
 }

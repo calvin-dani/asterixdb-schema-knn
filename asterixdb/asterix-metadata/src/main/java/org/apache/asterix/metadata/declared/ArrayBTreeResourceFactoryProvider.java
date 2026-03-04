@@ -71,6 +71,9 @@ public class ArrayBTreeResourceFactoryProvider implements IResourceFactoryProvid
         ITypeTraits[] typeTraits = getTypeTraits(mdProvider, dataset, index, recordType, metaType);
         IBinaryComparatorFactory[] cmpFactories = getCmpFactories(mdProvider, dataset, index, recordType, metaType);
         double bloomFilterFalsePositiveRate = mdProvider.getStorageProperties().getBloomFilterFalsePositiveRate();
+        int thetaSketchK = mdProvider.getStorageProperties().getThetaSketchK();
+        int maxSampleLeafAttempts = mdProvider.getStorageProperties().getMaxSampleLeafAttempts();
+        int sampleLeafDrawBatchSize = mdProvider.getStorageProperties().getSampleLeafDrawBatchSize();
         ILSMOperationTrackerFactory opTrackerFactory = dataset.getIndexOperationTrackerFactory(index);
         ILSMIOOperationCallbackFactory ioOpCallbackFactory = dataset.getIoOperationCallbackFactory(index);
         ILSMPageWriteCallbackFactory pageWriteCallbackFactory = dataset.getPageWriteCallbackFactory();
@@ -99,9 +102,9 @@ public class ArrayBTreeResourceFactoryProvider implements IResourceFactoryProvid
                         filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory,
                         pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                         mergePolicyFactory, mergePolicyProperties, true, null, bloomFilterFalsePositiveRate,
-                        index.isPrimaryIndex(), btreeFields, compDecompFactory, false,
-                        typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                        dataset.isAtomic());
+                        thetaSketchK, maxSampleLeafAttempts, sampleLeafDrawBatchSize, index.isPrimaryIndex(),
+                        btreeFields, compDecompFactory, false, typeTraitProvider.getTypeTrait(BuiltinType.ANULL),
+                        NullIntrospector.INSTANCE, false, dataset.isAtomic());
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_DATASET_TYPE,
                         dataset.getDatasetType().toString());

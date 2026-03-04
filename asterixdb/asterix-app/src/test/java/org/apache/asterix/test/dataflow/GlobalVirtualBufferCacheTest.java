@@ -64,9 +64,11 @@ import org.apache.hyracks.storage.am.lsm.btree.impl.TestLsmBtree;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.NoMergePolicyFactory;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -98,6 +100,7 @@ public class GlobalVirtualBufferCacheTest {
     @BeforeClass
     public static void setUp() {
         try {
+            ThetaSampler.setSamplingEnabled(false);
             System.out.println("SetUp: ");
             TestHelper.deleteExistingInstanceFiles();
             String configPath = System.getProperty("user.dir") + File.separator + "src" + File.separator + "test"
@@ -107,6 +110,11 @@ public class GlobalVirtualBufferCacheTest {
             LOGGER.error(e);
             Assert.fail(e.getMessage());
         }
+    }
+
+    @AfterClass
+    public static void tearDown() {
+        ThetaSampler.setSamplingEnabled(true);
     }
 
     @Before

@@ -1,24 +1,36 @@
-distribute result [$$46] [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+distribute result [$$46] [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
 -- DISTRIBUTE_RESULT  |UNPARTITIONED|
-  exchange [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+  exchange [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
   -- ONE_TO_ONE_EXCHANGE  |UNPARTITIONED|
-    assign [$$46] <- [{"$1": $$48}] project: [$$46] [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+    assign [$$46] <- [{"$1": $$48}] project: [$$46] [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
     -- ASSIGN  |UNPARTITIONED|
-      aggregate [$$48] <- [agg-sql-sum($$52)] [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+      aggregate [$$48] <- [agg-sql-sum($$52)] [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
       -- AGGREGATE  |UNPARTITIONED|
-        exchange [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+        exchange [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
         -- RANDOM_MERGE_EXCHANGE  |PARTITIONED|
-          aggregate [$$52] <- [agg-sql-count(1)] [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+          aggregate [$$52] <- [agg-sql-count(1)] [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
           -- AGGREGATE  |PARTITIONED|
-            select (and(gt($$A.getField("b"), 0), gt($$A.getField("c"), 2), eq($$A.getField("a"), 1))) [cardinality: 1411.1, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
-            -- STREAM_SELECT  |PARTITIONED|
-              project ([$$A]) [cardinality: 12000.0, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
-              -- STREAM_PROJECT  |PARTITIONED|
-                exchange [cardinality: 12000.0, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
+            exchange [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
+            -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+              distinct ([$$61]) [cardinality: 857.36, doc-size: 0.0, op-cost: 0.0, total-cost: 160151.66]
+              -- PRE_SORTED_DISTINCT_BY  |PARTITIONED|
+                exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
                 -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-                  data-scan []<-[$$47, $$A] <- test.A [cardinality: 12000.0, doc-size: 0.0, op-cost: 0.0, total-cost: 12000.0]
-                  -- DATASOURCE_SCAN  |PARTITIONED|
+                  order (ASC, $$61) [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                  -- STABLE_SORT [$$61(ASC)]  |PARTITIONED|
                     exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
                     -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
-                      empty-tuple-source [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
-                      -- EMPTY_TUPLE_SOURCE  |PARTITIONED|
+                      select (and(gt($$51, 0), gt($$50, 2), eq($$49, 1))) project: [$$61] [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                      -- STREAM_SELECT  |PARTITIONED|
+                        project ([$$49, $$51, $$50, $$61]) [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                        -- STREAM_PROJECT  |PARTITIONED|
+                          exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                          -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+                            unnest-map [$$49, $$51, $$50, $$60, $$61] <- index-search("idx_abcd", 0, "Default", "test", "A", false, false, 3, $$53, $$54, $$55, 1, $$56, true, true, true) [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                            -- BTREE_SEARCH  |PARTITIONED|
+                              exchange [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                              -- ONE_TO_ONE_EXCHANGE  |PARTITIONED|
+                                assign [$$53, $$54, $$55, $$56] <- [1, 0, 2, 1] [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                                -- ASSIGN  |PARTITIONED|
+                                  empty-tuple-source [cardinality: 0.0, doc-size: 0.0, op-cost: 0.0, total-cost: 0.0]
+                                  -- EMPTY_TUPLE_SOURCE  |PARTITIONED|
