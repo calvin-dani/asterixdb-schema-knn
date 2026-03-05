@@ -499,4 +499,10 @@ public class SampleOperationsHelper implements ISecondaryIndexOperationsHelper {
         return OptimizationConfUtil.getSortNumFrames(metadataProvider.getApplicationContext().getCompilerProperties(),
                 metadataProvider.getConfig(), sourceLoc);
     }
+
+    private static int getSortNumFrames(MetadataProvider metadataProvider, SourceLocation sourceLoc)
+            throws AlgebricksException {
+        return OptimizationConfUtil.getSortNumFrames(metadataProvider.getApplicationContext().getCompilerProperties(),
+                metadataProvider.getConfig(), sourceLoc);
+    }
 }

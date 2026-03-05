@@ -134,7 +134,6 @@ public class AccessMethodUtils {
     enum SecondaryUnnestMapOutputVarType {
         PRIMARY_KEY,
         SECONDARY_KEY
-        SECONDARY_KEY
     }
 
     public final static ImmutableSet<FunctionIdentifier> CAST_NULL_TYPE_CONSTRUCTORS = ImmutableSet.of(
@@ -492,8 +491,6 @@ public class AccessMethodUtils {
      * Vector and inverted indexes skip SK output to avoid materializing unnecessary data.
      */
     public static void appendSecondaryIndexOutputVars(Dataset dataset, ARecordType recordType,
-            ARecordType metaRecordType, Index index, IOptimizationContext context, List<LogicalVariable> dest)
-            throws AlgebricksException {
             ARecordType metaRecordType, Index index, IOptimizationContext context, List<LogicalVariable> dest)
             throws AlgebricksException {
         int numPrimaryKeys;

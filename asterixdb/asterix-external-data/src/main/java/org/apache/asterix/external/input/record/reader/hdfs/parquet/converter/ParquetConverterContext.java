@@ -45,7 +45,6 @@ import org.apache.asterix.om.base.AMutableDuration;
 import org.apache.asterix.om.base.AMutableInt64;
 import org.apache.asterix.om.base.AMutableTime;
 import org.apache.asterix.om.base.ANull;
-import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.ATime;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
@@ -86,9 +85,6 @@ public class ParquetConverterContext extends ParserContext {
     @SuppressWarnings("unchecked")
     private final ISerializerDeserializer<ADateTime> datetimeSerDer =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADATETIME);
-    @SuppressWarnings("unchecked")
-    private final ISerializerDeserializer<ADuration> durationSerDer =
-            SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADURATION);
     @SuppressWarnings("unchecked")
     private final ISerializerDeserializer<ANull> nullSerDer =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ANULL);

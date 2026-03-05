@@ -24,10 +24,9 @@
  */
 
 
-drop dataverse test if exists;
-create dataverse test;
 use test;
 
+<<<<<<<< HEAD:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/index-only-testcases/simple-index-only-rtree/simple-index-only-rtree.1.ddl.sqlpp
 create type dataType as {
   row_id: int32,
 location: point
@@ -38,3 +37,16 @@ primary key row_id;
 
 create index cfLocation on dataset1(location) type rtree;
 
+========
+insert into test1 (
+{"x1": 88, "x2": 99, "states": [1,2,3,4], "elements": [{"s": 1, "m": 2}, {"s": 11, "m": 22}] },
+{"x1": 88, "x2": 99, "states": [5,2,3,4], "elements": [{"s": 1, "m": 2}, {"s": 11, "m": 22}] }
+);
+insert into test2 (
+{"elements": [{"a": 1, "states": [1,2]}, {"a": 2, "states": [4,5]}, {"a": 3, "states": [9,10]}] }
+);
+insert into test3 (
+{"elements": [{"elements1": [1,2,3]}, {"elements1": [1,2,3]}]},
+{"elements": [{"elements1": [0,2,5]}, {"elements1": [11,22,1]}]}
+);
+>>>>>>>> backup-before-rewrite-20260304:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/profile/subplan/subplan.2.update.sqlpp

@@ -79,7 +79,6 @@ public class GlobalVirtualBufferCache implements IVirtualBufferCache, ILifeCycle
     private final Set<ILSMIndex> flushingIndexes = Collections.synchronizedSet(new HashSet<>());
     private final Set<ILSMMemoryComponent> flushingComponents = Collections.synchronizedSet(new HashSet<>());
     private int flushPtr;
-    private int flushPtr;
 
     private final int filteredMemoryComponentMaxNumPages;
     private final int flushPageBudget;

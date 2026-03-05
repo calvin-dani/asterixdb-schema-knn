@@ -27,14 +27,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.asterix.app.result.ResponseMetrics;
-import org.apache.asterix.app.result.ResponseMetrics;
 import org.apache.asterix.app.result.ResponsePrinter;
 import org.apache.asterix.app.result.ResultHandle;
 import org.apache.asterix.app.result.ResultReader;
-import org.apache.asterix.app.result.fields.CreatedAtPrinter;
-import org.apache.asterix.app.result.fields.MetricsPrinter;
-import org.apache.asterix.app.result.fields.PartitionInfoPrinter;
-import org.apache.asterix.app.result.fields.ResultCountPrinter;
 import org.apache.asterix.app.result.fields.CreatedAtPrinter;
 import org.apache.asterix.app.result.fields.MetricsPrinter;
 import org.apache.asterix.app.result.fields.PartitionInfoPrinter;
@@ -73,27 +68,20 @@ public class QueryStatusApiServlet extends AbstractQueryApiServlet {
     protected void get(IServletRequest request, IServletResponse response) throws Exception {
         final String strHandle = localPath(request);
         final ResultHandle handle = parseAndValidateHandle(request, response);
-        final ResultHandle handle = parseAndValidateHandle(request, response);
         if (handle == null) {
             return; // Response status already set in parseAndValidateHandle
-            return; // Response status already set in parseAndValidateHandle
         }
-        boolean uriMode = handle.getRequestId() != null;
         boolean uriMode = handle.getRequestId() != null;
         ResultReader resultReader = new ResultReader(getResultSet(), handle.getJobId(), handle.getResultSetId());
         final ResultJobRecord.Status resultReaderStatus = resultReader.getStatus();
         if (resultReaderStatus == null) {
-            LOGGER.info("No results for: \"{}\"", strHandle);
             LOGGER.info("No results for: \"{}\"", strHandle);
             response.setStatus(HttpResponseStatus.NOT_FOUND);
             return;
         }
         ResultStatus resultStatus = resultStatus(resultReaderStatus);
         RequestExecutionState executionState = new RequestExecutionState();
-        RequestExecutionState executionState = new RequestExecutionState();
         HttpUtil.setContentType(response, HttpUtil.ContentType.APPLICATION_JSON, request);
-        // Always return 200 OK for valid status requests irrespective of the result status.
-        response.setStatus(HttpResponseStatus.OK);
         // Always return 200 OK for valid status requests irrespective of the result status.
         response.setStatus(HttpResponseStatus.OK);
         final PrintWriter resultWriter = response.writer();
@@ -107,15 +95,10 @@ public class QueryStatusApiServlet extends AbstractQueryApiServlet {
             case TIMEOUT -> handleTimeout(handle, executionState, printer, response);
             case FATAL, FAILED -> handleFailure(handle, executionState, printer, response, resultReaderStatus);
             case QUEUED, RUNNING -> {}
-        switch (resultStatus) {
-            case SUCCESS -> handleSuccessfulResult(request, strHandle, uriMode, printer, resultReader);
-            case TIMEOUT -> handleTimeout(handle, executionState, printer, response);
-            case FATAL, FAILED -> handleFailure(handle, executionState, printer, response, resultReaderStatus);
-            case QUEUED, RUNNING -> {}
         }
         printer.printResults();
         if (uriMode) {
-            printMetricsAndFooters(printer, resultReader, request, handle.getRequestId(), handle.getJobId(), resultStatus);
+            printMetricsAndFooters(printer, resultReader, request);
         }
         printer.end();
         if (response.writer().checkError()) {
@@ -159,55 +142,15 @@ public class QueryStatusApiServlet extends AbstractQueryApiServlet {
         }
     }
 
-    private void handleSuccessfulResult(IServletRequest request, String strHandle, boolean uriMode,
-            ResponsePrinter printer, ResultReader resultReader) throws HyracksDataException {
-        String servletPath = servletPath(request).replace("status", "result");
-        String resHandle;
-        if (uriMode) {
-            resHandle = servletPath + strHandle;
-        } else {
-            resHandle = "http://" + host(request) + servletPath + strHandle;
-        }
-        printer.addResultPrinter(new ResultHandlePrinter(resHandle));
-        if (uriMode) {
-            ResultMetadata metadata = (ResultMetadata) resultReader.getMetadata();
-            printer.addResultPrinter(new ResultCountPrinter(
-                    ((ResultMetadata) (resultReader.getResultSetReader().getResultMetadata())).getResultCount()));
-            printer.addResultPrinter(new PartitionInfoPrinter(resultReader.getResultSetReader().getResultRecords(),
-                    resHandle, metadata.isResultSetOrdered()));
-        }
-    }
-
-    private void handleTimeout(ResultHandle handle, RequestExecutionState executionState, ResponsePrinter printer,
-            IServletResponse response) {
-        RuntimeDataException hde = new RuntimeDataException(ErrorCode.REQUEST_TIMEOUT);
-        hde.addSuppressed(new TimeoutException());
-        handleExecuteStatementException(hde, executionState, handle.getRequestId(), null, response);
-        requestFailed(hde, printer, executionState);
-    }
-
-    private void handleFailure(ResultHandle handle, RequestExecutionState executionState, ResponsePrinter printer,
-            IServletResponse response, ResultJobRecord.Status resultReaderStatus) {
-        Exception ex = extractException(resultReaderStatus);
-        if (ex != null) {
-            handleExecuteStatementException(ex, executionState, handle.getRequestId(), null, response);
-            requestFailed(ex, printer, executionState);
-        }
-    }
-
     ResultStatus resultStatus(ResultJobRecord.Status status) {
         switch (status.getState()) {
             case IDLE:
-                return ResultStatus.QUEUED;
                 return ResultStatus.QUEUED;
             case RUNNING:
                 return ResultStatus.RUNNING;
             case SUCCESS:
                 return ResultStatus.SUCCESS;
             case FAILED:
-                return ResultStatus.FAILED;
-            case TIMEOUT:
-                return ResultStatus.TIMEOUT;
                 return ResultStatus.FAILED;
             case TIMEOUT:
                 return ResultStatus.TIMEOUT;

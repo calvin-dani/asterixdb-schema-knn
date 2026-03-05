@@ -196,6 +196,11 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
     /** Key for storing computed QuantizationConstants in the config map */
     public static final String KEY_QUANTIZATION_CONSTANTS = "quantization.constants";
 
+    private static final Logger LOGGER = LogManager.getLogger();
+
+    /** Key for storing computed QuantizationConstants in the config map */
+    public static final String KEY_QUANTIZATION_CONSTANTS = "quantization.constants";
+
     private final ICcApplicationContext appCtx;
     private final IStorageComponentProvider storageComponentProvider;
     private final StorageProperties storageProperties;

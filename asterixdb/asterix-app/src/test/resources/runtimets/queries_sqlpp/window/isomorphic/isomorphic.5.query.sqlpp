@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+<<<<<<<< HEAD:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/window/isomorphic/isomorphic.5.query.sqlpp
 /*
  * Description  : Isomorphic Subplan functions Test
  * Expected Res : SUCCESS
@@ -31,3 +32,24 @@ FROM
     ON l.timestamp = r.timestamp
 order by timestamp;
 
+========
+
+package org.apache.hyracks.dataflow.std.sort;
+
+import org.apache.hyracks.api.comm.IFrameWriter;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+
+public interface IAccumulate {
+
+    boolean hasRemaining();
+
+    void reset() throws HyracksDataException;
+
+    void accumulate() throws HyracksDataException;
+
+    void close() throws HyracksDataException;
+
+    int flush(IFrameWriter writer) throws HyracksDataException;
+
+}
+>>>>>>>> backup-before-rewrite-20260304:hyracks-fullstack/hyracks/hyracks-dataflow-std/src/main/java/org/apache/hyracks/dataflow/std/sort/IAccumulate.java

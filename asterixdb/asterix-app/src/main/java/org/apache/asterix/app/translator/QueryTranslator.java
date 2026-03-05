@@ -24,8 +24,6 @@ import static org.apache.asterix.common.utils.IdentifierUtil.dataverse;
 import static org.apache.asterix.lang.common.statement.CreateFullTextFilterStatement.FIELD_TYPE_STOPWORDS;
 import static org.apache.hyracks.api.job.HyracksJobProperty.JOB_KIND;
 import static org.apache.hyracks.control.nc.result.ResultState.UNLIMITED_READS;
-import static org.apache.hyracks.api.job.HyracksJobProperty.JOB_KIND;
-import static org.apache.hyracks.control.nc.result.ResultState.UNLIMITED_READS;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -6138,7 +6136,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             try {
                 org.apache.asterix.translator.ResultMetadata resultMetadata =
                         new org.apache.asterix.translator.ResultMetadata(sessionConfig.fmt());
-                resultMetadata.setCreateTime(System.currentTimeMillis());
                 final JobSpecification jobSpec = rewriteCompileQuery(hcc, metadataProvider, query, null, stmtParams,
                         requestParameters, resultMetadata);
                 // update stats with count of compile-time warnings. needs to be adapted for multi-statement.
@@ -6146,6 +6143,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 afterCompile();
                 MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
                 stats.setCompileTime(System.nanoTime() - compileStart);
+                resultMetadata.setCompileTime(stats.getCompileTime());
                 resultMetadata.setCompileTime(stats.getCompileTime());
                 resultMetadata.setCompileTime(stats.getCompileTime());
                 bActiveTxn = false;
@@ -6279,9 +6277,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 }, requestParameters, cancellable, appCtx, metadataProvider, atomicStmt, jobKind);
             } catch (Exception e) {
                 jobIdFuture.completeExceptionally(e);
-                synchronized (printed) {
-                    exceptionThrown.setTrue();
-                }
                 throw new RuntimeException(e);
             }
         });
@@ -6294,24 +6289,54 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             cancelIfStarted(hcc, jobIdFuture);
             jobSubmitFuture.cancel(true);
         } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            // Unwrap RuntimeException wrapper if present
-            if (cause instanceof RuntimeException && cause.getCause() != null) {
-                cause = cause.getCause();
-            }
-            if (cause instanceof Exception) {
-                throw (Exception) cause;
-            } else if (cause instanceof Error) {
-                throw (Error) cause;
-            } else {
-                throw HyracksDataException.create(e);
-            }
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            handleAsyncJobException(cause, jobId.get(), resultDelivery);
+        } catch (Exception e) {
+            handleAsyncJobException(e, jobId.get(), resultDelivery);
         } finally {
             synchronized (printed) {
                 if (printed.isFalse()) {
                     printed.setTrue();
                     printed.notify();
                 }
+            }
+        }
+    }
+
+    private void handleAsyncJobTimeout(IHyracksClientConnection hcc, CompletableFuture<JobId> jobIdFuture, JobId jobId,
+            Future<?> jobSubmitFuture) {
+        cancelIfStarted(hcc, jobIdFuture);
+        jobSubmitFuture.cancel(true);
+        final ClusterControllerService controllerService =
+                (ClusterControllerService) appCtx.getServiceContext().getControllerService();
+        controllerService.getResultDirectoryService().reportJobTimeout(jobId);
+    }
+
+    private void handleAsyncJobException(Throwable e, JobId jobId, ResultDelivery resultDelivery) {
+        if (Objects.equals(JobId.INVALID, jobId)) {
+            // compilation failed
+            responsePrinter.addResultPrinter(new StatusPrinter(AbstractQueryApiServlet.ResultStatus.FAILED));
+            responsePrinter.addResultPrinter(new ErrorsPrinter(Collections.singletonList(ExecutionError.of(e))));
+            try {
+                responsePrinter.printResults();
+            } catch (HyracksDataException ex) {
+                LOGGER.error("failed to print result", ex);
+            }
+        } else {
+            GlobalConfig.ASTERIX_LOGGER.log(Level.ERROR,
+                    resultDelivery.name() + " job with id " + jobId + " " + "failed", e);
+        }
+    }
+
+    private void cancelIfStarted(IHyracksClientConnection hcc, CompletableFuture<JobId> jobIdFuture) {
+        if (jobIdFuture.isDone() && !jobIdFuture.isCompletedExceptionally()) {
+            try {
+                JobId jobId = jobIdFuture.getNow(null);
+                if (jobId != null) {
+                    hcc.cancelJob(jobId);
+                }
+            } catch (Exception e) {
+                LOGGER.warn("Failed to cancel timed out job", e);
             }
         }
     }

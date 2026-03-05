@@ -25,10 +25,8 @@ import static org.apache.asterix.common.exceptions.ErrorCode.REJECT_BAD_CLUSTER_
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.asterix.app.message.EstimateColumnCountRequestMessage;
 import org.apache.asterix.app.message.EstimateColumnCountRequestMessage;
 import org.apache.asterix.app.message.StorageSizeRequestMessage;
 import org.apache.asterix.common.api.IClusterManagementWork;
@@ -49,11 +47,7 @@ import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.metadata.utils.DatasetPartitions;
 import org.apache.asterix.metadata.utils.DatasetUtil;
-import org.apache.asterix.metadata.utils.DatasetPartitions;
-import org.apache.asterix.metadata.utils.DatasetUtil;
 import org.apache.hyracks.api.util.InvokeUtil;
-
-import it.unimi.dsi.fastutil.ints.Int2IntMap;
 
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 

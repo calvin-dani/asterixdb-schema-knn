@@ -27,26 +27,21 @@ import org.apache.asterix.app.result.ResponsePrinter;
 import org.apache.asterix.app.result.ResultHandle;
 import org.apache.asterix.app.result.ResultReader;
 import org.apache.asterix.app.result.fields.CreatedAtPrinter;
-import org.apache.asterix.app.result.fields.CreatedAtPrinter;
 import org.apache.asterix.app.result.fields.MetricsPrinter;
 import org.apache.asterix.app.result.fields.ProfilePrinter;
 import org.apache.asterix.app.result.fields.ResultsPrinter;
 import org.apache.asterix.common.api.IApplicationContext;
-import org.apache.asterix.common.dataflow.ICcApplicationContext;
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
 import org.apache.asterix.translator.IStatementExecutor.Stats;
 import org.apache.asterix.translator.ResultMetadata;
 import org.apache.asterix.translator.SessionConfig;
 import org.apache.asterix.translator.SessionOutput;
 import org.apache.asterix.utils.AsyncRequestsAPIUtil;
-import org.apache.asterix.utils.AsyncRequestsAPIUtil;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.JobId;
-import org.apache.hyracks.api.job.JobId;
 import org.apache.hyracks.api.result.IResultSet;
 import org.apache.hyracks.api.result.ResultJobRecord;
-import org.apache.hyracks.api.result.ResultSetId;
 import org.apache.hyracks.api.result.ResultSetId;
 import org.apache.hyracks.http.api.IServletRequest;
 import org.apache.hyracks.http.api.IServletResponse;
@@ -171,7 +166,7 @@ public class QueryResultApiServlet extends AbstractQueryApiServlet {
     }
 
     private ResponseMetrics buildMetrics(Stats stats, ResultMetadata metadata) {
-        long endTime = System.nanoTime();
+        long endTime = System.currentTimeMillis();
         stats.setProcessedObjects(metadata.getProcessedObjects());
         stats.setQueueWaitTime(metadata.getQueueWaitTimeInNanos());
         stats.setBufferCacheHitRatio(metadata.getBufferCacheHitRatio());
@@ -180,11 +175,11 @@ public class QueryResultApiServlet extends AbstractQueryApiServlet {
         stats.setCloudPagesReadCount(metadata.getCloudPagesReadCount());
         stats.setCloudPagesPersistedCount(metadata.getCloudPagesPersistedCount());
         stats.updateTotalWarningsCount(metadata.getTotalWarningsCount());
-        return ResponseMetrics.of(TimeUnit.MILLISECONDS.toNanos(endTime - metadata.getCreateTime()),
-                metadata.getJobDuration(), stats.getCount(), stats.getSize(), metadata.getProcessedObjects(), 0,
-                metadata.getTotalWarningsCount(), metadata.getCompileTime(), stats.getQueueWaitTime(),
-                stats.getBufferCacheHitRatio(), stats.getBufferCachePageReadCount(), stats.getCloudReadRequestsCount(),
-                stats.getCloudPagesReadCount(), stats.getCloudPagesPersistedCount());
+        return ResponseMetrics.of(endTime - metadata.getCreateTime(), metadata.getJobDuration(), stats.getCount(),
+                stats.getSize(), metadata.getProcessedObjects(), 0, metadata.getTotalWarningsCount(),
+                metadata.getCompileTime(), stats.getQueueWaitTime(), stats.getBufferCacheHitRatio(),
+                stats.getBufferCachePageReadCount(), stats.getCloudReadRequestsCount(), stats.getCloudPagesReadCount(),
+                stats.getCloudPagesPersistedCount());
     }
 
     /**
