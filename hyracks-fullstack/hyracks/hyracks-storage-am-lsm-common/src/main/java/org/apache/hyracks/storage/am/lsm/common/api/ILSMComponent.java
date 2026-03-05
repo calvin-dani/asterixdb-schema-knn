@@ -20,6 +20,7 @@ package org.apache.hyracks.storage.am.lsm.common.api;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation.LSMIOOperationType;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 import org.apache.hyracks.storage.common.IIndex;
 
 /**

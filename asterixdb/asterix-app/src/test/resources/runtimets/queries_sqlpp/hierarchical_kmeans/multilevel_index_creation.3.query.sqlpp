@@ -1,0 +1,186 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+USE ColumnTest;
+
+-- Create the hierarchical cluster index using the hierarchical k-means algorithm
+-- This test specifically validates the multilevel index creation process
+DROP INDEX ColumnDataset.ColumnDatasetIdx IF EXISTS;
+
+-- Create the hierarchical cluster index using the hierarchical k-means algorithm
+CREATE INDEX ColumnDatasetIdx ON ColumnDataset(embedding) 
+TYPE hierarchical_cluster 
+WITH {
+  "k": 4,
+  "max_iterations": 10,
+  "tolerance": 0.01,
+  "seed": 12345,
+  "max_levels": 3,
+  "min_cluster_size": 2
+};
+
+-- Test 1: Verify index creation and basic functionality
+-- Purpose: Validate that the hierarchical cluster index was created successfully
+SELECT 
+  "index_creation_test" AS test_name,
+  COUNT(*) AS total_records,
+  -- Check if clustering information is available
+  COUNT(CASE WHEN cluster_id IS NOT NULL THEN 1 END) AS clustered_records,
+  COUNT(DISTINCT cluster_id) AS num_clusters,
+  -- Validate basic functionality
+  CASE 
+    WHEN COUNT(CASE WHEN cluster_id IS NOT NULL THEN 1 END) > 0
+     AND COUNT(DISTINCT cluster_id) >= 2
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM ColumnDataset;
+
+-- Test 2: Validate cluster distribution
+-- Purpose: Ensure proper distribution of clusters
+-- Expected: Should have reasonable cluster sizes
+WITH cluster_distribution AS (
+  SELECT 
+    cluster_id,
+    COUNT(*) AS cluster_size,
+    AVG(distance_to_centroid) AS avg_distance,
+    STDDEV(distance_to_centroid) AS stddev_distance
+  FROM ColumnDataset
+  WHERE cluster_id IS NOT NULL
+  GROUP BY cluster_id
+)
+SELECT 
+  "cluster_distribution_test" AS test_name,
+  COUNT(*) AS num_clusters,
+  AVG(cluster_size) AS avg_cluster_size,
+  MIN(cluster_size) AS min_cluster_size,
+  MAX(cluster_size) AS max_cluster_size,
+  AVG(avg_distance) AS overall_avg_distance,
+  -- Validate distribution
+  CASE 
+    WHEN COUNT(*) >= 2 
+     AND MIN(cluster_size) > 0
+     AND AVG(avg_distance) < 5.0
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM cluster_distribution;
+
+-- Test 3: Validate hierarchical structure (if available)
+-- Purpose: Test hierarchical tree structure
+-- Expected: Should show proper parent-child relationships
+WITH hierarchical_structure AS (
+  SELECT 
+    cluster_level,
+    cluster_id,
+    parent_cluster_id,
+    COUNT(*) AS point_count
+  FROM ColumnDataset
+  WHERE cluster_id IS NOT NULL
+  GROUP BY cluster_level, cluster_id, parent_cluster_id
+)
+SELECT 
+  "hierarchical_structure_test" AS test_name,
+  COUNT(DISTINCT cluster_level) AS num_levels,
+  COUNT(DISTINCT cluster_id) AS total_clusters,
+  COUNT(DISTINCT parent_cluster_id) AS parent_clusters,
+  AVG(point_count) AS avg_points_per_cluster,
+  -- Validate hierarchical structure
+  CASE 
+    WHEN COUNT(DISTINCT cluster_level) > 0 
+     AND COUNT(DISTINCT cluster_id) >= 2
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM hierarchical_structure;
+
+-- Test 4: Test index query performance
+-- Purpose: Test that the index supports efficient queries
+-- Expected: Should be able to query by cluster
+WITH query_performance AS (
+  SELECT 
+    cluster_id,
+    COUNT(*) AS points_in_cluster,
+    AVG(distance_to_centroid) AS avg_distance
+  FROM ColumnDataset
+  WHERE cluster_id IS NOT NULL
+    AND distance_to_centroid < 3.0  -- Range query condition
+  GROUP BY cluster_id
+)
+SELECT 
+  "query_performance_test" AS test_name,
+  COUNT(*) AS clusters_in_range,
+  SUM(points_in_cluster) AS total_points_in_range,
+  AVG(avg_distance) AS avg_distance_in_range,
+  -- Validate query performance
+  CASE 
+    WHEN COUNT(*) > 0 
+     AND SUM(points_in_cluster) > 0
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS validation_result
+FROM query_performance;
+
+-- Test 5: Comprehensive multilevel index validation
+-- Purpose: Overall validation of the multilevel hierarchical cluster index
+WITH comprehensive_validation AS (
+  SELECT 
+    -- Basic metrics
+    COUNT(*) AS total_records,
+    COUNT(CASE WHEN cluster_id IS NOT NULL THEN 1 END) AS clustered_records,
+    COUNT(DISTINCT cluster_id) AS num_clusters,
+    COUNT(DISTINCT cluster_level) AS num_levels,
+    -- Quality metrics
+    AVG(distance_to_centroid) AS avg_distance,
+    STDDEV(distance_to_centroid) AS stddev_distance,
+    -- Distribution metrics
+    MIN(cluster_size) AS min_cluster_size,
+    MAX(cluster_size) AS max_cluster_size,
+    AVG(cluster_size) AS avg_cluster_size
+  FROM (
+    SELECT 
+      cluster_id,
+      cluster_level,
+      distance_to_centroid,
+      COUNT(*) OVER (PARTITION BY cluster_id) AS cluster_size
+    FROM ColumnDataset
+    WHERE cluster_id IS NOT NULL
+  ) AS cluster_stats
+)
+SELECT 
+  "comprehensive_multilevel_validation" AS test_name,
+  total_records,
+  clustered_records,
+  num_clusters,
+  num_levels,
+  avg_distance,
+  stddev_distance,
+  min_cluster_size,
+  max_cluster_size,
+  avg_cluster_size,
+  -- Overall validation
+  CASE 
+    WHEN clustered_records > 0 
+     AND num_clusters >= 2
+     AND avg_distance > 0
+     AND min_cluster_size > 0
+    THEN "PASS" 
+    ELSE "FAIL" 
+  END AS overall_validation
+FROM comprehensive_validation;

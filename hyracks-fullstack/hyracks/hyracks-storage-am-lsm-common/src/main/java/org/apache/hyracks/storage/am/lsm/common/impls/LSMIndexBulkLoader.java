@@ -18,18 +18,29 @@
  */
 package org.apache.hyracks.storage.am.lsm.common.impls;
 
+import static org.apache.hyracks.storage.am.lsm.common.impls.DiskComponentMetadata.THETA_INSERT_DELETE_SKETCH_KEY;
+
+import java.io.IOException;
+
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMTreeTupleWriter;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 
 public class LSMIndexBulkLoader implements IChainedComponentBulkLoader {
-    private final IIndexBulkLoader bulkLoader;
+    protected final IComponentMetadata componentMetadata;
+    protected final IIndexBulkLoader bulkLoader;
+    protected final ISampler sampler;
 
-    public LSMIndexBulkLoader(IIndexBulkLoader bulkLoader) {
+    public LSMIndexBulkLoader(IIndexBulkLoader bulkLoader, IComponentMetadata componentMetadata, ISampler sampler) {
         this.bulkLoader = bulkLoader;
+        this.componentMetadata = componentMetadata;
+        this.sampler = sampler;
     }
 
     @Override
@@ -58,6 +69,14 @@ public class LSMIndexBulkLoader implements IChainedComponentBulkLoader {
 
     @Override
     public void end() throws HyracksDataException {
+        try {
+            IValueReference reference = sampler.serializeSamplingMetadata();
+            if (reference != null) {
+                componentMetadata.put(THETA_INSERT_DELETE_SKETCH_KEY, reference);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         bulkLoader.end();
     }
 
@@ -84,5 +103,15 @@ public class LSMIndexBulkLoader implements IChainedComponentBulkLoader {
     @Override
     public void force() throws HyracksDataException {
         bulkLoader.force();
+    }
+
+    /**
+     * Get the underlying IIndexBulkLoader.
+     * This allows access to the wrapped bulk loader for specialized operations.
+     * 
+     * @return the underlying IIndexBulkLoader
+     */
+    public IIndexBulkLoader getBulkLoader() {
+        return bulkLoader;
     }
 }

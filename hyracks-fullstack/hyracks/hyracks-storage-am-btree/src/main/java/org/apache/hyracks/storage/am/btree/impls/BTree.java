@@ -60,6 +60,7 @@ import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.IModificationOperationCallback;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
@@ -711,6 +712,7 @@ public class BTree extends AbstractTreeIndex {
                         ctx.getCursorInitialState().setOriginialKeyComparator(ctx.getCmp());
                         ctx.getCursorInitialState().setPage(node);
                         ctx.getCursorInitialState().setPageId(pageId);
+                        ctx.getCursorInitialState().setRootPageId(rootPage);
                         ctx.getCursor().open(ctx.getCursorInitialState(), ctx.getPred());
                         break;
                     }
@@ -894,6 +896,11 @@ public class BTree extends AbstractTreeIndex {
             btree.diskOrderScan(cursor, ctx);
         }
 
+        @Override
+        public void diskSampleScan(IIndexCursor cursor) throws HyracksDataException {
+            throw new UnsupportedOperationException("Disk sample scan is not supported for BTree.");
+        }
+
         // TODO: Ideally, this method should not exist. But we need it for
         // the changing the leafFrame and leafFrameFactory of the op context for
         // the LSM-BTree to work correctly.
@@ -983,8 +990,8 @@ public class BTree extends AbstractTreeIndex {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        return new BTreeNSMBulkLoader(fillFactor, verifyInput, callback, this);
+            boolean checkIfEmptyIndex, ISampler sampler, IPageWriteCallback callback) throws HyracksDataException {
+        return new BTreeNSMBulkLoader(fillFactor, verifyInput, callback, sampler, this);
     }
 
     @SuppressWarnings("rawtypes")

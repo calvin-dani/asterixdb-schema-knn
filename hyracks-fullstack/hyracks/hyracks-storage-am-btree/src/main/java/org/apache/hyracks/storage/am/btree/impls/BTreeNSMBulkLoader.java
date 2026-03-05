@@ -32,6 +32,7 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndex;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndexBulkLoader;
 import org.apache.hyracks.storage.am.common.impls.NodeFrontier;
+import org.apache.hyracks.storage.common.ISampler;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
@@ -50,15 +51,16 @@ public class BTreeNSMBulkLoader extends AbstractTreeIndexBulkLoader {
     protected final boolean verifyInput;
     private final int maxTupleSize;
 
-    public BTreeNSMBulkLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback, ITreeIndex index)
-            throws HyracksDataException {
-        this(fillFactor, verifyInput, callback, index, index.getLeafFrameFactory().createFrame(),
+    public BTreeNSMBulkLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback, ISampler sampler,
+            ITreeIndex index) throws HyracksDataException {
+        this(fillFactor, verifyInput, callback, index, index.getLeafFrameFactory().createFrame(), sampler,
                 DefaultBufferCacheWriteContext.INSTANCE);
     }
 
     protected BTreeNSMBulkLoader(float fillFactor, boolean verifyInput, IPageWriteCallback callback, ITreeIndex index,
-            ITreeIndexFrame leafFrame, IBufferCacheWriteContext writeContext) throws HyracksDataException {
-        super(fillFactor, callback, index, leafFrame, writeContext);
+            ITreeIndexFrame leafFrame, ISampler sampler, IBufferCacheWriteContext writeContext)
+            throws HyracksDataException {
+        super(fillFactor, callback, index, leafFrame, writeContext, sampler);
         this.verifyInput = verifyInput;
         splitKey = new BTreeSplitKey(tupleWriter.createTupleReference());
         splitKey.getTuple().setFieldCount(cmp.getKeyFieldCount());
@@ -68,6 +70,7 @@ public class BTreeNSMBulkLoader extends AbstractTreeIndexBulkLoader {
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
         try {
+            sampler.addTuple(tuple);
             int tupleSize = Math.max(leafFrame.getBytesRequiredToWriteTuple(tuple),
                     interiorFrame.getBytesRequiredToWriteTuple(tuple));
             NodeFrontier leafFrontier = nodeFrontiers.get(0);

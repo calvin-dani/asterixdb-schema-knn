@@ -27,6 +27,7 @@ import org.apache.asterix.common.api.INcApplicationContext;
 import org.apache.asterix.common.ioopcallbacks.LSMIOOperationCallback;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -51,14 +52,33 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
     protected final int partition;
     protected ILSMIndex[] primaryIndexes;
 
+    // Static structure parameters for Vector Clustering Tree
+    protected final Integer numLevels;
+    protected final List<Integer> clustersPerLevel;
+    protected final List<List<Integer>> centroidsPerCluster;
+    protected final Integer maxEntriesPerPage;
+
+    // Backwards compatible constructor (without Vector Clustering Tree parameters)
     public LSMIndexBulkLoadOperatorNodePushable(IIndexDataflowHelperFactory indexDataflowHelperFactory,
             IIndexDataflowHelperFactory priamryIndexDataflowHelperFactory, IHyracksTaskContext ctx, int partition,
             int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
             boolean checkIfEmptyIndex, RecordDescriptor recDesc, BulkLoadUsage usage, int datasetId,
             ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap)
             throws HyracksDataException {
+        this(indexDataflowHelperFactory, priamryIndexDataflowHelperFactory, ctx, partition, fieldPermutation,
+                fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, recDesc, usage, datasetId,
+                tupleFilterFactory, partitionerFactory, partitionsMap, null, null, null, null, false);
+    }
+
+    public LSMIndexBulkLoadOperatorNodePushable(IIndexDataflowHelperFactory indexDataflowHelperFactory,
+            IIndexDataflowHelperFactory priamryIndexDataflowHelperFactory, IHyracksTaskContext ctx, int partition,
+            int[] fieldPermutation, float fillFactor, boolean verifyInput, long numElementsHint,
+            boolean checkIfEmptyIndex, RecordDescriptor recDesc, BulkLoadUsage usage, int datasetId,
+            ITupleFilterFactory tupleFilterFactory, ITuplePartitionerFactory partitionerFactory, int[][] partitionsMap,
+            Integer numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster,
+            Integer maxEntriesPerPage, boolean sampleLoader) throws HyracksDataException {
         super(indexDataflowHelperFactory, ctx, partition, fieldPermutation, fillFactor, verifyInput, numElementsHint,
-                checkIfEmptyIndex, recDesc, tupleFilterFactory, partitionerFactory, partitionsMap);
+                checkIfEmptyIndex, recDesc, tupleFilterFactory, partitionerFactory, partitionsMap, sampleLoader);
 
         if (priamryIndexDataflowHelperFactory != null) {
             primaryIndexHelpers = new IIndexDataflowHelper[partitions.length];
@@ -75,6 +95,10 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
         this.usage = usage;
         this.datasetId = datasetId;
         this.partition = partition;
+        this.numLevels = numLevels;
+        this.clustersPerLevel = clustersPerLevel;
+        this.centroidsPerCluster = centroidsPerCluster;
+        this.maxEntriesPerPage = maxEntriesPerPage;
         INcApplicationContext ncCtx =
                 (INcApplicationContext) ctx.getJobletContext().getServiceContext().getApplicationContext();
         datasetManager = ncCtx.getDatasetLifecycleManager();
@@ -85,6 +109,38 @@ public class LSMIndexBulkLoadOperatorNodePushable extends IndexBulkLoadOperatorN
         ILSMIndex targetIndex = (ILSMIndex) index;
         Map<String, Object> parameters = new HashMap<>();
         parameters.put(LSMIOOperationCallback.KEY_FLUSHED_COMPONENT_ID, LSMComponentId.DEFAULT_COMPONENT_ID);
+
+        // Add static structure parameters if provided
+        if (numLevels != null) {
+            parameters.put("numLevels", numLevels);
+        }
+        if (clustersPerLevel != null) {
+            parameters.put("clustersPerLevel", clustersPerLevel);
+        }
+        if (centroidsPerCluster != null) {
+            parameters.put("centroidsPerCluster", centroidsPerCluster);
+        }
+        if (maxEntriesPerPage != null) {
+            parameters.put("maxEntriesPerPage", maxEntriesPerPage);
+        }
+
+        // Add RecordDescriptor serializers for VCTree bulk loading (only for data loading, not static structure creation)
+        if (usage.equals(BulkLoadUsage.LOAD) && recDesc != null) {
+            @SuppressWarnings("rawtypes")
+            ISerializerDeserializer[] dataFrameSerdes = recDesc.getFields();
+            if (dataFrameSerdes != null && dataFrameSerdes.length > 0) {
+                parameters.put("dataFrameSerdes", dataFrameSerdes);
+                //                System.err.println("LSMIndexBulkLoadOperatorNodePushable: Added dataFrameSerdes to parameters (count: "
+                //                        + dataFrameSerdes.length + ")");
+            } else {
+                //                System.err.println(
+                //                        "LSMIndexBulkLoadOperatorNodePushable: WARNING - recDesc.getFields() returned null or empty array");
+            }
+        } else {
+            //            System.err.println("LSMIndexBulkLoadOperatorNodePushable: Not adding dataFrameSerdes - usage=" + usage
+            //                    + ", recDesc=" + (recDesc != null ? "not null" : "null"));
+        }
+
         if (usage.equals(BulkLoadUsage.LOAD)) {
             bulkLoaders[indexId] = targetIndex.createBulkLoader(fillFactor, verifyInput, numElementsHint,
                     checkIfEmptyIndex, parameters);

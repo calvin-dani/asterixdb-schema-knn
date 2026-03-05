@@ -86,7 +86,8 @@ public class TestLsmBtree extends LSMBTree {
             ILSMIndexFileManager fileManager, ILSMDiskComponentFactory componentFactory,
             ILSMDiskComponentFactory bulkLoadComponentFactory, IComponentFilterHelper filterHelper,
             ILSMComponentFilterFrameFactory filterFrameFactory, LSMComponentFilterManager filterManager,
-            double bloomFilterFalsePositiveRate, int fieldCount, IBinaryComparatorFactory[] cmpFactories,
+            int[] bloomFilterKeyFields, double bloomFilterFalsePositiveRate, int thetaSketchK,
+            int maxSampleLeafAttempts, int fieldCount, IBinaryComparatorFactory[] cmpFactories,
             ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
             ILSMIOOperationCallbackFactory ioOperationCallbackFactory,
             ILSMPageWriteCallbackFactory pageWriteCallbackFactory, boolean needKeyDupCheck, boolean hasBloomFilter,
@@ -94,9 +95,10 @@ public class TestLsmBtree extends LSMBTree {
             throws HyracksDataException {
         super(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory, insertLeafFrameFactory,
                 deleteLeafFrameFactory, diskBufferCache, fileManager, componentFactory, bulkLoadComponentFactory,
-                filterHelper, filterFrameFactory, filterManager, bloomFilterFalsePositiveRate, fieldCount, cmpFactories,
-                mergePolicy, opTracker, ioScheduler, ioOperationCallbackFactory, pageWriteCallbackFactory,
-                needKeyDupCheck, hasBloomFilter, btreeFields, filterFields, durable, updateAware, tracer, false);
+                filterHelper, filterFrameFactory, filterManager, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
+                thetaSketchK, maxSampleLeafAttempts, fieldCount, cmpFactories, mergePolicy, opTracker, ioScheduler,
+                ioOperationCallbackFactory, pageWriteCallbackFactory, needKeyDupCheck, hasBloomFilter, btreeFields,
+                filterFields, durable, updateAware, tracer, false);
         addModifyCallback(AllowTestOpCallback.INSTANCE);
         addSearchCallback(AllowTestOpCallback.INSTANCE);
         addFlushCallback(AllowTestOpCallback.INSTANCE);

@@ -32,6 +32,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
@@ -60,13 +61,14 @@ public abstract class AbstractLSMIndexOperationContext implements ILSMIndexOpera
     protected boolean recovery = false;
     private ILSMIOOperation ioOperation;
     private Map<String, Object> parametersMap;
+    private final IIndexAccessParameters iap;
 
     public AbstractLSMIndexOperationContext(ILSMIndex index, int[] treeFields, int[] filterFields,
-            IBinaryComparatorFactory[] filterCmpFactories, ISearchOperationCallback searchCallback,
-            IExtendedModificationOperationCallback modificationCallback, ITracer tracer) {
+            IBinaryComparatorFactory[] filterCmpFactories, IIndexAccessParameters iap, ITracer tracer) {
         this.index = index;
-        this.searchCallback = searchCallback;
-        this.modificationCallback = modificationCallback;
+        this.searchCallback = iap.getSearchOperationCallback();
+        this.modificationCallback = (IExtendedModificationOperationCallback) iap.getModificationCallback();
+        this.iap = iap;
         this.componentHolder = new ArrayList<>();
         this.componentsToBeMerged = new ArrayList<>();
         this.componentsToBeReplicated = new ArrayList<>();
@@ -228,6 +230,11 @@ public abstract class AbstractLSMIndexOperationContext implements ILSMIndexOpera
     @Override
     public Map<String, Object> getParameters() {
         return parametersMap;
+    }
+
+    @Override
+    public <T> T getIndexAccessParameter(String key, Class<T> clazz) {
+        return iap.getParameter(key, clazz);
     }
 
 }

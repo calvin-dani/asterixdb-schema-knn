@@ -55,6 +55,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.ComponentFilterHelper;
 import org.apache.hyracks.storage.am.lsm.common.impls.DiskBTreeFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFilterManager;
 import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
+import org.apache.hyracks.storage.am.lsm.common.theta.ThetaSampler;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.util.trace.ITracer;
 
@@ -89,6 +90,25 @@ public class LSMBTreeUtil {
             ILSMPageWriteCallbackFactory pageWriteCallbackFactory, boolean needKeyDupCheck,
             ITypeTraits[] filterTypeTraits, IBinaryComparatorFactory[] filterCmpFactories, int[] btreeFields,
             int[] filterFields, boolean durable, IMetadataPageManagerFactory freePageManagerFactory,
+            boolean updateAware, ITracer tracer, ICompressorDecompressorFactory compressorDecompressorFactory,
+            boolean hasBloomFilter, ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic)
+            throws HyracksDataException {
+        return createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache, typeTraits,
+                cmpFactories, bloomFilterKeyFields, bloomFilterFalsePositiveRate, ThetaSampler.DEFAULT_K, 500,
+                mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, needKeyDupCheck,
+                filterTypeTraits, filterCmpFactories, btreeFields, filterFields, durable, freePageManagerFactory,
+                updateAware, tracer, compressorDecompressorFactory, hasBloomFilter, nullTypeTraits, nullIntrospector,
+                atomic);
+    }
+
+    public static LSMBTree createLSMTree(NCConfig storageConfig, IIOManager ioManager,
+            List<IVirtualBufferCache> virtualBufferCaches, FileReference file, IBufferCache diskBufferCache,
+            ITypeTraits[] typeTraits, IBinaryComparatorFactory[] cmpFactories, int[] bloomFilterKeyFields,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts,
+            ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker, ILSMIOOperationScheduler ioScheduler,
+            ILSMIOOperationCallbackFactory ioOpCallbackFactory, ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
+            boolean needKeyDupCheck, ITypeTraits[] filterTypeTraits, IBinaryComparatorFactory[] filterCmpFactories,
+            int[] btreeFields, int[] filterFields, boolean durable, IMetadataPageManagerFactory freePageManagerFactory,
             boolean updateAware, ITracer tracer, ICompressorDecompressorFactory compressorDecompressorFactory,
             boolean hasBloomFilter, ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic)
             throws HyracksDataException {
@@ -142,8 +162,9 @@ public class LSMBTreeUtil {
 
         return new LSMBTree(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory, insertLeafFrameFactory,
                 deleteLeafFrameFactory, diskBufferCache, fileNameManager, componentFactory, bulkLoadComponentFactory,
-                filterHelper, filterFrameFactory, filterManager, bloomFilterFalsePositiveRate, typeTraits.length,
-                cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory,
-                needKeyDupCheck, hasBloomFilter, btreeFields, filterFields, durable, updateAware, tracer, atomic);
+                filterHelper, filterFrameFactory, filterManager, bloomFilterKeyFields, bloomFilterFalsePositiveRate,
+                thetaSketchK, maxSampleLeafAttempts, typeTraits.length, cmpFactories, mergePolicy, opTracker,
+                ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, needKeyDupCheck, hasBloomFilter,
+                btreeFields, filterFields, durable, updateAware, tracer, atomic);
     }
 }

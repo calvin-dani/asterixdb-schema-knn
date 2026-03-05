@@ -189,6 +189,7 @@ public class OperatorStats implements IOperatorStats {
     @Override
     public void updateFrom(IOperatorStats stats) {
         tupleCounter.update(stats.getTupleCounter().get());
+        inputTupleCounter.update(stats.getInputTupleCounter().get());
         timeCounter.update(stats.getTimeCounter().get());
         pageReads.update(stats.getPageReadCounter().get());
         updateIndexesStats(stats.getIndexesStats());

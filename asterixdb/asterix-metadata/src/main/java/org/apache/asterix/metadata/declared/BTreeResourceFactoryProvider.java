@@ -78,6 +78,8 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
         IBinaryComparatorFactory[] cmpFactories = getCmpFactories(mdProvider, dataset, index, recordType, metaType);
         int[] bloomFilterFields = getBloomFilterFields(dataset, index);
         double bloomFilterFalsePositiveRate = mdProvider.getStorageProperties().getBloomFilterFalsePositiveRate();
+        int thetaSketchK = mdProvider.getStorageProperties().getThetaSketchK();
+        int maxSampleLeafAttempts = mdProvider.getStorageProperties().getMaxSampleLeafAttempts();
         ILSMOperationTrackerFactory opTrackerFactory = dataset.getIndexOperationTrackerFactory(index);
         ILSMIOOperationCallbackFactory ioOpCallbackFactory = dataset.getIoOperationCallbackFactory(index);
         ILSMPageWriteCallbackFactory pageWriteCallbackFactory = dataset.getPageWriteCallbackFactory();
@@ -111,9 +113,10 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory,
                             pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                             mergePolicyFactory, mergePolicyProperties, true, bloomFilterFields,
-                            bloomFilterFalsePositiveRate, index.isPrimaryIndex(), btreeFields, compDecompFactory,
-                            hasBloomFilter, typeTraitProvider.getTypeTrait(BuiltinType.ANULL),
-                            NullIntrospector.INSTANCE, isSecondaryNoIncrementalMaintenance, dataset.isAtomic());
+                            bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts, index.isPrimaryIndex(),
+                            btreeFields, compDecompFactory, hasBloomFilter,
+                            typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE,
+                            isSecondaryNoIncrementalMaintenance, dataset.isAtomic());
                 } else {
                     //Column
                     List<Integer> keySourceIndicator =
@@ -127,9 +130,9 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                             filterTypeTraits, filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory,
                             pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                             mergePolicyFactory, mergePolicyProperties, bloomFilterFields, bloomFilterFalsePositiveRate,
-                            btreeFields, compDecompFactory, typeTraitProvider.getTypeTrait(BuiltinType.ANULL),
-                            NullIntrospector.INSTANCE, isSecondaryNoIncrementalMaintenance, columnManagerFactory,
-                            dataset.isAtomic());
+                            thetaSketchK, maxSampleLeafAttempts, btreeFields, compDecompFactory,
+                            typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE,
+                            isSecondaryNoIncrementalMaintenance, columnManagerFactory, dataset.isAtomic());
                 }
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_DATASET_TYPE,
@@ -146,21 +149,39 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                 && index.getIndexName().equals(IndexingConstants.getFilesIndexName(dataset.getDatasetName()))) {
             return new ITypeTraits[0];
         }
-        Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
-        int numSecondaryKeys = indexDetails.getKeyFieldNames().size();
+        int numSecondaryKeys;
+        List<List<String>> keyFieldNames;
+        List<IAType> keyFieldTypes;
+        List<Integer> keySourceIndicators;
+
+        if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
+            // VECTOR indexes use include fields for secondary keys
+            Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+            numSecondaryKeys = vectorIndexDetails.getIncludeFieldNames().size();
+            keyFieldNames = vectorIndexDetails.getIncludeFieldNames();
+            keyFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
+            keySourceIndicators = vectorIndexDetails.getIncludeFieldSourceIndicators();
+        } else {
+            // Other index types use key fields
+            Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+            numSecondaryKeys = indexDetails.getKeyFieldNames().size();
+            keyFieldNames = indexDetails.getKeyFieldNames();
+            keyFieldTypes = indexDetails.getKeyFieldTypes();
+            keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
+        }
         ITypeTraitProvider typeTraitProvider = metadataProvider.getStorageComponentProvider().getTypeTraitProvider();
         ITypeTraits[] secondaryTypeTraits = new ITypeTraits[numSecondaryKeys + numPrimaryKeys];
         for (int i = 0; i < numSecondaryKeys; i++) {
             ARecordType sourceType;
-            List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
             if (keySourceIndicators == null || keySourceIndicators.get(i) == 0) {
                 sourceType = recordType;
             } else {
                 sourceType = metaType;
             }
-            Pair<IAType, Boolean> keyTypePair = Index.getNonNullableOpenFieldType(index,
-                    indexDetails.getKeyFieldTypes().get(i), indexDetails.getKeyFieldNames().get(i), sourceType);
+            Pair<IAType, Boolean> keyTypePair =
+                    Index.getNonNullableOpenFieldType(index, keyFieldTypes.get(i), keyFieldNames.get(i), sourceType);
             IAType keyType = keyTypePair.first;
             secondaryTypeTraits[i] = typeTraitProvider.getTypeTrait(keyType);
         }
@@ -179,23 +200,41 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
                 && index.getIndexName().equals(IndexingConstants.getFilesIndexName(dataset.getDatasetName()))) {
             return new IBinaryComparatorFactory[0];
         }
-        Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+
         int numPrimaryKeys = dataset.getPrimaryKeys().size();
-        int numSecondaryKeys = indexDetails.getKeyFieldNames().size();
+        int numSecondaryKeys;
+        List<List<String>> keyFieldNames;
+        List<IAType> keyFieldTypes;
+        List<Integer> keySourceIndicators;
+
+        if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
+            // VECTOR indexes use include fields for secondary keys
+            Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+            numSecondaryKeys = vectorIndexDetails.getIncludeFieldNames().size();
+            keyFieldNames = vectorIndexDetails.getIncludeFieldNames();
+            keyFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
+            keySourceIndicators = vectorIndexDetails.getIncludeFieldSourceIndicators();
+        } else {
+            // Other index types use key fields
+            Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
+            numSecondaryKeys = indexDetails.getKeyFieldNames().size();
+            keyFieldNames = indexDetails.getKeyFieldNames();
+            keyFieldTypes = indexDetails.getKeyFieldTypes();
+            keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
+        }
         IBinaryComparatorFactoryProvider cmpFactoryProvider =
                 metadataProvider.getStorageComponentProvider().getComparatorFactoryProvider();
         IBinaryComparatorFactory[] secondaryCmpFactories =
                 new IBinaryComparatorFactory[numSecondaryKeys + numPrimaryKeys];
         for (int i = 0; i < numSecondaryKeys; i++) {
             ARecordType sourceType;
-            List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
             if (keySourceIndicators == null || keySourceIndicators.get(i) == 0) {
                 sourceType = recordType;
             } else {
                 sourceType = metaType;
             }
-            Pair<IAType, Boolean> keyTypePair = Index.getNonNullableOpenFieldType(index,
-                    indexDetails.getKeyFieldTypes().get(i), indexDetails.getKeyFieldNames().get(i), sourceType);
+            Pair<IAType, Boolean> keyTypePair =
+                    Index.getNonNullableOpenFieldType(index, keyFieldTypes.get(i), keyFieldNames.get(i), sourceType);
             IAType keyType = keyTypePair.first;
             secondaryCmpFactories[i] = cmpFactoryProvider.getBinaryComparatorFactory(keyType, true);
         }
@@ -222,6 +261,9 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
             case BTREE:
             case RTREE:
                 // secondary btrees and rtrees do not have bloom filters
+                return null;
+            case VECTOR:
+                // VECTOR indexes do not have bloom filters (used for similarity search, not exact matching)
                 return null;
             case LENGTH_PARTITIONED_NGRAM_INVIX:
             case LENGTH_PARTITIONED_WORD_INVIX:

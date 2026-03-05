@@ -59,10 +59,10 @@ public class FlushColumnTupleWriter extends AbstractColumnTupleWriter {
     private final int maxNumberOfTuples;
     private final IColumnValuesWriter[] primaryKeyWriters;
     private final int maxLeafNodeSize;
+    protected final IColumnPageZeroWriterFlavorSelector pageZeroWriterFlavorSelector;
     protected final BitSet presentColumnsIndexes;
 
     protected int primaryKeysEstimatedSize;
-    protected final IColumnPageZeroWriterFlavorSelector pageZeroWriterFlavorSelector;
 
     public FlushColumnTupleWriter(FlushColumnMetadata columnMetadata, int pageSize, int maxNumberOfTuples,
             double tolerance, int maxLeafNodeSize, IColumnWriteContext writeContext) {

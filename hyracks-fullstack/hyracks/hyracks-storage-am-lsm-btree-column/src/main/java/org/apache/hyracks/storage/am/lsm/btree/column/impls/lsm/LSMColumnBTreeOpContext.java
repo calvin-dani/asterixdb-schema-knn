@@ -24,7 +24,6 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparator;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.IColumnProjectionInfo;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.projection.IColumnTupleProjector;
@@ -32,13 +31,13 @@ import org.apache.hyracks.storage.am.lsm.btree.column.cloud.buffercache.IColumnR
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm.tuples.ColumnAwareMultiComparator;
 import org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil;
 import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTreeOpContext;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent.LSMComponentType;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMHarness;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
-import org.apache.hyracks.storage.common.ISearchOperationCallback;
+import org.apache.hyracks.storage.common.IComponentMetadata;
+import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.MultiComparator;
 import org.apache.hyracks.util.trace.ITracer;
 
@@ -47,15 +46,20 @@ public class LSMColumnBTreeOpContext extends LSMBTreeOpContext {
 
     public LSMColumnBTreeOpContext(ILSMIndex index, List<ILSMMemoryComponent> mutableComponents,
             ITreeIndexFrameFactory insertLeafFrameFactory, ITreeIndexFrameFactory deleteLeafFrameFactory,
-            IExtendedModificationOperationCallback modificationCallback, ISearchOperationCallback searchCallback,
-            int numBloomFilterKeyFields, int[] btreeFields, int[] filterFields, ILSMHarness lsmHarness,
-            IBinaryComparatorFactory[] filterCmpFactories, ITracer tracer, IColumnTupleProjector projector) {
-        super(index, mutableComponents, insertLeafFrameFactory, deleteLeafFrameFactory, modificationCallback,
-                searchCallback, numBloomFilterKeyFields, btreeFields, filterFields, lsmHarness, filterCmpFactories,
-                tracer);
+            IIndexAccessParameters lsmIap, int numBloomFilterKeyFields, int[] btreeFields, int[] filterFields,
+            ILSMHarness lsmHarness, IBinaryComparatorFactory[] filterCmpFactories, ITracer tracer,
+            IColumnTupleProjector projector) {
+        super(index, mutableComponents, insertLeafFrameFactory, deleteLeafFrameFactory, lsmIap, numBloomFilterKeyFields,
+                btreeFields, filterFields, lsmHarness, filterCmpFactories, tracer);
         this.projector = projector;
     }
 
+    // Can this projection info be cached and reused across multiple read operations?
+    // like in Query and Merge
+    // Since copying a componentMetadata seems to be an expensive operation
+    // We can cache it based on the last component's id
+    // if it is same as the last time we created a projection info,
+    // We can reuse the last projection info
     public IColumnProjectionInfo createProjectionInfo() throws HyracksDataException {
         List<ILSMComponent> operationalComponents = getComponentHolder();
         IComponentMetadata componentMetadata = null;

@@ -24,7 +24,6 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.control.common.controllers.NCConfig;
-import org.apache.hyracks.storage.am.common.api.IExtendedModificationOperationCallback;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnManager;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnMetadata;
@@ -34,7 +33,7 @@ import org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil;
 import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTree;
 import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTreeBatchPointSearchCursor;
 import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTreeRangeSearchCursor;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
+import org.apache.hyracks.storage.am.lsm.btree.impls.LSMIndexSampleCursor;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponentFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationCallbackFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperationScheduler;
@@ -46,6 +45,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMPageWriteCallbackFactory
 import org.apache.hyracks.storage.am.lsm.common.api.IVirtualBufferCache;
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
@@ -72,7 +72,8 @@ public class LSMColumnBTree extends LSMBTree {
             ITreeIndexFrameFactory deleteLeafFrameFactory, IBufferCache diskBufferCache,
             IColumnBufferPool columnBufferPool, ILSMIndexFileManager fileManager,
             ILSMDiskComponentFactory componentFactory, ILSMDiskComponentFactory mergeComponentFactory,
-            ILSMDiskComponentFactory bulkloadComponentFactory, double bloomFilterFalsePositiveRate, int fieldCount,
+            ILSMDiskComponentFactory bulkloadComponentFactory, int[] bloomFilterKeyFields,
+            double bloomFilterFalsePositiveRate, int thetaSketchK, int maxSampleLeafAttempts, int fieldCount,
             IBinaryComparatorFactory[] cmpFactories, ILSMMergePolicy mergePolicy, ILSMOperationTracker opTracker,
             ILSMIOOperationScheduler ioScheduler, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
             ILSMPageWriteCallbackFactory pageWriteCallbackFactory, int[] btreeFields, ITracer tracer,
@@ -80,9 +81,9 @@ public class LSMColumnBTree extends LSMBTree {
             throws HyracksDataException {
         super(storageConfig, ioManager, virtualBufferCaches, interiorFrameFactory, insertLeafFrameFactory,
                 deleteLeafFrameFactory, diskBufferCache, fileManager, componentFactory, bulkloadComponentFactory, null,
-                null, null, bloomFilterFalsePositiveRate, fieldCount, cmpFactories, mergePolicy, opTracker, ioScheduler,
-                ioOpCallbackFactory, pageWriteCallbackFactory, true, true, btreeFields, null, true, false, tracer,
-                atomic);
+                null, null, bloomFilterKeyFields, bloomFilterFalsePositiveRate, thetaSketchK, maxSampleLeafAttempts,
+                fieldCount, cmpFactories, mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory,
+                pageWriteCallbackFactory, true, true, btreeFields, null, true, false, tracer, atomic);
         this.columnManager = columnManager;
         this.mergeComponentFactory = mergeComponentFactory;
         this.diskCacheManager = diskCacheManager;
@@ -111,10 +112,11 @@ public class LSMColumnBTree extends LSMBTree {
                 ((LSMColumnBTreeWithBloomFilterDiskComponentFactory) componentFactory).getBloomFilterKeyFields().length;
         IColumnTupleProjector tupleProjector =
                 ColumnUtil.getTupleProjector(iap, columnManager.getMergeColumnProjector());
-        return new LSMColumnBTreeOpContext(this, memoryComponents, insertLeafFrameFactory, deleteLeafFrameFactory,
-                (IExtendedModificationOperationCallback) iap.getModificationCallback(),
-                iap.getSearchOperationCallback(), numBloomFilterKeyFields, getTreeFields(), getFilterFields(),
-                getHarness(), getFilterCmpFactories(), tracer, tupleProjector);
+        LSMColumnBTreeOpContext opCtx = new LSMColumnBTreeOpContext(this, memoryComponents, insertLeafFrameFactory,
+                deleteLeafFrameFactory, iap, numBloomFilterKeyFields, getTreeFields(), getFilterFields(), getHarness(),
+                getFilterCmpFactories(), tracer, tupleProjector);
+        opCtx.setParameters(iap.getParameters());
+        return opCtx;
     }
 
     protected IColumnManager getColumnManager() {
@@ -138,6 +140,11 @@ public class LSMColumnBTree extends LSMBTree {
     @Override
     public LSMBTreeBatchPointSearchCursor createBatchPointSearchCursor(ILSMIndexOperationContext opCtx) {
         return new LSMColumnBatchPointSearchCursor(opCtx);
+    }
+
+    @Override
+    public LSMIndexSampleCursor createSampleCollectorCursor(ILSMIndexOperationContext opContext) {
+        return new LSMIndexSampleCursor(opContext, new LSMColumnBatchPointSearchCursor(opContext));
     }
 
     @Override

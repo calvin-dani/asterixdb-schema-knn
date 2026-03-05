@@ -17,6 +17,7 @@
  * under the License.
  */
 
+<<<<<<<< HEAD:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/cbo-join/index-advisor/nested-fields/nested-fields.1.ddl.sqlpp
 
 drop dataverse test if exists;
 create dataverse test;
@@ -27,3 +28,27 @@ CREATE DATASET B PRIMARY KEY ( b_0 : integer);
 
 CREATE INDEX idx_2 ON A(a_1.n_1.`n_2 field name`.`n_3`: time) CAST (DEFAULT NULL time 'hh:mm:ss.nnna');
 CREATE INDEX i3 ON B(UNNEST b.c UNNEST d.e UNNEST t SELECT x.y : string, q.w: int, u: int) EXCLUDE UNKNOWN KEY;
+========
+USE test;
+
+
+INSERT INTO col2 (
+    [
+{"id": 1, "name": "aqay awil", "centuries" : []},
+    {"id": 2, "centuries" : []},
+    {"id":3 , "name": null, "centuries" : []}
+    ]
+);
+
+COPY (
+select * from col2
+    ) toWriter
+TO %adapter%
+PATH (%pathprefix% "copy-to-result", "parquet-null2")
+WITH {
+    %template_colons%,
+    %additionalProperties%
+    "format":"parquet",
+    "version" : "2"
+    };
+>>>>>>>> backup-before-rewrite-20260304:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/copy-to/parquet-null2/parquet-null2.02.update.sqlpp

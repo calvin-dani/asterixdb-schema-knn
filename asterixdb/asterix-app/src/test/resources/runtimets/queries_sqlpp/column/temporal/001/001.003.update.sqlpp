@@ -16,7 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+DROP DATAVERSE test IF EXISTS;
+CREATE DATAVERSE test;
 
+<<<<<<<< HEAD:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/column/temporal/001/001.003.update.sqlpp
  USE test;
 
  UPSERT INTO ColumnDataset ({
@@ -29,3 +32,19 @@
     "myYearMonthDuration": year_month_duration("P10Y11M"),
     "myDayTimeDuration": day_time_duration('PT134M')
  });
+========
+USE test;
+CREATE TYPE OpenType AS {
+};
+
+CREATE COLLECTION col1 PRIMARY KEY (id: int);
+CREATE COLLECTION col2 PRIMARY KEY (id: int);
+
+CREATE EXTERNAL DATASET colCopy(OpenType) USING %adapter% (
+    %template%,
+    %additional_Properties%
+    ("definition"="%path_prefix%copy-to-result/union-all"),
+    ("embed-filter-values" = "false"),
+    ("format"="json")
+);
+>>>>>>>> backup-before-rewrite-20260304:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/copy-to/union-all/union-all.01.ddl.sqlpp

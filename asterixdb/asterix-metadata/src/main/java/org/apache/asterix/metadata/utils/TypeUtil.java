@@ -413,6 +413,11 @@ public class TypeUtil {
                     enforcedRecordType = appendArrayIndexTypes(enforcedRecordType,
                             (Index.ArrayIndexDetails) index.getIndexDetails(), enforcedTypeBuilder);
                     break;
+                case VECTOR:
+                    // VECTOR indexes use VectorIndexDetails, treat similar to VALUE indexes for type enforcement
+                    enforcedRecordType = appendVectorIndexType(enforcedRecordType,
+                            (Index.VectorIndexDetails) index.getIndexDetails(), enforcedTypeBuilder);
+                    break;
                 default:
                     throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,
                             String.valueOf(index.getIndexType()));
@@ -441,6 +446,17 @@ public class TypeUtil {
             enforcedRecordType = enforcedTypeBuilder.build();
         }
 
+        return enforcedRecordType;
+    }
+
+    private static ARecordType appendVectorIndexType(ARecordType enforcedRecordType,
+            Index.VectorIndexDetails vectorIndexDetails, EnforcedTypeBuilder enforcedTypeBuilder)
+            throws AlgebricksException {
+        // VECTOR indexes have a single key field (the vector field) and optional include fields.
+        // Include fields are stored alongside vectors for retrieval only — they don't need type
+        // enforcement. Unlike B-tree enforced indexes, vector include fields don't alter query
+        // semantics, so we skip enforcement to avoid type promotion conflicts (e.g., a closed-schema
+        // string field wrapped as union(string, null, missing) failing canPromote checks).
         return enforcedRecordType;
     }
 

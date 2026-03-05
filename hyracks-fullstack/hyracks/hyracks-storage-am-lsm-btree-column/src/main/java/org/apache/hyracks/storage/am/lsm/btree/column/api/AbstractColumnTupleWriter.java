@@ -18,12 +18,11 @@
  */
 package org.apache.hyracks.storage.am.lsm.btree.column.api;
 
-import java.nio.ByteBuffer;
-
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.btree.IColumnPageZeroWriter;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.btree.IColumnPageZeroWriterFlavorSelector;
+import org.apache.hyracks.storage.am.lsm.common.impls.ComponentStatsAccumulator;
 
 /**
  * Columnar Tuple Writer:
@@ -34,10 +33,10 @@ import org.apache.hyracks.storage.am.lsm.btree.column.impls.btree.IColumnPageZer
  * Then, the columns are flushed to disk.
  * <p>
  * Contract:
- * - Initially, the writer has to set multiPageOp by calling {@link #init(IColumnWriteMultiPageOp)}
+ * - Initially, the writer has to set multiPageOp by calling {@link #init(IColumnWriteMultiPageOp, ComponentStatsAccumulator)}
  * - For each write, the caller should check if adding a tuple does not exceed the {@link #getMaxNumberOfTuples()} or
  * the on-disk page size (called stopping condition)
- * - If the stopping condition is reached, then {@link #flush(ByteBuffer, IColumnPageZeroWriter)} needed to be called
+ * - If the stopping condition is reached, then {@link #flush(IColumnPageZeroWriter)} needed to be called
  * <p>
  * Hyracks visibility:
  * - Columns are written as blobs (i.e., not interpretable by Hyracks)
@@ -47,7 +46,7 @@ public abstract class AbstractColumnTupleWriter extends AbstractTupleWriterDisab
     /**
      * Set the writer with {@link IColumnWriteMultiPageOp} to allocate columns for their writers
      *
-     * @param multiPageOp multiPageOp
+     * @param multiPageOp               multiPageOp
      */
     public abstract void init(IColumnWriteMultiPageOp multiPageOp) throws HyracksDataException;
 

@@ -1,0 +1,496 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+package org.apache.asterix.runtime.operators;
+
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.asterix.common.storage.StaticStructureFileManager;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.IIOManager;
+import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.FloatArraySerializerDeserializer;
+import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
+import org.apache.hyracks.dataflow.common.utils.TupleUtils;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
+import org.apache.hyracks.storage.am.common.frames.LIFOMetaDataFrameFactory;
+import org.apache.hyracks.storage.am.common.freepage.AppendOnlyLinkedMetadataPageManager;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringInteriorFrame;
+import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
+
+/**
+ * Direct binary writer for VCTree static structure pages.
+ * Bypasses LSM component creation and writes pages directly to .staticstructure file.
+ * 
+ * This class creates a minimal LSM index instance only for page management infrastructure
+ * (freePageManager, bufferCache, metaFrame) and processes hierarchical clustering tuples
+ * to extract centroids and write static structure pages directly to binary file.
+ */
+public class VCTreeStaticStructureBinaryWriter {
+
+    // Page management infrastructure (minimal LSM index components)
+    private final IBufferCache bufferCache;
+    private final AppendOnlyLinkedMetadataPageManager freePageManager;
+    private final ITreeIndexMetadataFrame metaFrame;
+    @SuppressWarnings("unused")
+    private final int fileId;
+
+    // Structure configuration
+    private final int numLevels;
+    private final List<Integer> clustersPerLevel;
+    private final List<List<Integer>> centroidsPerCluster;
+    private final int maxEntriesPerPage;
+
+    // Helper arrays for page ID computation
+    private int[] totalCentroidsUpToLevel;
+    private int[] totalPagesUpToLevel;
+
+    // Page tracking
+    private final List<List<Integer>> levelPageIds;
+    private final List<StaticStructurePage> staticStructurePages;
+
+    // Frames for page creation (unused for now)
+    @SuppressWarnings("unused")
+    private IVectorClusteringInteriorFrame interiorFrame;
+    @SuppressWarnings("unused")
+    private IVectorClusteringLeafFrame leafFrame;
+
+    // Current processing state
+    private int currentLevel;
+    private int currentClusterInLevel;
+    private int currentCentroidInCluster;
+
+    // File management
+    private final StaticStructureFileManager fileManager;
+    private final String indexPath;
+    private final IIOManager ioManager;
+
+    /**
+     * Represents a static structure page with its data and metadata.
+     */
+    public static class StaticStructurePage {
+        public final int pageId;
+        public final int level;
+        public final int clusterId;
+        public final byte[] pageData;
+        public final boolean isLeaf;
+
+        public StaticStructurePage(int pageId, int level, int clusterId, byte[] pageData, boolean isLeaf) {
+            this.pageId = pageId;
+            this.level = level;
+            this.clusterId = clusterId;
+            this.pageData = pageData;
+            this.isLeaf = isLeaf;
+        }
+    }
+
+    public VCTreeStaticStructureBinaryWriter(IBufferCache bufferCache, IIOManager ioManager, String indexPath,
+            int numLevels, List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster,
+            int maxEntriesPerPage) throws HyracksDataException {
+
+        this.bufferCache = bufferCache;
+        this.indexPath = indexPath;
+        this.numLevels = numLevels;
+        this.clustersPerLevel = new ArrayList<>(clustersPerLevel);
+        this.centroidsPerCluster = new ArrayList<>();
+        for (List<Integer> levelCentroids : centroidsPerCluster) {
+            this.centroidsPerCluster.add(new ArrayList<>(levelCentroids));
+        }
+        this.maxEntriesPerPage = maxEntriesPerPage;
+
+        // Initialize file management
+        this.ioManager = ioManager;
+        this.fileManager = StaticStructureFileManager.create(ioManager, indexPath);
+
+        // Create minimal page management infrastructure
+        this.fileId = createMinimalFileReference();
+        this.freePageManager = new AppendOnlyLinkedMetadataPageManager(bufferCache, new LIFOMetaDataFrameFactory());
+        this.metaFrame = freePageManager.createMetadataFrame();
+
+        // Initialize tracking structures
+        this.levelPageIds = new ArrayList<>(numLevels);
+        this.staticStructurePages = new ArrayList<>();
+        for (int i = 0; i < numLevels; i++) {
+            levelPageIds.add(new ArrayList<>());
+        }
+
+        // Initialize processing state
+        this.currentLevel = 0;
+        this.currentClusterInLevel = 0;
+        this.currentCentroidInCluster = 0;
+
+        // Precompute helper arrays
+        computeHelperArrays();
+
+        System.err.println("VCTreeStaticStructureBinaryWriter initialized");
+        System.err.println("numLevels=" + numLevels + ", maxEntriesPerPage=" + maxEntriesPerPage);
+    }
+
+    /**
+     * Creates a minimal file reference for page management.
+     */
+    private int createMinimalFileReference() throws HyracksDataException {
+        // Create a temporary file reference for page management
+        // This is only used for page ID allocation, not actual file I/O
+        try {
+            FileReference tempFile = ioManager.resolve(indexPath + "/temp_static_structure");
+            return bufferCache.createFile(tempFile);
+        } catch (Exception e) {
+            // If file creation fails, use a dummy file ID
+            return 0;
+        }
+    }
+
+    /**
+     * Precompute cumulative totals for efficient page ID calculation.
+     */
+    private void computeHelperArrays() {
+        totalCentroidsUpToLevel = new int[numLevels + 1];
+        totalPagesUpToLevel = new int[numLevels + 1];
+
+        totalCentroidsUpToLevel[0] = 0;
+        totalPagesUpToLevel[0] = 0;
+
+        for (int level = 0; level < numLevels; level++) {
+            int centroidsInLevel = 0;
+            for (int cluster = 0; cluster < clustersPerLevel.get(level); cluster++) {
+                centroidsInLevel += centroidsPerCluster.get(level).get(cluster);
+            }
+            totalCentroidsUpToLevel[level + 1] = totalCentroidsUpToLevel[level] + centroidsInLevel;
+            totalPagesUpToLevel[level + 1] = totalPagesUpToLevel[level] + clustersPerLevel.get(level);
+        }
+
+        System.err.println("totalCentroidsUpToLevel: " + java.util.Arrays.toString(totalCentroidsUpToLevel));
+        System.err.println("totalPagesUpToLevel: " + java.util.Arrays.toString(totalPagesUpToLevel));
+    }
+
+    /**
+     * Process hierarchical clustering tuples and create static structure pages.
+     */
+    public void processTuples(List<ITupleReference> tuples) throws HyracksDataException {
+        System.err.println("DEBUG: VCTreeStaticStructureBinaryWriter.processTuples() called");
+        System.err.println("Processing " + tuples.size() + " hierarchical clustering tuples");
+
+        // Pre-allocate all pages using freePageManager
+        int totalClusters = 0;
+        for (int level = 0; level < numLevels; level++) {
+            totalClusters += clustersPerLevel.get(level);
+        }
+
+        System.err.println("DEBUG: Pre-allocating " + totalClusters + " pages");
+        System.err.println("Pre-allocating " + totalClusters + " pages");
+        for (int i = 0; i < totalClusters; i++) {
+            int allocatedPageId = freePageManager.takePage(metaFrame);
+            System.err.println(
+                    "DEBUG: Pre-allocated page " + allocatedPageId + " (" + (i + 1) + "/" + totalClusters + ")");
+            System.err.println("Pre-allocated page " + allocatedPageId + " (" + (i + 1) + "/" + totalClusters + ")");
+        }
+
+        // Process tuples and create pages
+        System.err.println("DEBUG: Starting tuple processing loop...");
+        for (int tupleIndex = 0; tupleIndex < tuples.size(); tupleIndex++) {
+            ITupleReference tuple = tuples.get(tupleIndex);
+            System.err.println("DEBUG: Processing tuple " + (tupleIndex + 1) + "/" + tuples.size());
+            processTuple(tuple);
+        }
+
+        System.err.println("DEBUG: Tuple processing completed");
+        System.err.println("Completed processing " + tuples.size() + " tuples");
+        System.err.println("Created " + staticStructurePages.size() + " static structure pages");
+    }
+
+    /**
+     * Process a single tuple and create corresponding page entry.
+     */
+    private void processTuple(ITupleReference tuple) throws HyracksDataException {
+        // Extract centroid information from tuple
+        CentroidInfo centroidInfo = extractCentroidInfo(tuple);
+
+        // Compute child page ID
+        int childPageId = determineChildPageId();
+
+        // Create entry tuple: <centroid_id, embedding, child_page_id>
+        ITupleReference entryTuple = createEntryTuple(centroidInfo, childPageId);
+
+        // Get or create current page
+        StaticStructurePage currentPage = getCurrentPage();
+
+        // Add entry to current page
+        addEntryToPage(currentPage, entryTuple);
+
+        // Advance position in structure
+        advancePosition();
+    }
+
+    /**
+     * Extract centroid information from hierarchical clustering tuple.
+     */
+    private CentroidInfo extractCentroidInfo(ITupleReference tuple) throws HyracksDataException {
+        ISerializerDeserializer<?>[] fieldSerdes = new ISerializerDeserializer[4];
+        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE; // level
+        fieldSerdes[1] = IntegerSerializerDeserializer.INSTANCE; // clusterId
+        fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE; // centroidId
+        fieldSerdes[3] = FloatArraySerializerDeserializer.INSTANCE; // embedding
+
+        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
+
+        int level = (Integer) fieldValues[0];
+        int clusterId = (Integer) fieldValues[1];
+        int centroidId = (Integer) fieldValues[2];
+        float[] embedding = (float[]) fieldValues[3];
+
+        return new CentroidInfo(level, clusterId, centroidId, embedding);
+    }
+
+    /**
+     * Compute child page ID based on current position and predetermined structure.
+     */
+    private int determineChildPageId() {
+        if (currentLevel == numLevels - 1) {
+            // Leaf level - child page ID will be metadata page
+            return -1;
+        }
+
+        // Compute which cluster this centroid points to in the next level
+        int childClusterIndex = computeChildClusterIndex();
+
+        // Child page ID = offset for next level + cluster index within that level
+        int childPageId = totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
+
+        System.err.println("Centroid at level " + currentLevel + " points to cluster " + childClusterIndex + " -> page "
+                + childPageId);
+
+        return childPageId;
+    }
+
+    /**
+     * Compute which cluster in the next level this centroid points to.
+     */
+    private int computeChildClusterIndex() {
+        int centroidsProcessedInCurrentLevel = 0;
+
+        // Count centroids processed in current level so far
+        for (int cluster = 0; cluster < currentClusterInLevel; cluster++) {
+            centroidsProcessedInCurrentLevel += centroidsPerCluster.get(currentLevel).get(cluster);
+        }
+        centroidsProcessedInCurrentLevel += currentCentroidInCluster;
+
+        return centroidsProcessedInCurrentLevel;
+    }
+
+    /**
+     * Create entry tuple with centroid info and child page pointer.
+     */
+    private ITupleReference createEntryTuple(CentroidInfo centroidInfo, int childPageId) throws HyracksDataException {
+        try {
+            return TupleUtils.createTuple(
+                    new ISerializerDeserializer<?>[] { IntegerSerializerDeserializer.INSTANCE,
+                            FloatArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
+                    centroidInfo.centroidId, centroidInfo.embedding, childPageId);
+        } catch (Exception e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    /**
+     * Get or create current page for the current cluster.
+     */
+    private StaticStructurePage getCurrentPage() throws HyracksDataException {
+        int computedPageId = computeCurrentClusterPageId();
+
+        // Check if we already have a page for this cluster
+        for (StaticStructurePage page : staticStructurePages) {
+            if (page.pageId == computedPageId) {
+                return page;
+            }
+        }
+
+        // Create new page
+        return createNewPage(computedPageId);
+    }
+
+    /**
+     * Compute the page ID for the current cluster being built.
+     */
+    private int computeCurrentClusterPageId() {
+        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel;
+    }
+
+    /**
+     * Create a new static structure page.
+     */
+    private StaticStructurePage createNewPage(int computedPageId) throws HyracksDataException {
+        // Create page data buffer
+        byte[] pageData = new byte[bufferCache.getPageSize()];
+        ByteBuffer buffer = ByteBuffer.wrap(pageData);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        // Initialize page header
+        boolean isLeaf = (currentLevel == numLevels - 1);
+        buffer.putInt(computedPageId); // page ID
+        buffer.putInt(currentLevel); // level
+        buffer.putInt(currentClusterInLevel); // cluster ID
+        buffer.put((byte) (isLeaf ? 1 : 0)); // is leaf flag
+
+        StaticStructurePage page =
+                new StaticStructurePage(computedPageId, currentLevel, currentClusterInLevel, pageData, isLeaf);
+
+        staticStructurePages.add(page);
+        levelPageIds.get(currentLevel).add(computedPageId);
+
+        System.err.println("Created new page " + computedPageId + " for level " + currentLevel);
+
+        return page;
+    }
+
+    /**
+     * Add entry to the specified page.
+     */
+    private void addEntryToPage(StaticStructurePage page, ITupleReference entryTuple) {
+        // For now, just track the entry - actual page layout will be implemented
+        // based on the specific frame requirements
+        System.err.println("Adding entry to page " + page.pageId + " at level " + page.level);
+    }
+
+    /**
+     * Advance position in the predetermined structure.
+     */
+    private void advancePosition() throws HyracksDataException {
+        currentCentroidInCluster++;
+
+        // Check if we finished current cluster
+        if (currentCentroidInCluster >= centroidsPerCluster.get(currentLevel).get(currentClusterInLevel)) {
+            // Move to next cluster
+            currentCentroidInCluster = 0;
+            currentClusterInLevel++;
+
+            // Check if we finished current level
+            if (currentClusterInLevel >= clustersPerLevel.get(currentLevel)) {
+                // Move to next level
+                currentLevel++;
+                currentClusterInLevel = 0;
+
+                if (currentLevel < numLevels) {
+                    System.err.println("Moving to level " + currentLevel);
+                }
+            } else {
+                System.err.println("Starting cluster " + currentClusterInLevel + " in level " + currentLevel);
+            }
+        }
+    }
+
+    /**
+     * Write static structure pages to binary file.
+     */
+    public void writeToBinaryFile() throws HyracksDataException {
+        System.err.println("DEBUG: VCTreeStaticStructureBinaryWriter.writeToBinaryFile() called");
+        System.err.println("Writing " + staticStructurePages.size() + " pages to .staticstructure file");
+
+        try {
+            // Create structure metadata
+            System.err.println("DEBUG: Creating structure metadata...");
+            Map<String, Object> structureData = new HashMap<>();
+            structureData.put("numLevels", numLevels);
+            structureData.put("clustersPerLevel", clustersPerLevel);
+            structureData.put("centroidsPerCluster", centroidsPerCluster);
+            structureData.put("maxEntriesPerPage", maxEntriesPerPage);
+            structureData.put("totalPages", staticStructurePages.size());
+            structureData.put("levelPageIds", levelPageIds);
+            System.err.println("DEBUG: Structure metadata created");
+
+            // Write structure metadata to .staticstructure file
+            System.err.println("DEBUG: Writing structure metadata to .staticstructure file...");
+            fileManager.writeStaticStructure(structureData);
+            System.err.println("DEBUG: Structure metadata written successfully");
+
+            // Write page data to binary file
+            System.err.println("DEBUG: Writing page data to binary file...");
+            writePageDataToFile();
+            System.err.println("DEBUG: Page data written successfully");
+
+            System.err.println("Successfully wrote static structure to binary file");
+
+        } catch (Exception e) {
+            System.err.println("DEBUG: Exception in writeToBinaryFile: " + e.getMessage());
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    /**
+     * Write page data to binary file.
+     */
+    private void writePageDataToFile() throws IOException {
+        System.err.println("DEBUG: writePageDataToFile() called");
+        String binaryFilePath = indexPath + "/static_structure_pages.bin";
+        System.err.println("DEBUG: Binary file path: " + binaryFilePath);
+
+        try (FileOutputStream fos = new FileOutputStream(binaryFilePath)) {
+            System.err.println("DEBUG: FileOutputStream created successfully");
+
+            // Write header with page count
+            System.err.println("DEBUG: Writing header with page count: " + staticStructurePages.size());
+            ByteBuffer headerBuffer = ByteBuffer.allocate(4);
+            headerBuffer.order(ByteOrder.LITTLE_ENDIAN);
+            headerBuffer.putInt(staticStructurePages.size());
+            fos.write(headerBuffer.array());
+            System.err.println("DEBUG: Header written successfully");
+
+            // Write each page
+            System.err.println("DEBUG: Writing " + staticStructurePages.size() + " pages...");
+            for (int i = 0; i < staticStructurePages.size(); i++) {
+                StaticStructurePage page = staticStructurePages.get(i);
+                fos.write(page.pageData);
+                System.err.println("DEBUG: Written page " + (i + 1) + "/" + staticStructurePages.size() + " (pageId="
+                        + page.pageId + ", level=" + page.level + ")");
+            }
+            System.err.println("DEBUG: All pages written successfully");
+        }
+
+        System.err.println("DEBUG: FileOutputStream closed");
+        System.err.println("Page data written to: " + binaryFilePath);
+    }
+
+    /**
+     * Centroid information extracted from tuple.
+     */
+    private static class CentroidInfo {
+        @SuppressWarnings("unused")
+        public final int level;
+        @SuppressWarnings("unused")
+        public final int clusterId;
+        public final int centroidId;
+        public final float[] embedding;
+
+        public CentroidInfo(int level, int clusterId, int centroidId, float[] embedding) {
+            this.level = level;
+            this.clusterId = clusterId;
+            this.centroidId = centroidId;
+            this.embedding = embedding;
+        }
+    }
+}
