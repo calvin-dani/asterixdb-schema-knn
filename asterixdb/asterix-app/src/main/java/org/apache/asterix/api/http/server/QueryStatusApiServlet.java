@@ -98,7 +98,7 @@ public class QueryStatusApiServlet extends AbstractQueryApiServlet {
         }
         printer.printResults();
         if (uriMode) {
-            printMetricsAndFooters(printer, resultReader, request);
+            printMetricsAndFooters(printer, resultReader, request, handle.getRequestId(), handle.getJobId(), resultStatus);
         }
         printer.end();
         if (response.writer().checkError()) {

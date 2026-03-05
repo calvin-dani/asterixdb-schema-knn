@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
+import org.apache.asterix.metadata.declared.IIndexProvider;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.om.base.ABoolean;
@@ -103,7 +104,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
     public boolean rewritePre(Mutable<ILogicalOperator> opRef, IOptimizationContext context)
             throws AlgebricksException {
         clear();
-        setMetadataDeclarations(context);
+        setMetadataIndexDeclarations(context, (IIndexProvider) context.getMetadataProvider());
 
         AbstractLogicalOperator op = (AbstractLogicalOperator) opRef.getValue();
 

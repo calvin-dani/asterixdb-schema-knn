@@ -235,13 +235,6 @@ public class QueryIndexRewriter extends FunctionRewriter implements IResultTypeC
             return index;
         }
         // currently, only normal secondary indexes are supported
-        if (idxType != DatasetConfig.IndexType.BTREE || Index.IndexCategory.of(idxType) != Index.IndexCategory.VALUE
-                || index.isPrimaryKeyIndex()) {
-            throw new CompilationException(ErrorCode.COMPILATION_FUNC_EXPRESSION_CANNOT_UTILIZE_INDEX,
-                    f.getSourceLocation(), LogRedactionUtil.userData(f.toString()));
-        }
-        return index;
-        // currently, only normal and array secondary indexes are supported
         if ((idxType == DatasetConfig.IndexType.BTREE && !index.isPrimaryKeyIndex())
                 || idxType == DatasetConfig.IndexType.ARRAY) {
             return index;
@@ -249,4 +242,5 @@ public class QueryIndexRewriter extends FunctionRewriter implements IResultTypeC
         throw new CompilationException(ErrorCode.COMPILATION_FUNC_EXPRESSION_CANNOT_UTILIZE_INDEX,
                 f.getSourceLocation(), LogRedactionUtil.userData(f.toString()));
     }
+
 }

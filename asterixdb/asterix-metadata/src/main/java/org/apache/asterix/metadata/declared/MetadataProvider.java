@@ -193,14 +193,6 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
 
     private static final Logger LOGGER = LogManager.getLogger();
 
-    /** Key for storing computed QuantizationConstants in the config map */
-    public static final String KEY_QUANTIZATION_CONSTANTS = "quantization.constants";
-
-    private static final Logger LOGGER = LogManager.getLogger();
-
-    /** Key for storing computed QuantizationConstants in the config map */
-    public static final String KEY_QUANTIZATION_CONSTANTS = "quantization.constants";
-
     private final ICcApplicationContext appCtx;
     private final IStorageComponentProvider storageComponentProvider;
     private final StorageProperties storageProperties;
@@ -1130,7 +1122,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         }
     }
 
-    protected void addIcebergCatalogPropertiesIfNeeded(ICcApplicationContext appCtx, Map<String, String> configuration)
+    public void addIcebergCatalogPropertiesIfNeeded(ICcApplicationContext appCtx, Map<String, String> configuration)
             throws AlgebricksException {
         if (IcebergUtils.isIcebergTable(configuration)) {
             String catalogName = configuration.get(IcebergConstants.ICEBERG_CATALOG_NAME);
@@ -1741,15 +1733,9 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             prevFieldPermutation = new int[numKeys + numFilterFields];
             int k = 0;
 
-            // DEBUG: Log prevSecondaryKeys variables
-            System.out.println("DEBUG [MetadataProvider.getVectorIndexModificationRuntime]: prevSecondaryKeys.size()="
-                    + (prevSecondaryKeys != null ? prevSecondaryKeys.size() : "null"));
-
             // Previous vector field + include fields
             for (LogicalVariable varKey : prevSecondaryKeys) {
                 int idx = propagatedSchema.findVariable(varKey);
-                System.out.println(
-                        "DEBUG [MetadataProvider]: prevSecondaryKey variable=" + varKey + " -> field index=" + idx);
                 prevFieldPermutation[k] = idx;
                 k++;
             }

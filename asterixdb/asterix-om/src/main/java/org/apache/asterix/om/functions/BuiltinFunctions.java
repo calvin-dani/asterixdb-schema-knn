@@ -248,18 +248,18 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier ARRAY_BINARY_SEARCH = FunctionConstants.newAsterix("array-binary-search", 2);
 
     // objects
-    public static final FunctionIdentifier RECORD_TRANSFORM = FunctionConstants.newAsterix("object-transform", 2);
     public static final FunctionIdentifier RECORD_MERGE = FunctionConstants.newAsterix("object-merge", 2);
     public static final FunctionIdentifier RECORD_MERGE_IGNORE_DUPLICATES =
             FunctionConstants.newAsterix("object-merge-ignore-duplicates", 2);
-    public static final FunctionIdentifier RECORD_REMOVE_RECURSIVE =
-            FunctionConstants.newAsterix("object-remove-recursive", 2);
     public static final FunctionIdentifier RECORD_CONCAT =
             FunctionConstants.newAsterix("object-concat", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier RECORD_CONCAT_STRICT =
             FunctionConstants.newAsterix("object-concat-strict", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier REMOVE_FIELDS = FunctionConstants.newAsterix("object-remove-fields", 2);
     public static final FunctionIdentifier ADD_FIELDS = FunctionConstants.newAsterix("object-add-fields", 2);
+    public static final FunctionIdentifier RECORD_TRANSFORM = FunctionConstants.newAsterix("object-transform", 2);
+    public static final FunctionIdentifier RECORD_REMOVE_RECURSIVE =
+            FunctionConstants.newAsterix("object-remove-recursive", 2);
 
     public static final FunctionIdentifier CLOSED_RECORD_CONSTRUCTOR =
             FunctionConstants.newAsterix("closed-object-constructor", FunctionIdentifier.VARARGS);
@@ -851,8 +851,6 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("win-mark-valid-tuple-impl", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier WIN_PARTITION_LENGTH_IMPL =
             FunctionConstants.newAsterix("win-partition-length-impl", 0);
-    public static final FunctionIdentifier WIN_MARK_VALID_TUPLES_IMPL =
-            FunctionConstants.newAsterix("win-mark-valid-tuple-impl", FunctionIdentifier.VARARGS);
 
     // unnesting functions
     public static final FunctionIdentifier SCAN_COLLECTION = FunctionConstants.newAsterix("scan-collection", 1);
@@ -1941,7 +1939,6 @@ public class BuiltinFunctions {
         addPrivateFunction(WIN_MARK_FIRST_NULL_IMPL, ABooleanTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_MARK_VALID_TUPLES_IMPL, ABooleanTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_PARTITION_LENGTH_IMPL, AInt64TypeComputer.INSTANCE, false);
-        addPrivateFunction(WIN_MARK_VALID_TUPLES_IMPL, ABooleanTypeComputer.INSTANCE, false);
 
         // Similarity functions
         addFunction(EDIT_DISTANCE_CONTAINS, OrderedListOfAnyTypeComputer.INSTANCE, true);
@@ -2095,12 +2092,12 @@ public class BuiltinFunctions {
         // objects
         addFunction(RECORD_MERGE, RecordMergeTypeComputer.INSTANCE, true);
         addPrivateFunction(RECORD_MERGE_IGNORE_DUPLICATES, RecordMergeTypeComputer.INSTANCE_IGNORE_DUPLICATES, true);
-        addPrivateFunction(RECORD_REMOVE_RECURSIVE, RecordRemoveRecursiveTypeComputer.INSTANCE, true);
-        addPrivateFunction(RECORD_TRANSFORM, RecordTransformTypeComputer.INSTANCE, true);
         addFunction(RECORD_CONCAT, OpenARecordTypeComputer.INSTANCE, true);
         addPrivateFunction(RECORD_CONCAT_STRICT, OpenARecordTypeComputer.INSTANCE, true);
         addFunction(ADD_FIELDS, RecordAddFieldsTypeComputer.INSTANCE, true);
         addFunction(REMOVE_FIELDS, RecordRemoveFieldsTypeComputer.INSTANCE, true);
+        addPrivateFunction(RECORD_REMOVE_RECURSIVE, RecordRemoveRecursiveTypeComputer.INSTANCE, true);
+        addPrivateFunction(RECORD_TRANSFORM, RecordTransformTypeComputer.INSTANCE, true);
         addPrivateFunction(CLOSED_RECORD_CONSTRUCTOR, ClosedRecordConstructorResultType.INSTANCE, true);
         addPrivateFunction(OPEN_RECORD_CONSTRUCTOR, OpenRecordConstructorResultType.INSTANCE, true);
         addPrivateFunction(FIELD_ACCESS_BY_INDEX, FieldAccessByIndexResultType.INSTANCE, true);
@@ -3022,7 +3019,6 @@ public class BuiltinFunctions {
         addWindowFunction(null, WIN_MARK_FIRST_NULL_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
         addWindowFunction(null, WIN_MARK_VALID_TUPLES_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
         addWindowFunction(null, WIN_PARTITION_LENGTH_IMPL, NO_FRAME_CLAUSE, MATERIALIZE_PARTITION);
-        addWindowFunction(null, WIN_MARK_VALID_TUPLES_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
     }
 
     static {

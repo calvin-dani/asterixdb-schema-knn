@@ -40,7 +40,6 @@ import org.apache.hyracks.storage.common.buffercache.CachedPage;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
-import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
@@ -78,8 +77,6 @@ public final class ColumnBTreeBulkloader extends BTreeNSMBulkLoader implements I
     private int lastRequiredFreeSpace;
     private int sparseLeafsCount;
     private int densePagesCount;
-    private int sparseLeafsCount;
-    private int densePagesCount;
 
     public ColumnBTreeBulkloader(NCConfig storageConfig, float fillFactor, boolean verifyInput,
             IPageWriteCallback callback, ITreeIndex index, ITreeIndexFrame leafFrame,
@@ -95,7 +92,6 @@ public final class ColumnBTreeBulkloader extends BTreeNSMBulkLoader implements I
         columnWriter = columnarFrame.getColumnTupleWriter();
         reservedBufferCount = 0;
         lowKey = new BTreeSplitKey(tupleWriter.createTupleReference());
-        lowKey.getTuple().setFieldCount(cmp.getKeyFieldCount());
         lowKey.getTuple().setFieldCount(cmp.getKeyFieldCount());
         setLowKey = true;
 

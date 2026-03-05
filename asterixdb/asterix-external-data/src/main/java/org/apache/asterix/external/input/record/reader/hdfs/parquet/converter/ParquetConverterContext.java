@@ -86,6 +86,9 @@ public class ParquetConverterContext extends ParserContext {
     private final ISerializerDeserializer<ADateTime> datetimeSerDer =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADATETIME);
     @SuppressWarnings("unchecked")
+    private final ISerializerDeserializer<ADuration> durationSerDer =
+            SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ADURATION);
+    @SuppressWarnings("unchecked")
     private final ISerializerDeserializer<ANull> nullSerDer =
             SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ANULL);
 

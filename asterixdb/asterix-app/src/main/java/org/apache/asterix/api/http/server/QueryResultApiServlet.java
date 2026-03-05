@@ -20,7 +20,6 @@ package org.apache.asterix.api.http.server;
 
 import java.io.IOException;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.asterix.app.result.ResponseMetrics;
 import org.apache.asterix.app.result.ResponsePrinter;

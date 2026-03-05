@@ -852,7 +852,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Get frames limit for group by operator
         int framesLimit = OptimizationConfUtil.getGroupByNumFrames(
                 metadataProvider.getApplicationContext().getCompilerProperties(), metadataProvider.getConfig(),
-                sourceLoc);
+                sourceLoc, metadataProvider.getApplicationContext().getCompilerProperties().getFrameSize());
 
         // Local aggregate operator (collects values per partition)
         AbstractAggregatorDescriptorFactory localAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
@@ -1008,7 +1008,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             int[] groupFields = new int[0];
             int framesLimit = OptimizationConfUtil.getGroupByNumFrames(
                     metadataProvider.getApplicationContext().getCompilerProperties(), metadataProvider.getConfig(),
-                    sourceLoc);
+                    sourceLoc, metadataProvider.getApplicationContext().getCompilerProperties().getFrameSize());
             AbstractAggregatorDescriptorFactory localAggFactoryDesc = new SimpleAlgebricksAccumulatingAggregatorFactory(
                     new IAggregateEvaluatorFactory[] { localAggFactory }, groupFields);
             IBinaryComparatorFactory[] comparatorFactories = new IBinaryComparatorFactory[0];
