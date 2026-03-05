@@ -43,14 +43,10 @@ import org.apache.hyracks.storage.common.IIndexCursorStats;
 import org.apache.hyracks.storage.common.NoOpIndexCursorStats;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
-import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheReadContext;
 
 public class ColumnBTree extends DiskBTree {
-    private final IColumnBufferPool columnBufferPool;
-
-    public ColumnBTree(IBufferCache bufferCache, IColumnBufferPool columnBufferPool, IPageManager freePageManager,
     private final IColumnBufferPool columnBufferPool;
 
     public ColumnBTree(IBufferCache bufferCache, IColumnBufferPool columnBufferPool, IPageManager freePageManager,

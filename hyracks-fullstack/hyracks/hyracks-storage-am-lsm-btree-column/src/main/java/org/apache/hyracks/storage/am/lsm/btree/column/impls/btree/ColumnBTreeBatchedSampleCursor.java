@@ -46,16 +46,13 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 // once the ids are collected, project the whole tuples, when requested to the cursor.
 public class ColumnBTreeBatchedSampleCursor extends EnforcedIndexCursor
         implements ITreeIndexCursor, IColumnReadMultiPageOp {
-
     private final ColumnBTree bTree;
     private final BTreeOpContext opCtx;
     private final ColumnBTreeReadLeafFrame leafFrame;
     private final IColumnReadContext context;
     private final IColumnTupleIterator frameTuple;
-
     // u64: (pageId << 32) | tupleIndex
     private final LongSet seenTupleIndexes;
-
     // Cardinality variables
     private static final int MAX_LEAF_FINDING_ATTEMPTS = 20; // Setting just a random value for now
     private final int componentSampleCardinality;
@@ -63,15 +60,12 @@ public class ColumnBTreeBatchedSampleCursor extends EnforcedIndexCursor
     private int sampledCount;
     private boolean continueCurrentLeaf = false;
     private int hasNextAttemptCount = 0;
-
     private IBufferCache bufferCache;
     private int fileId = -1;
-
     private int rootPageId;
     private ICachedPage page0 = null;
     private int page0Id = -1;
     private int tupleIndex = -1;
-
     // search predicate
     private final ILSMIndexBatchPointCursor searchCursor;
     private final BatchPredicateWithKeys batchPredicate;
@@ -114,12 +108,9 @@ public class ColumnBTreeBatchedSampleCursor extends EnforcedIndexCursor
         if (page0 != null) {
             releasePages();
         }
-
         page0 = initialState.getPage();
         page0Id = ((BTreeCursorInitialState) initialState).getPageId();
-
         rootPageId = ((BTreeCursorInitialState) initialState).getRootPageId();
-
     }
 
     @Override
@@ -129,17 +120,14 @@ public class ColumnBTreeBatchedSampleCursor extends EnforcedIndexCursor
 
     @Override
     protected void doNext() throws HyracksDataException {
-
     }
 
     @Override
     protected void doDestroy() throws HyracksDataException {
-
     }
 
     @Override
     protected void doClose() throws HyracksDataException {
-
     }
 
     @Override
@@ -162,7 +150,6 @@ public class ColumnBTreeBatchedSampleCursor extends EnforcedIndexCursor
 
     @Override
     public void unpin(ICachedPage page) throws HyracksDataException {
-
     }
 
     @Override

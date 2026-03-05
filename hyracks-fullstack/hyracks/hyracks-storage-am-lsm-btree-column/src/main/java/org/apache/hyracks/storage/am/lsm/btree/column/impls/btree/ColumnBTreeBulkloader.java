@@ -35,11 +35,9 @@ import org.apache.hyracks.storage.am.common.impls.NodeFrontier;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.AbstractColumnTupleWriter;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.buffercache.IColumnWriteContext;
-import org.apache.hyracks.storage.am.lsm.common.impls.ComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.CachedPage;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
-import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
@@ -85,8 +83,9 @@ public final class ColumnBTreeBulkloader extends BTreeNSMBulkLoader implements I
 
     public ColumnBTreeBulkloader(NCConfig storageConfig, float fillFactor, boolean verifyInput,
             IPageWriteCallback callback, ITreeIndex index, ITreeIndexFrame leafFrame,
-            IBufferCacheWriteContext writeContext) throws HyracksDataException {
-        super(fillFactor, verifyInput, callback, index, leafFrame, writeContext);
+            IBufferCacheWriteContext writeContext, ComponentStatsAccumulator componentStatsAccumulator)
+            throws HyracksDataException {
+        super(fillFactor, verifyInput, callback, index, leafFrame, writeContext, componentStatsAccumulator);
         columnBufferPool = ((ColumnBTree) index).getColumnBufferPool();
         columnsPages = new ArrayList<>();
         pageZeroSegments = new ArrayList<>();
@@ -96,6 +95,7 @@ public final class ColumnBTreeBulkloader extends BTreeNSMBulkLoader implements I
         columnWriter = columnarFrame.getColumnTupleWriter();
         reservedBufferCount = 0;
         lowKey = new BTreeSplitKey(tupleWriter.createTupleReference());
+        lowKey.getTuple().setFieldCount(cmp.getKeyFieldCount());
         lowKey.getTuple().setFieldCount(cmp.getKeyFieldCount());
         setLowKey = true;
 
