@@ -22,6 +22,7 @@
  * Expected Res : Success
  */
 
+<<<<<<<< HEAD:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/index-selection/btree-index-range/btree-index-range.02.update.sqlpp
 use test;
 
 
@@ -41,3 +42,10 @@ INSERT INTO A (
     }
     FROM range(1, 12000) i
 );
+========
+USE VectorVerse;
+FROM vectorDataset row
+SELECT row.name AS name ,  vector_distance(row.embedding, [0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34,0.12, 0.53, 0.34], "euclidean distance") AS distance
+ORDER BY distance;
+
+>>>>>>>> backup-before-rewrite-20260304:asterixdb/asterix-app/src/test/resources/runtimets/queries_sqlpp/vector-distance/test-case-invaliddimensions/vector_distance.3.query.sqlpp

@@ -204,8 +204,8 @@ public class OptimizationConfUtil {
         }
         int frameLimit = (int) (memBudget / frameSize);
         if (frameLimit < minFrameLimit) {
-            throw AsterixException.create(ErrorCode.INVALID_FRAME_BASED_MEMORY_BUDGET, sourceLoc, parameterName,
-                    memBudget, frameSize, minFrameLimit, frameSize * minFrameLimit, "bytes");
+            throw AsterixException.create(ErrorCode.COMPILATION_BAD_QUERY_PARAMETER_VALUE, sourceLoc, parameterName,
+                    frameSize * minFrameLimit, "bytes");
         }
         // sets the frame limit to the minimum frame limit if the calculated frame limit is too small.
         return Math.max(frameLimit, minFrameLimit);

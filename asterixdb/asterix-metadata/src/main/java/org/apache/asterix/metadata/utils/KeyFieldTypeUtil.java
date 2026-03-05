@@ -18,10 +18,13 @@
  */
 package org.apache.asterix.metadata.utils;
 
+import static org.apache.asterix.om.types.AOrderedListType.FULL_OPEN_ORDEREDLIST_TYPE;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
@@ -130,6 +133,18 @@ public class KeyFieldTypeUtil {
      */
     public static List<Pair<IAType, Boolean>> getBTreeIndexKeyTypes(Index index, ARecordType recordType,
             ARecordType metaRecordType) throws AlgebricksException {
+        if (index.getIndexType() == DatasetConfig.IndexType.SAMPLE) {
+            Index.SampleIndexDetails indexDetails = (Index.SampleIndexDetails) index.getIndexDetails();
+            List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
+            List<Pair<IAType, Boolean>> indexKeyTypes = new ArrayList<>();
+            for (int i = 0; i < indexDetails.getKeyFieldNames().size(); i++) {
+                Pair<IAType, Boolean> keyPairType = Index.getNonNullableOpenFieldType(index,
+                        indexDetails.getKeyFieldTypes().get(i), indexDetails.getKeyFieldNames().get(i),
+                        chooseSource(keySourceIndicators, i, recordType, metaRecordType));
+                indexKeyTypes.add(keyPairType);
+            }
+            return indexKeyTypes;
+        }
         Index.ValueIndexDetails indexDetails = (Index.ValueIndexDetails) index.getIndexDetails();
         List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
         List<Pair<IAType, Boolean>> indexKeyTypes = new ArrayList<>();
@@ -209,6 +224,23 @@ public class KeyFieldTypeUtil {
         return indexKeyTypes;
     }
 
+    public static List<IAType> getVectorIndexKeyTypes(Index index, ARecordType recordType, ARecordType metaRecordType)
+            throws AlgebricksException {
+        Index.VectorIndexDetails indexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
+        // List<Integer> keySourceIndicators = indexDetails.getKeyFieldSourceIndicators();
+        List<IAType> indexKeyTypes = new ArrayList<>();
+        //ARecordType targetRecType = chooseSource(keySourceIndicators, 0, recordType, metaRecordType);
+        ARecordType targetRecType = recordType;
+
+        Pair<IAType, Boolean> keyPairType = Index.getNonNullableOpenFieldType(index, FULL_OPEN_ORDEREDLIST_TYPE,
+                indexDetails.getKeyFieldNames().get(0), targetRecType);
+
+        // For vector indexes, the key type is the vector itself (ordered list of doubles)
+        // The secondary key output is the full vector embedding
+        indexKeyTypes.add(keyPairType.first);
+        return indexKeyTypes;
+    }
+
     /**
      * Get the number of secondary index keys.
      *
@@ -242,6 +274,8 @@ public class KeyFieldTypeUtil {
                         chooseSource(keySourceIndicators, 0, recordType, metaRecordType));
                 IAType keyType = keyPairType.first;
                 return NonTaggedFormatUtil.getNumDimensions(keyType.getTypeTag()) * 2;
+            case VECTOR:
+                return ((Index.VectorIndexDetails) index.getIndexDetails()).getKeyFieldNames().size();
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, index.getIndexType());
         }

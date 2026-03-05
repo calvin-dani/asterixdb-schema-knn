@@ -54,6 +54,7 @@ import org.apache.hyracks.storage.am.rtree.api.IRTreeLeafFrame;
 import org.apache.hyracks.storage.am.rtree.frames.RTreeNSMFrame;
 import org.apache.hyracks.storage.am.rtree.frames.RTreeNSMInteriorFrame;
 import org.apache.hyracks.storage.am.rtree.tuples.RTreeTypeAwareTupleWriter;
+import org.apache.hyracks.storage.common.IComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IIndexCursor;
@@ -821,6 +822,11 @@ public class RTree extends AbstractTreeIndex {
             rtree.diskOrderScan(cursor, ctx);
         }
 
+        @Override
+        public void diskSampleScan(IIndexCursor cursor) throws HyracksDataException {
+            throw new UnsupportedOperationException("Disk sample scan is not supported for RTree.");
+        }
+
         public RTreeOpContext getOpContext() {
             return ctx;
         }
@@ -900,12 +906,15 @@ public class RTree extends AbstractTreeIndex {
 
     @Override
     public IIndexBulkLoader createBulkLoader(float fillFactor, boolean verifyInput, long numElementsHint,
-            boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
+            boolean checkIfEmptyIndex, IPageWriteCallback callback, IComponentStatsAccumulator statsAccumulator)
+            throws HyracksDataException {
         // TODO: verifyInput currently does nothing.
-        return new RTreeBulkLoader(fillFactor, callback);
+        // todo: pass statsAccumulator may here as well
+        return new RTreeBulkLoader(fillFactor, callback, statsAccumulator);
     }
 
     public class RTreeBulkLoader extends AbstractTreeIndexBulkLoader {
+        private final IComponentStatsAccumulator statsAccumulator;
         ITreeIndexFrame lowerFrame, prevInteriorFrame;
         RTreeTypeAwareTupleWriter interiorFrameTupleWriter =
                 ((RTreeTypeAwareTupleWriter) interiorFrame.getTupleWriter());
@@ -913,14 +922,17 @@ public class RTree extends AbstractTreeIndex {
         ByteBuffer mbr;
         List<Integer> prevNodeFrontierPages = new ArrayList<>();
 
-        public RTreeBulkLoader(float fillFactor, IPageWriteCallback callback) throws HyracksDataException {
+        public RTreeBulkLoader(float fillFactor, IPageWriteCallback callback,
+                IComponentStatsAccumulator statsAccumulator) throws HyracksDataException {
             super(fillFactor, callback, RTree.this);
+            this.statsAccumulator = statsAccumulator;
             prevInteriorFrame = interiorFrameFactory.createFrame();
         }
 
         @Override
         public void add(ITupleReference tuple) throws HyracksDataException {
             try {
+                statsAccumulator.account(tuple);
                 int leafFrameTupleSize = leafFrame.getBytesRequiredToWriteTuple(tuple);
                 int interiorFrameTupleSize = interiorFrame.getBytesRequiredToWriteTuple(tuple);
                 int tupleSize = Math.max(leafFrameTupleSize, interiorFrameTupleSize);

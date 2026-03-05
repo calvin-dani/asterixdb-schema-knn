@@ -229,6 +229,7 @@ import org.apache.asterix.runtime.aggregates.std.LocalVarAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalVarPopAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.MaxAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.MinAggregateDescriptor;
+import org.apache.asterix.runtime.aggregates.std.QuantizationConstantsAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.RangeMapAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SkewnessAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SqlAvgAggregateDescriptor;
@@ -552,6 +553,7 @@ import org.apache.asterix.runtime.evaluators.functions.bitwise.BitTestWithoutAll
 import org.apache.asterix.runtime.evaluators.functions.bitwise.BitXorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.bitwise.IsBitSetWithAllFlagDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.bitwise.IsBitSetWithoutAllFlagDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.kmeans.KmeanFaissArrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.AccessFieldDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.AccessNestedFieldDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.records.CheckIntegerDescriptor;
@@ -646,6 +648,9 @@ import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYear2Descr
 import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYearDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationGreaterThanComparatorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationLessThanComparatorDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.ANNDistanceDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceConstantDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.DenseRankRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.NtileRunningAggregateDescriptor;
 import org.apache.asterix.runtime.runningaggregates.std.PercentRankRunningAggregateDescriptor;
@@ -745,6 +750,7 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(GlobalStddevAggregateDescriptor.FACTORY);
         fc.add(LocalSamplingAggregateDescriptor.FACTORY);
         fc.add(RangeMapAggregateDescriptor.FACTORY);
+        fc.add(QuantizationConstantsAggregateDescriptor.FACTORY);
         fc.add(StddevPopAggregateDescriptor.FACTORY);
         fc.add(LocalStddevPopAggregateDescriptor.FACTORY);
         fc.add(IntermediateStddevPopAggregateDescriptor.FACTORY);
@@ -1333,6 +1339,12 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(GetOverlappingIntervalDescriptor.FACTORY);
         fc.add(DurationFromIntervalDescriptor.FACTORY);
 
+        // Vector functions
+        fc.add(VectorDistanceArrDescriptor.FACTORY);
+        fc.add(VectorDistanceConstantDescriptor.FACTORY);
+        fc.add(ANNDistanceDescriptor.FACTORY);
+
+        fc.add(KmeanFaissArrDescriptor.FACTORY);
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
         fc.add(IsArrayDescriptor.FACTORY);

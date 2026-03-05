@@ -1,0 +1,233 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+package org.apache.hyracks.storage.am.lsm.vector.impls;
+
+import java.io.FilenameFilter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.FileReference;
+import org.apache.hyracks.api.io.IIOManager;
+import org.apache.hyracks.storage.am.common.api.ITreeIndex;
+import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexFileManager;
+import org.apache.hyracks.storage.am.lsm.common.impls.IndexComponentFileReference;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentFileReferences;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMVCTreeComponentFileReferences;
+import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+/**
+ * File manager for LSM Vector Clustering Trees.
+ *
+ * This class manages the files associated with LSM Vector Clustering Tree components,
+ * including naming conventions, file creation, and cleanup operations for both
+ * in-memory and disk components.
+ */
+public class LSMVCTreeFileManager extends AbstractLSMIndexFileManager {
+    private static final Logger LOGGER = LogManager.getLogger();
+
+    private static final String VCTREE_SUFFIX = "vct";
+    private static final String STATIC_STRUCTURE_SUFFIX = ".staticstructure";
+    private static final String MASK_FILE_PREFIX = ".";
+
+    private final TreeIndexFactory<? extends ITreeIndex> vcTreeFactory;
+
+    private static final FilenameFilter vcTreeFilter =
+            (dir, name) -> !name.startsWith(".") && name.endsWith(VCTREE_SUFFIX);
+
+    public LSMVCTreeFileManager(IIOManager ioManager, FileReference file,
+            TreeIndexFactory<? extends ITreeIndex> vcTreeFactory) {
+        super(ioManager, file, null);
+        this.vcTreeFactory = vcTreeFactory;
+    }
+
+    @Override
+    protected String getNextComponentSequence(FilenameFilter filenameFilter) throws HyracksDataException {
+        // For VCTree, the static structure is implicitly component [0,0]
+        // Ensure data component sequences start from 0 (first flush will be 0_0, second 1_1, etc.)
+
+        // First check if there are any existing data component files
+        long maxSeq = getOnDiskLastUsedComponentSequence(filenameFilter);
+
+        // If no data files exist yet but static structure exists, start from -1
+        // so the first flush will be sequence 0 (++(-1) = 0)
+        FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
+        if (maxSeq == -1 && staticStructureFile.getFile().exists()) {
+            // Static structure exists but no data files yet - first flush should be 0_0
+            return IndexComponentFileReference.getFlushSequence(0);
+        }
+
+        // Otherwise, increment the max sequence found
+        return IndexComponentFileReference.getFlushSequence(maxSeq + 1);
+    }
+
+    private long getOnDiskLastUsedComponentSequence(FilenameFilter filenameFilter) throws HyracksDataException {
+        long maxComponentSeq = -1;
+        final java.util.Set<FileReference> files = ioManager.list(baseDir, filenameFilter);
+        for (FileReference file : files) {
+            maxComponentSeq = Math.max(maxComponentSeq, IndexComponentFileReference.of(file).getSequenceEnd());
+        }
+        return maxComponentSeq;
+    }
+
+    @Override
+    public LSMComponentFileReferences getRelFlushFileReference() throws HyracksDataException {
+        String baseName = getNextComponentSequence(vcTreeFilter);
+        return new LSMVCTreeComponentFileReferences(baseDir.getChild(baseName + DELIMITER + VCTREE_SUFFIX), null, null,
+                baseDir.getChild(STATIC_STRUCTURE_SUFFIX));
+    }
+
+    @Override
+    public LSMComponentFileReferences getRelMergeFileReference(String firstFileName, String lastFileName) {
+        final String baseName = IndexComponentFileReference.getMergeSequence(firstFileName, lastFileName);
+        return new LSMComponentFileReferences(baseDir.getChild(baseName + DELIMITER + VCTREE_SUFFIX), null,
+                baseDir.getChild(baseName + DELIMITER + STATIC_STRUCTURE_SUFFIX));
+    }
+
+    @Override
+    public List<LSMComponentFileReferences> cleanupAndGetValidFiles() throws HyracksDataException {
+        List<LSMComponentFileReferences> validFiles = new ArrayList<>();
+        ArrayList<IndexComponentFileReference> allVCTreeFiles = new ArrayList<>();
+        HashSet<String> reported = new HashSet<>();
+
+        // Gather all VCTree files
+        validateFiles(baseDir.getFile(), vcTreeFilter, allVCTreeFiles, reported, vcTreeFactory);
+
+        // Sort all files in DESCENDING order (newest first) to match LSM component list ordering
+        // LSM expects disk components ordered from newest to oldest: [2,2], [1,1], [0,0]
+        Collections.sort(allVCTreeFiles, Collections.reverseOrder());
+
+        // Validate the single shared static structure file (one per index, not per component)
+        FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
+        if (!validateStaticStructureFile(staticStructureFile)) {
+            LOGGER.log(Level.TRACE, "Invalid or missing shared .staticstructure file: {}",
+                    staticStructureFile.getAbsolutePath());
+            // Clean up all VCTree files since they can't work without the static structure
+            for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
+                cleanupOrphanedVCTreeFile(vcTreeFile.getFileRef());
+            }
+            return validFiles; // Return empty list
+        }
+
+        // Process each VCTree file - all share the same static structure
+        for (IndexComponentFileReference vcTreeFile : allVCTreeFiles) {
+            String baseName = vcTreeFile.getSequence();
+            LOGGER.log(Level.TRACE, "Valid VCTree component found: {} (using shared .staticstructure)", baseName);
+            validFiles.add(new LSMComponentFileReferences(vcTreeFile.getFileRef(), null, staticStructureFile));
+        }
+
+        return validFiles;
+    }
+
+    @Override
+    protected boolean areHolesAllowed() {
+        return false; // VCTree components must be contiguous
+    }
+
+    /**
+     * Validates and returns the shared static structure file reference.
+     * The static structure is shared across all LSM components and contains
+     * the hierarchical k-means clustering metadata.
+     *
+     * @return LSMVCTreeComponentFileReferences with only the static structure, or null if invalid
+     * @throws HyracksDataException if validation fails
+     */
+    public LSMVCTreeComponentFileReferences getStaticStructureFileReference() throws HyracksDataException {
+        FileReference staticStructureFile = baseDir.getChild(STATIC_STRUCTURE_SUFFIX);
+        if (validateStaticStructureFile(staticStructureFile)) {
+            return new LSMVCTreeComponentFileReferences(null, null, null, staticStructureFile);
+        }
+        return null;
+    }
+
+    /**
+     * Validates that there are no invalid files in the directory.
+     */
+    private void validateFiles(java.io.File dir, FilenameFilter filter, List<IndexComponentFileReference> files,
+            HashSet<String> reported, TreeIndexFactory<? extends ITreeIndex> factory) throws HyracksDataException {
+
+        String[] fileNames = dir.list(filter);
+        if (fileNames == null) {
+            return;
+        }
+
+        for (String fileName : fileNames) {
+            FileReference fileRef = baseDir.getChild(fileName);
+            IndexComponentFileReference iFileRef = IndexComponentFileReference.of(fileRef);
+            files.add(iFileRef);
+        }
+    }
+
+    /**
+     * Validates that a .staticstructure file exists and is valid.
+     *
+     * @param staticStructureFile The .staticstructure file to validate
+     * @return true if the file exists and is valid, false otherwise
+     */
+    private boolean validateStaticStructureFile(FileReference staticStructureFile) {
+        try {
+            // Check if file exists
+            if (!ioManager.exists(staticStructureFile)) {
+                LOGGER.log(Level.TRACE, "Static structure file does not exist: {}",
+                        staticStructureFile.getAbsolutePath());
+                return false;
+            }
+
+            LOGGER.log(Level.TRACE, "Static structure file is valid: {}", staticStructureFile.getAbsolutePath());
+            return true;
+
+        } catch (Exception e) {
+            LOGGER.log(Level.TRACE, "Error validating static structure file {}: {}",
+                    staticStructureFile.getAbsolutePath(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Gets the mask file for a .staticstructure file.
+     *
+     * @param staticStructureFile The .staticstructure file
+     * @return The corresponding mask file
+     */
+    private FileReference getMaskFile(FileReference staticStructureFile) {
+        String maskFileName = MASK_FILE_PREFIX + staticStructureFile.getName();
+        return staticStructureFile.getParent().getChild(maskFileName);
+    }
+
+    /**
+     * Cleans up an orphaned VCTree file when its .staticstructure file is missing or invalid.
+     *
+     * @param vcTreeFile The orphaned VCTree file to clean up
+     */
+    private void cleanupOrphanedVCTreeFile(FileReference vcTreeFile) {
+        try {
+            LOGGER.log(Level.TRACE, "Cleaning up orphaned VCTree file: {}", vcTreeFile.getAbsolutePath());
+            ioManager.delete(vcTreeFile);
+        } catch (Exception e) {
+            LOGGER.log(Level.TRACE, "Failed to clean up orphaned VCTree file {}: {}", vcTreeFile.getAbsolutePath(),
+                    e.getMessage());
+        }
+    }
+}

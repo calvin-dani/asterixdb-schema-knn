@@ -38,6 +38,7 @@ public class LSMBTreeSearchCursor extends EnforcedIndexCursor implements ILSMInd
     private final LSMBTreePointSearchCursor pointCursor;
     private final LSMBTreeRangeSearchCursor rangeCursor;
     private final LSMBTreeDiskComponentScanCursor scanCursor;
+
     private ILSMIndexCursor currentCursor;
 
     public LSMBTreeSearchCursor(ILSMIndexOperationContext opCtx) {

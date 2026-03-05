@@ -18,10 +18,13 @@
  */
 package org.apache.hyracks.dataflow.std.sort;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.ActivityId;
+import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparator;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.dataflow.value.INormalizedKeyComputer;
@@ -31,11 +34,15 @@ import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
+import org.apache.hyracks.dataflow.common.utils.TaskUtil;
 import org.apache.hyracks.dataflow.std.buffermanager.EnumFreeSlotPolicy;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class ExternalSortOperatorDescriptor extends AbstractSorterOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private Algorithm alg = Algorithm.MERGE_SORT;
     private EnumFreeSlotPolicy policy = EnumFreeSlotPolicy.LAST_FIT;
@@ -82,6 +89,92 @@ public class ExternalSortOperatorDescriptor extends AbstractSorterOperatorDescri
                         comparatorFactories, outRecDescs[0], alg, policy, framesLimit, outputLimit);
                 return runGen;
             }
+
+            @Override
+            public IOperatorNodePushable createPushRuntime(final IHyracksTaskContext ctx,
+                    final IRecordDescriptorProvider recordDescProvider, final int partition, int nPartitions) {
+                final IOperatorNodePushable op =
+                        super.createPushRuntime(ctx, recordDescProvider, partition, nPartitions);
+                return new IOperatorNodePushable() {
+                    long openDuration;
+                    long nextFrameDuration;
+                    long closeDuration;
+
+                    @Override
+                    public void initialize() throws HyracksDataException {
+                        op.initialize();
+                    }
+
+                    @Override
+                    public void deinitialize() throws HyracksDataException {
+                        op.deinitialize();
+                    }
+
+                    @Override
+                    public int getInputArity() {
+                        return op.getInputArity();
+                    }
+
+                    @Override
+                    public void setOutputFrameWriter(int index, IFrameWriter writer, RecordDescriptor recordDesc)
+                            throws HyracksDataException {
+                        op.setOutputFrameWriter(index, writer, recordDesc);
+                    }
+
+                    @Override
+                    public IFrameWriter getInputFrameWriter(int index) {
+                        final IFrameWriter writer = op.getInputFrameWriter(index);
+                        return new IFrameWriter() {
+                            @Override
+                            public void open() throws HyracksDataException {
+                                long start = System.nanoTime();
+                                writer.open();
+                                openDuration = System.nanoTime() - start;
+                            }
+
+                            @Override
+                            public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+                                long start = System.nanoTime();
+                                writer.nextFrame(buffer);
+                                nextFrameDuration += System.nanoTime() - start;
+                            }
+
+                            @Override
+                            public void fail() throws HyracksDataException {
+                                writer.fail();
+                            }
+
+                            @Override
+                            public void close() throws HyracksDataException {
+                                long start = System.nanoTime();
+                                try {
+                                    writer.close();
+                                } finally {
+                                    closeDuration = System.nanoTime() - start;
+                                    if (TaskUtil.get("SAMPLE_OPERATION_IS_GOING", ctx) != null) {
+                                        LOGGER.debug("StatsLogging: ExternalSort_SortActivity_Open_Time: {}ns",
+                                                openDuration);
+                                        LOGGER.debug("StatsLogging: ExternalSort_SortActivity_NextFrame_Time: {}ns",
+                                                nextFrameDuration);
+                                        LOGGER.debug("StatsLogging: ExternalSort_SortActivity_Close_Time: {}ns",
+                                                closeDuration);
+                                    }
+                                }
+                            }
+
+                            @Override
+                            public void flush() throws HyracksDataException {
+                                writer.flush();
+                            }
+                        };
+                    }
+
+                    @Override
+                    public String getDisplayName() {
+                        return op.getDisplayName();
+                    }
+                };
+            }
         };
     }
 
@@ -96,6 +189,56 @@ public class ExternalSortOperatorDescriptor extends AbstractSorterOperatorDescri
                     IBinaryComparator[] comparators, INormalizedKeyComputer nmkComputer, int necessaryFrames) {
                 return new ExternalSortRunMerger(ctx, runs, sortFields, comparators, nmkComputer, outRecDescs[0],
                         necessaryFrames, outputLimit);
+            }
+
+            @Override
+            public IOperatorNodePushable createPushRuntime(final IHyracksTaskContext ctx,
+                    final IRecordDescriptorProvider recordDescProvider, final int partition, int nPartitions) {
+                final IOperatorNodePushable op =
+                        super.createPushRuntime(ctx, recordDescProvider, partition, nPartitions);
+                return new IOperatorNodePushable() {
+                    long initializeDuration;
+
+                    @Override
+                    public void initialize() throws HyracksDataException {
+                        long start = System.nanoTime();
+                        try {
+                            op.initialize();
+                        } finally {
+                            initializeDuration = System.nanoTime() - start;
+                            if (TaskUtil.get("SAMPLE_OPERATION_IS_GOING", ctx) != null) {
+                                LOGGER.debug("StatsLogging: ExternalSort_MergeActivity_Initialize_Time: {}ns",
+                                        initializeDuration);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void deinitialize() throws HyracksDataException {
+                        op.deinitialize();
+                    }
+
+                    @Override
+                    public int getInputArity() {
+                        return op.getInputArity();
+                    }
+
+                    @Override
+                    public void setOutputFrameWriter(int index, IFrameWriter writer, RecordDescriptor recordDesc)
+                            throws HyracksDataException {
+                        op.setOutputFrameWriter(index, writer, recordDesc);
+                    }
+
+                    @Override
+                    public IFrameWriter getInputFrameWriter(int index) {
+                        return op.getInputFrameWriter(index);
+                    }
+
+                    @Override
+                    public String getDisplayName() {
+                        return op.getDisplayName();
+                    }
+                };
             }
         };
     }

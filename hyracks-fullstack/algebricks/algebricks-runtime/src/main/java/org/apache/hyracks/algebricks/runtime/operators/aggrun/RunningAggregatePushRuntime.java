@@ -31,10 +31,12 @@ class RunningAggregatePushRuntime extends AbstractRunningAggregatePushRuntime<IR
     RunningAggregatePushRuntime(int[] projectionColumns, int[] runningAggOutColumns,
             IRunningAggregateEvaluatorFactory[] runningAggFactories, IHyracksTaskContext ctx) {
         super(projectionColumns, runningAggOutColumns, runningAggFactories, IRunningAggregateEvaluator.class, ctx);
+
     }
 
     @Override
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+        System.err.println("RunningAggregatePushRuntime.nextFrame called");
         tAccess.reset(buffer);
         produceTuples(tAccess, 0, tAccess.getTupleCount() - 1, tRef);
     }
