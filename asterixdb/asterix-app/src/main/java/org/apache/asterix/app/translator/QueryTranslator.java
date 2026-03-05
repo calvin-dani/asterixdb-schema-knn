@@ -1646,6 +1646,49 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 }
             }
             Index.IIndexDetails indexDetails;
+            if (indexType == IndexType.VECTOR) {
+                List<CreateIndexStatement.IndexedElement> includeElements = stmtCreateIndex.getIncludeElements();
+                int includeElementsCount = includeElements.size();
+
+                List<List<String>> includeFieldNames = new ArrayList<>(includeElementsCount);
+                List<IAType> includeFieldTypes = new ArrayList<>(includeElementsCount);
+                List<Integer> includeFieldSourceIndicators = new ArrayList<>(includeElementsCount);
+
+                for (int i = 0; i < includeElementsCount; i++) {
+                    CreateIndexStatement.IndexedElement includeElement = includeElements.get(i);
+                    List<String> fieldName = includeElement.getProjectList().get(0).first;
+                    IAType fieldType = indexFieldTypes.get(i).get(0);
+                    int sourceIndicator = includeElement.getSourceIndicator();
+
+                    includeFieldNames.add(fieldName);
+                    includeFieldTypes.add(fieldType);
+                    includeFieldSourceIndicators.add(sourceIndicator);
+                }
+
+                Map<String, String> castConfig = TypeUtil.validateConfiguration(stmtCreateIndex.getCastConfig(),
+                        stmtCreateIndex.getSourceLocation());
+                String datetimeFormat = TypeUtil.getDatetimeFormat(castConfig);
+                String dateFormat = TypeUtil.getDateFormat(castConfig);
+                String timeFormat = TypeUtil.getTimeFormat(castConfig);
+
+                CreateIndexStatement.IndexedElement indexedElement = stmtCreateIndex.getIndexedElements().get(0);
+                List<String> keyFieldNames = indexedElement.getProjectList().get(0).first;
+
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames, includeFieldNames,
+                        includeFieldSourceIndicators, includeFieldTypes, true, stmtCreateIndex.getExcludeUnknownKey(),
+                        stmtCreateIndex.getCastDefaultNull(), datetimeFormat, dateFormat, timeFormat,
+                        stmtCreateIndex.getWithObjectNode());
+
+                Index newIndex = new Index(databaseName, dataverseName, datasetName, indexName, indexType, indexDetails,
+                        stmtCreateIndex.isEnforced(), false, MetadataUtil.PENDING_ADD_OP, creator);
+
+                bActiveTxn = false; // doCreateIndexImpl() takes over the current transaction
+                EntityDetails entityDetails =
+                        EntityDetails.newIndex(databaseName, dataverseName, datasetName, indexName);
+                doCreateIndexImpl(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator, entityDetails);
+                return;
+            }
+
             if (Index.IndexCategory.of(indexType) == Index.IndexCategory.ARRAY) {
                 if (!stmtCreateIndex.hasExcludeUnknownKey()
                         || !stmtCreateIndex.getExcludeUnknownKey().getOrElse(false)) {
@@ -1930,6 +1973,60 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             }
             // #. add a new index with PendingAddOp
             MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+
+            // VECTOR INDEX: Multi-job pattern (creation -> static structure -> loading)
+            if (index.getIndexType() == IndexType.VECTOR) {
+                // JOB 1: Create empty index files
+                spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
+                if (spec == null) {
+                    throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                            "Failed to create job spec for creating index '" + ds.getDatasetName() + "."
+                                    + index.getIndexName() + "'");
+                }
+                beforeTxnCommit(metadataProvider, creator, entityDetails);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                progress = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+                runJob(hcc, spec, jobFlags);
+
+                // Flush dataset
+                if (ds.getDatasetType() == DatasetType.INTERNAL) {
+                    FlushDatasetUtil.flushDataset(hcc, metadataProvider, index.getDatabaseName(),
+                            index.getDataverseName(), index.getDatasetName());
+                }
+
+                // JOB 2: Create static structure (required before loading records)
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                spec = IndexUtil.buildSecondaryIndexStaticStructureJobSpec(ds, index, metadataProvider, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                runJob(hcc, spec, jobFlags);
+
+                // JOB 3: Load data into index
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, index, metadataProvider, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                runJob(hcc, spec, jobFlags);
+
+                // Final cleanup: PendingAddOp -> PendingNoOp
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(), index.getDatabaseName(),
+                        index.getDataverseName(), index.getDatasetName(), index.getIndexName());
+                index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+                MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+
+                return;
+            }
+
             // #. prepare to create the index artifact in NC.
             spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
             if (spec == null) {
