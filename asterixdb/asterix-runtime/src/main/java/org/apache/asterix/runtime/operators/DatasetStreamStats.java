@@ -29,6 +29,7 @@ import org.apache.hyracks.api.job.profiling.IndexStats;
  */
 public final class DatasetStreamStats {
 
+    private static final float COMPRESSED_RATIO = 2.5f; // Heuristic value
     private final long cardinality;
 
     private final int avgTupleSize;
@@ -39,6 +40,12 @@ public final class DatasetStreamStats {
         this.cardinality = opStats.getTupleCounter().get();
         long totalTupleSize = opStats.getPageReadCounter().get();
         this.avgTupleSize = cardinality > 0 ? (int) (totalTupleSize / cardinality) : 0;
+    public DatasetStreamStats(IOperatorStats opStats, long totalDatasetStorageSize) {
+        long sampledTupleCount = opStats.getTupleCounter().get();
+        long sampledTupleSize = opStats.getPageReads().get();
+        totalDatasetStorageSize = (long) (totalDatasetStorageSize * COMPRESSED_RATIO);
+        this.avgTupleSize = sampledTupleCount > 0 ? (int) (sampledTupleSize / sampledTupleCount) : 0;
+        this.cardinality = avgTupleSize > 0 ? totalDatasetStorageSize / avgTupleSize : 0;
         this.indexesStats = opStats.getIndexesStats();
     }
 

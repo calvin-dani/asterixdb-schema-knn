@@ -291,6 +291,45 @@ public class Stats {
         return false;
     }
 
+    private boolean isJoinSelFromSamplesApplicable(ILogicalOperator leafInput1, ILogicalOperator leafInput2,
+            Index index1, Index index2, LogicalVariable var1, LogicalVariable var2) throws AlgebricksException {
+        Index.SampleIndexDetails details1 = (Index.SampleIndexDetails) index1.getIndexDetails();
+        Index.SampleIndexDetails details2 = (Index.SampleIndexDetails) index2.getIndexDetails();
+        if (details1.getSourceCardinality() >= details1.getSampleCardinalityTarget()
+                && details2.getSourceCardinality() >= details2.getSampleCardinalityTarget()) {
+            return false;
+        }
+        double numDistinct1 = computeNumDistinct(leafInput1, var1, index1);
+        if (numDistinct1 < 0) {
+            return false;
+        }
+        double avgNumRowsPerValue1 = details1.getSourceCardinality() / numDistinct1;
+        double numDistinct2 = computeNumDistinct(leafInput2, var2, index2);
+        if (numDistinct2 < 0) {
+            return false;
+        }
+        double avgNumRowsPerValue2 = details2.getSourceCardinality() / numDistinct2;
+        return avgNumRowsPerValue1 * avgNumRowsPerValue2 * Math.min(numDistinct1, numDistinct2) <= Math
+                .max(Math.max(details1.getSourceCardinality(), details2.getSourceCardinality()), 750000);
+    }
+
+    private double computeNumDistinct(ILogicalOperator leafInput, LogicalVariable var, Index index)
+            throws AlgebricksException {
+        List<List<IAObject>> result = runSamplingQueryDistinct(this.optCtx, leafInput, var, index);
+        if (result == null) {
+            return -1; // Negative value indicates failure
+        }
+        double numDistincts = findPredicateCardinality(result, true);
+        Index.SampleIndexDetails details = (Index.SampleIndexDetails) index.getIndexDetails();
+        if (numDistincts == 0) {
+            numDistincts = details.getSourceCardinality(); // All values are nulls
+        }
+        if (numDistincts == 0) {
+            numDistincts = 1; // Sample is empty
+        }
+        return numDistincts;
+    }
+
     private double naiveJoinSelectivity(List<LogicalVariable> exprUsedVars, double card1, double card2, int idx1,
             int idx2, boolean unnestOp1, boolean unnestOp2) throws AlgebricksException {
         AbstractLeafInput leafInput;

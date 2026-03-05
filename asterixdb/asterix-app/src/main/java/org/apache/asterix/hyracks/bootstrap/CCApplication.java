@@ -26,6 +26,7 @@ import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.
 import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.REBALANCE_REQUIRED;
 import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.SHUTTING_DOWN;
 import static org.apache.hyracks.api.util.JavaSerializationUtils.registerReplacement;
+import static org.apache.hyracks.api.util.JavaSerializationUtils.registerReplacement;
 import static org.apache.hyracks.control.common.controllers.ControllerConfig.Option.CLOUD_DEPLOYMENT;
 
 import java.io.File;

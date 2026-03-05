@@ -24,6 +24,8 @@ import static org.apache.asterix.common.utils.IdentifierUtil.dataverse;
 import static org.apache.asterix.lang.common.statement.CreateFullTextFilterStatement.FIELD_TYPE_STOPWORDS;
 import static org.apache.hyracks.api.job.HyracksJobProperty.JOB_KIND;
 import static org.apache.hyracks.control.nc.result.ResultState.UNLIMITED_READS;
+import static org.apache.hyracks.api.job.HyracksJobProperty.JOB_KIND;
+import static org.apache.hyracks.control.nc.result.ResultState.UNLIMITED_READS;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -169,6 +171,7 @@ import org.apache.asterix.lang.common.statement.FunctionDropStatement;
 import org.apache.asterix.lang.common.statement.IndexDropStatement;
 import org.apache.asterix.lang.common.statement.InsertStatement;
 import org.apache.asterix.lang.common.statement.InternalDetailsDecl;
+import org.apache.asterix.lang.common.statement.KmeansStatement;
 import org.apache.asterix.lang.common.statement.LibraryDropStatement;
 import org.apache.asterix.lang.common.statement.LoadStatement;
 import org.apache.asterix.lang.common.statement.NodeGroupDropStatement;
@@ -266,6 +269,7 @@ import org.apache.asterix.translator.util.ValidateUtil;
 import org.apache.asterix.utils.DataverseUtil;
 import org.apache.asterix.utils.FeedOperations;
 import org.apache.asterix.utils.FlushDatasetUtil;
+import org.apache.asterix.utils.StorageUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.commons.lang3.mutable.MutableBoolean;
@@ -300,6 +304,7 @@ import org.apache.hyracks.control.common.controllers.CCConfig;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDropOperatorDescriptor.DropOption;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMergePolicyFactory;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LSMTreeIndexInsertUpdateDeleteOperatorDescriptor;
+import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndexFileManager;
 import org.apache.hyracks.storage.am.lsm.invertedindex.fulltext.TokenizerCategory;
 import org.apache.hyracks.util.LogRedactionUtil;
 import org.apache.logging.log4j.Level;
@@ -578,6 +583,10 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                         break;
                     case ANALYZE:
                         handleAnalyzeStatement(metadataProvider, stmt, hcc, requestParameters);
+                        break;
+                    case CREATE_VECTOR_INDEX:
+                        handleCreateVectorIndexStatement(metadataProvider, stmt, hcc, requestParameters,
+                                Creator.DEFAULT_CREATOR);
                         break;
                     case ANALYZE_DROP:
                         handleAnalyzeDropStatement(metadataProvider, stmt, hcc, requestParameters);
@@ -1352,6 +1361,38 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 metadataProvider);
     }
 
+    public void handleCreateVectorIndexStatement(MetadataProvider metadataProvider, Statement stmt,
+            IHyracksClientConnection hcc, IRequestParameters requestParameters, Creator creator) throws Exception {
+        //        System.err.println("=== HANDLING CREATE VECTOR INDEX STATEMENT ===");
+        CreateIndexStatement stmtCreateIndex = (CreateIndexStatement) stmt;
+        String datasetName = stmtCreateIndex.getDatasetName().getValue();
+        String indexName = stmtCreateIndex.getIndexName().getValue();
+        String fullTextConfigName = stmtCreateIndex.getFullTextConfigName();
+        //        System.err.println("Dataset: " + datasetName);
+        //        System.err.println("Index: " + indexName);
+        //        System.err.println("Index type: " + stmtCreateIndex.getIndexType());
+        //        System.err.println("Indexed elements: " + stmtCreateIndex.getIndexedElements());
+        //        System.err.println("Include elements: " + stmtCreateIndex.getIncludeElements());
+        //        System.err.println("With object node: " + stmtCreateIndex.getWithObjectNode());
+
+        metadataProvider.validateDatabaseObjectName(stmtCreateIndex.getNamespace(), indexName,
+                stmt.getSourceLocation());
+        Namespace stmtActiveNamespace = getActiveNamespace(stmtCreateIndex.getNamespace());
+        DataverseName dataverseName = stmtActiveNamespace.getDataverseName();
+        String databaseName = stmtActiveNamespace.getDatabaseName();
+        if (isCompileOnly()) {
+            return;
+        }
+        lockUtil.createIndexBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName, datasetName,
+                fullTextConfigName);
+        try {
+            doCreateVectorIndex(metadataProvider, stmtCreateIndex, databaseName, dataverseName, datasetName, hcc,
+                    requestParameters, creator);
+        } finally {
+            metadataProvider.getLocks().unlock();
+        }
+    }
+
     public void handleCreateIndexStatement(MetadataProvider metadataProvider, Statement stmt,
             IHyracksClientConnection hcc, IRequestParameters requestParameters, Creator creator) throws Exception {
         CreateIndexStatement stmtCreateIndex = (CreateIndexStatement) stmt;
@@ -1402,7 +1443,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             List<CreateIndexStatement.IndexedElement> indexedElements = stmtCreateIndex.getIndexedElements();
             int indexedElementsCount = indexedElements.size();
             boolean isSecondaryPrimary = indexedElementsCount == 0;
-            validateIndexType(datasetType, indexType, isSecondaryPrimary, sourceLoc);
+            validateIndexType(datasetType, indexType, isSecondaryPrimary, indexedElementsCount, sourceLoc);
 
             String indexName = stmtCreateIndex.getIndexName().getValue();
             Index index = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), databaseName,
@@ -1431,7 +1472,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 aRecordType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(aRecordType, ds);
             }
 
-            List<List<IAType>> indexFieldTypes = new ArrayList<>(indexedElementsCount);
+            indexedElements = indexType == IndexType.VECTOR ? stmtCreateIndex.getIncludeElements() : indexedElements;
+            List<List<IAType>> indexFieldTypes = new ArrayList<>(indexedElements.size());
             boolean hadUnnest = false;
             boolean overridesFieldTypes = false;
             boolean isHeterogeneousIndex = false;
@@ -1569,7 +1611,8 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                                 }
                             }
                         } else {
-                            if (indexType != IndexType.BTREE && indexType != IndexType.ARRAY) {
+                            if (indexType != IndexType.BTREE && indexType != IndexType.ARRAY
+                                    && indexType != IndexType.VECTOR) {
                                 throw new CompilationException(ErrorCode.INDEX_ILLEGAL_NON_ENFORCED_TYPED,
                                         indexedElement.getSourceLocation(), indexType);
                             }
@@ -1589,7 +1632,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     }
 
                     if (fieldTypePrime == null) {
-                        if (indexType != IndexType.BTREE) {
+                        if (indexType != IndexType.BTREE && indexType != IndexType.VECTOR) {
                             if (projectPath != null) {
                                 String fieldName =
                                         LogRedactionUtil.userData(RecordUtil.toFullyQualifiedName(projectPath));
@@ -1655,6 +1698,76 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 }
             }
             Index.IIndexDetails indexDetails;
+            if (indexType == IndexType.VECTOR) {
+                List<CreateIndexStatement.IndexedElement> includeElements = stmtCreateIndex.getIncludeElements();
+                int includeElementsCount = includeElements.size();
+                //                System.err.println("Include elements count: " + includeElementsCount);
+                //                System.err.println("Include elements: " + includeElements);
+
+                /* process include fields */
+                List<List<String>> includeFieldNames = new ArrayList<>(includeElementsCount);
+                List<IAType> includeFieldTypes = new ArrayList<>(includeElementsCount);
+                List<Integer> includeFieldSourceIndicators = new ArrayList<>(includeElementsCount);
+
+                for (int i = 0; i < includeElementsCount; i++) {
+                    CreateIndexStatement.IndexedElement includeElement = includeElements.get(i);
+                    List<String> fieldName = includeElement.getProjectList().getFirst().first;
+                    IAType fieldType = indexFieldTypes.get(i).getFirst();
+                    int sourceIndicator = includeElement.getSourceIndicator();
+
+                    includeFieldNames.add(fieldName);
+                    includeFieldTypes.add(fieldType);
+                    includeFieldSourceIndicators.add(sourceIndicator);
+
+                    //                    System.err.println("Include field " + i + ": " + fieldName + ", type: " + fieldType + ", source: "
+                    //                            + sourceIndicator);
+                }
+
+                //                System.err.println("Final include field names: " + includeFieldNames);
+                //                System.err.println("Final include field types: " + includeFieldTypes);
+                //                System.err.println("Final include field source indicators: " + includeFieldSourceIndicators);
+
+                Map<String, String> castConfig = TypeUtil.validateConfiguration(stmtCreateIndex.getCastConfig(),
+                        stmtCreateIndex.getSourceLocation());
+                String datetimeFormat = TypeUtil.getDatetimeFormat(castConfig);
+                String dateFormat = TypeUtil.getDateFormat(castConfig);
+                String timeFormat = TypeUtil.getTimeFormat(castConfig);
+
+                CreateIndexStatement.IndexedElement indexedElement = stmtCreateIndex.getIndexedElements().getFirst();
+                List<String> keyFieldNames = indexedElement.getProjectList().getFirst().first;
+
+                //                System.err.println("=== CREATING VECTOR INDEX DETAILS ===");
+                //                System.err.println("Key field names: " + keyFieldNames);
+                // For vector indexes, indexFieldTypes might be empty due to type validation restrictions
+                if (!indexFieldTypes.isEmpty()) {
+                    //                    System.err.println("Key field types: " + indexFieldTypes.get(0));
+                } else {
+                    //                    System.err.println("Key field types: [not available - using default vector type]");
+                }
+                //                System.err.println("Key field source indicators: " + indexedElement.getSourceIndicator());
+
+                indexDetails = new Index.VectorIndexDetails(keyFieldNames, includeFieldNames,
+                        includeFieldSourceIndicators, includeFieldTypes, true, stmtCreateIndex.getExcludeUnknownKey(),
+                        stmtCreateIndex.getCastDefaultNull(), datetimeFormat, dateFormat, timeFormat,
+                        stmtCreateIndex.getWithObjectNode());
+
+                //                System.err.println("Created vector index details: " + indexDetails);
+                //                System.err.println("Vector index details key field names: "
+                //                        + ((Index.VectorIndexDetails) indexDetails).getKeyFieldNames());
+                //                System.err.println("Vector index details include field names: "
+                //                        + ((Index.VectorIndexDetails) indexDetails).getIncludeFieldNames());
+                //                System.err.println("=== END VECTOR INDEX DETAILS CREATION ===");
+
+                Index newIndex = new Index(databaseName, dataverseName, datasetName, indexName, indexType, indexDetails,
+                        stmtCreateIndex.isEnforced(), false, MetadataUtil.PENDING_ADD_OP, creator);
+
+                bActiveTxn = false; // doCreateIndexImpl() takes over the current transaction
+                EntityDetails entityDetails =
+                        EntityDetails.newIndex(databaseName, dataverseName, datasetName, indexName);
+                doCreateIndexImpl(hcc, metadataProvider, ds, newIndex, jobFlags, sourceLoc, creator, entityDetails);
+                return;
+            }
+
             if (Index.IndexCategory.of(indexType) == Index.IndexCategory.ARRAY) {
                 if (!stmtCreateIndex.hasExcludeUnknownKey()
                         || !stmtCreateIndex.getExcludeUnknownKey().getOrElse(false)) {
@@ -1729,6 +1842,14 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             }
             throw e;
         }
+    }
+
+    protected void doCreateVectorIndex(MetadataProvider metadataProvider, CreateIndexStatement stmtCreateIndex,
+            String databaseName, DataverseName dataverseName, String datasetName, IHyracksClientConnection hcc,
+            IRequestParameters requestParameters, Creator creator) throws Exception {
+        // Simply call the existing doCreateIndex method - it already has proper VECTOR index handling
+        doCreateIndex(metadataProvider, stmtCreateIndex, databaseName, dataverseName, datasetName, hcc,
+                requestParameters, creator);
     }
 
     public void handleCreateFullTextFilterStatement(MetadataProvider metadataProvider, Statement stmt)
@@ -1939,6 +2060,92 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             }
             // #. add a new index with PendingAddOp
             MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+
+            // Four-job pattern for vector indexes with quantization
+            if (index.getIndexType() == IndexType.VECTOR) {
+                // VECTOR INDEX: Four Jobs
+
+                // JOB 0.5: Calculate quantization constants from ANALYZE sample index
+                // The quantization constants are written to a sidecar file in the dataset directory
+                // which is then read by LSMVCTreeLocalResource in Job 1
+                //                try {
+                //                    spec = IndexUtil.buildSecondaryIndexQuantizationMetadataJobSpec(ds, index, metadataProvider,
+                //                            sourceLoc);
+                //                    if (spec != null) {
+                //                        System.err.println("[QueryTranslator] Running Job 0.5: quantization constants computation");
+                //                        runJob(hcc, spec, jobFlags);
+                //                        System.err.println(
+                //                                "[QueryTranslator] Job 0.5 completed - sidecar file written to dataset directory");
+                //                    } else {
+                //                        System.err
+                //                                .println("[QueryTranslator] Job 0.5 spec was null - no ANALYZE sample index available");
+                //                    }
+                //                } catch (CompilationException e) {
+                //                    // No sample index available - proceed without quantization
+                //                    System.err.println(
+                //                            "[QueryTranslator] No ANALYZE sample available for quantization: " + e.getMessage());
+                //                } catch (Exception e) {
+                //                    System.err.println("[QueryTranslator] Exception during Job 0.5: " + e.getMessage());
+                //                    e.printStackTrace();
+                //                }
+
+                // JOB 1: Create empty index files
+                // LSMVCTreeLocalResource will read the sidecar file and include quantization constants in .metadata
+                spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
+                if (spec == null) {
+                    throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                            "Failed to create job spec for creating index '" + ds.getDatasetName() + "."
+                                    + index.getIndexName() + "'");
+                }
+                beforeTxnCommit(metadataProvider, creator, entityDetails);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                progress = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+                runJob(hcc, spec, jobFlags);
+
+                // Flush dataset
+                if (ds.getDatasetType() == DatasetType.INTERNAL) {
+                    FlushDatasetUtil.flushDataset(hcc, metadataProvider, index.getDatabaseName(),
+                            index.getDataverseName(), index.getDatasetName());
+                }
+
+                // JOB 2: Create static structure
+                //                System.err.println("=== JOB 2: Creating static structure ===");
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+                spec = IndexUtil.buildSecondaryIndexStaticStructureJobSpec(ds, index, metadataProvider, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                runJob(hcc, spec, jobFlags);
+
+                // JOB 3: Load data into index (simplified loading job - no K-means or structure creation)
+                //                System.err.println("=== JOB 3: Loading data into index (simplified) ===");
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+                spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, index, metadataProvider, sourceLoc);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+                runJob(hcc, spec, jobFlags);
+
+                // Final cleanup
+                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+                bActiveTxn = true;
+                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+                // Add another new index with PendingNoOp after deleting the index with PendingAddOp
+                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(), index.getDatabaseName(),
+                        index.getDataverseName(), index.getDatasetName(), index.getIndexName());
+                index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+                MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+                bActiveTxn = false;
+
+                return; // Exit early for vector indexes
+            }
+
             // #. prepare to create the index artifact in NC.
             spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
             if (spec == null) {
@@ -2031,14 +2238,19 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         }
     }
 
-    protected void validateIndexType(DatasetType datasetType, IndexType indexType, boolean isSecondaryPrimaryIndex,
-            SourceLocation sourceLoc) throws AlgebricksException {
+    protected void validateIndexType(DatasetType datasetType, IndexType indexType, boolean isSecondaryPrimary,
+            int indexedElementsCount, SourceLocation sourceLoc) throws AlgebricksException {
+        boolean isSecondaryPrimaryIndex = indexedElementsCount == 0;
         // disable creating secondary primary index on an external dataset
         if (datasetType == DatasetType.EXTERNAL && isSecondaryPrimaryIndex) {
             throw new CompilationException(ErrorCode.CANNOT_CREATE_SEC_PRIMARY_IDX_ON_EXT_DATASET);
         }
         if (indexType != IndexType.BTREE && isSecondaryPrimaryIndex) {
             throw new CompilationException(ErrorCode.COMPILATION_INCOMPATIBLE_INDEX_TYPE, sourceLoc,
+                    String.valueOf(indexType));
+        }
+        if (indexType == IndexType.VECTOR && indexedElementsCount != 1) {
+            throw new CompilationException(ErrorCode.CANNOT_CREATE_VECTOR_IDX_ON_MULTIPLE_FIELDS, sourceLoc,
                     String.valueOf(indexType));
         }
     }
@@ -5091,6 +5303,360 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
         }
     }
 
+    private void doCreateVectorIndexImplSimple(IHyracksClientConnection hcc, MetadataProvider metadataProvider,
+            Dataset ds, Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
+            EntityDetails entityDetails) throws Exception {
+        MetadataTransactionContext mdTxnCtx = metadataProvider.getMetadataTxnContext();
+        index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+        MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+        beforeTxnCommit(metadataProvider, creator, entityDetails);
+        MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    }
+
+    private void doCreateVectorIndexImpl(IHyracksClientConnection hcc, MetadataProvider metadataProvider, Dataset ds,
+            Index index, EnumSet<JobFlag> jobFlags, SourceLocation sourceLoc, Creator creator,
+            EntityDetails entityDetails) throws Exception {
+        boolean bActiveTxn = true;
+        MetadataTransactionContext mdTxnCtx = metadataProvider.getMetadataTxnContext();
+        try {
+            // #. add a new index with PendingAddOp
+            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+            // #. prepare to create the index artifact in NC.
+            /* spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
+            if (spec == null) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Failed to create job spec for creating index '" + ds.getDatasetName() + "." + index.getIndexName() + "'");
+            } */
+            beforeTxnCommit(metadataProvider, creator, entityDetails);
+
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+            // #. create the index artifact in NC.
+            //runJob(hcc, spec, jobFlags);
+
+            // #. flush the internal dataset
+            // We need this to guarantee the correctness of component Id acceleration for
+            // secondary-to-primary index.
+            // Otherwise, the new secondary index component would corresponding to a partial
+            // memory component
+            // of the primary index, which is incorrect.
+            /*
+            if (ds.getDatasetType() == DatasetType.INTERNAL) {
+                FlushDatasetUtil.flushDataset(hcc, metadataProvider, index.getDatabaseName(), index.getDataverseName(),
+                        index.getDatasetName());
+            }
+             */
+
+            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            bActiveTxn = true;
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+            // #. load data into the index in NC.
+            //spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, index, metadataProvider, sourceLoc);
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+            bActiveTxn = false;
+
+            //runJob(hcc, spec, jobFlags);
+
+            // #. begin new metadataTxn
+            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+            bActiveTxn = true;
+            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+
+            // #. add another new index with PendingNoOp after deleting the index with
+            // PendingAddOp
+            MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(), index.getDatabaseName(),
+                    index.getDataverseName(), index.getDatasetName(), index.getIndexName());
+            index.setPendingOp(MetadataUtil.PENDING_NO_OP);
+            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
+            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+        } catch (Exception e) {
+            if (bActiveTxn) {
+                abort(e, e, mdTxnCtx);
+            }
+            throw e;
+        }
+    }
+
+    protected void handleKmeansStatement(MetadataProvider metadataProvider, Statement stmt,
+            IHyracksClientConnection hcc, IRequestParameters requestParameters) throws Exception {
+        KmeansStatement analyzeStatement = (KmeansStatement) stmt;
+        metadataProvider.validateDatabaseObjectName(analyzeStatement.getNamespace(), analyzeStatement.getDatasetName(),
+                analyzeStatement.getSourceLocation());
+        Namespace stmtActiveNamespace = getActiveNamespace(analyzeStatement.getNamespace());
+        DataverseName dataverseName = stmtActiveNamespace.getDataverseName();
+        String databaseName = stmtActiveNamespace.getDatabaseName();
+        String datasetName = analyzeStatement.getDatasetName();
+        if (isCompileOnly()) {
+            return;
+        }
+        lockUtil.analyzeDatasetBegin(lockManager, metadataProvider.getLocks(), databaseName, dataverseName,
+                datasetName);
+        //        try {
+        ////            doAKmeanseDataset(metadataProvider, analyzeStatement, databaseName, dataverseName, datasetName, hcc,
+        ////                    requestParameters);
+        //        } finally {
+        //            metadataProvider.getLocks().unlock();
+        //        }
+    }
+    //
+    //    protected void doAKmeanseDataset(MetadataProvider metadataProvider, KmeansStatement stmtAnalyze,
+    //            String databaseName, DataverseName dataverseName, String datasetName, IHyracksClientConnection hcc,
+    //            IRequestParameters requestParameters) throws Exception {
+    //        SourceLocation sourceLoc = stmtAnalyze.getSourceLocation();
+    //        ProgressState progressNewIndexCreate = ProgressState.NO_PROGRESS;
+    //        ProgressState progressExistingIndexDrop = ProgressState.NO_PROGRESS;
+    //        Dataset ds = null;
+    //        Index existingIndex = null, newIndexPendingAdd = null;
+    //        JobSpecification existingIndexDropSpec = null;
+    //        MetadataTransactionContext mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //        boolean bActiveTxn = true;
+    //        metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //        try {
+    //            // Check if the dataverse exists
+    //            Dataverse dv = MetadataManager.INSTANCE.getDataverse(mdTxnCtx, databaseName, dataverseName);
+    //            if (dv == null) {
+    //                throw new CompilationException(ErrorCode.UNKNOWN_DATAVERSE, sourceLoc,
+    //                        MetadataUtil.dataverseName(databaseName, dataverseName, metadataProvider.isUsingDatabase()));
+    //            }
+    //            // Check if the dataset exists
+    //            ds = metadataProvider.findDataset(databaseName, dataverseName, datasetName);
+    //            if (ds == null) {
+    //                throw new CompilationException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, sourceLoc, datasetName,
+    //                        MetadataUtil.dataverseName(databaseName, dataverseName, metadataProvider.isUsingDatabase()));
+    //            }
+    //            if (ds.getDatasetType() == DatasetType.INTERNAL) {
+    //                validateDatasetState(metadataProvider, ds, sourceLoc);
+    //            } else {
+    //                throw new CompilationException(ErrorCode.OPERATION_NOT_SUPPORTED, sourceLoc);
+    //            }
+    //
+    //            IndexType sampleIndexType = IndexType.SAMPLE;
+    //            Pair<String, String> sampleIndexNames = IndexUtil.getSampleIndexNames(datasetName);
+    //            String newIndexName;
+    //            existingIndex = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), databaseName,
+    //                    dataverseName, datasetName, sampleIndexNames.first);
+    //            if (existingIndex != null) {
+    //                newIndexName = sampleIndexNames.second;
+    //            } else {
+    //                existingIndex = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(),
+    //                        databaseName, dataverseName, datasetName, sampleIndexNames.second);
+    //                newIndexName = sampleIndexNames.first;
+    //            }
+    //
+    //            InternalDatasetDetails dsDetails = (InternalDatasetDetails) ds.getDatasetDetails();
+    //            int sampleCardinalityTarget = stmtAnalyze.getSampleSize();
+    //            long sampleSeed = stmtAnalyze.getOrCreateSampleSeed();
+    //
+    //            Index.SampleIndexDetails newIndexDetailsPendingAdd = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
+    //                    dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget, 0, 0,
+    //                    sampleSeed, Collections.emptyMap());
+    //            newIndexPendingAdd = new Index(databaseName, dataverseName, datasetName, newIndexName, sampleIndexType,
+    //                    newIndexDetailsPendingAdd, false, false, MetadataUtil.PENDING_ADD_OP, Creator.DEFAULT_CREATOR);
+    //
+    //            // #. add a new index with PendingAddOp
+    //            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), newIndexPendingAdd);
+    //            // #. prepare to create the index artifact in NC.
+    //            JobSpecification spec =
+    //                    IndexUtil.buildSecondaryIndexCreationJobSpec(ds, newIndexPendingAdd, metadataProvider, sourceLoc);
+    //            if (spec == null) {
+    //                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+    //                        "Failed to create job spec for creating index '" + ds.getDatasetName() + "."
+    //                                + newIndexPendingAdd.getIndexName() + "'");
+    //            }
+    //            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //            bActiveTxn = false;
+    //            progressNewIndexCreate = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+    //
+    //            // #. create the index artifact in NC.
+    //            runJob(hcc, spec);
+    //
+    //            // #. flush dataset
+    //            FlushDatasetUtil.flushDataset(hcc, metadataProvider, databaseName, dataverseName, datasetName);
+    //            //
+    //            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //            bActiveTxn = true;
+    //            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //
+    //            // #. load data into the index in NC.
+    //            spec = IndexUtil.buildSecondaryIndexLoadingJobSpec(ds, newIndexPendingAdd, metadataProvider, sourceLoc);
+    //            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //            bActiveTxn = false;
+    //            //
+    //            //            List<IOperatorStats> opStats
+    //            List<IOperatorStats>pair = runJob(hcc, spec, jobFlags,
+    //                    Collections.singletonList(SampleOperationsHelper.DATASET_STATS_OPERATOR_NAME));
+    //
+    //            //1. Analyze statment - update (no res) , Sample query - issued by CBO (res)
+    //            //2. DistributeResultOperator DistributeResultOperator to be used.
+    //
+    //            ResultSetId resultSetId = new ResultSetId(metadataProvider.getResultSetIdCounter().getAndInc());
+    //            ResultSetSinkId rssId = new ResultSetSinkId(resultSetId);
+    //            ResultSetDataSink sink = new ResultSetDataSink(rssId, null);
+    ////            IResultSetReader resultSetReader = appCtx.getResultSet().createReader(pair.first, resultSetId);
+    //
+    //            BuiltinType aggType = BuiltinType.AINT64;
+    //            List<ISerializerDeserializer<?>> resultSerdeList = new ArrayList<>(1);
+    //            ISerializerDeserializer[] aggSerde = new ISerializerDeserializer[1];
+    //            IDataFormat format = metadataProvider.getDataFormat();
+    //            ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
+    //            resultSerdeList.add(serdeProvider.getSerializerDeserializer(aggType));
+    //
+    //            //            FrameManager frameManager = new FrameManager(queryOptCtx.getPhysicalOptimizationConfig().getFrameSize());
+    //            //metadataprived
+    //            FrameManager frameManager = new FrameManager(10);
+    //            IFrame frame = new VSizeFrame(frameManager);
+    //            //            metadataProvide
+    //
+    //            FrameTupleAccessor fta = new FrameTupleAccessor(null);
+    //            ByteArrayAccessibleInputStream bais = new ByteArrayAccessibleInputStream(frame.getBuffer().array(), 0, 0);
+    //            DataInputStream dis = new DataInputStream(bais);
+    //            List<List<IAObject>> result = new ArrayList<>();
+    //
+    ////            while (resultSetReader.read(frame) > 0) {
+    ////                ByteBuffer buffer = frame.getBuffer();
+    ////                fta.reset(buffer);
+    ////                int nTuples = fta.getTupleCount();
+    ////                for (int tupleIdx = 0; tupleIdx < nTuples; tupleIdx++) {
+    ////                    int tupleStart = fta.getTupleStartOffset(tupleIdx);
+    ////                    int tupleEnd = fta.getTupleEndOffset(tupleIdx);
+    ////                    bais.setContent(buffer.array(), tupleStart, tupleEnd - tupleStart);
+    ////
+    ////                    List<IAObject> values = new ArrayList<>(1);
+    ////                    for (int fieldIdx = 0; fieldIdx < 1; fieldIdx++) {
+    ////                        IAObject value = (IAObject) resultSerdeList.get(fieldIdx).deserialize(dis);
+    ////                        values.add(value);
+    ////                    }
+    ////                    result.add(values);
+    ////                }
+    ////            }
+    //
+    //            // Result and calculate AVG CENTROID =>
+    //
+    //            if (pair.second == null || pair.second.size() == 0) {
+    //                throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_STATE, "", sourceLoc);
+    //            }
+    //            // TODO CALVIN DANI COMPARE with BTREE
+    //            long datasetCompressedTreeSize = StorageUtil.getCollectionDataSize(appCtx, databaseName, dataverseName,
+    //                    datasetName, datasetName, AbstractLSMIndexFileManager.BTREE_SUFFIX);
+    //            DatasetStreamStats stats = new DatasetStreamStats(pair.second.get(0),datasetCompressedTreeSize);
+    //            ////
+    //            Index.SampleIndexDetails newIndexDetailsFinal = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
+    //                    dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget,
+    //                    stats.getCardinality(), stats.getAvgTupleSize(), sampleSeed, stats.getIndexesStats());
+    //            Index newIndexFinal = new Index(databaseName, dataverseName, datasetName, newIndexName, sampleIndexType,
+    //                    newIndexDetailsFinal, false, false, MetadataUtil.PENDING_NO_OP, Creator.DEFAULT_CREATOR);
+    //
+    //            // #. begin new metadataTxn
+    //            mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //            bActiveTxn = true;
+    //            metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //            // #. add same new index with PendingNoOp after deleting its entry with PendingAddOp
+    //            MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+    //                    newIndexPendingAdd.getDatabaseName(), newIndexPendingAdd.getDataverseName(),
+    //                    newIndexPendingAdd.getDatasetName(), newIndexPendingAdd.getIndexName());
+    //            MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), newIndexFinal);
+    //            MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //            bActiveTxn = false;
+    //            progressNewIndexCreate = ProgressState.NO_PROGRESS;
+    //
+    //            if (existingIndex != null) {
+    //                // #. set existing index to PendingDropOp because we'll be dropping it next
+    //                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //                bActiveTxn = true;
+    //                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+    //                        existingIndex.getDatabaseName(), existingIndex.getDataverseName(),
+    //                        existingIndex.getDatasetName(), existingIndex.getIndexName());
+    //                existingIndex.setPendingOp(MetadataUtil.PENDING_DROP_OP);
+    //                MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), existingIndex);
+    //                existingIndexDropSpec = IndexUtil.buildDropIndexJobSpec(existingIndex, metadataProvider, ds, sourceLoc);
+    //                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //                progressExistingIndexDrop = ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA;
+    //                bActiveTxn = false;
+    //
+    //                // #. drop existing index on NCs
+    //                runJob(hcc, existingIndexDropSpec);
+    //
+    //                // #. drop existing index metadata
+    //                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //                bActiveTxn = true;
+    //                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //                MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+    //                        existingIndex.getDatabaseName(), existingIndex.getDataverseName(),
+    //                        existingIndex.getDatasetName(), existingIndex.getIndexName());
+    //                MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //                bActiveTxn = false;
+    //                progressExistingIndexDrop = ProgressState.NO_PROGRESS;
+    //            }
+    //
+    //        } catch (Exception e) {
+    //            LOGGER.error("failed to analyze dataset; executing compensating operations", e);
+    //            if (bActiveTxn) {
+    //                abort(e, e, mdTxnCtx);
+    //            }
+    //
+    //            if (progressExistingIndexDrop == ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA) {
+    //                // #. execute compensation operations remove the index in NCs
+    //                try {
+    //                    runJob(hcc, existingIndexDropSpec);
+    //                } catch (Exception e2) {
+    //                    // do no throw exception since still the metadata needs to be compensated.
+    //                    e.addSuppressed(e2);
+    //                }
+    //                // #. remove the record from the metadata.
+    //                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //                try {
+    //                    MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+    //                            existingIndex.getDatabaseName(), existingIndex.getDataverseName(),
+    //                            existingIndex.getDatasetName(), existingIndex.getIndexName());
+    //                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //                } catch (Exception e2) {
+    //                    e.addSuppressed(e2);
+    //                    abort(e, e2, mdTxnCtx);
+    //                    throw new IllegalStateException("System is inconsistent state: pending index("
+    //                            + existingIndex.getDataverseName() + "." + existingIndex.getDatasetName() + "."
+    //                            + existingIndex.getIndexName() + ") couldn't be removed from the metadata", e);
+    //                }
+    //            } else if (progressNewIndexCreate == ProgressState.ADDED_PENDINGOP_RECORD_TO_METADATA) {
+    //                // #. execute compensation operations remove the index in NCs
+    //                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //                bActiveTxn = true;
+    //                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //                try {
+    //                    JobSpecification jobSpec =
+    //                            IndexUtil.buildDropIndexJobSpec(newIndexPendingAdd, metadataProvider, ds, sourceLoc);
+    //                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //                    bActiveTxn = false;
+    //                    runJob(hcc, jobSpec);
+    //                } catch (Exception e2) {
+    //                    e.addSuppressed(e2);
+    //                    if (bActiveTxn) {
+    //                        abort(e, e2, mdTxnCtx);
+    //                    }
+    //                }
+    //                // #. remove the record from the metadata.
+    //                mdTxnCtx = MetadataManager.INSTANCE.beginTransaction();
+    //                metadataProvider.setMetadataTxnContext(mdTxnCtx);
+    //                try {
+    //                    MetadataManager.INSTANCE.dropIndex(metadataProvider.getMetadataTxnContext(),
+    //                            newIndexPendingAdd.getDatabaseName(), newIndexPendingAdd.getDataverseName(),
+    //                            newIndexPendingAdd.getDatasetName(), newIndexPendingAdd.getIndexName());
+    //                    MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
+    //                } catch (Exception e2) {
+    //                    e.addSuppressed(e2);
+    //                    abort(e, e2, mdTxnCtx);
+    //                    throw new IllegalStateException("System is in inconsistent state: pending index("
+    //                            + newIndexPendingAdd.getDataverseName() + "." + newIndexPendingAdd.getDatasetName() + "."
+    //                            + newIndexPendingAdd.getIndexName() + ") couldn't be removed from the metadata", e);
+    //                }
+    //            }
+    //
+    //            throw e;
+    //        }
+    //    }
+
     protected void doAnalyzeDataset(MetadataProvider metadataProvider, AnalyzeStatement stmtAnalyze,
             String databaseName, DataverseName dataverseName, String datasetName, IHyracksClientConnection hcc,
             IRequestParameters requestParameters) throws Exception {
@@ -5179,7 +5745,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             if (opStats == null || opStats.size() == 0) {
                 throw new CompilationException(ErrorCode.COMPILATION_ILLEGAL_STATE, "", sourceLoc);
             }
-            DatasetStreamStats stats = new DatasetStreamStats(opStats.get(0));
+            long datasetCompressedTreeSize = StorageUtil.getCollectionDataSize(appCtx, databaseName, dataverseName,
+                    datasetName, datasetName, AbstractLSMIndexFileManager.BTREE_SUFFIX);
+            DatasetStreamStats stats = new DatasetStreamStats(opStats.get(0), datasetCompressedTreeSize);
 
             Index.SampleIndexDetails newIndexDetailsFinal = new Index.SampleIndexDetails(dsDetails.getPrimaryKey(),
                     dsDetails.getKeySourceIndicator(), dsDetails.getPrimaryKeyType(), sampleCardinalityTarget,
@@ -5578,6 +6146,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 afterCompile();
                 MetadataManager.INSTANCE.commitTransaction(mdTxnCtx);
                 stats.setCompileTime(System.nanoTime() - compileStart);
+                resultMetadata.setCompileTime(stats.getCompileTime());
                 resultMetadata.setCompileTime(stats.getCompileTime());
                 bActiveTxn = false;
                 return query.isExplain() || query.isAdvise() || isCompileOnly() ? null : jobSpec;

@@ -35,9 +35,11 @@ import org.apache.hyracks.storage.am.common.impls.NodeFrontier;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.AbstractColumnTupleWriter;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 import org.apache.hyracks.storage.am.lsm.btree.column.cloud.buffercache.IColumnWriteContext;
+import org.apache.hyracks.storage.am.lsm.common.impls.ComponentStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.CachedPage;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
+import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IColumnBufferPool;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.context.IBufferCacheWriteContext;
@@ -61,8 +63,12 @@ public final class ColumnBTreeBulkloader extends BTreeNSMBulkLoader implements I
     private final IColumnPageZeroWriter.ColumnPageZeroWriterType pageZeroWriterType;
     private final IColumnBufferPool columnBufferPool;
     private boolean writerInitialized = false;
+    private final IColumnBufferPool columnBufferPool;
+    private boolean writerInitialized = false;
     private boolean setLowKey;
     private int tupleCount;
+    // reservedBufferCount tracks the number of column buffers currently held by this bulkloader.
+    private int reservedBufferCount;
     // reservedBufferCount tracks the number of column buffers currently held by this bulkloader.
     private int reservedBufferCount;
 
@@ -112,6 +118,7 @@ public final class ColumnBTreeBulkloader extends BTreeNSMBulkLoader implements I
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
+        statsAccumulator.account(tuple);
         // track the number of columns in the current tuple
         columnWriter.updateColumnMetadataForCurrentTuple(tuple);
         ensureWritersInitialized();

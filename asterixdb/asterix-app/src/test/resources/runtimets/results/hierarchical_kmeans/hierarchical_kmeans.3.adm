@@ -1,0 +1,5 @@
+{ "test_name": "basic_clustering_test", "total_points": 30, "num_clusters": 3, "avg_distance": 1.2, "stddev_distance": 0.8, "validation_result": "PASS" }
+{ "test_name": "cluster_distribution_test", "num_clusters": 3, "avg_cluster_size": 10.0, "min_cluster_size": 8, "max_cluster_size": 12, "overall_avg_distance": 1.2, "validation_result": "PASS" }
+{ "test_name": "edge_case_test", "total_points": 30, "identical_points": 3, "outliers": 2, "normal_points": 25, "num_clusters": 3, "validation_result": "PASS" }
+{ "test_name": "performance_test", "total_points": 30, "num_clusters": 3, "avg_distance": 1.2, "stddev_distance": 0.8, "avg_iterations": 5, "max_iterations": 8, "validation_result": "PASS" }
+{ "test_name": "comprehensive_validation", "total_tests": 4, "passed_tests": 4, "failed_tests": 0, "total_points_tested": 120, "total_clusters_tested": 12, "overall_result": "ALL_TESTS_PASSED" }

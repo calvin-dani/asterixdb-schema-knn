@@ -50,6 +50,9 @@ import org.apache.asterix.column.values.writer.NoOpColumnValuesWriter;
 import org.apache.asterix.column.values.writer.NullMissingColumnValuesWriter;
 import org.apache.asterix.column.values.writer.StringColumnValuesWriter;
 import org.apache.asterix.column.values.writer.UUIDColumnValuesWriter;
+import org.apache.asterix.column.values.writer.NullMissingColumnValuesWriter;
+import org.apache.asterix.column.values.writer.StringColumnValuesWriter;
+import org.apache.asterix.column.values.writer.UUIDColumnValuesWriter;
 import org.apache.asterix.om.dictionary.AbstractFieldNamesDictionary;
 import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
 import org.apache.asterix.om.types.ARecordType;
@@ -69,6 +72,7 @@ public final class NoWriteFlushColumnMetadata extends FlushColumnMetadata {
 
     private int numColumns;
     private int buffersRequiredByCurrentTuple;
+    private int buffersRequiredByCurrentTuple;
 
     public NoWriteFlushColumnMetadata(ARecordType datasetType, ARecordType metaType, int numPrimaryKeys,
             boolean metaContainsKeys, IColumnValuesWriterFactory columnWriterFactory,
@@ -76,7 +80,12 @@ public final class NoWriteFlushColumnMetadata extends FlushColumnMetadata {
             int requiredTemporaryBuffers, IFieldNamesDictionary fieldNamesDictionary, ObjectSchemaNode root,
             ObjectSchemaNode metaRoot, Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels,
             ArrayBackedValueStorage schemaStorage) {
+            int requiredTemporaryBuffers, IFieldNamesDictionary fieldNamesDictionary, ObjectSchemaNode root,
+            ObjectSchemaNode metaRoot, Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels,
+            ArrayBackedValueStorage schemaStorage) {
         super(datasetType, metaType, numPrimaryKeys, metaContainsKeys, columnWriterFactory, multiPageOpRef, writers,
+                requiredTemporaryBuffers, fieldNamesDictionary, root, metaRoot, definitionLevels, schemaStorage);
+        buffersRequiredByCurrentTuple = 0;
                 requiredTemporaryBuffers, fieldNamesDictionary, root, metaRoot, definitionLevels, schemaStorage);
         buffersRequiredByCurrentTuple = 0;
         numColumns = 0;
@@ -108,6 +117,8 @@ public final class NoWriteFlushColumnMetadata extends FlushColumnMetadata {
         ArrayBackedValueStorage schemaStorage = new ArrayBackedValueStorage(serializedMetadata.getLength());
         schemaStorage.append(serializedMetadata);
         return new NoWriteFlushColumnMetadata(datasetType, metaType, numPrimaryKeys, metaContainsKeys,
+                columnWriterFactory, multiPageOpRef, writers, requiredTemporaryBuffers, fieldNamesDictionary, root,
+                metaRoot, definitionLevels, schemaStorage);
                 columnWriterFactory, multiPageOpRef, writers, requiredTemporaryBuffers, fieldNamesDictionary, root,
                 metaRoot, definitionLevels, schemaStorage);
     }

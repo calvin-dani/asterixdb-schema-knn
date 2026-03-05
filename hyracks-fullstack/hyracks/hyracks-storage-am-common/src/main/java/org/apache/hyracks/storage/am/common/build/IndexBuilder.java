@@ -19,11 +19,13 @@
 package org.apache.hyracks.storage.am.common.build;
 
 import java.io.IOException;
+import java.util.Map;
 
 import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.storage.am.common.api.IIndexBuilder;
+import org.apache.hyracks.storage.am.common.api.IQuantizedResource;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.ILocalResourceRepository;
@@ -47,6 +49,7 @@ public class IndexBuilder implements IIndexBuilder {
     protected final boolean durable;
     private final IResourceIdFactory resourceIdFactory;
     private final String resourceRelPath;
+    private Map<String, Object> quantizationParams;
 
     /*
      * Ideally, we should not pass resource id factory to the constructor since we can obtain it through
@@ -65,6 +68,13 @@ public class IndexBuilder implements IIndexBuilder {
         resourceRelPath = resourceRef.getRelativePath();
     }
 
+    public void setQuantizationParameters(Map<String, Object> quantizationParams) {
+        System.err.println("[IndexBuilder] setQuantizationParameters() - received params: " + quantizationParams);
+        this.quantizationParams = quantizationParams;
+        System.err.println("[IndexBuilder] setQuantizationParameters() - stored, this.quantizationParams now: "
+                + this.quantizationParams);
+    }
+
     @Override
     public void build() throws HyracksDataException {
         IResourceLifecycleManager<IIndex> lcManager = storageManager.getLifecycleManager(ctx);
@@ -78,7 +88,22 @@ public class IndexBuilder implements IIndexBuilder {
             localResourceRepository.delete(resourceRelPath);
         }
         resourceId = resourceIdFactory.createId();
+        System.err
+                .println("[IndexBuilder] build() - about to create resource, quantizationParams=" + quantizationParams);
         IResource resource = localResourceFactory.createResource(resourceRef);
+        System.err.println("[IndexBuilder] build() - created resource class: " + resource.getClass().getName());
+        System.err.println("[IndexBuilder] build() - resource instanceof IQuantizedResource? "
+                + (resource instanceof IQuantizedResource));
+        System.err.println("[IndexBuilder] build() - quantizationParams != null? " + (quantizationParams != null));
+        // [New Feature] Inject quantization constants if available
+        if (resource instanceof IQuantizedResource && quantizationParams != null) {
+            System.err.println("[IndexBuilder] build() - INJECTING params into resource!");
+            ((IQuantizedResource) resource).setQuantizationParameters(quantizationParams);
+            System.err.println("[IndexBuilder] build() - injection complete");
+        } else {
+            System.err.println("[IndexBuilder] build() - NOT injecting: instanceof="
+                    + (resource instanceof IQuantizedResource) + ", params=" + (quantizationParams != null));
+        }
         lr = new LocalResource(resourceId, ITreeIndexFrame.Constants.VERSION, durable, resource);
         IIndex index = lcManager.get(resourceRelPath);
         if (index != null) {

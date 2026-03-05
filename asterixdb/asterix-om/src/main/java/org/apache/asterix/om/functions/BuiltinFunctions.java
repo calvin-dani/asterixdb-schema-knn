@@ -457,6 +457,8 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-local-sampling", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier RANGE_MAP =
             FunctionConstants.newAsterix("agg-range-map", FunctionIdentifier.VARARGS);
+    public static final FunctionIdentifier QUANTIZATION_CONSTANTS =
+            FunctionConstants.newAsterix("agg-quantization-constants", 1);
     public static final FunctionIdentifier STDDEV_POP = FunctionConstants.newAsterix("agg-stddev_pop", 1);
     public static final FunctionIdentifier GLOBAL_STDDEV_POP = FunctionConstants.newAsterix("agg-global-stddev_pop", 1);
     public static final FunctionIdentifier INTERMEDIATE_STDDEV_POP =
@@ -508,6 +510,13 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier SCALAR_SKEWNESS = FunctionConstants.newAsterix("skewness", 1);
     public static final FunctionIdentifier SCALAR_KURTOSIS = FunctionConstants.newAsterix("kurtosis", 1);
     public static final FunctionIdentifier SCALAR_UNION_MBR = FunctionConstants.newAsterix("union_mbr", 1);
+
+    // aggregates for clustering
+    public static final FunctionIdentifier KMEANS_ACCUMULATE = FunctionConstants.newAsterix("agg-kmeans-accumulate", 1);
+    public static final FunctionIdentifier LOCAL_KMEANS_ACCUMULATE =
+            FunctionConstants.newAsterix("agg-local-kmeans-accumulate", 1);
+    public static final FunctionIdentifier GLOBAL_KMEANS_ACCUMULATE =
+            FunctionConstants.newAsterix("agg-global-kmeans-accumulate", 1);
 
     // serializable aggregate functions
     public static final FunctionIdentifier SERIAL_AVG = FunctionConstants.newAsterix("avg-serial", 1);
@@ -838,6 +847,8 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("win-mark-first-missing-impl", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier WIN_MARK_FIRST_NULL_IMPL =
             FunctionConstants.newAsterix("win-mark-first-null-impl", FunctionIdentifier.VARARGS);
+    public static final FunctionIdentifier WIN_MARK_VALID_TUPLES_IMPL =
+            FunctionConstants.newAsterix("win-mark-valid-tuple-impl", FunctionIdentifier.VARARGS);
     public static final FunctionIdentifier WIN_PARTITION_LENGTH_IMPL =
             FunctionConstants.newAsterix("win-partition-length-impl", 0);
     public static final FunctionIdentifier WIN_MARK_VALID_TUPLES_IMPL =
@@ -1157,6 +1168,20 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier OVERLAP_BINS = FunctionConstants.newAsterix("overlap-bins", 3);
     public static final FunctionIdentifier GET_OVERLAPPING_INTERVAL =
             FunctionConstants.newAsterix("get-overlapping-interval", 2);
+
+    //Vector functions
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY =
+            FunctionConstants.newAsterix("vector-distance", FunctionIdentifier.VARARGS);
+    public static final FunctionIdentifier VECTOR_DISTANCE_ARRAY_CONSTANT =
+            FunctionConstants.newAsterix("vector-distance-constant", 3);
+    // Vector search functions
+    public static final FunctionIdentifier ANN_DISTANCE =
+            FunctionConstants.newAsterix("ann-distance", FunctionIdentifier.VARARGS);
+
+    // KMEAN function
+    public static final FunctionIdentifier KMEAN_FAISS = FunctionConstants.newAsterix("kmean-faiss", 3);
+    public static final FunctionIdentifier KMEAN_COMMONS = FunctionConstants.newAsterix("kmean-common", 3);
+    //    public static final FunctionIdentifier KMEAN_FAISS = FunctionConstants.newAsterix("kmean-faiss", 3);
 
     // Temporal functions
     public static final FunctionIdentifier UNIX_TIME_FROM_DATE_IN_DAYS =
@@ -1626,6 +1651,7 @@ public class BuiltinFunctions {
         addPrivateFunction(GLOBAL_STDDEV_SAMP, NullableDoubleTypeComputer.INSTANCE, true);
         addPrivateFunction(LOCAL_SAMPLING, ABinaryTypeComputer.INSTANCE, true);
         addPrivateFunction(RANGE_MAP, ABinaryTypeComputer.INSTANCE, true);
+        addPrivateFunction(QUANTIZATION_CONSTANTS, ABinaryTypeComputer.INSTANCE, true);
         addPrivateFunction(LOCAL_STDDEV_POP, LocalSingleVarStatisticsTypeComputer.INSTANCE, true);
         addFunction(STDDEV_POP, NullableDoubleTypeComputer.INSTANCE, true);
         addPrivateFunction(GLOBAL_STDDEV_POP, NullableDoubleTypeComputer.INSTANCE, true);
@@ -1879,6 +1905,12 @@ public class BuiltinFunctions {
         addFunction(SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
 
+        // Vector functions
+        addFunction(VECTOR_DISTANCE_ARRAY, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(VECTOR_DISTANCE_ARRAY_CONSTANT, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(ANN_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
+
+        addFunction(KMEAN_FAISS, ADoubleTypeComputer.INSTANCE, true);
         // Window functions
 
         addFunction(CUME_DIST, ADoubleTypeComputer.INSTANCE, false);
@@ -1907,6 +1939,7 @@ public class BuiltinFunctions {
         addFunction(PERCENT_RANK_IMPL, ADoubleTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_MARK_FIRST_MISSING_IMPL, ABooleanTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_MARK_FIRST_NULL_IMPL, ABooleanTypeComputer.INSTANCE, false);
+        addPrivateFunction(WIN_MARK_VALID_TUPLES_IMPL, ABooleanTypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_PARTITION_LENGTH_IMPL, AInt64TypeComputer.INSTANCE, false);
         addPrivateFunction(WIN_MARK_VALID_TUPLES_IMPL, ABooleanTypeComputer.INSTANCE, false);
 
@@ -2506,6 +2539,11 @@ public class BuiltinFunctions {
         addIntermediateAgg(RANGE_MAP, RANGE_MAP);
         addGlobalAgg(RANGE_MAP, RANGE_MAP);
 
+        // QUANTIZATION_CONSTANTS
+        addAgg(QUANTIZATION_CONSTANTS);
+        addIntermediateAgg(QUANTIZATION_CONSTANTS, QUANTIZATION_CONSTANTS);
+        addGlobalAgg(QUANTIZATION_CONSTANTS, QUANTIZATION_CONSTANTS);
+
         addAgg(NULL_WRITER);
         addLocalAgg(NULL_WRITER, NULL_WRITER);
         addIntermediateAgg(NULL_WRITER, NULL_WRITER);
@@ -2982,6 +3020,7 @@ public class BuiltinFunctions {
         addWindowFunction(ROW_NUMBER, ROW_NUMBER_IMPL, NO_FRAME_CLAUSE);
         addWindowFunction(null, WIN_MARK_FIRST_MISSING_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
         addWindowFunction(null, WIN_MARK_FIRST_NULL_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
+        addWindowFunction(null, WIN_MARK_VALID_TUPLES_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
         addWindowFunction(null, WIN_PARTITION_LENGTH_IMPL, NO_FRAME_CLAUSE, MATERIALIZE_PARTITION);
         addWindowFunction(null, WIN_MARK_VALID_TUPLES_IMPL, NO_FRAME_CLAUSE, INJECT_ORDER_ARGS);
     }

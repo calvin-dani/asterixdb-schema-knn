@@ -287,6 +287,11 @@ public class Joblet implements IHyracksJobletContext, ICounterContext {
         return frameManager.getInitialFrameSize();
     }
 
+    //    @Override
+    //    public final int getMaxFrameSize() {
+    //        return frameManager.getMaxFrameSize();
+    //    }
+
     public final long getMaxWarnings() {
         return maxWarnings;
     }

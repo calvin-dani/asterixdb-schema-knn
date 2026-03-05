@@ -45,6 +45,7 @@ import org.apache.asterix.om.base.AMutableDuration;
 import org.apache.asterix.om.base.AMutableInt64;
 import org.apache.asterix.om.base.AMutableTime;
 import org.apache.asterix.om.base.ANull;
+import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.ATime;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;

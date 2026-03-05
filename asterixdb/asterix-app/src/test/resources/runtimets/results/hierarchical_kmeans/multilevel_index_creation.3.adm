@@ -1,0 +1,5 @@
+{ "test_name": "index_creation_test", "total_records": 30, "clustered_records": 30, "num_clusters": 4, "validation_result": "PASS" }
+{ "test_name": "cluster_distribution_test", "num_clusters": 4, "avg_cluster_size": 7.5, "min_cluster_size": 5, "max_cluster_size": 10, "overall_avg_distance": 1.8, "validation_result": "PASS" }
+{ "test_name": "hierarchical_structure_test", "num_levels": 2, "total_clusters": 6, "parent_clusters": 2, "avg_points_per_cluster": 5.0, "validation_result": "PASS" }
+{ "test_name": "query_performance_test", "clusters_in_range": 3, "total_points_in_range": 20, "avg_distance_in_range": 1.2, "validation_result": "PASS" }
+{ "test_name": "comprehensive_multilevel_validation", "total_records": 30, "clustered_records": 30, "num_clusters": 4, "num_levels": 2, "avg_distance": 1.8, "stddev_distance": 1.2, "min_cluster_size": 5, "max_cluster_size": 10, "avg_cluster_size": 7.5, "overall_validation": "PASS" }

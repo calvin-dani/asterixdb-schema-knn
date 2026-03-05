@@ -39,13 +39,16 @@ public class StorageSizeRequestMessage extends CcIdentifiedMessage implements IN
     private final String dataverse;
     private final String collection;
     private final String index;
+    private final String fileNameSuffix;
 
-    public StorageSizeRequestMessage(long reqId, String database, String dataverse, String collection, String index) {
+    public StorageSizeRequestMessage(long reqId, String database, String dataverse, String collection, String index,
+            String fileNameSuffix) {
         this.reqId = reqId;
         this.database = database;
         this.dataverse = dataverse;
         this.collection = collection;
         this.index = index;
+        this.fileNameSuffix = fileNameSuffix;
     }
 
     @Override
@@ -69,10 +72,14 @@ public class StorageSizeRequestMessage extends CcIdentifiedMessage implements IN
             if (resourceReference.getDatabase().equals(database)
                     && resourceReference.getDataverse().getCanonicalForm().equals(dataverse)
                     && resourceReference.getDataset().equals(collection)) {
+                boolean matches = true;
                 if (index != null) {
-                    return resourceReference.getIndex().equals(index);
+                    matches &= resourceReference.getIndex().equals(index);
                 }
-                return true;
+                if (fileNameSuffix != null) {
+                    matches &= resourceReference.getName().endsWith(fileNameSuffix);
+                }
+                return matches;
             }
             return false;
         };

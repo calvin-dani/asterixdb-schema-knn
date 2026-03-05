@@ -134,6 +134,7 @@ import org.apache.asterix.lang.common.literal.TrueLiteral;
 import org.apache.asterix.lang.common.parser.ScopeChecker;
 import org.apache.asterix.lang.common.statement.AdapterDropStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeStatement;
+import org.apache.asterix.lang.common.statement.KmeansStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeDropStatement;
 import org.apache.asterix.lang.common.statement.CompactStatement;
 import org.apache.asterix.lang.common.statement.ConnectFeedStatement;
@@ -146,6 +147,7 @@ import org.apache.asterix.lang.common.statement.CreateFeedPolicyStatement;
 import org.apache.asterix.lang.common.statement.CreateFeedStatement;
 import org.apache.asterix.lang.common.statement.CreateFunctionStatement;
 import org.apache.asterix.lang.common.statement.CreateIndexStatement;
+import org.apache.asterix.lang.common.statement.CreateVectorIndexStatement;
 import org.apache.asterix.lang.common.statement.CreateSynonymStatement;
 import org.apache.asterix.lang.common.statement.CreateFullTextFilterStatement;
 import org.apache.asterix.lang.common.statement.CreateFullTextConfigStatement;
@@ -1067,6 +1069,7 @@ Statement SingleStatement() throws ParseException:
     | stmt = ConnectionStatement()
     | stmt = CompactStatement()
     | stmt = AnalyzeStatement()
+    | stmt = KmeansStatement()
     | stmt = Query()
   )
   {
@@ -1474,10 +1477,11 @@ void DatasetRecordField(RecordTypeDefinition recType) throws ParseException:
 CreateIndexStatement CreateIndexStatement(Token startStmtToken) throws ParseException:
 {
   CreateIndexStatement stmt = null;
+  boolean isVectorIndex = false;
 }
 {
   (
-    <INDEX> stmt = IndexSpecification(startStmtToken)
+    ( <VECTOR> { isVectorIndex = true; } )? <INDEX> stmt = IndexSpecification(startStmtToken, isVectorIndex)
     | <PRIMARY> <INDEX> stmt = PrimaryIndexSpecification(startStmtToken)
   )
   {
@@ -1485,7 +1489,7 @@ CreateIndexStatement CreateIndexStatement(Token startStmtToken) throws ParseExce
   }
 }
 
-CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseException:
+CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIndex) throws ParseException:
 {
   Pair<Namespace,Identifier> nameComponents = null;
   String indexName = null;
@@ -1501,6 +1505,8 @@ CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseExcept
   Pair<Map<String, String>, Boolean> castConfigDefaultNull;
   Boolean castDefaultNull = null;
   Map<String, String> castConfig = null;
+  RecordConstructor withRecord = null;
+  List<CreateIndexStatement.IndexedElement> nonVectorFieldsList = new ArrayList<CreateIndexStatement.IndexedElement>();
 }
 {
   (
@@ -1519,7 +1525,9 @@ CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseExcept
       )*
     <RIGHTPAREN>
     ( <TYPE> indexParams = IndexType() )? ( <ENFORCED> { enforced = true; } )?
-    ( LOOKAHEAD({laIdentifier(EXCLUDE) || laIdentifier(INCLUDE)}) <IDENTIFIER>
+    // Parse INCLUDE/EXCLUDE UNKNOWN KEY (for non-vector indexes)
+    // Lookahead checks that INCLUDE/EXCLUDE is followed by UNKNOWN to disambiguate from INCLUDE (fields)
+    ( LOOKAHEAD({(laIdentifier(EXCLUDE) || laIdentifier(INCLUDE)) && laToken(2, UNKNOWN)}) <IDENTIFIER>
     {
       if (isToken(EXCLUDE)) {
         excludeUnknown = true;
@@ -1537,25 +1545,120 @@ CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseExcept
         castDefaultNull = castConfigDefaultNull.second;
       }
     )?
+
+    // Parse INCLUDE clause for vector index additional fields (e.g., INCLUDE (year, title))
+    // Lookahead checks that INCLUDE is followed by LEFTPAREN to disambiguate from INCLUDE UNKNOWN KEY
+    // This allows filtering on these fields during vector search
+    ( LOOKAHEAD({laIdentifier(INCLUDE) && laToken(2, LEFTPAREN)}) <IDENTIFIER>
+      {
+        if (!isToken(INCLUDE)) {
+          throw createUnexpectedTokenError();
+        }
+      }
+      <LEFTPAREN> { startElementToken = token; }
+        indexedElement = IndexedElement(startElementToken) {
+          nonVectorFieldsList.add(indexedElement);
+        }
+        (<COMMA> { startElementToken = token; }
+          indexedElement = IndexedElement(startElementToken) {
+            nonVectorFieldsList.add(indexedElement);
+          }
+        )*
+      <RIGHTPAREN>
+    )?
+
+    // Parse WITH clause for vector index configuration
+    ( <WITH> withRecord = RecordConstructor() )?
   )
   {
-    IndexType indexType;
-    int gramLength;
-    if (indexParams != null) {
-      indexType = indexParams.type;
-      gramLength = indexParams.gramLength;
-      fullTextConfigName = indexParams.fullTextConfig;
-    } else {
-      indexType = hasUnnest ? IndexType.ARRAY : IndexType.BTREE;
-      gramLength = -1;
-      fullTextConfigName = null;
+    // Auto-detect vector index from VECTOR field type annotation
+      // This allows both syntaxes:
+      // - CREATE VECTOR INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
+      // - CREATE INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
+      boolean hasVectorField = false;
+      if (indexedElementList.size() == 1) {
+        CreateIndexStatement.IndexedElement field = indexedElementList.get(0);
+        List<Pair<List<String>, IndexedTypeExpression>> projectList = field.getProjectList();
+        if (projectList != null && !projectList.isEmpty()) {
+          IndexedTypeExpression typeExpr = projectList.get(0).second;
+          if (typeExpr != null) {
+            TypeExpression innerType = typeExpr.getType();
+            if (innerType != null && innerType instanceof TypeReferenceExpression) {
+              TypeReferenceExpression typeRef = (TypeReferenceExpression) innerType;
+              Pair<Namespace, Identifier> ident = typeRef.getIdent();
+              if (ident != null && ident.second != null &&
+                  "$$VECTOR_MARKER$$".equals(ident.second.getValue())) {
+                hasVectorField = true;
+              }
+            }
+          }
+        }
+      }
+
+      // If VECTOR field annotation detected OR CREATE VECTOR INDEX used, treat as vector index
+      if (hasVectorField || isVectorIndex) {
+        // Validate exactly one field for vector index
+        if (indexedElementList.size() != 1) {
+          throw new SqlppParseException(getSourceLocation(startStmtToken),
+            "Vector index requires exactly one field");
+        }
+
+        // Validate that VECTOR type annotation is present
+        if (!hasVectorField) {
+          throw new SqlppParseException(getSourceLocation(startStmtToken),
+            "Vector index field must have VECTOR type annotation. Expected syntax: CREATE [VECTOR] INDEX ... (field VECTOR) WITH {...}");
+        }
+
+        // Validate that WITH clause is provided
+        if (withRecord == null) {
+          throw new SqlppParseException(getSourceLocation(startStmtToken),
+            "Vector index requires WITH clause specifying index configuration");
+        }
+
+        // Create vector index statement
+        try {
+          CreateIndexStatement stmt = CreateIndexStatement.CreateVectorIndexStatement(
+            nameComponents.first, nameComponents.second,
+            new Identifier(indexName),
+            indexedElementList.get(0),  // vectorField
+            nonVectorFieldsList,         // empty for new syntax (no INC clause)
+            withRecord,
+            ifNotExists);
+          return addSourceLocation(stmt, startStmtToken);
+        } catch (CompilationException e) {
+          throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
+        }
+      }
+
+      // Handle regular (non-vector) index creation
+      IndexType indexType;
+      int gramLength;
+      if (indexParams != null) {
+        indexType = indexParams.type;
+        gramLength = indexParams.gramLength;
+        fullTextConfigName = indexParams.fullTextConfig;
+      } else {
+        indexType = hasUnnest ? IndexType.ARRAY : IndexType.BTREE;
+        gramLength = -1;
+        fullTextConfigName = null;
+      }
+      try{
+          CreateIndexStatement stmt = CreateIndexStatement.CreateNonVectorIndexStatement(nameComponents.first, nameComponents.second,
+          new Identifier(indexName), indexType, indexedElementList, enforced, gramLength, fullTextConfigName, ifNotExists,
+              excludeUnknown, castDefaultNull, castConfig);
+          return addSourceLocation(stmt, startStmtToken);
+      }   catch (CompilationException e) {
+          throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
+      }
     }
-    CreateIndexStatement stmt = new CreateIndexStatement(nameComponents.first, nameComponents.second,
-      new Identifier(indexName), indexType, indexedElementList, enforced, gramLength, fullTextConfigName, ifNotExists,
-      excludeUnknown, castDefaultNull, castConfig);
-    return addSourceLocation(stmt, startStmtToken);
-  }
 }
+
+// Old CreateVectorIndexStatement and VectorIndexSpecification functions removed.
+// Vector indexes are now created via the unified IndexSpecification grammar which auto-detects
+// vector indexes from the VECTOR field type annotation.
+// Both syntaxes are supported:
+// - CREATE VECTOR INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
+// - CREATE INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
 
 CreateIndexStatement.IndexedElement IndexedElement(Token startElementToken) throws ParseException:
 {
@@ -1659,10 +1762,24 @@ Pair<List<String>, IndexedTypeExpression> IndexedField() throws ParseException:
 {
   Triple<List<String>, Token, Token> path = null;
   IndexedTypeExpression type = null;
+  boolean isVectorType = false;
 }
 {
-  path = MultipartIdentifier() ( <COLON> type = IndexedTypeExpr(true) )?
+  path = MultipartIdentifier()
+  (
+    <COLON> type = IndexedTypeExpr(true)
+    | <VECTOR> { isVectorType = true; }
+  )?
   {
+    // For VECTOR type annotation, create a special marker TypeExpression
+    // This allows IndexSpecification to distinguish between:
+    // - "embedding" (no annotation) → type = null
+    // - "embedding VECTOR" → type = TypeExpression with typeRefKind = ATOMIC and typeName = "$$VECTOR_MARKER$$"
+    if (isVectorType) {
+      TypeExpression vectorMarker = new TypeReferenceExpression(
+          new Pair<Namespace, Identifier>(null, new Identifier("$$VECTOR_MARKER$$")));
+      type = new IndexedTypeExpression(vectorMarker, false);
+    }
     return new Pair<List<String>, IndexedTypeExpression>(path.first, type);
   }
 }
@@ -1680,10 +1797,14 @@ CreateIndexStatement PrimaryIndexSpecification(Token startStmtToken) throws Pars
     if (indexName == null) {
       indexName = MetadataConstants.PRIMARY_INDEX_PREFIX + nameComponents.second;
     }
-    CreateIndexStatement stmt = new CreateIndexStatement(nameComponents.first, nameComponents.second,
+    try {
+      CreateIndexStatement stmt = CreateIndexStatement.CreateNonVectorIndexStatement(nameComponents.first, nameComponents.second,
       new Identifier(indexName), IndexType.BTREE, Collections.emptyList(), false, -1, null, ifNotExists, null, null,
       Collections.emptyMap());
-    return addSourceLocation(stmt, startStmtToken);
+      return addSourceLocation(stmt, startStmtToken);
+    } catch (CompilationException e) {
+      throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
+    }
   }
 }
 
@@ -3448,6 +3569,23 @@ Statement AnalyzeStatement() throws ParseException:
   }
 }
 
+Statement KmeansStatement() throws ParseException:
+{
+  Token startToken = null;
+  Statement stmt = null;
+  Pair<Namespace,Identifier> nameComponents = null;
+}
+{
+  <KMEANS> { startToken = token; } DatasetToken() nameComponents = QualifiedName()
+  (
+    stmt = AnalyzeDatasetDropStatement(startToken, nameComponents.first, nameComponents.second)
+    | stmt = KmeansDatasetStatement(startToken, nameComponents.first, nameComponents.second)
+  )
+  {
+    return stmt;
+  }
+}
+
 Statement AnalyzeDatasetStatement(Token startToken, Namespace namespace, Identifier identifier) throws ParseException:
 {
   RecordConstructor withRecord = null;
@@ -3457,6 +3595,22 @@ Statement AnalyzeDatasetStatement(Token startToken, Namespace namespace, Identif
   {
     try {
     AnalyzeStatement stmt = new AnalyzeStatement(namespace, identifier.getValue(), withRecord);
+    return addSourceLocation(stmt, startToken);
+    } catch (CompilationException e) {
+       throw new SqlppParseException(getSourceLocation(startToken), e.getMessage());
+    }
+  }
+}
+
+Statement KmeansDatasetStatement(Token startToken, Namespace namespace, Identifier identifier) throws ParseException:
+{
+  RecordConstructor withRecord = null;
+}
+{
+  ( <WITH> withRecord = RecordConstructor() )?
+  {
+    try {
+    KmeansStatement stmt = new KmeansStatement(namespace, identifier.getValue(), withRecord);
     return addSourceLocation(stmt, startToken);
     } catch (CompilationException e) {
        throw new SqlppParseException(getSourceLocation(startToken), e.getMessage());
@@ -6308,6 +6462,7 @@ TOKEN [IGNORE_CASE]:
   <ADAPTER: "adapter">
   | <ALL : "all">
   | <ANALYZE: "analyze">
+  | <KMEANS: "kmeans">
   | <AND : "and">
   | <ANY : "any">
   | <APPLY : "apply">
@@ -6364,6 +6519,7 @@ TOKEN [IGNORE_CASE]:
   | <IF : "if">
   | <INTO : "into">
   | <IN : "in">
+  | <INC : "inc">
   | <INDEX : "index">
   | <INGESTION : "ingestion">
   | <INNER : "inner">
@@ -6427,6 +6583,7 @@ TOKEN [IGNORE_CASE]:
   | <USING : "using">
   | <VALUE : "value">
   | <VALUED : "valued">
+  | <VECTOR : "vector">
   | <VIEW : "view">
   | <WHEN : "when">
   | <WHERE : "where">
