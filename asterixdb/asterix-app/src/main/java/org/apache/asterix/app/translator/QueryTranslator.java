@@ -1388,7 +1388,6 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             DatasetType datasetType = ds.getDatasetType();
             IndexType indexType = stmtCreateIndex.getIndexType();
             List<CreateIndexStatement.IndexedElement> indexedElements = stmtCreateIndex.getIndexedElements();
-            indexedElements = indexType == IndexType.VECTOR ? stmtCreateIndex.getIncludeElements() : indexedElements;
             int indexedElementsCount = indexedElements.size();
             boolean isSecondaryPrimary = indexedElementsCount == 0;
             validateIndexType(datasetType, indexType, isSecondaryPrimary, sourceLoc);
@@ -1419,6 +1418,9 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             if (!ds.hasMetaPart()) {
                 aRecordType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(aRecordType, ds);
             }
+
+            indexedElements = indexType == IndexType.VECTOR ? stmtCreateIndex.getIncludeElements() : indexedElements;
+            indexedElementsCount = indexedElements.size();
 
             List<List<IAType>> indexFieldTypes = new ArrayList<>(indexedElementsCount);
             boolean hadUnnest = false;
