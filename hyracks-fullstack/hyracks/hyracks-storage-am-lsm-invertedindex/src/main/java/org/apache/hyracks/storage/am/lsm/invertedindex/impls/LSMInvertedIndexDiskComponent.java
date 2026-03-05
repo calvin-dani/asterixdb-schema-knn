@@ -33,6 +33,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.IndexWithBuddyBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.util.ComponentUtils;
 import org.apache.hyracks.storage.am.lsm.invertedindex.ondisk.OnDiskInvertedIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteFailureCallback;
@@ -129,8 +130,9 @@ public class LSMInvertedIndexDiskComponent extends AbstractLSMWithBuddyDiskCompo
             long numElementsHint, boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
         IIndexBulkLoader indexBulkLoader =
                 invIndex.createMergeBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, callback);
-        IIndexBulkLoader buddyBulkLoader =
-                getBuddyIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, callback);
+        // Need to understand the use case of buddy, is this related to antimatter
+        IIndexBulkLoader buddyBulkLoader = getBuddyIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint,
+                checkIfEmptyIndex, callback, NoOpStatsAccumulator.INSTANCE);
         return new IndexWithBuddyBulkLoader(indexBulkLoader, buddyBulkLoader);
     }
 }

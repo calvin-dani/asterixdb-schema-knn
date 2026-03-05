@@ -125,6 +125,7 @@ import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.UTF8NGramToken
 import org.apache.hyracks.storage.am.lsm.invertedindex.tokenizers.UTF8WordTokenFactory;
 import org.apache.hyracks.storage.am.lsm.rtree.dataflow.LSMRTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.rtree.dataflow.LSMRTreeWithAntiMatterLocalResource;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVCTreeLocalResource;
 import org.apache.hyracks.storage.am.rtree.frames.RTreePolicyType;
 import org.apache.hyracks.storage.am.rtree.impls.DoublePrimitiveValueProviderFactory;
 import org.apache.hyracks.storage.am.rtree.impls.FloatPrimitiveValueProviderFactory;
@@ -161,6 +162,7 @@ public class PersistedResourceRegistry implements IPersistedResourceRegistry {
         registeredClasses.put("LSMRTreeWithAntiMatterLocalResource", LSMRTreeWithAntiMatterLocalResource.class);
         registeredClasses.put("LSMInvertedIndexLocalResource", LSMInvertedIndexLocalResource.class);
         registeredClasses.put("LSMColumnBTreeLocalResource", LSMColumnBTreeLocalResource.class);
+        registeredClasses.put("LSMVCTreeLocalResource", LSMVCTreeLocalResource.class);
 
         // ILSMMergePolicyFactory
         registeredClasses.put("NoMergePolicyFactory", NoMergePolicyFactory.class);

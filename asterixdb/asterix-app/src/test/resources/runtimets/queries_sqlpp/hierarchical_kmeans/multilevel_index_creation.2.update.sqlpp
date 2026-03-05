@@ -1,0 +1,66 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+USE ColumnTest;
+
+-- Create synthetic test data for multilevel index creation
+INSERT INTO ColumnDataset([
+  -- Well-separated clusters for clear hierarchical structure
+  -- Cluster 1: Points around (1, 1, 1, 1)
+  { "uid": 1, "embedding": [1.0, 1.0, 1.0, 1.0] },
+  { "uid": 2, "embedding": [1.1, 1.1, 1.1, 1.1] },
+  { "uid": 3, "embedding": [0.9, 0.9, 0.9, 0.9] },
+  { "uid": 4, "embedding": [1.2, 0.8, 1.0, 1.0] },
+  { "uid": 5, "embedding": [0.8, 1.2, 1.0, 1.0] },
+  
+  -- Cluster 2: Points around (5, 5, 5, 5)
+  { "uid": 6, "embedding": [5.0, 5.0, 5.0, 5.0] },
+  { "uid": 7, "embedding": [5.1, 5.1, 5.1, 5.1] },
+  { "uid": 8, "embedding": [4.9, 4.9, 4.9, 4.9] },
+  { "uid": 9, "embedding": [5.2, 4.8, 5.0, 5.0] },
+  { "uid": 10, "embedding": [4.8, 5.2, 5.0, 5.0] },
+  
+  -- Cluster 3: Points around (10, 10, 10, 10)
+  { "uid": 11, "embedding": [10.0, 10.0, 10.0, 10.0] },
+  { "uid": 12, "embedding": [10.1, 10.1, 10.1, 10.1] },
+  { "uid": 13, "embedding": [9.9, 9.9, 9.9, 9.9] },
+  { "uid": 14, "embedding": [10.2, 9.8, 10.0, 10.0] },
+  { "uid": 15, "embedding": [9.8, 10.2, 10.0, 10.0] },
+  
+  -- Cluster 4: Points around (15, 15, 15, 15)
+  { "uid": 16, "embedding": [15.0, 15.0, 15.0, 15.0] },
+  { "uid": 17, "embedding": [15.1, 15.1, 15.1, 15.1] },
+  { "uid": 18, "embedding": [14.9, 14.9, 14.9, 14.9] },
+  { "uid": 19, "embedding": [15.2, 14.8, 15.0, 15.0] },
+  { "uid": 20, "embedding": [14.8, 15.2, 15.0, 15.0] },
+  
+  -- Additional points for more complex hierarchy
+  { "uid": 21, "embedding": [2.0, 2.0, 2.0, 2.0] },
+  { "uid": 22, "embedding": [3.0, 3.0, 3.0, 3.0] },
+  { "uid": 23, "embedding": [7.0, 7.0, 7.0, 7.0] },
+  { "uid": 24, "embedding": [8.0, 8.0, 8.0, 8.0] },
+  { "uid": 25, "embedding": [12.0, 12.0, 12.0, 12.0] },
+  { "uid": 26, "embedding": [13.0, 13.0, 13.0, 13.0] },
+  { "uid": 27, "embedding": [17.0, 17.0, 17.0, 17.0] },
+  { "uid": 28, "embedding": [18.0, 18.0, 18.0, 18.0] },
+  
+  -- Edge cases
+  { "uid": 29, "embedding": [1.0, 1.0, 1.0, 1.0] }, -- Duplicate
+  { "uid": 30, "embedding": [50.0, 50.0, 50.0, 50.0] } -- Outlier
+]);

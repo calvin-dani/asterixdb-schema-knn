@@ -19,17 +19,24 @@
 
 package org.apache.hyracks.storage.am.btree.impls;
 
+import java.nio.ByteBuffer;
+import java.util.concurrent.ThreadLocalRandom;
+
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.util.HyracksConstants;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.btree.api.IBTreeLeafFrame;
 import org.apache.hyracks.storage.am.btree.api.IDiskBTreeStatefulPointSearchCursor;
+import org.apache.hyracks.storage.am.common.api.IIndexOperationContext;
+import org.apache.hyracks.storage.am.common.api.ILSMIndexBatchPointCursor;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexCursor;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.impls.TreeIndexDiskOrderScanCursor;
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -115,6 +122,90 @@ public class DiskBTree extends BTree {
         return cmp <= 0;
     }
 
+    private void diskSampleScan(ITreeIndexCursor cursor, BTreeOpContext ctx,
+            IBufferCacheReadContext bufferCacheReadContext) throws HyracksDataException {
+        ctx.reset();
+        ctx.setCursor(cursor);
+        cursor.setBufferCache(bufferCache);
+        cursor.setFileId(getFileId());
+        pickRandomLeaf(rootPage, ctx, cursor, bufferCacheReadContext);
+    }
+
+    protected void pickRandomLeaf(int rootPageId, BTreeOpContext ctx, ITreeIndexCursor cursor,
+            IBufferCacheReadContext bufferCacheReadContext) throws HyracksDataException {
+        ICachedPage currentPage = null;
+        try {
+            currentPage =
+                    bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), rootPageId), bufferCacheReadContext);
+            currentPage = getRandomLeafPage(currentPage, ctx, bufferCacheReadContext);
+            int childPageId = BufferedFileHandle.getPageId(currentPage.getDiskPageId());
+            ctx.getCursorInitialState().setSearchOperationCallback(ctx.getSearchCallback());
+            ctx.getCursorInitialState().setOriginialKeyComparator(ctx.getCmp());
+            ctx.getCursorInitialState().setPage(currentPage);
+            ctx.getCursorInitialState().setPageId(childPageId);
+            ctx.getCursorInitialState().setRootPageId(rootPage);
+            ctx.getLeafFrame().setPage(currentPage);
+            cursor.open(ctx.getCursorInitialState(), ctx.getPred());
+        } catch (Exception e) {
+            if (!ctx.isExceptionHandled() && currentPage != null) {
+                bufferCache.unpin(currentPage, bufferCacheReadContext);
+            }
+            ctx.setExceptionHandled(true);
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    public ICachedPage getRandomLeafPage(ICachedPage rootPage, BTreeOpContext ctx,
+            IBufferCacheReadContext bufferCacheReadContext) throws HyracksDataException {
+        ICachedPage currentPage = rootPage;
+        ctx.getInteriorFrame().setPage(currentPage);
+        try {
+            int childPageId;
+            while (!ctx.getInteriorFrame().isLeaf()) {
+                // pick a random node, until we reach the leaf
+                // walk down the tree until we find the leaf
+                int numberOfChildren = ctx.getInteriorFrame().getTupleCount();
+                if (ctx.getInteriorFrame().getRightLeafOffset() > 0) {
+                    numberOfChildren += 1;
+                }
+                // Throw a die, and pick a random child
+                int randomChildIndex = ThreadLocalRandom.current().nextInt(numberOfChildren);
+                // pick the random child
+                childPageId = getChild(ctx, randomChildIndex, numberOfChildren);
+                ICachedPage nextPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(getFileId(), childPageId),
+                        bufferCacheReadContext);
+                bufferCache.unpin(currentPage, bufferCacheReadContext);
+                currentPage = nextPage;
+                ctx.getInteriorFrame().setPage(currentPage);
+            }
+
+            // In here, the leaf page is pinned.
+            return currentPage;
+        } catch (Exception e) {
+            if (!ctx.isExceptionHandled() && currentPage != null) {
+                bufferCache.unpin(currentPage, bufferCacheReadContext);
+            }
+            ctx.setExceptionHandled(true);
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    private int getChild(BTreeOpContext ctx, int childIndex, int numberOfChildren) {
+        // If the childIndex is the last one, return the right leaf offset
+        if (childIndex == numberOfChildren - 1 && ctx.getInteriorFrame().getRightLeafOffset() > 0) {
+            return ctx.getInteriorFrame().getRightLeafOffset();
+        }
+        int tupleOffset = ctx.getInteriorFrame().getTupleOffset(childIndex);
+        ITreeIndexTupleReference frameTuple = ctx.getInteriorFrame().getTupleRef();
+        frameTuple.setFieldCount(ctx.getCmp().getKeyFieldCount());
+        ByteBuffer buf = ctx.getInteriorFrame().getBuffer();
+        frameTuple.resetByTupleOffset(buf.array(), tupleOffset);
+        int childPageId =
+                IntegerPointable.getInteger(buf.array(), frameTuple.getFieldStart(frameTuple.getFieldCount() - 1)
+                        + frameTuple.getFieldLength(frameTuple.getFieldCount() - 1));
+        return childPageId;
+    }
+
     private void searchDown(ICachedPage page, int pageId, BTreeOpContext ctx, ITreeIndexCursor cursor,
             IBufferCacheReadContext bcOpCtx) throws HyracksDataException {
         ICachedPage currentPage = page;
@@ -135,6 +226,7 @@ public class DiskBTree extends BTree {
             ctx.getCursorInitialState().setOriginialKeyComparator(ctx.getCmp());
             ctx.getCursorInitialState().setPage(currentPage);
             ctx.getCursorInitialState().setPageId(childPageId);
+            ctx.getCursorInitialState().setRootPageId(rootPage);
             ctx.getLeafFrame().setPage(currentPage);
             cursor.open(ctx.getCursorInitialState(), ctx.getPred());
         } catch (Exception e) {
@@ -148,6 +240,11 @@ public class DiskBTree extends BTree {
 
     @Override
     public BTreeAccessor createAccessor(IIndexAccessParameters iap) {
+        return new DiskBTreeAccessor(this, iap);
+    }
+
+    public BTreeAccessor createAccessor(IIndexAccessParameters iap, IIndexOperationContext opCtx, int index)
+            throws HyracksDataException {
         return new DiskBTreeAccessor(this, iap);
     }
 
@@ -202,10 +299,25 @@ public class DiskBTree extends BTree {
             return new DiskBTreeDiskScanCursor(leafFrame);
         }
 
+        public ITreeIndexCursor createSampleCursor(int componentSampleCardinality, long sampleSeed,
+                ILSMIndexBatchPointCursor searchCursor) {
+            IBTreeLeafFrame leafFrame = (IBTreeLeafFrame) btree.getLeafFrameFactory().createFrame();
+            return new DiskBTreeSampleCursor((DiskBTree) btree, leafFrame, componentSampleCardinality, sampleSeed, ctx,
+                    getBufferCacheOperationContext(), searchCursor);
+        }
+
         @Override
         public void diskOrderScan(ITreeIndexCursor cursor) throws HyracksDataException {
             ctx.setOperation(IndexOperation.DISKORDERSCAN);
             ((DiskBTree) btree).diskOrderScan(cursor, ctx);
+        }
+
+        @Override
+        public void diskSampleScan(IIndexCursor cursor) throws HyracksDataException {
+            // Should I introduce a new operation type?
+            // what are the side effects of DISKORDERSCAN?
+            ctx.setOperation(IndexOperation.DISKORDERSCAN);
+            ((DiskBTree) btree).diskSampleScan((ITreeIndexCursor) cursor, ctx, getBufferCacheOperationContext());
         }
 
         protected IBufferCacheReadContext getBufferCacheOperationContext() {

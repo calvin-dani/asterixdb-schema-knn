@@ -32,6 +32,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
+import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.ISearchOperationCallback;
 import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.MultiComparator;
@@ -39,6 +40,7 @@ import org.apache.hyracks.storage.common.MultiComparator;
 public class TestLSMIndexOperationContext implements ILSMIndexOperationContext {
 
     private final ILSMIndex index;
+    private final IIndexAccessParameters iap;
     private final List<ILSMComponent> componentHolder = new ArrayList<>();
     private final List<ILSMDiskComponent> componentsToBeMerged = new ArrayList<>();
     private final List<ILSMDiskComponent> componentsToBeReplicated = new ArrayList<>();
@@ -49,8 +51,9 @@ public class TestLSMIndexOperationContext implements ILSMIndexOperationContext {
     private boolean filterSkip = false;
     private boolean isRecovery = false;
 
-    public TestLSMIndexOperationContext(ILSMIndex index) {
+    public TestLSMIndexOperationContext(ILSMIndex index, IIndexAccessParameters iap) {
         this.index = index;
+        this.iap = iap;
     }
 
     @Override
@@ -199,4 +202,8 @@ public class TestLSMIndexOperationContext implements ILSMIndexOperationContext {
         return map;
     }
 
+    @Override
+    public <T> T getIndexAccessParameter(String key, Class<T> clazz) {
+        return iap.getParameter(key, clazz);
+    }
 }

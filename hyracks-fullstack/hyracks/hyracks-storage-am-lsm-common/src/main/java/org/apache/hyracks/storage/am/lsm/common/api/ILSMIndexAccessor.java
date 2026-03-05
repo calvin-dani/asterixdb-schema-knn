@@ -246,6 +246,8 @@ public interface ILSMIndexAccessor extends IIndexAccessor {
      */
     void scanDiskComponents(IIndexCursor cursor) throws HyracksDataException;
 
+    void scanDiskComponentsForSample(IIndexCursor cursor) throws HyracksDataException;
+
     /**
      * Delete components that match the passed predicate
      * NOTE: This call can only be made when the caller knows that data modification has been stopped

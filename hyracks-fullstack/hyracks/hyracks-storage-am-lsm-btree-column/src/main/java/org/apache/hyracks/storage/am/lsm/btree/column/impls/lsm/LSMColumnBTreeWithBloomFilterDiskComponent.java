@@ -32,7 +32,6 @@ import org.apache.hyracks.storage.am.lsm.btree.column.impls.btree.ColumnBTree;
 import org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil;
 import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTreeMergeOperation;
 import org.apache.hyracks.storage.am.lsm.btree.impls.LSMBTreeWithBloomFilterDiskComponent;
-import org.apache.hyracks.storage.am.lsm.common.api.IComponentMetadata;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponent;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilter;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
@@ -40,6 +39,7 @@ import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation.LSMIOOperati
 import org.apache.hyracks.storage.am.lsm.common.impls.AbstractLSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.ChainedLSMDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoader;
+import org.apache.hyracks.storage.common.IComponentMetadata;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 
@@ -77,6 +77,7 @@ public class LSMColumnBTreeWithBloomFilterDiskComponent extends LSMBTreeWithBloo
         LSMIOOperationType operationType = operation.getIOOperationType();
         LSMColumnBTree lsmColumnBTree = (LSMColumnBTree) getLsmIndex();
         ColumnBTree columnBTree = (ColumnBTree) getIndex();
+
         IColumnMetadata columnMetadata;
         if (operationType == LSMIOOperationType.FLUSH || operationType == LSMIOOperationType.LOAD) {
             columnMetadata = lsmColumnBTree.getColumnMetadata();
@@ -94,7 +95,7 @@ public class LSMColumnBTreeWithBloomFilterDiskComponent extends LSMBTreeWithBloo
         IColumnIndexDiskCacheManager diskCacheManager = lsmColumnBTree.getDiskCacheManager();
         IColumnWriteContext writeContext = diskCacheManager.createWriteContext(numberOfColumns, operationType);
         IIndexBulkLoader bulkLoader = columnBTree.createBulkLoader(storageConfig, fillFactor, verifyInput, callback,
-                columnMetadata, writeContext);
-        return new LSMColumnIndexBulkloader(bulkLoader, columnMetadata, getMetadata());
+                columnMetadata, writeContext, getStatsAccumulator());
+        return new LSMColumnIndexBulkloader(bulkLoader, columnMetadata, getMetadata(), getStatsAccumulator());
     }
 }

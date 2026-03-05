@@ -26,6 +26,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.IChainedComponentBulkLoade
 import org.apache.hyracks.storage.am.lsm.common.impls.IndexWithBuddyBulkLoader;
 import org.apache.hyracks.storage.am.lsm.common.util.ComponentUtils;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
+import org.apache.hyracks.storage.common.NoOpStatsAccumulator;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteCallback;
 import org.apache.hyracks.storage.common.buffercache.IPageWriteFailureCallback;
 
@@ -91,10 +92,11 @@ public abstract class AbstractLSMWithBuddyDiskComponent extends AbstractLSMWithB
     @Override
     protected IChainedComponentBulkLoader createIndexBulkLoader(float fillFactor, boolean verifyInput,
             long numElementsHint, boolean checkIfEmptyIndex, IPageWriteCallback callback) throws HyracksDataException {
-        IIndexBulkLoader indexBulkLoader =
-                getIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, callback);
-        IIndexBulkLoader buddyBulkLoader =
-                getBuddyIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint, checkIfEmptyIndex, callback);
+        IIndexBulkLoader indexBulkLoader = getIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint,
+                checkIfEmptyIndex, callback, getStatsAccumulator());
+        // todo: understand why buddy bulk loader do, currently not accounting in the statsAccumulator`
+        IIndexBulkLoader buddyBulkLoader = getBuddyIndex().createBulkLoader(fillFactor, verifyInput, numElementsHint,
+                checkIfEmptyIndex, callback, NoOpStatsAccumulator.INSTANCE);
         return new IndexWithBuddyBulkLoader(indexBulkLoader, buddyBulkLoader);
     }
 
