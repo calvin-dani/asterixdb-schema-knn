@@ -1388,6 +1388,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             DatasetType datasetType = ds.getDatasetType();
             IndexType indexType = stmtCreateIndex.getIndexType();
             List<CreateIndexStatement.IndexedElement> indexedElements = stmtCreateIndex.getIndexedElements();
+            indexedElements = indexType == IndexType.VECTOR ? stmtCreateIndex.getIncludeElements() : indexedElements;
             int indexedElementsCount = indexedElements.size();
             boolean isSecondaryPrimary = indexedElementsCount == 0;
             validateIndexType(datasetType, indexType, isSecondaryPrimary, sourceLoc);
