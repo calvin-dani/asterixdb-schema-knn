@@ -75,6 +75,19 @@ public interface IVCTreeDataTupleCreator {
     }
 
     /**
+     * Sets quantization parameters so that the 4-arg {@link #createDataTuple}
+     * can perform actual scalar quantization instead of serializing
+     * full-precision vectors.
+     *
+     * Default implementation is a no-op (for non-quantized creators).
+     *
+     * @param quantizationParams {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
+     */
+    default void setQuantizationParams(float[] quantizationParams) {
+        // no-op for non-quantized implementations
+    }
+
+    /**
      * Returns the field index of the primary key in the output data tuple.
      * Callers use this to locate the PK when reading stored tuples.
      *

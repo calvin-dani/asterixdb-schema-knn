@@ -60,19 +60,46 @@ public class QuantizedVCTreeDataTupleCreator implements IVCTreeDataTupleCreator 
     private static final int PK_FIELD_INDEX = 4;
     private final int numIncludeFields;
 
+    // Quantization parameters: {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
+    // null = not yet initialized (falls back to full-precision serialization for unit tests)
+    private float[] quantizationParams;
+
     public QuantizedVCTreeDataTupleCreator(int numIncludeFields) {
         this.numIncludeFields = numIncludeFields;
     }
 
     @Override
+    public void setQuantizationParams(float[] quantizationParams) {
+        this.quantizationParams = quantizationParams;
+    }
+
+    @Override
     public ITupleReference createDataTuple(double[] vector, double distance, int centroidId,
             ITupleReference originalTuple) throws HyracksDataException {
-        // Test mode pass-through: serialize the full-precision vector as raw big-endian doubles
-        ByteBuffer buf = ByteBuffer.allocate(vector.length * Double.BYTES);
-        for (double d : vector) {
-            buf.putDouble(d);
+        byte[] quantizedEmbedding;
+        if (quantizationParams != null) {
+            // Production path: perform actual scalar quantization
+            float minQ = quantizationParams[0];
+            float maxQ = quantizationParams[1];
+            float alpha = quantizationParams[2];
+            int bits = (int) quantizationParams[4];
+            int levels = 1 << bits;
+            quantizedEmbedding = new byte[vector.length];
+            for (int i = 0; i < vector.length; i++) {
+                double value = Math.max(minQ, Math.min(maxQ, vector[i]));
+                int quantizedValue = Math.toIntExact(Math.round((value - minQ) * alpha));
+                quantizedValue = Math.max(0, Math.min(levels - 1, quantizedValue));
+                quantizedEmbedding[i] = (byte) quantizedValue;
+            }
+        } else {
+            // Test mode fallback: serialize the full-precision vector as raw big-endian doubles
+            ByteBuffer buf = ByteBuffer.allocate(vector.length * Double.BYTES);
+            for (double d : vector) {
+                buf.putDouble(d);
+            }
+            quantizedEmbedding = buf.array();
         }
-        return createDataTuple(vector, distance, centroidId, originalTuple, distance, buf.array());
+        return createDataTuple(vector, distance, centroidId, originalTuple, distance, quantizedEmbedding);
     }
 
     @Override

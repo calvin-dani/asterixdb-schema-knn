@@ -1289,6 +1289,8 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     tree.metadataFrameFactory, tree.dataFrameFactory, tree.freePageManager, tree.cmpFactories,
                     tree.vectorDimensions, iap.getModificationCallback(), iap.getSearchOperationCallback(),
                     tree.dataTupleCreatorFactory);
+            // Pass quantization params to the data tuple creator for actual SQ quantization
+            ctx.getDataTupleCreator().setQuantizationParams(tree.quantizationParams);
         }
 
         public void reset(VectorClusteringTree vctree, IIndexAccessParameters iap) {
