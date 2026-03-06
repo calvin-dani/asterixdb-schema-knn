@@ -103,16 +103,9 @@ public class DatasetLocalResource implements IResource, IQuantizedResource {
 
     @Override
     public void setQuantizationParameters(Map<String, Object> parameters) {
-        System.err.println("[DatasetLocalResource] setQuantizationParameters() - called with: " + parameters);
-        System.err.println("[DatasetLocalResource] wrapped resource class: " + resource.getClass().getName());
-        System.err.println("[DatasetLocalResource] wrapped resource instanceof IQuantizedResource? "
-                + (resource instanceof IQuantizedResource));
         // Delegate to the wrapped resource if it supports quantization
         if (resource instanceof IQuantizedResource) {
-            System.err.println("[DatasetLocalResource] delegating to wrapped resource");
             ((IQuantizedResource) resource).setQuantizationParameters(parameters);
-        } else {
-            System.err.println("[DatasetLocalResource] WARNING: wrapped resource does NOT support IQuantizedResource");
         }
     }
 }
