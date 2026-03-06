@@ -69,10 +69,7 @@ public class IndexBuilder implements IIndexBuilder {
     }
 
     public void setQuantizationParameters(Map<String, Object> quantizationParams) {
-        System.err.println("[IndexBuilder] setQuantizationParameters() - received params: " + quantizationParams);
         this.quantizationParams = quantizationParams;
-        System.err.println("[IndexBuilder] setQuantizationParameters() - stored, this.quantizationParams now: "
-                + this.quantizationParams);
     }
 
     @Override
@@ -88,21 +85,10 @@ public class IndexBuilder implements IIndexBuilder {
             localResourceRepository.delete(resourceRelPath);
         }
         resourceId = resourceIdFactory.createId();
-        System.err
-                .println("[IndexBuilder] build() - about to create resource, quantizationParams=" + quantizationParams);
         IResource resource = localResourceFactory.createResource(resourceRef);
-        System.err.println("[IndexBuilder] build() - created resource class: " + resource.getClass().getName());
-        System.err.println("[IndexBuilder] build() - resource instanceof IQuantizedResource? "
-                + (resource instanceof IQuantizedResource));
-        System.err.println("[IndexBuilder] build() - quantizationParams != null? " + (quantizationParams != null));
         // [New Feature] Inject quantization constants if available
         if (resource instanceof IQuantizedResource && quantizationParams != null) {
-            System.err.println("[IndexBuilder] build() - INJECTING params into resource!");
             ((IQuantizedResource) resource).setQuantizationParameters(quantizationParams);
-            System.err.println("[IndexBuilder] build() - injection complete");
-        } else {
-            System.err.println("[IndexBuilder] build() - NOT injecting: instanceof="
-                    + (resource instanceof IQuantizedResource) + ", params=" + (quantizationParams != null));
         }
         lr = new LocalResource(resourceId, ITreeIndexFrame.Constants.VERSION, durable, resource);
         IIndex index = lcManager.get(resourceRelPath);
