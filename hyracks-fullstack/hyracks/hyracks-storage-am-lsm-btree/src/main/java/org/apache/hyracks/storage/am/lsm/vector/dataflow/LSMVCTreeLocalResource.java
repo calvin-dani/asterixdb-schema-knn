@@ -48,6 +48,7 @@ import org.apache.hyracks.storage.am.lsm.common.dataflow.LsmResource;
 import org.apache.hyracks.storage.am.lsm.vector.utils.LSMVCTreeUtils;
 import org.apache.hyracks.storage.am.vector.api.IVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVectorBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.impls.QuantizedVCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.impls.VCTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IStorageManager;
@@ -340,7 +341,14 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
         Float alpha = getOrDefaultFloat(json, "alpha", null);
         Integer bits = getOrDefaultInt(json, "bits", null);
         Integer sampleCount = getOrDefaultInt(json, "sampleCount", null);
-        IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory = new VCTreeDataTupleCreatorFactory(numIncludeFields);
+        // Determine quantized vs non-quantized based on presence of quantization parameters
+        boolean isQuantized = (minQuantile != null);
+        IVCTreeDataTupleCreatorFactory dataTupleCreatorFactory;
+        if (isQuantized) {
+            dataTupleCreatorFactory = new QuantizedVCTreeDataTupleCreatorFactory(numIncludeFields);
+        } else {
+            dataTupleCreatorFactory = new VCTreeDataTupleCreatorFactory(numIncludeFields);
+        }
 
         return new LSMVCTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic,
                 indexName, confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount, null,

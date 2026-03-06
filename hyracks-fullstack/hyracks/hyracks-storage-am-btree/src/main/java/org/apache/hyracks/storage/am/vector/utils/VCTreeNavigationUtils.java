@@ -362,8 +362,9 @@ public class VCTreeNavigationUtils {
                             new VCTreeNavigationFrame(currentPageId, sortedCentroids, true);
                     state.stack.push(leafFrame_nav);
 
-                    // Return first centroid as closest cluster
+                    // Return first centroid as closest cluster, marking it visited
                     VCTreeLeafCentroid first = leafFrame_nav.nextCentroid();
+                    state.markVisited(first.centroidId);
                     return ClusterSearchResult.create(first.pageId, first.tupleIndex, first.centroid, first.distance,
                             first.centroidId, first.directoryPageId);
 
