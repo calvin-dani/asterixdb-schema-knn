@@ -287,6 +287,11 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
                             vcCursor.openClusterByResult(firstCluster);
                         }
                     }
+
+                    // The DFS init centroid was discarded - un-mark it from visited
+                    // and reset the DFS leaf frame so it can be re-discovered later
+                    visitedSet.remove(dfsCluster.centroidId);
+                    firstCursor.resetDfsFirstCentroid();
                 }
 
                 LOGGER.log(Level.TRACE,

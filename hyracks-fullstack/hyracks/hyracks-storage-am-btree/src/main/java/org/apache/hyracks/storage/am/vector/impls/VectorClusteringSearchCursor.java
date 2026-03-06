@@ -37,6 +37,7 @@ import org.apache.hyracks.storage.am.vector.api.IVectorClusteringLeafFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorClusteringMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVectorDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVectorQuantizer;
+import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationFrame;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationState;
 import org.apache.hyracks.storage.am.vector.utils.VCTreeNavigationUtils;
 import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
@@ -369,8 +370,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             return true;
         }
 
-        // Current cluster exhausted - return false
-        // Let the LSM layer decide whether to advance to next cluster
+        // Current cluster exhausted - let the LSM layer decide whether to advance to next cluster
         return false;
     }
 
@@ -389,7 +389,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
             this.currentTuple = this.frameTuple;
         }
         currentTupleIndex++;
-        recordsIterated++; // Track how many records we've iterated through
+        recordsIterated++;
     }
 
     @Override
@@ -528,6 +528,7 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
      * Used by full-scan mode for sequential cluster iteration.
      */
     private void openClusterByDirectoryPage(long directoryPageId) throws HyracksDataException {
+        // Log previous cluster summary if we have data
         this.targetMetadataPageId = directoryPageId;
 
         // Guard: directoryPageId=-1 means empty cluster (no data assigned during bulk loading)
@@ -687,6 +688,20 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
 
         // Get next from DFS (automatically skips visited via NavigationState)
         return VCTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
+    }
+
+    /**
+     * Reset the DFS iterator so the first centroid (consumed by initializeClusterIterator)
+     * can be re-discovered. Called when the DFS init cluster is discarded in favor of the
+     * level-wise first cluster.
+     */
+    public void resetDfsFirstCentroid() {
+        if (iteratorState != null && iteratorState.initialized && !iteratorState.stack.isEmpty()) {
+            VCTreeNavigationFrame topFrame = iteratorState.stack.peek();
+            if (topFrame.isLeaf && topFrame.nextIndex > 0) {
+                topFrame.nextIndex--;
+            }
+        }
     }
 
     /**

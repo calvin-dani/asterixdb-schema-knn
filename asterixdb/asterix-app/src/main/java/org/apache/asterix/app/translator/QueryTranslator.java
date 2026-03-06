@@ -1580,7 +1580,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     }
 
                     if (fieldTypePrime == null) {
-                        if (indexType != IndexType.BTREE) {
+                        if (indexType != IndexType.BTREE && indexType != IndexType.VECTOR) {
                             if (projectPath != null) {
                                 String fieldName =
                                         LogRedactionUtil.userData(RecordUtil.toFullyQualifiedName(projectPath));
