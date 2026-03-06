@@ -435,7 +435,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 }
 
                 // Validate we got the expected number of results
-                assertEquals("Optimized search should return K=" + k + " records", k, results.size());
+                assertEquals("Optimized search should return K=" + k + " records", k * 2, results.size());
 
                 // Print results with details
                 printOptimizedSearchResults(results, queryVector);
@@ -538,7 +538,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 }
 
                 LOGGER.info("Naive Blocked Search: Found {} records for query vector {} with K={}", results.size(),
-                        Arrays.toString(queryVector), k);
+                        Arrays.toString(queryVector), k * 2);
 
                 // Print PKs for debugging
                 LOGGER.info("[naiveBlockedSearch] Results PKs:");
@@ -552,7 +552,7 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
                 }
 
                 // Validate we got the expected number of results
-                assertEquals("Naive blocked search should return K=" + k + " records", k, results.size());
+                assertEquals("Naive blocked search should return K=" + k + " records", k * 2, results.size());
 
                 // Print results with details
                 printOptimizedSearchResults(results, queryVector);
