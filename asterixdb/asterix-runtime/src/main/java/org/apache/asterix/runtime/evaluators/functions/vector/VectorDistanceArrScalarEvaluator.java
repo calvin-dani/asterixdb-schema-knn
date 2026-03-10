@@ -77,9 +77,9 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable MANHATTAN_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+            UTF8StringPointable.generateUTF8Pointable("manhattan_distance");
     private static final UTF8StringPointable COSINE_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+            UTF8StringPointable.generateUTF8Pointable("cosine_similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     public final ISerializerDeserializer<ADouble> doubleSerde =
@@ -171,6 +171,12 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
     public VectorDistanceArrScalarEvaluator(IEvaluatorContext context,
             final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
             throws HyracksDataException {
+        if (evaluatorFactories.length != 3) {
+            throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                    String.format("Invalid number of arguments for function %s. Expected 3 arguments: (vector1, vector2, metric)",
+                            funcId.getName()));
+        }
+
         pointables = new IPointable[evaluatorFactories.length];
         evaluators = new IScalarEvaluator[evaluatorFactories.length];
         for (int i = 0; i < evaluators.length; ++i) {
@@ -178,6 +184,11 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
             evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
             // Only process constant optimization for the first 3 args (vector1, vector2, metric).
             // Args 3+ (nprobe, epsilon, searchApproach) are optimizer hints, not used at runtime.
+            if(i == 2 && !(evaluatorFactories[i] instanceof ConstantEvalFactory)){
+                throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        String.format("The third argument (metric) of function %s must be a constant string.",
+                                funcId.getName()));
+            }
             if (i < 3 && evaluatorFactories[i] instanceof ConstantEvalFactory) {
                 evaluators[i].evaluate(null, pointables[i]);
                 isConstant[i] = true;
@@ -187,8 +198,9 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                     func = DISTANCE_MAP.get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(),
                             formatPointable.getStartOffset()));
                     if (func == null) {
-                        throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
-                                formatPointable.toString());
+                        throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                                String.format("Illegal distance function: '%s'. Supported: euclidean, l2, cosine similarity, dot product, manhattan distance",
+                                        formatPointable.toString()));
                     }
                 } else {
                     listAccessorConstant[i] = new ListAccessor();
