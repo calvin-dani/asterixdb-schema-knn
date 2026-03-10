@@ -171,25 +171,32 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // ============ SAMPLING INSTEAD OF FULL TABLE SCAN ============
         // Extract sampling parameters from WITH clause
+        // Exactly ONE of train_list_number, train_list_percentage, or train_list_fraction must be provided
         AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
-        int sampleSize = (withObjectNodeForSampling != null)
+        int trainListNumber = (withObjectNodeForSampling != null)
                 ? withObjectNodeForSampling.getOptionalInt("train_list_number", -1) : -1;
+        double trainListPercentage = (withObjectNodeForSampling != null)
+                ? withObjectNodeForSampling.getOptionalDouble("train_list_percentage", -1.0) : -1.0;
+        double trainListFraction = (withObjectNodeForSampling != null)
+                ? withObjectNodeForSampling.getOptionalDouble("train_list_fraction", -1.0) : -1.0;
         long sampleSeed = (withObjectNodeForSampling != null)
                 ? (long) withObjectNodeForSampling.getOptionalDouble("sample_seed", System.currentTimeMillis())
                 : System.currentTimeMillis();
 
-        if (sampleSize <= 0) {
-            // No sampling parameters provided - default to full scan
+        // Exactly one must be filled
+        boolean hasNumber = trainListNumber > 0;
+        boolean hasPercentage = trainListPercentage > 0 && trainListPercentage <= 100;
+        boolean hasFraction = trainListFraction > 0 && trainListFraction <= 1.0;
+        int count = (hasNumber ? 1 : 0) + (hasPercentage ? 1 : 0) + (hasFraction ? 1 : 0);
+
+        if (count != 1) {
             throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                    "Invalid or missing sampling parameters in WITH clause. 'train_list_number' must be a positive integer.");
+                    "Exactly one of 'train_list_number', 'train_list_percentage', or 'train_list_fraction' must be "
+                            + "specified in the WITH clause. train_list_number: positive integer; "
+                            + "train_list_percentage: 0-100; train_list_fraction: 0.0-1.0");
         }
 
-        // Calculate per-partition sample size
-        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
-        int numPartitions = partitioningProperties.getNumberOfPartitions();
-        int sampleCardinalityPerPartition = Math.max(1, sampleSize / numPartitions);
-
-        // Retrieve cardinality from sample index metadata (if available)
+        // Retrieve cardinality from sample index metadata (needed for percentage and fraction)
         long datasetCardinality = 0;
         try {
             Index sampleIndex = metadataProvider.findSampleIndex(dataset.getDatabaseName(), dataset.getDataverseName(),
@@ -198,12 +205,33 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 Index.SampleIndexDetails sampleDetails = (Index.SampleIndexDetails) sampleIndex.getIndexDetails();
                 datasetCardinality = sampleDetails.getSourceCardinality();
                 System.err.println("Retrieved sourceCardinality from sample index: " + datasetCardinality);
-                //            System.err.println("Retrieved sourceCardinality from sample index: " + datasetCardinality);
             }
         } catch (Exception e) {
             // Sample index not found or error retrieving it - continue with datasetCardinality = 0
-            //            System.err.println("Could not retrieve sample index cardinality: " + e.getMessage());
         }
+
+        int sampleSize;
+        if (hasNumber) {
+            sampleSize = trainListNumber;
+        } else if (hasPercentage) {
+            if (datasetCardinality <= 0) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "train_list_percentage requires ANALYZE DATASET to be run first to obtain dataset cardinality.");
+            }
+            sampleSize = (int) Math.max(1, datasetCardinality * (trainListPercentage / 100.0));
+        } else {
+            // hasFraction
+            if (datasetCardinality <= 0) {
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "train_list_fraction requires ANALYZE DATASET to be run first to obtain dataset cardinality.");
+            }
+            sampleSize = (int) Math.max(1, datasetCardinality * trainListFraction);
+        }
+
+        // Calculate per-partition sample size
+        PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
+        int numPartitions = partitioningProperties.getNumberOfPartitions();
+        int sampleCardinalityPerPartition = Math.max(1, sampleSize / numPartitions);
 
         // dummy key provider -> sample scan (replacing full primary index scan)
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
