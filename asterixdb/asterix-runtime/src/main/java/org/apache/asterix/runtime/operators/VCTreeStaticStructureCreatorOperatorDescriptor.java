@@ -1116,8 +1116,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
                     if (levelDistribution == null || levelDistribution.isEmpty()) {
                         System.err.println("ERROR: No level distribution found - cannot build structure without data");
-                        throw HyracksDataException
-                                .create(new RuntimeException("No hierarchical data available to build structure"));
+                        throw HyracksDataException.create(
+                                new RuntimeException("Cannot build vector index: no training vectors were found. "
+                                        + "Verify that the indexed field exists in the dataset and contains vector data, "
+                                        + "and that the dataset has at least 'train_list_number' records."));
                     }
 
                     // Find max level

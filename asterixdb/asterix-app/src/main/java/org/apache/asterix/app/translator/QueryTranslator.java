@@ -1674,8 +1674,16 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 CreateIndexStatement.IndexedElement indexedElement = stmtCreateIndex.getIndexedElements().get(0);
                 List<String> keyFieldNames = indexedElement.getProjectList().get(0).first;
 
+                // Validate that the vector field exists in the dataset schema
+                Triple<IAType, Boolean, Boolean> vectorFieldType =
+                        KeyFieldTypeUtil.getKeyProjectType(aRecordType, keyFieldNames, sourceLoc);
+                if (vectorFieldType == null && !aRecordType.isOpen()) {
+                    throw new CompilationException(ErrorCode.COMPILATION_FIELD_NOT_FOUND, sourceLoc,
+                            LogRedactionUtil.userData(RecordUtil.toFullyQualifiedName(keyFieldNames)));
+                }
+
                 indexDetails = new Index.VectorIndexDetails(keyFieldNames, includeFieldNames,
-                        includeFieldSourceIndicators, includeFieldTypes, true, stmtCreateIndex.getExcludeUnknownKey(),
+                        includeFieldSourceIndicators, includeFieldTypes, false, stmtCreateIndex.getExcludeUnknownKey(),
                         stmtCreateIndex.getCastDefaultNull(), datetimeFormat, dateFormat, timeFormat,
                         stmtCreateIndex.getWithObjectNode());
 

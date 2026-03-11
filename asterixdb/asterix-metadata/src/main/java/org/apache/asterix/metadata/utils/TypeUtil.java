@@ -452,31 +452,11 @@ public class TypeUtil {
     private static ARecordType appendVectorIndexType(ARecordType enforcedRecordType,
             Index.VectorIndexDetails vectorIndexDetails, EnforcedTypeBuilder enforcedTypeBuilder)
             throws AlgebricksException {
-        // VECTOR indexes have a single key field (the vector field) and optional include fields
-        // For type enforcement, we only need to handle the include fields, not the key field
-        // The key field (vector field) doesn't have explicit types - it's just the field name
-        List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
-        List<IAType> includeFieldTypes = vectorIndexDetails.getIncludeFieldTypes();
-        List<Integer> includeSources = vectorIndexDetails.getIncludeFieldSourceIndicators();
-
-        for (int i = 0; i < includeFieldNames.size(); i++) {
-            if (includeSources.get(i) != Index.RECORD_INDICATOR) {
-                throw new CompilationException(ErrorCode.COMPILATION_ERROR,
-                        "Indexing an open field is only supported on the record part");
-            }
-            // Skip type enforcement for include fields with ANY type (when loaded from metadata)
-            // Include fields already exist in the schema, so they don't need type enforcement
-            IAType includeFieldType = includeFieldTypes.get(i);
-            if (includeFieldType.getTypeTag() == ATypeTag.ANY) {
-                continue;
-            }
-            enforcedTypeBuilder.reset(enforcedRecordType, includeFieldNames.get(i),
-                    Collections.nCopies(includeFieldNames.get(i).size(), false), includeFieldType,
-                    vectorIndexDetails.getCastDefaultNull().getOrElse(false));
-            validateRecord(enforcedRecordType);
-            enforcedRecordType = enforcedTypeBuilder.build();
-        }
-
+        // VECTOR indexes have a single key field (the vector field) and optional include fields.
+        // Include fields are stored alongside vectors for retrieval only — they don't need type
+        // enforcement. Unlike B-tree enforced indexes, vector include fields don't alter query
+        // semantics, so we skip enforcement to avoid type promotion conflicts (e.g., a closed-schema
+        // string field wrapped as union(string, null, missing) failing canPromote checks).
         return enforcedRecordType;
     }
 
