@@ -173,7 +173,8 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
             throws HyracksDataException {
         if (evaluatorFactories.length != 3) {
             throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                    String.format("Invalid number of arguments for function %s. Expected 3 arguments: (vector1, vector2, metric)",
+                    String.format(
+                            "Invalid number of arguments for function %s. Expected 3 arguments: (vector1, vector2, metric)",
                             funcId.getName()));
         }
 
@@ -184,10 +185,9 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
             evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
             // Only process constant optimization for the first 3 args (vector1, vector2, metric).
             // Args 3+ (nprobe, epsilon, searchApproach) are optimizer hints, not used at runtime.
-            if(i == 2 && !(evaluatorFactories[i] instanceof ConstantEvalFactory)){
-                throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                        String.format("The third argument (metric) of function %s must be a constant string.",
-                                funcId.getName()));
+            if (i == 2 && !(evaluatorFactories[i] instanceof ConstantEvalFactory)) {
+                throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc, String.format(
+                        "The third argument (metric) of function %s must be a constant string.", funcId.getName()));
             }
             if (i < 3 && evaluatorFactories[i] instanceof ConstantEvalFactory) {
                 evaluators[i].evaluate(null, pointables[i]);
@@ -199,7 +199,8 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                             formatPointable.getStartOffset()));
                     if (func == null) {
                         throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                                String.format("Illegal distance function: '%s'. Supported: euclidean, l2, cosine similarity, dot product, manhattan distance",
+                                String.format(
+                                        "Illegal distance function: '%s'. Supported: euclidean, l2, cosine similarity, dot product, manhattan distance",
                                         formatPointable.toString()));
                     }
                 } else {

@@ -145,6 +145,7 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
     private int nextCallCount;
     private int antimatterCancellations;
     private int tuplesFilteredOut;
+    private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
 
     public LSMVCTreeBlockedNaiveCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
@@ -158,6 +159,7 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
         this.nextCallCount = 0;
         this.antimatterCancellations = 0;
         this.tuplesFilteredOut = 0;
+        this.validTuplesFromCurrentCluster = 0;
 
         // Get initial state
         LSMVCTreeCursorInitialState lsmInitialState = (LSMVCTreeCursorInitialState) initialState;
@@ -168,7 +170,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
         // Extract search parameters from predicate
         VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
         this.K = vectorPred.getK();
-        this.candidateLimit = 2 * K; // Send 2*K to PK for reranking (hardcoded; later from query/SET)
+        int mult = vectorPred.getKMultiplier();
+        this.candidateLimit = K * Math.max(1, mult); // Send K*kMultiplier to PK for reranking
         this.nprobe = vectorPred.getNprobe();
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
@@ -326,6 +329,7 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
                 if (validTuple != null) {
                     // Apply INCLUDE field filter
                     if (passesTupleFilter(validTuple)) {
+                        validTuplesFromCurrentCluster++;
                         // Compute approximate distance using quantized embedding
                         double dqx = computeApproximateDistance(validTuple);
                         addToTopKWindow(validTuple, dqx);
@@ -353,6 +357,15 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
                 break;
             }
 
+            // Exclude empty clusters from nprobe
+            if (validTuplesFromCurrentCluster == 0) {
+                for (int i = 0; i < rangeCursors.length; i++) {
+                    if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
+                        ((VectorClusteringSearchCursor) rangeCursors[i]).decrementClustersProbed();
+                    }
+                }
+            }
+            validTuplesFromCurrentCluster = 0;
             advanceAllComponentsToNextCluster();
         }
     }

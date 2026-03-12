@@ -218,6 +218,14 @@ public class VectorClusteringSearchCursor implements IIndexCursor {
     }
 
     /**
+     * Decrement the clusters probed counter.
+     * Used when a cluster contributed 0 valid tuples (structural or reconciliation empty).
+     */
+    public void decrementClustersProbed() {
+        this.clustersProbed = Math.max(0, this.clustersProbed - 1);
+    }
+
+    /**
      * Reset the clusters probed counter.
      * Used when re-opening cursor to a different first cluster (e.g., level-wise[0] instead of DFS result).
      */

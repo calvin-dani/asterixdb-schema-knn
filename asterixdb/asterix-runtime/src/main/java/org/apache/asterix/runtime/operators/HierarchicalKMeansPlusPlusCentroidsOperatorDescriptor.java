@@ -598,9 +598,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable MANHATTAN_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+            UTF8StringPointable.generateUTF8Pointable("manhattan_distance");
     private static final UTF8StringPointable COSINE_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+            UTF8StringPointable.generateUTF8Pointable("cosine_similarity");
     private static final UTF8StringPointable COSINE_ALIAS = UTF8StringPointable.generateUTF8Pointable("cosine");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
@@ -648,8 +648,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         DistanceFunction func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
         if (func == null) {
-            // Default to euclidean squared for unknown metrics (consistent with VCTreeBulkLoaderAndGroupingOperatorDescriptor)
-            return new EuclideanSquaredDistanceFunction();
+            throw new IllegalArgumentException("Unsupported distance function: " + distanceType);
         }
         return func;
     }

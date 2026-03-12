@@ -873,6 +873,18 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             // Non-quantized without SET: keep 0 (naive streaming)
         }
 
+        // Read kMultiplier from session config (default 2, clamp to [1, 100])
+        int kMultiplier = 2;
+        String kmultStr = (String) getConfig().get(CompilerProperties.COMPILER_VECTOR_KMULTIPLIER_KEY);
+        if (kmultStr != null && !kmultStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(kmultStr.trim());
+                kMultiplier = Math.max(1, parsed);
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid compiler.vector.kmultiplier '{}', using default 2", kmultStr);
+            }
+        }
+
         // Create vector accessor factory for extracting AOrderedList<ADouble> from query tuples
         // This factory is serializable and passed through the job pipeline
         // The operator uses it to create accessors that parse AsterixDB's vector format
@@ -885,10 +897,10 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
 
         // Create VectorSearchOperatorDescriptor
         int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
-        VectorSearchOperatorDescriptor vectorSearchOp =
-                new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc, queryFields, indexDataflowHelperFactory,
-                        retainInput, searchCallbackFactory, vectorAccessorFactory, distanceFunctionFactory,
-                        partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory, searchApproach);
+        VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
+                queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
+                distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory,
+                searchApproach, kMultiplier);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }

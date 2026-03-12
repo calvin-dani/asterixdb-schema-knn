@@ -91,12 +91,15 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // Number of secondary key fields before PKs in data tuples (2 for non-quantized, 4 for quantized)
     protected final int numSecondaryKeys;
 
+    // Multiplier for candidate limit: K * kMultiplier candidates sent to PK for reranking
+    protected final int kMultiplier;
+
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
             IVectorBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
-            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys)
-            throws HyracksDataException {
+            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys,
+            int kMultiplier) throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -125,6 +128,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.tupleFilterFactory = tupleFilterFactory;
         this.searchApproach = searchApproach;
         this.numSecondaryKeys = numSecondaryKeys;
+        this.kMultiplier = kMultiplier;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
@@ -199,6 +203,9 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             if (tupleFilter != null) {
                 vectorPred.setTupleFilter(tupleFilter);
             }
+
+            // Set kMultiplier for candidate limit (K * kMultiplier sent to PK for reranking)
+            vectorPred.setKMultiplier(kMultiplier);
         }
     }
 

@@ -110,6 +110,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     private int cancellationsMade; // Matter tuples cancelled by antimatter
     private int getTupleCallCount; // Track how many times doGetTuple() is called
     private int tuplesFilteredOut; // Tuples that failed INCLUDE field filter
+    private int validTuplesFromCurrentCluster; // Valid tuples output from current cluster (for empty-cluster nprobe)
 
     // Tuple filter for INCLUDE field predicates (e.g., year > 2000)
     // When set, only tuples passing this filter are returned and counted toward K
@@ -177,6 +178,7 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         this.cancellationsMade = 0;
         this.getTupleCallCount = 0;
         this.tuplesFilteredOut = 0;
+        this.validTuplesFromCurrentCluster = 0;
 
         // Set up comparator and operational components
         cmp = lsmInitialState.getOriginalKeyComparator();
@@ -788,6 +790,9 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     @Override
     public ITupleReference doGetTuple() {
         getTupleCallCount++;
+        if (outputElement != null) {
+            validTuplesFromCurrentCluster++;
+        }
         return outputElement != null ? outputElement.getTuple() : null;
     }
 
@@ -951,6 +956,15 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         }
 
         // Not enough results or haven't probed enough clusters yet - advance ALL components
+        // Exclude empty clusters from nprobe (query mode only)
+        if (!fullScanMode && validTuplesFromCurrentCluster == 0) {
+            for (int i = 0; i < rangeCursors.length; i++) {
+                if (rangeCursors[i] instanceof VectorClusteringSearchCursor) {
+                    ((VectorClusteringSearchCursor) rangeCursors[i]).decrementClustersProbed();
+                }
+            }
+        }
+        validTuplesFromCurrentCluster = 0;
         advanceAllComponentsToNextCluster();
     }
 
