@@ -151,6 +151,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
     private int totalTuplesProcessed;
     private int antimatterCancellations;
     private int tuplesFilteredOut;
+    private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
 
     public LSMVCTreeBlockedCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
@@ -163,6 +164,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.totalTuplesProcessed = 0;
         this.antimatterCancellations = 0;
         this.tuplesFilteredOut = 0;
+        this.validTuplesFromCurrentCluster = 0;
         this.addToTopKWindowCallCount = 0;
 
         // Get initial state
@@ -174,7 +176,8 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         // Extract search parameters from predicate
         VectorSearchPredicate vectorPred = (VectorSearchPredicate) searchPred;
         this.K = vectorPred.getK();
-        this.candidateLimit = 2 * K; // Send 2*K to PK for reranking (hardcoded; later from query/SET)
+        int mult = vectorPred.getKMultiplier();
+        this.candidateLimit = K * Math.max(1, mult); // Send K*kMultiplier to PK for reranking
         this.nprobe = vectorPred.getNprobe();
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
@@ -319,6 +322,11 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                     nextCluster.hasQuantizedDistance() ? nextCluster.quantizedDistance : Double.NaN,
                     nextCluster.directoryPageId);
 
+            // Exclude empty clusters from nprobe
+            if (validTuplesFromCurrentCluster == 0) {
+                clustersExplored = Math.max(0, clustersExplored - 1);
+            }
+            validTuplesFromCurrentCluster = 0;
             advanceAllComponentsToNextCluster(nextCluster);
             clustersExplored++;
         }
@@ -765,10 +773,12 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
                     addToTopKWindowCallCount, dqx, topKWindow.size(), K, tuple.getFieldCount());
         }
         if (topKWindow.size() < candidateLimit) {
+            validTuplesFromCurrentCluster++;
             // Copy tuple before storing - the original buffer will be reused
             ITupleReference tupleCopy = TupleUtils.copyTuple(tuple);
             topKWindow.offer(new ResultEntry(tupleCopy, dqx));
         } else if (dqx < topKWindow.peek().dqx) {
+            validTuplesFromCurrentCluster++;
             topKWindow.poll(); // Remove worst
             // Copy tuple before storing - the original buffer will be reused
             ITupleReference tupleCopy = TupleUtils.copyTuple(tuple);

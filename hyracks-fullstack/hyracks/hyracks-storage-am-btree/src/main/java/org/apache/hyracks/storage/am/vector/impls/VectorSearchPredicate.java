@@ -45,6 +45,7 @@ public class VectorSearchPredicate implements ISearchPredicate {
     private double epsilon; // Distance threshold for level-wise cross-pollination
     private int searchApproach; // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
     private int pkStartField; // Field index where primary keys start (2 for non-quantized, 4 for quantized)
+    private int kMultiplier; // Multiplier for candidate limit: K * kMultiplier sent to PK for reranking (default 2)
 
     public VectorSearchPredicate() {
         // Empty constructor for initialization
@@ -54,6 +55,7 @@ public class VectorSearchPredicate implements ISearchPredicate {
         this.epsilon = 0.15; // Default: no epsilon (use nprobe count only)
         this.searchApproach = 0; // Default: naive search
         this.pkStartField = 2; // Default: non-quantized format
+        this.kMultiplier = 2; // Default: 2*K candidates for reranking
     }
 
     public VectorSearchPredicate(int k) {
@@ -64,6 +66,7 @@ public class VectorSearchPredicate implements ISearchPredicate {
         this.epsilon = 0.15;
         this.searchApproach = 0;
         this.pkStartField = 2;
+        this.kMultiplier = 2;
     }
 
     public VectorSearchPredicate(int k, int nprobe, double epsilon) {
@@ -74,6 +77,7 @@ public class VectorSearchPredicate implements ISearchPredicate {
         this.distanceMetric = null;
         this.searchApproach = 0;
         this.pkStartField = 2;
+        this.kMultiplier = 2;
     }
 
     public VectorSearchPredicate(double[] queryVector) {
@@ -84,6 +88,7 @@ public class VectorSearchPredicate implements ISearchPredicate {
         this.epsilon = 0.15;
         this.searchApproach = 0;
         this.pkStartField = 2;
+        this.kMultiplier = 2;
     }
 
     /**
@@ -216,6 +221,20 @@ public class VectorSearchPredicate implements ISearchPredicate {
      */
     public int getPkStartField() {
         return pkStartField;
+    }
+
+    /**
+     * Set the kMultiplier for candidate limit (K * kMultiplier sent to PK for reranking).
+     */
+    public void setKMultiplier(int kMultiplier) {
+        this.kMultiplier = kMultiplier;
+    }
+
+    /**
+     * Get the kMultiplier for candidate limit.
+     */
+    public int getKMultiplier() {
+        return kMultiplier;
     }
 
     @Override
