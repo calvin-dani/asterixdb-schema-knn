@@ -90,6 +90,7 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeser
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.partition.FieldHashPartitionerFactory;
 import org.apache.hyracks.dataflow.common.data.partition.OnePartitionComputerFactory;
+import org.apache.hyracks.dataflow.std.connectors.MToNBroadcastConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.connectors.MToNPartitioningConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.connectors.OneToOneConnectorDescriptor;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
@@ -111,6 +112,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
     private static final int DEFAULT_BITS = 4;
+    private static final int FULL_SCAN_THRESHOLD = 10000;
     private IVectorBinaryAccessorFactory vectorAccessorFactory;
 
     protected SecondaryVectorOperationsHelper(Dataset dataset, Index index, MetadataProvider metadataProvider,
@@ -169,7 +171,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 IndexUtil.createPrimaryIndexScanTupleProjectorFactory(dataset.getDatasetFormatInfo(),
                         indexDetails.getIndexExpectedType(), itemType, metaType, numPrimaryKeys);
 
-        // ============ SAMPLING INSTEAD OF FULL TABLE SCAN ============
+        // ============ SAMPLING OR FULL SCAN based on sampleSize threshold ============
         // Extract sampling parameters from WITH clause
         // Exactly ONE of train_list_number, train_list_percentage, or train_list_fraction must be provided
         AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
@@ -190,10 +192,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         int count = (hasNumber ? 1 : 0) + (hasPercentage ? 1 : 0) + (hasFraction ? 1 : 0);
 
         if (count != 1) {
-            throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                    "Exactly one of 'train_list_number', 'train_list_percentage', or 'train_list_fraction' must be "
-                            + "specified in the WITH clause. train_list_number: positive integer; "
-                            + "train_list_percentage: 0-100; train_list_fraction: 0.0-1.0");
+           trainListFraction = 0.1;
+           hasFraction = true;
         }
 
         // Retrieve cardinality from sample index metadata (needed for percentage and fraction)
@@ -206,11 +206,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 datasetCardinality = sampleDetails.getSourceCardinality();
                 System.err.println("Retrieved sourceCardinality from sample index: " + datasetCardinality);
             }
+            else{
+                throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                        "Vector Index requires ANALYZE statement prior to CREATE INDEX DDL.");
+            }
         } catch (Exception e) {
+            throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                    "Vector Index requires ANALYZE statement prior to CREATE INDEX DDL.");
             // Sample index not found or error retrieving it - continue with datasetCardinality = 0
         }
 
-        int sampleSize;
+        int sampleSize = 0;
         if (hasNumber) {
             sampleSize = trainListNumber;
         } else if (hasPercentage) {
@@ -219,7 +225,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                         "train_list_percentage requires ANALYZE DATASET to be run first to obtain dataset cardinality.");
             }
             sampleSize = (int) Math.max(1, datasetCardinality * (trainListPercentage / 100.0));
-        } else {
+        } else if (hasFraction) {
             // hasFraction
             if (datasetCardinality <= 0) {
                 throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
@@ -228,15 +234,31 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             sampleSize = (int) Math.max(1, datasetCardinality * trainListFraction);
         }
 
-        // Calculate per-partition sample size
+        // Clamp sample size before deciding between full scan vs sampling.
+        // This caps sampling to a minimum of 10,000, while still allowing a full scan if dataset cardinality < 10,000.
+        if (datasetCardinality > 0) {
+            sampleSize = (int) Math.min(sampleSize, datasetCardinality);
+        }
+        sampleSize = Math.max(sampleSize, 10000);
+        sampleSize = Math.min(sampleSize, 1000000);
+        if (datasetCardinality > 0) {
+            sampleSize = (int) Math.min(sampleSize, datasetCardinality);
+        }
+
+        boolean useFullScan = sampleSize < FULL_SCAN_THRESHOLD;
+
         PartitioningProperties partitioningProperties = metadataProvider.getPartitioningProperties(dataset);
         int numPartitions = partitioningProperties.getNumberOfPartitions();
-        int sampleCardinalityPerPartition = Math.max(1, sampleSize / numPartitions);
 
-        // dummy key provider -> sample scan (replacing full primary index scan)
         IOperatorDescriptor sourceOp = DatasetUtil.createDummyKeyProviderOp(spec, dataset, metadataProvider);
-        IOperatorDescriptor targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
-                sampleCardinalityPerPartition, sampleSeed, projectorFactory);
+        IOperatorDescriptor targetOp;
+        if (useFullScan) {
+            targetOp = DatasetUtil.createPrimaryIndexScanOp(spec, metadataProvider, dataset, projectorFactory);
+        } else {
+            int sampleCardinalityPerPartition = Math.max(1, sampleSize / numPartitions);
+            targetOp = DatasetUtil.createSampleScanOp(spec, metadataProvider, dataset,
+                    sampleCardinalityPerPartition, sampleSeed, projectorFactory);
+        }
         spec.connect(new OneToOneConnectorDescriptor(spec), sourceOp, 0, targetOp, 0);
 
         sourceOp = targetOp;
@@ -292,7 +314,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ISerializerDeserializer[] scalarFieldSerdes = new ISerializerDeserializer[1];
         // Use DoubleSerializerDeserializer.INSTANCE to match ScalarValueRunFileWriter
         scalarFieldSerdes[0] =
-                org.apache.hyracks.dataflow.common.data.marshalling.DoubleSerializerDeserializer.INSTANCE;
+                DoubleSerializerDeserializer.INSTANCE;
         RecordDescriptor scalarRecDesc = new RecordDescriptor(scalarFieldSerdes);
 
         //        System.err.println("=== RECORD DESCRIPTOR COMPARISON ===");
@@ -344,7 +366,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Use DoubleBinaryComparatorFactory.INSTANCE to match DoubleSerializerDeserializer.INSTANCE
         // (raw doubles without type tags)
         IBinaryComparatorFactory[] scalarSortComparatorFactories =
-                { org.apache.hyracks.data.std.accessors.DoubleBinaryComparatorFactory.INSTANCE };
+                { DoubleBinaryComparatorFactory.INSTANCE };
         ExternalSortOperatorDescriptor scalarSortOp = new ExternalSortOperatorDescriptor(spec, sortFrames,
                 scalarSortFields, scalarSortComparatorFactories, scalarRecDesc);
         scalarSortOp.setSourceLocation(sourceLoc);
@@ -764,8 +786,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         if (vectorDimensions <= 0) {
             // Try to get from type (check if it's a fixed-length ordered list)
             if (vectorFieldType.getTypeTag() == ARRAY) {
-                org.apache.asterix.om.types.AOrderedListType listType =
-                        (org.apache.asterix.om.types.AOrderedListType) vectorFieldType;
+                AOrderedListType listType =
+                        (AOrderedListType) vectorFieldType;
                 // AOrderedListType doesn't store dimension directly, so we need to get it from WITH clause
                 // For now, require dimensions in WITH clause
                 throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
@@ -839,8 +861,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
         ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
         ISerializerDeserializer<?>[] flattenedSerDes =
-                new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ADOUBLE) };
-        ITypeTraits[] flattenedTypeTraits = new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ADOUBLE) };
+                new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(ADOUBLE) };
+        ITypeTraits[] flattenedTypeTraits = new ITypeTraits[] { typeTraitProvider.getTypeTrait(ADOUBLE) };
         RecordDescriptor flattenedRecordDesc = new RecordDescriptor(flattenedSerDes, flattenedTypeTraits);
         System.err.println("Flattened record descriptor: single DOUBLE field");
 
@@ -855,8 +877,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         System.err.println("--- STEP 3: Creating local aggregate ---");
         // Record descriptor for aggregate output (binary containing serialized values)
         ISerializerDeserializer<?>[] aggOutputSerDes =
-                new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ABINARY) };
-        ITypeTraits[] aggOutputTypeTraits = new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ABINARY) };
+                new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(ABINARY) };
+        ITypeTraits[] aggOutputTypeTraits = new ITypeTraits[] { typeTraitProvider.getTypeTrait(ABINARY) };
         RecordDescriptor aggOutputRecordDesc = new RecordDescriptor(aggOutputSerDes, aggOutputTypeTraits);
         System.err.println("Aggregate output: BINARY (serialized double values)");
 
@@ -1005,9 +1027,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             ISerializerDeserializerProvider serdeProvider = format.getSerdeProvider();
             ITypeTraitProvider typeTraitProvider = format.getTypeTraitProvider();
             ISerializerDeserializer<?>[] flattenedSerDes =
-                    new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ADOUBLE) };
+                    new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(ADOUBLE) };
             ITypeTraits[] flattenedTypeTraits =
-                    new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ADOUBLE) };
+                    new ITypeTraits[] { typeTraitProvider.getTypeTrait(ADOUBLE) };
             RecordDescriptor flattenedRecordDesc = new RecordDescriptor(flattenedSerDes, flattenedTypeTraits);
 
             targetOp = new VectorComponentExtractorOperatorDescriptor(spec, vectorFieldEvalFactory,
@@ -1020,9 +1042,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             // --- Step 3: Local Aggregate ---
             // Aggregate Output Descriptor
             ISerializerDeserializer<?>[] aggOutputSerDes =
-                    new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(BuiltinType.ABINARY) };
+                    new ISerializerDeserializer[] { serdeProvider.getSerializerDeserializer(ABINARY) };
             ITypeTraits[] aggOutputTypeTraits =
-                    new ITypeTraits[] { typeTraitProvider.getTypeTrait(BuiltinType.ABINARY) };
+                    new ITypeTraits[] { typeTraitProvider.getTypeTrait(ABINARY) };
             RecordDescriptor aggOutputRecordDesc = new RecordDescriptor(aggOutputSerDes, aggOutputTypeTraits);
 
             // Aggregate Function
@@ -1085,7 +1107,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                     secondaryPartitionConstraint);
 
             // Connect Broadcast: GlobalAgg -> Broadcast -> QuantizedCreate
-            spec.connect(new org.apache.hyracks.dataflow.std.connectors.MToNBroadcastConnectorDescriptor(spec),
+            spec.connect(new MToNBroadcastConnectorDescriptor(spec),
                     sourceOp, 0, createOp, 0);
 
             spec.addRoot(createOp);

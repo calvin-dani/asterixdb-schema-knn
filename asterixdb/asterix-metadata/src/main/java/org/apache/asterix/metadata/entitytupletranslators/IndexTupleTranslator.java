@@ -392,7 +392,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                         Triple<IAType, Boolean, Boolean> projectTypeResult =
                                 KeyFieldTypeUtil.getKeyProjectType((ARecordType) inputTypePrime, projectPath, null);
                         if (projectTypeResult == null) {
-                            if (indexType != IndexType.BTREE) {
+                            if (indexType != IndexType.BTREE && indexType != IndexType.VECTOR) {
                                 throw new AsterixException(ErrorCode.METADATA_ERROR, projectPath.toString());
                             }
                             projectTypePrime = BuiltinType.ANY;
