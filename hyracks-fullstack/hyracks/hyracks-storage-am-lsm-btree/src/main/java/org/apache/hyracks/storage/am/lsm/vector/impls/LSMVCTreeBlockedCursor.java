@@ -178,7 +178,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         this.K = vectorPred.getK();
         int mult = vectorPred.getKMultiplier();
         this.candidateLimit = K * Math.max(1, mult); // Send K*kMultiplier to PK for reranking
-        this.nprobe = vectorPred.getNprobe();
+        this.nprobe = 1; // Will be computed by NprobeClusterSelectionStrategy from minProbeFraction
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
 
@@ -207,7 +207,7 @@ public class LSMVCTreeBlockedCursor implements IIndexCursor {
         if (Boolean.TRUE.equals(useSequentialScan)) {
             this.clusterStrategy = new SequentialClusterSelectionStrategy();
         } else {
-            this.clusterStrategy = new NprobeClusterSelectionStrategy(nprobe, epsilon);
+            this.clusterStrategy = new NprobeClusterSelectionStrategy(vectorPred.getMinProbeFraction(), epsilon);
         }
 
         // Initialize priority queues

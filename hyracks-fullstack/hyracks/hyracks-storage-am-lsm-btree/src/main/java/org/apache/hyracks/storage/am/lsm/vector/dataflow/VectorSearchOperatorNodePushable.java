@@ -184,18 +184,19 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 vectorPred.setDistanceMetric(distanceMetric);
             }
 
-            // Extract nprobe from field 3 (int, +1 to skip type tag)
+            // Extract min_probe_fraction from field 3 (double, +1 to skip type tag)
+            // Fraction of leaf clusters to probe (0.0-1.0). 0 means use default (0.1).
             if (queryFields.length > 3) {
-                int nprobe = IntegerPointable.getInteger(queryParamsTuple.getFieldData(3),
+                double minProbeFraction = DoublePointable.getDouble(queryParamsTuple.getFieldData(3),
                         queryParamsTuple.getFieldStart(3) + 1);
-                vectorPred.setNprobe(nprobe);
+                vectorPred.setMinProbeFraction(minProbeFraction);
             }
 
-            // Extract epsilon from field 4 (double, +1 to skip type tag)
+            // Extract k_multiplier from field 4 (int, +1 to skip type tag)
             if (queryFields.length > 4) {
-                double epsilon = DoublePointable.getDouble(queryParamsTuple.getFieldData(4),
+                int queryKMult = IntegerPointable.getInteger(queryParamsTuple.getFieldData(4),
                         queryParamsTuple.getFieldStart(4) + 1);
-                vectorPred.setEpsilon(epsilon);
+                vectorPred.setKMultiplier(Math.max(1, queryKMult));
             }
 
             // Set tuple filter for INCLUDE field predicates (e.g., year > 2000)
@@ -204,8 +205,10 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 vectorPred.setTupleFilter(tupleFilter);
             }
 
-            // Set kMultiplier for candidate limit (K * kMultiplier sent to PK for reranking)
-            vectorPred.setKMultiplier(kMultiplier);
+            // Session config compiler.vector.kmultiplier overrides query arg if set (kMultiplier > 1 from constructor)
+            if (kMultiplier > 1) {
+                vectorPred.setKMultiplier(kMultiplier);
+            }
         }
     }
 

@@ -153,17 +153,18 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
         // Extract pkStartField from search predicate for conditional tuple format
         this.pkStartField = ((VectorSearchPredicate) searchPred).getPkStartField();
 
-        // Extract nprobe and epsilon from search predicate
-        this.nprobe = extractNprobe(searchPred);
+        // Extract minProbeFraction and epsilon from search predicate
+        double minProbeFraction = extractMinProbeFraction(searchPred);
         double epsilon = extractEpsilon(searchPred);
+        this.nprobe = 1; // Will be computed by NprobeClusterSelectionStrategy from minProbeFraction
 
         // Create cluster selection strategy based on mode
         if (fullScanMode) {
             // Merge mode: sequential cluster iteration, no early termination
             this.clusterStrategy = new SequentialClusterSelectionStrategy();
         } else {
-            // Query mode: level-wise + DFS, nprobe/K-based early termination
-            this.clusterStrategy = new NprobeClusterSelectionStrategy(nprobe, epsilon);
+            // Query mode: level-wise + DFS, minProbeFraction/K-based early termination
+            this.clusterStrategy = new NprobeClusterSelectionStrategy(minProbeFraction, epsilon);
         }
 
         // Extract tuple filter from search predicate for INCLUDE field predicates
@@ -852,10 +853,10 @@ public class LSMVCTreeSearchCursor extends LSMIndexSearchCursor {
     }
 
     /**
-     * Extract nprobe value from search predicate (minimum clusters to probe before K-check).
+     * Extract minProbeFraction from search predicate (fraction of leaf clusters to probe).
      */
-    private int extractNprobe(ISearchPredicate searchPred) {
-        return ((VectorSearchPredicate) searchPred).getNprobe();
+    private double extractMinProbeFraction(ISearchPredicate searchPred) {
+        return ((VectorSearchPredicate) searchPred).getMinProbeFraction();
     }
 
     /**

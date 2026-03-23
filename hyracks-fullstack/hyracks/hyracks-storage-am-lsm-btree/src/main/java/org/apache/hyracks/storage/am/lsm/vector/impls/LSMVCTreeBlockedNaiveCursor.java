@@ -27,7 +27,6 @@ import java.util.Set;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
-import org.apache.hyracks.data.std.primitive.DoublePointable;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
@@ -172,7 +171,7 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
         this.K = vectorPred.getK();
         int mult = vectorPred.getKMultiplier();
         this.candidateLimit = K * Math.max(1, mult); // Send K*kMultiplier to PK for reranking
-        this.nprobe = vectorPred.getNprobe();
+        this.nprobe = 1; // Will be computed by NprobeClusterSelectionStrategy from minProbeFraction
         this.epsilon = vectorPred.getEpsilon();
         this.pkStartField = vectorPred.getPkStartField();
 
@@ -195,8 +194,8 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
             this.vectorAccessor = vectorAccessorFactory.createAccessor();
         }
 
-        // Create cluster selection strategy (nprobe + DFS fallback)
-        this.clusterStrategy = new NprobeClusterSelectionStrategy(nprobe, epsilon);
+        // Create cluster selection strategy (minProbeFraction → nprobe + DFS fallback)
+        this.clusterStrategy = new NprobeClusterSelectionStrategy(vectorPred.getMinProbeFraction(), epsilon);
 
         // Top-K window: capacity = candidateLimit (2*K) for reranking
         topKWindow = new PriorityQueue<>(Math.max(candidateLimit, 1), (a, b) -> Double.compare(b.dqx, a.dqx));
@@ -626,15 +625,6 @@ public class LSMVCTreeBlockedNaiveCursor implements IIndexCursor {
         System.arraycopy(data, contentOffset, qBytes, 0, contentLength);
         double[] dequantized = quantizer.dequantize(qBytes);
         return distanceFunction.apply(quantizedQueryVector, dequantized);
-    }
-
-    /**
-     * Extract D(x, C) from tuple. First field is distance_to_centroid.
-     */
-    private double extractDistanceToCentroid(ITupleReference tuple) {
-        byte[] data = tuple.getFieldData(0);
-        int offset = tuple.getFieldStart(0);
-        return DoublePointable.getDouble(data, offset);
     }
 
     /**
