@@ -47,8 +47,9 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
     private static final Logger LOGGER = LogManager.getLogger();
 
     // Parameters
-    private final int nprobe;
+    private final double minProbeFraction;
     private final double epsilon;
+    private int nprobe; // Computed from minProbeFraction * totalLeafClusters at initialize time
     private int K;
 
     // Level-wise state
@@ -66,9 +67,10 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
     // For DFS fallback
     private VectorClusteringSearchCursor firstCursor;
 
-    public NprobeClusterSelectionStrategy(int nprobe, double epsilon) {
-        this.nprobe = nprobe;
+    public NprobeClusterSelectionStrategy(double minProbeFraction, double epsilon) {
+        this.minProbeFraction = minProbeFraction;
         this.epsilon = epsilon;
+        this.nprobe = 1; // Will be computed in initialize() from minProbeFraction * totalLeafClusters
         this.visitedCentroidIds = new HashSet<>();
     }
 
@@ -93,6 +95,10 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                         vcTree.getNavigationRootPageId(), vcTree.getInteriorFrameFactory(),
                         vcTree.getLeafFrameFactory(), queryVector, distFunc, epsilon, quantizedQueryVector, quantizer);
 
+                // Compute nprobe from minProbeFraction * totalLeafClusters
+                int totalLeafClusters = globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 1;
+                this.nprobe = Math.max(1, (int) Math.floor(totalLeafClusters * minProbeFraction));
+
                 // Mark first cluster as visited and start getNextCluster() from index 1
                 // The cursor handles index 0 separately via getFirstCluster()
                 if (globalLevelWiseClusters != null && !globalLevelWiseClusters.isEmpty()) {
@@ -101,8 +107,9 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                 }
 
                 LOGGER.log(Level.TRACE,
-                        String.format("[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f",
-                                globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 0, epsilon));
+                        String.format(
+                                "[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f, minProbeFraction=%.2f, nprobe=%d",
+                                totalLeafClusters, epsilon, minProbeFraction, nprobe));
             } catch (Exception e) {
                 LOGGER.log(Level.TRACE,
                         String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
@@ -223,6 +230,10 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
     // Getters for logging/debugging
     public int getNprobe() {
         return nprobe;
+    }
+
+    public double getMinProbeFraction() {
+        return minProbeFraction;
     }
 
     public double getEpsilon() {

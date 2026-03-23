@@ -873,15 +873,16 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
             // Non-quantized without SET: keep 0 (naive streaming)
         }
 
-        // Read kMultiplier from session config (default 2, clamp to [1, 100])
-        int kMultiplier = 2;
+        // Read kMultiplier from session config (default 1, clamp to [1, 100])
+        // Session config overrides query arg when set (kMultiplier > 1 signals override to NodePushable)
+        int kMultiplier = 1;
         String kmultStr = (String) getConfig().get(CompilerProperties.COMPILER_VECTOR_KMULTIPLIER_KEY);
         if (kmultStr != null && !kmultStr.trim().isEmpty()) {
             try {
                 int parsed = Integer.parseInt(kmultStr.trim());
                 kMultiplier = Math.max(1, parsed);
             } catch (NumberFormatException e) {
-                LOGGER.warn("Invalid compiler.vector.kmultiplier '{}', using default 2", kmultStr);
+                LOGGER.warn("Invalid compiler.vector.kmultiplier '{}', using default 1", kmultStr);
             }
         }
 

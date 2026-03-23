@@ -1504,11 +1504,10 @@ void DatasetRecordField(RecordTypeDefinition recType) throws ParseException:
 CreateIndexStatement CreateIndexStatement(Token startStmtToken) throws ParseException:
 {
   CreateIndexStatement stmt = null;
-  boolean isVectorIndex = false;
 }
 {
   (
-    ( <VECTOR> { isVectorIndex = true; } )? <INDEX> stmt = IndexSpecification(startStmtToken, isVectorIndex)
+    <INDEX> stmt = IndexSpecification(startStmtToken)
     | <PRIMARY> <INDEX> stmt = PrimaryIndexSpecification(startStmtToken)
   )
   {
@@ -1516,7 +1515,7 @@ CreateIndexStatement CreateIndexStatement(Token startStmtToken) throws ParseExce
   }
 }
 
-CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIndex) throws ParseException:
+CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseException:
 {
   Pair<Namespace,Identifier> nameComponents = null;
   String indexName = null;
@@ -1557,31 +1556,9 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
         }
       )*
     <RIGHTPAREN>
-    ( <TYPE> indexParams = IndexType() )? ( <ENFORCED> { enforced = true; } )?
-    // Parse INCLUDE/EXCLUDE UNKNOWN KEY (for non-vector indexes)
-    // Lookahead checks that INCLUDE/EXCLUDE is followed by UNKNOWN to disambiguate from INCLUDE (fields)
-    ( LOOKAHEAD({(laIdentifier(EXCLUDE) || laIdentifier(INCLUDE)) && laToken(2, UNKNOWN)}) <IDENTIFIER>
-    {
-      if (isToken(EXCLUDE)) {
-        excludeUnknown = true;
-      } else if (isToken(INCLUDE)) {
-        excludeUnknown = false;
-      } else {
-        throw createUnexpectedTokenError();
-      }
-    } <UNKNOWN> <KEY>
-    )?
 
-    ( <CAST><LEFTPAREN> castConfigDefaultNull = CastDefaultNull() <RIGHTPAREN>
-      {
-        castConfig = castConfigDefaultNull.first;
-        castDefaultNull = castConfigDefaultNull.second;
-      }
-    )?
-
-    // Parse INCLUDE clause for vector index additional fields (e.g., INCLUDE (year, title))
+    // Parse INCLUDE clause for vector index additional fields (e.g., INCLUDE(title, popularity))
     // Lookahead checks that INCLUDE is followed by LEFTPAREN to disambiguate from INCLUDE UNKNOWN KEY
-    // This allows filtering on these fields during vector search
     ( LOOKAHEAD({laIdentifier(INCLUDE) && laToken(2, LEFTPAREN)}) <IDENTIFIER>
       {
         if (!isToken(INCLUDE)) {
@@ -1600,14 +1577,34 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
       <RIGHTPAREN>
     )?
 
+    ( <TYPE> indexParams = IndexType() )? ( <ENFORCED> { enforced = true; } )?
+
     // Parse WITH clause for vector index configuration
     ( <WITH> withRecord = RecordConstructor() )?
+
+    // Parse INCLUDE/EXCLUDE UNKNOWN KEY
+    // Lookahead checks that INCLUDE/EXCLUDE is followed by UNKNOWN to disambiguate from INCLUDE(fields)
+    ( LOOKAHEAD({(laIdentifier(EXCLUDE) || laIdentifier(INCLUDE)) && laToken(2, UNKNOWN)}) <IDENTIFIER>
+    {
+      if (isToken(EXCLUDE)) {
+        excludeUnknown = true;
+      } else if (isToken(INCLUDE)) {
+        excludeUnknown = false;
+      } else {
+        throw createUnexpectedTokenError();
+      }
+    } <UNKNOWN> <KEY>
+    )?
+
+    ( <CAST><LEFTPAREN> castConfigDefaultNull = CastDefaultNull() <RIGHTPAREN>
+      {
+        castConfig = castConfigDefaultNull.first;
+        castDefaultNull = castConfigDefaultNull.second;
+      }
+    )?
   )
   {
-    // Auto-detect vector index from VECTOR field type annotation
-      // This allows both syntaxes:
-      // - CREATE VECTOR INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
-      // - CREATE INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
+      // Check if VECTOR field type annotation is present
       boolean hasVectorField = false;
       if (indexedElementList.size() == 1) {
         CreateIndexStatement.IndexedElement field = indexedElementList.get(0);
@@ -1628,18 +1625,25 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
         }
       }
 
-      // If VECTOR field annotation detected OR CREATE VECTOR INDEX used, treat as vector index
-      if (hasVectorField || isVectorIndex) {
+      boolean isVTree = indexParams != null && indexParams.type == IndexType.VECTOR;
+
+      // Validate: VECTOR annotation requires TYPE VTREE
+      if (hasVectorField && !isVTree) {
+        throw new SqlppParseException(getSourceLocation(startStmtToken),
+          "VECTOR field annotation requires TYPE VTREE. Expected syntax: CREATE INDEX ... (field VECTOR) TYPE VTREE WITH {...} EXCLUDE UNKNOWN KEY");
+      }
+
+      // Validate: TYPE VTREE requires VECTOR annotation
+      if (isVTree && !hasVectorField) {
+        throw new SqlppParseException(getSourceLocation(startStmtToken),
+          "TYPE VTREE requires VECTOR field annotation. Expected syntax: CREATE INDEX ... (field VECTOR) TYPE VTREE WITH {...} EXCLUDE UNKNOWN KEY");
+      }
+
+      if (isVTree) {
         // Validate exactly one field for vector index
         if (indexedElementList.size() != 1) {
           throw new SqlppParseException(getSourceLocation(startStmtToken),
             "Vector index requires exactly one field");
-        }
-
-        // Validate that VECTOR type annotation is present
-        if (!hasVectorField) {
-          throw new SqlppParseException(getSourceLocation(startStmtToken),
-            "Vector index field must have VECTOR type annotation. Expected syntax: CREATE [VECTOR] INDEX ... (field VECTOR) WITH {...}");
         }
 
         // Validate that WITH clause is provided
@@ -1648,19 +1652,31 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
             "Vector index requires WITH clause specifying index configuration");
         }
 
+        // Validate that EXCLUDE UNKNOWN KEY is specified
+        if (excludeUnknown == null || !excludeUnknown) {
+          throw new SqlppParseException(getSourceLocation(startStmtToken),
+            "Vector index requires EXCLUDE UNKNOWN KEY");
+        }
+
         // Create vector index statement
         try {
           CreateIndexStatement stmt = CreateIndexStatement.CreateVectorIndexStatement(
             nameComponents.first, nameComponents.second,
             new Identifier(indexName),
             indexedElementList.get(0),  // vectorField
-            nonVectorFieldsList,         // empty for new syntax (no INC clause)
+            nonVectorFieldsList,         // INCLUDE fields
             withRecord,
             ifNotExists);
           return addSourceLocation(stmt, startStmtToken);
         } catch (CompilationException e) {
           throw new SqlppParseException(getSourceLocation(startStmtToken), e.getMessage());
         }
+      }
+
+      // Validate: INCLUDE clause is only for vector indexes
+      if (!nonVectorFieldsList.isEmpty()) {
+        throw new SqlppParseException(getSourceLocation(startStmtToken),
+          "INCLUDE clause is only supported for vector indexes (TYPE VTREE)");
       }
 
       // Handle regular (non-vector) index creation
@@ -1685,13 +1701,6 @@ CreateIndexStatement IndexSpecification(Token startStmtToken, boolean isVectorIn
       }
     }
 }
-
-// Old CreateVectorIndexStatement and VectorIndexSpecification functions removed.
-// Vector indexes are now created via the unified IndexSpecification grammar which auto-detects
-// vector indexes from the VECTOR field type annotation.
-// Both syntaxes are supported:
-// - CREATE VECTOR INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
-// - CREATE INDEX ix1 ON Movie1(embedding VECTOR) WITH {...}
 
 CreateIndexStatement.IndexedElement IndexedElement(Token startElementToken) throws ParseException:
 {
@@ -1893,7 +1902,12 @@ IndexParams IndexType() throws ParseException:
       type = IndexType.LENGTH_PARTITIONED_NGRAM_INVIX;
       gramLength = Integer.valueOf(token.image);
     }
-  <RIGHTPAREN>)
+  <RIGHTPAREN>
+  | <VTREE>
+    {
+      type = IndexType.VECTOR;
+    }
+  )
     {
       return new IndexParams(type, gramLength, fullTextConfig);
     }
@@ -6760,6 +6774,7 @@ TOKEN [IGNORE_CASE]:
   | <VALUED : "valued">
   | <VECTOR : "vector">
   | <VIEW : "view">
+  | <VTREE : "vtree">
   | <WHEN : "when">
   | <WHERE : "where">
   | <WITH : "with">

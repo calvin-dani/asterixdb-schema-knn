@@ -21,6 +21,7 @@ package org.apache.asterix.lang.common.util;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.object.base.AdmObjectNode;
+import org.apache.asterix.object.base.AdmStringNode;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.AUnionType;
 import org.apache.asterix.om.types.BuiltinType;
@@ -38,6 +39,7 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION = "train_list_fraction";
     public static final String VECTOR_INDEX_PARAMETER_SIMILARITY = "similarity";
     public static final String VECTOR_INDEX_PARAMETER_NUM_K = "num_clusters";
+    public static final String VECTOR_INDEX_DEFAULT_QUANTIZATION = "SQ8";
 
     private static final ARecordType WITH_OBJECT_TYPE = getWithObjectType();
 
@@ -51,6 +53,13 @@ public class VectorIndexDeclUtil {
         final ConfigurationTypeValidator validator = new ConfigurationTypeValidator();
         final AdmObjectNode node = ExpressionUtils.toNode(withRecord);
         validator.validateType(WITH_OBJECT_TYPE, node);
+
+        // Default quantization to SQ8 if not specified
+        String quantization = node.getOptionalString(VECTOR_INDEX_PARAMETER_QUANTIZATION, null);
+        if (quantization == null) {
+            node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(VECTOR_INDEX_DEFAULT_QUANTIZATION));
+        }
+
         return node;
     }
 
