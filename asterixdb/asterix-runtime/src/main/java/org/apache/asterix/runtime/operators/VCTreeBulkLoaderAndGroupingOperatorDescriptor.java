@@ -74,6 +74,10 @@ import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IResource;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.util.string.UTF8StringUtil;
+import org.apache.hyracks.api.exceptions.IWarningCollector;
+import org.apache.hyracks.api.exceptions.Warning;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Operator that handles bulk loader initialization and recursive data grouping to run files.
@@ -88,6 +92,7 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingleActivityOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOGGER = LogManager.getLogger();
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final float fillFactor; // TODO: Use fillFactor in future bulk loading operations
     private final UUID permitUUID;
@@ -402,9 +407,10 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 return null;
             }
 
-            // Validate embedding dimensions
+            // Validate embedding dimensions — return empty array as sentinel for mismatch
+            // (null = missing field/silent, empty = dimension mismatch/warn)
             if (embedding.length != vectorDimension) {
-                return null;
+                return new double[0];
             }
 
             return embedding;
@@ -476,6 +482,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private MaterializerTaskState materializedData;
         int successfulQueries = 0;
         int totalTuplesProcessed = 0;
+        int dimensionMismatchCount = 0;
 
         // Output infrastructure for transformed tuples
         private FrameTupleAppender outputAppender;
@@ -1019,6 +1026,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         // Extract embedding from tuple
                         double[] embedding = extractEmbeddingFromTuple(tuple, ctx);
 
+                        // Dimension mismatch: returns empty array (length 0) vs missing field: returns null
+                        if (embedding != null && embedding.length == 0) {
+                            dimensionMismatchCount++;
+                        }
+
                         if (embedding != null && embedding.length > 0) {
                             // Find closest centroid using the extracted embedding
                             // Use accessor to find closest leaf centroid with distance function
@@ -1212,8 +1224,17 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
         @Override
         public void close() throws HyracksDataException {
-            //            System.err.println("Total tuples processed: " + totalTuplesProcessed);
-            //            System.err.println("Successful extractions: " + successfulQueries);
+            // Emit client-facing warning for dimension mismatches
+            if (dimensionMismatchCount > 0) {
+                LOGGER.warn("Vector index build: {} records skipped due to embedding dimension mismatch (expected {})",
+                        dimensionMismatchCount, vectorDimension);
+                IWarningCollector warningCollector = ctx.getWarningCollector();
+                if (warningCollector.shouldWarn()) {
+                    warningCollector.warn(Warning.of(null, org.apache.asterix.common.exceptions.ErrorCode.COMPILATION_ERROR,
+                            String.format("Vector index build: %d records skipped due to embedding dimension mismatch (expected %d)",
+                                    dimensionMismatchCount, vectorDimension)));
+                }
+            }
 
             try {
                 // CRITICAL: Write any remaining output data before closing

@@ -213,8 +213,11 @@ Properties ::= ( "(" Identifier "=" ( StringLiteral | IntegerLiteral ) ( "," Ide
 CreateIndex ::= CreateSecondaryIndex | CreatePrimaryKeyIndex
 
 CreateSecondaryIndex ::= "CREATE" "INDEX" Identifier ("IF" "NOT" "EXISTS")? "ON" QualifiedName
-                       "(" IndexedElement ( "," IndexedElement )* ")" ("TYPE" IndexType)? ("ENFORCED")?
+                       "(" IndexedElement ( "," IndexedElement )* ")"
+                       ( "INCLUDE" "(" NestedField ( "," NestedField )* ")" )?
+                       ("TYPE" IndexType)? ("ENFORCED")?
                        (( "EXCLUDE" | "INCLUDE" ) "UNKNOWN" "KEY")?
+                       ( "WITH" RecordConstructor )?
 
 CreatePrimaryKeyIndex ::= "CREATE" "PRIMARY" "INDEX" Identifier? ("IF" "NOT" "EXISTS")? "ON" QualifiedName ("TYPE" "BTREE")?
 
@@ -225,13 +228,14 @@ IndexedElement ::= ArrayIndexElement
 ArrayIndexElement ::= "UNNEST" NestedField ( "UNNEST" NestedField )*
                       ( ( ":" TypeReference ) | ( "SELECT" NestedField ( ":" TypeReference )? ( "," NestedField ( ":" TypeReference )? )* ) )?
 
-IndexField ::= NestedField ( ":" TypeReference "?"? )?
+IndexField ::= NestedField ( ( ":" TypeReference "?"? ) | "VECTOR" )?
 
 IndexType ::= "BTREE"
              |"RTREE"
              |"KEYWORD"
              |"FULLTEXT"
              |"NGRAM" "(" IntegerLiteral ")"
+             |"VTREE"
 
 CreateSynonym ::= "CREATE" "SYNONYM" QualifiedName "FOR" QualifiedName ("IF" "NOT" "EXISTS")?
 

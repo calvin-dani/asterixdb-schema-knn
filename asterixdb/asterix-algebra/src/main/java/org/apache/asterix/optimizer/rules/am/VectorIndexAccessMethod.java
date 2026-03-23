@@ -129,7 +129,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 return false;
             }
         } else {
-            // ann_distance(vectorField, queryVector, metric [, nprobe, epsilon])
+            // ann_distance(vectorField, queryVector, metric [, min_probe_fraction, k_multiplier])
             if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 5) {
                 return false;
             }
@@ -274,24 +274,26 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         boolean isVectorDistance =
                 annDistanceExpr.getFunctionIdentifier().equals(BuiltinFunctions.VECTOR_DISTANCE_ARRAY);
 
-        // Add nprobe variable (arg 3 for ANN_DISTANCE, default 10)
-        // SQL++ parser creates AInt64 for integer literals; convert to AInt32 for IntegerPointable at runtime
-        LogicalVariable nprobeVar = context.newVar();
-        queryVarList.add(nprobeVar);
+        // Add min_probe_fraction variable (arg 3 for ANN_DISTANCE, default 0.1)
+        // Fraction of leaf clusters to probe (0.0-1.0). 0 means use default (0.1).
+        // Converted to nprobe = max(1, floor(totalLeafClusters * fraction)) at runtime.
+        LogicalVariable minProbeFractionVar = context.newVar();
+        queryVarList.add(minProbeFractionVar);
         if (!isVectorDistance && annDistanceExpr.getArguments().size() > 3) {
-            ILogicalExpression nprobeExpr = annDistanceExpr.getArguments().get(3).getValue().cloneExpression();
-            queryExprList.add(new MutableObject<>(ensureInt32Constant(nprobeExpr)));
+            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(3).getValue().cloneExpression()));
         } else {
-            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(10)))));
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(0.1)))));
         }
 
-        // Add epsilon variable (arg 4 for ANN_DISTANCE, default 0.15)
-        LogicalVariable epsilonVar = context.newVar();
-        queryVarList.add(epsilonVar);
+        // Add k_multiplier variable (arg 4 for ANN_DISTANCE, default 1)
+        // Multiplier for candidate limit: K * kMultiplier candidates collected for reranking.
+        LogicalVariable kMultiplierVar = context.newVar();
+        queryVarList.add(kMultiplierVar);
         if (!isVectorDistance && annDistanceExpr.getArguments().size() > 4) {
-            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(4).getValue().cloneExpression()));
+            ILogicalExpression kMultExpr = annDistanceExpr.getArguments().get(4).getValue().cloneExpression();
+            queryExprList.add(new MutableObject<>(ensureInt32Constant(kMultExpr)));
         } else {
-            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(0.15)))));
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(1)))));
         }
 
         // Add search_approach variable (always 0 for ann_distance, 4 for vector_distance)

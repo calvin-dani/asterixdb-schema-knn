@@ -41,54 +41,48 @@ public class VectorSearchPredicate implements ISearchPredicate {
     private String distanceMetric;
     private int k; // Number of nearest neighbors to return (for ANN queries)
     private ITupleFilter tupleFilter; // Filter for INCLUDE field predicates (e.g., year > 2000)
-    private int nprobe; // Number of clusters to probe (minimum before K-check)
-    private double epsilon; // Distance threshold for level-wise cross-pollination
+    private double minProbeFraction; // Fraction of leaf clusters to probe (0.0-1.0, default 0.1)
+    private int nprobeOverride; // Direct nprobe override for internal/merge use (-1 = not set, use minProbeFraction)
+    private double epsilon; // Distance threshold for level-wise cross-pollination (internal, not user-facing)
     private int searchApproach; // 0 = naive (LSMVCTreeSearchCursor), 1 = optimized (LSMVCTreeBlockedCursor)
     private int pkStartField; // Field index where primary keys start (2 for non-quantized, 4 for quantized)
-    private int kMultiplier; // Multiplier for candidate limit: K * kMultiplier sent to PK for reranking (default 2)
+    private int kMultiplier; // Multiplier for candidate limit: K * kMultiplier sent to PK for reranking (default 1)
+
+    private static final double DEFAULT_MIN_PROBE_FRACTION = 0.1;
+    private static final double DEFAULT_EPSILON = 0.3;
+    private static final int DEFAULT_K_MULTIPLIER = 1;
 
     public VectorSearchPredicate() {
-        // Empty constructor for initialization
         this.distanceMetric = null;
-        this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 5; // Default: probe 1 cluster
-        this.epsilon = 0.15; // Default: no epsilon (use nprobe count only)
-        this.searchApproach = 0; // Default: naive search
-        this.pkStartField = 2; // Default: non-quantized format
-        this.kMultiplier = 2; // Default: 2*K candidates for reranking
+        this.k = Integer.MAX_VALUE;
+        this.minProbeFraction = DEFAULT_MIN_PROBE_FRACTION;
+        this.nprobeOverride = -1;
+        this.epsilon = DEFAULT_EPSILON;
+        this.searchApproach = 0;
+        this.pkStartField = 2;
+        this.kMultiplier = DEFAULT_K_MULTIPLIER;
     }
 
     public VectorSearchPredicate(int k) {
-        // Constructor for ANN queries with K parameter
         this.k = k;
         this.distanceMetric = null;
-        this.nprobe = 5;
-        this.epsilon = 0.15;
+        this.minProbeFraction = DEFAULT_MIN_PROBE_FRACTION;
+        this.nprobeOverride = -1;
+        this.epsilon = DEFAULT_EPSILON;
         this.searchApproach = 0;
         this.pkStartField = 2;
-        this.kMultiplier = 2;
-    }
-
-    public VectorSearchPredicate(int k, int nprobe, double epsilon) {
-        // Constructor for ANN queries with K, nprobe, and epsilon parameters
-        this.k = k;
-        this.nprobe = nprobe;
-        this.epsilon = epsilon;
-        this.distanceMetric = null;
-        this.searchApproach = 0;
-        this.pkStartField = 2;
-        this.kMultiplier = 2;
+        this.kMultiplier = DEFAULT_K_MULTIPLIER;
     }
 
     public VectorSearchPredicate(double[] queryVector) {
         // Constructor kept for compatibility with tests
-        // In runtime, query data comes via setQueryTuple()
-        this.k = Integer.MAX_VALUE; // Default: no limit
-        this.nprobe = 5;
-        this.epsilon = 0.15;
+        this.k = Integer.MAX_VALUE;
+        this.minProbeFraction = DEFAULT_MIN_PROBE_FRACTION;
+        this.nprobeOverride = -1;
+        this.epsilon = DEFAULT_EPSILON;
         this.searchApproach = 0;
         this.pkStartField = 2;
-        this.kMultiplier = 2;
+        this.kMultiplier = DEFAULT_K_MULTIPLIER;
     }
 
     /**
@@ -149,18 +143,48 @@ public class VectorSearchPredicate implements ISearchPredicate {
     }
 
     /**
-     * Set the nprobe parameter (number of clusters to probe).
-     * This is the minimum number of clusters to explore before checking if K is satisfied.
+     * Set the min_probe_fraction parameter (fraction of leaf clusters to probe).
+     * Converted to nprobe = max(1, floor(totalLeafClusters * fraction)) at runtime.
+     * Value of 0 means use default (0.1).
      */
-    public void setNprobe(int nprobe) {
-        this.nprobe = nprobe;
+    public void setMinProbeFraction(double minProbeFraction) {
+        if (minProbeFraction <= 0.0) {
+            this.minProbeFraction = DEFAULT_MIN_PROBE_FRACTION;
+        } else if (minProbeFraction > 1.0) {
+            this.minProbeFraction = 1.0;
+        } else {
+            this.minProbeFraction = minProbeFraction;
+        }
     }
 
     /**
-     * Get the nprobe parameter (number of clusters to probe).
+     * Get the min_probe_fraction parameter.
+     */
+    public double getMinProbeFraction() {
+        return minProbeFraction;
+    }
+
+    /**
+     * Set nprobe directly (for internal/test/merge use, e.g., Integer.MAX_VALUE for merge mode).
+     * When nprobeOverride > 0, it takes precedence over minProbeFraction in the strategy.
+     */
+    public void setNprobe(int nprobe) {
+        this.nprobeOverride = nprobe;
+    }
+
+    /**
+     * Get nprobe override. Returns -1 if not set (use minProbeFraction instead).
+     */
+    public int getNprobeOverride() {
+        return nprobeOverride;
+    }
+
+    /**
+     * @deprecated Use getMinProbeFraction() or getNprobeOverride() instead.
+     * Kept for compatibility with VectorClusteringSearchCursor.extractNprobe().
      */
     public int getNprobe() {
-        return nprobe;
+        return nprobeOverride > 0 ? nprobeOverride : 5;
     }
 
     /**
@@ -257,8 +281,9 @@ public class VectorSearchPredicate implements ISearchPredicate {
 
     @Override
     public String toString() {
-        return "VectorPointPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + ", distanceMetric="
-                + distanceMetric + ", k=" + k + ", nprobe=" + nprobe + ", epsilon=" + epsilon + ", searchApproach="
-                + searchApproach + ", pkStartField=" + pkStartField + "]";
+        return "VectorSearchPredicate[queryTuple=" + (queryTuple != null ? "set" : "null") + ", distanceMetric="
+                + distanceMetric + ", k=" + k + ", minProbeFraction=" + minProbeFraction + ", epsilon=" + epsilon
+                + ", kMultiplier=" + kMultiplier + ", searchApproach=" + searchApproach + ", pkStartField="
+                + pkStartField + "]";
     }
 }

@@ -171,16 +171,17 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
     public VectorDistanceArrScalarEvaluator(IEvaluatorContext context,
             final IScalarEvaluatorFactory[] evaluatorFactories, FunctionIdentifier funcId, SourceLocation sourceLoc)
             throws HyracksDataException {
-        if (evaluatorFactories.length != 3) {
+        if (evaluatorFactories.length < 3 || evaluatorFactories.length > 5) {
             throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
                     String.format(
-                            "Invalid number of arguments for function %s. Expected 3 arguments: (vector1, vector2, metric)",
+                            "Invalid number of arguments for function %s. Expected 3-5 arguments: (vector1, vector2, metric [, min_probe_fraction] [, k_multiplier])",
                             funcId.getName()));
         }
 
-        pointables = new IPointable[evaluatorFactories.length];
-        evaluators = new IScalarEvaluator[evaluatorFactories.length];
-        for (int i = 0; i < evaluators.length; ++i) {
+        // Only use first 3 args for distance computation; args 3-4 are optimizer hints
+        pointables = new IPointable[3];
+        evaluators = new IScalarEvaluator[3];
+        for (int i = 0; i < 3; ++i) {
             pointables[i] = new VoidPointable();
             evaluators[i] = evaluatorFactories[i].createScalarEvaluator(context);
             // Only process constant optimization for the first 3 args (vector1, vector2, metric).
