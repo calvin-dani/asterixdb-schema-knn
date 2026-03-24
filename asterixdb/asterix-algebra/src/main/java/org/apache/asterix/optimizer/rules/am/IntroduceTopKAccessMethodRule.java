@@ -28,6 +28,8 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import org.apache.asterix.common.config.DatasetConfig.IndexType;
+import org.apache.asterix.common.exceptions.CompilationException;
+import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.metadata.declared.IIndexProvider;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Index;
@@ -58,6 +60,7 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperato
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.OrderOperator.IOrder;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperator;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorPropertiesUtil;
+import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -765,11 +768,11 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
      * Chooses the best vector index from candidates.
      * Considers:
      * 1. INCLUDE fields: If query has filter (WHERE clause), index must have all filter fields in INCLUDE
-     * 2. Distance metric: Prefers indexes with matching distance metrics
-     * Falls back to first field match if no metric match is found.
+     * 2. Distance metric: Prefers indexes with matching distance metrics.
+     * If the query specifies a constant distance metric that does not match the index metadata, compilation fails.
      */
     protected void chooseVectorIndex(Map<IAccessMethod, AccessMethodAnalysisContext> analyzedAMs,
-            List<Pair<IAccessMethod, Index>> result) {
+            List<Pair<IAccessMethod, Index>> result) throws AlgebricksException {
 
         AccessMethodAnalysisContext analysisCtx = analyzedAMs.get(VectorIndexAccessMethod.INSTANCE);
         if (analysisCtx == null) {
@@ -821,13 +824,17 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             }
         }
 
-        // Select best match: exact match preferred, fallback to field match
+        // Select best match: exact match, or fail if only a field match exists with a known mismatched metric
         if (exactMatch != null) {
             result.add(exactMatch);
             LOGGER.trace("Selected index with matching distance metric");
         } else if (fieldMatch != null) {
-            result.add(fieldMatch);
-            LOGGER.trace("Selected index with matching field (metric mismatch, may affect accuracy)");
+            Index idx = fieldMatch.second;
+            String indexMetric = VectorIndexAccessMethod.getIndexDistanceMetric(idx);
+            SourceLocation srcLoc =
+                    annDistanceExpr != null ? annDistanceExpr.getSourceLocation() : orderOp.getSourceLocation();
+            throw new CompilationException(ErrorCode.COMPILATION_ANN_DISTANCE_METRIC_MISMATCH, srcLoc,
+                    queryDistanceMetric, idx.getIndexName(), indexMetric);
         }
     }
 

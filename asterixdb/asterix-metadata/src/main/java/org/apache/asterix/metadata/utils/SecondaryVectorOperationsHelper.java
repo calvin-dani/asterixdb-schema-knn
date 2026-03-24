@@ -488,6 +488,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
         String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
+        double levelwiseEpsilon = (withObjectNode != null) ? withObjectNode.getOptionalDouble("epsilon", 0.3) : 0.3;
         boolean isQuantized = (quantization != null);
         if (isQuantized) {
             String qUpperCase = quantization.toUpperCase();
@@ -576,7 +577,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
                         distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader, isQuantized,
-                        partitioningProperties.getComputeStorageMap());
+                        partitioningProperties.getComputeStorageMap(), levelwiseEpsilon);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);

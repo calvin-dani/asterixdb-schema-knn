@@ -94,12 +94,15 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // Multiplier for candidate limit: K * kMultiplier candidates sent to PK for reranking
     protected final int kMultiplier;
 
+    /** Epsilon from vector index metadata (default 0.3 when absent in catalog). */
+    protected final double indexEpsilon;
+
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
             IVectorBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
             int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys,
-            int kMultiplier) throws HyracksDataException {
+            int kMultiplier, double indexEpsilon) throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -129,6 +132,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.searchApproach = searchApproach;
         this.numSecondaryKeys = numSecondaryKeys;
         this.kMultiplier = kMultiplier;
+        this.indexEpsilon = indexEpsilon;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
@@ -209,6 +213,8 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             if (kMultiplier > 1) {
                 vectorPred.setKMultiplier(kMultiplier);
             }
+
+            vectorPred.setEpsilon(indexEpsilon);
         }
     }
 

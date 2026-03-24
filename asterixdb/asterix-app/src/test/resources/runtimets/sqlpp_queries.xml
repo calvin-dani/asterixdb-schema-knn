@@ -15966,7 +15966,7 @@
     <test-case FilePath="ddl-with-clause">
       <compilation-unit name="missing-non-optional">
         <output-dir compare="Text">missing-non-optional</output-dir>
-        <expected-error>ASX1061: Field 'merge-policy.name' in the with clause cannot be null or missing</expected-error>
+        <expected-error>ASX1061: Field 'merge-policy.name' in the WITH clause cannot be null or missing</expected-error>
         <source-location>false</source-location>
       </compilation-unit>
     </test-case>

@@ -41,6 +41,8 @@ import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.exceptions.IWarningCollector;
+import org.apache.hyracks.api.exceptions.Warning;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
@@ -74,8 +76,6 @@ import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IResource;
 import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.util.string.UTF8StringUtil;
-import org.apache.hyracks.api.exceptions.IWarningCollector;
-import org.apache.hyracks.api.exceptions.Warning;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -106,6 +106,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private final int numIncludeFields;
     private final boolean isQuantized;
 
+    /** Epsilon for level-wise centroid search ({@code findCloseCentroidsLevelWiseGlobalSort}); from index WITH clause. */
+    private final double levelwiseEpsilon;
+
     // Maps task (compute) partition to storage partition(s) for index resource lookup
     private final int[][] partitionsMap;
 
@@ -121,9 +124,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable MANHATTAN_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+            UTF8StringPointable.generateUTF8Pointable("manhattan_distance");
     private static final UTF8StringPointable COSINE_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+            UTF8StringPointable.generateUTF8Pointable("cosine_similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     // Serializable distance function implementations
@@ -214,7 +217,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
             UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension,
-            int numPrimaryKeys, int numIncludeFields, boolean isQuantized, int[][] partitionsMap) {
+            int numPrimaryKeys, int numIncludeFields, boolean isQuantized, int[][] partitionsMap,
+            double levelwiseEpsilon) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -229,6 +233,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.numIncludeFields = numIncludeFields;
         this.isQuantized = isQuantized;
         this.partitionsMap = partitionsMap;
+        this.levelwiseEpsilon = levelwiseEpsilon > 0.0 && Double.isFinite(levelwiseEpsilon) ? levelwiseEpsilon : 0.3;
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -493,9 +498,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private IVectorDistanceFunction hyracksDistanceFunction;
         private OptimizedScalarQuantizationSampleFile.Params quantizationParams;
         private ScalarVectorQuantizer quantizer; // nullable — created only for quantized indexes
-
-        /** Default epsilon for level-wise centroid search (findCloseCentroidsLevelWiseGlobalSort). */
-        private static final double DEFAULT_LEVELWISE_EPSILON = 0.25;
 
         public VCTreeBulkLoaderAndGroupingNodePushable(IHyracksTaskContext ctx, int partition, int nPartitions,
                 RecordDescriptor inputRecDesc, UUID permitUUID, UUID materializedDataUUID) {
@@ -1046,7 +1048,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                                 // Find close centroids via level-wise global sort (epsilon = 0.25), use first for assignment
                                 List<ClusterSearchResult> closeResults =
-                                        findCloseCentroidsLevelWiseGlobalSort(embedding, DEFAULT_LEVELWISE_EPSILON);
+                                        findCloseCentroidsLevelWiseGlobalSort(embedding, levelwiseEpsilon);
                                 ClusterSearchResult result =
                                         (closeResults != null && !closeResults.isEmpty()) ? closeResults.get(0) : null;
                                 if (result != null) {
@@ -1230,9 +1232,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         dimensionMismatchCount, vectorDimension);
                 IWarningCollector warningCollector = ctx.getWarningCollector();
                 if (warningCollector.shouldWarn()) {
-                    warningCollector.warn(Warning.of(null, org.apache.asterix.common.exceptions.ErrorCode.COMPILATION_ERROR,
-                            String.format("Vector index build: %d records skipped due to embedding dimension mismatch (expected %d)",
-                                    dimensionMismatchCount, vectorDimension)));
+                    warningCollector
+                            .warn(Warning.of(null, org.apache.asterix.common.exceptions.ErrorCode.COMPILATION_ERROR,
+                                    String.format(
+                                            "Vector index build: %d records skipped due to embedding dimension mismatch (expected %d)",
+                                            dimensionMismatchCount, vectorDimension)));
                 }
             }
 

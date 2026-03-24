@@ -846,6 +846,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // Quantized:     [distance, centroidId, quantized_distance, quantized_embedding, PK..., includes...] → numSecondaryKeys = 4
         Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) vectorIndex.getIndexDetails();
         AdmObjectNode withObjectNode = vectorIndexDetails.getWithObjectNode();
+        double indexEpsilon = (withObjectNode != null) ? withObjectNode.getOptionalDouble("epsilon", 0.3) : 0.3;
         String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
         boolean isQuantized = (quantization != null);
         int numSecondaryKeys = isQuantized ? VCTreeDataTupleConstants.Q_NUM_SECONDARY_FIELDS
@@ -901,7 +902,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
                 queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
                 distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory,
-                searchApproach, kMultiplier);
+                searchApproach, kMultiplier, indexEpsilon);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }
