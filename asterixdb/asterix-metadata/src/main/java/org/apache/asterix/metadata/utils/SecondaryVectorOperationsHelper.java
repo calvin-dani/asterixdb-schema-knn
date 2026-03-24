@@ -285,9 +285,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Extract K value from WITH clause
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
-        int K = (int) Math.sqrt(datasetCardinality); // default value
+        int K = (int) Math.sqrt((double) datasetCardinality /numPartitions); // default value
         if (withObjectNode != null) {
-            K = withObjectNode.getOptionalInt("num_clusters", (int) Math.sqrt(datasetCardinality));
+            K = withObjectNode.getOptionalInt("num_clusters", (int) Math.sqrt((double) datasetCardinality /numPartitions));
         }
 
         // Distance metric from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.)
