@@ -1119,7 +1119,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         throw HyracksDataException.create(
                                 new RuntimeException("Cannot build vector index: no training vectors were found. "
                                         + "Verify that the indexed field exists in the dataset and contains vector data, "
-                                        + "and that the dataset has at least 'train_list_number' records."));
+                                        + "and that sampling produced enough vectors for train_list_fraction."));
                     }
 
                     // Find max level

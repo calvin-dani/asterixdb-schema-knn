@@ -78,9 +78,9 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable MANHATTAN_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("manhattan distance");
+            UTF8StringPointable.generateUTF8Pointable("manhattan_distance");
     private static final UTF8StringPointable COSINE_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
+            UTF8StringPointable.generateUTF8Pointable("cosine_similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     public final ISerializerDeserializer<ADouble> doubleSerde =
