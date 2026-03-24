@@ -81,11 +81,15 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     // Multiplier for candidate limit: K * kMultiplier candidates sent to PK for reranking
     protected final int kMultiplier;
 
+    /** Epsilon from vector index WITH metadata (ANN / cluster search). */
+    protected final double indexEpsilon;
+
     public VectorSearchOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVectorBinaryAccessorFactory vectorAccessorFactory,
             java.io.Serializable distanceFunctionFactory, int[][] partitionsMap, int numPrimaryKeys,
-            int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory, int searchApproach, int kMultiplier) {
+            int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory, int searchApproach, int kMultiplier,
+            double indexEpsilon) {
         super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
@@ -99,6 +103,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         this.tupleFilterFactory = tupleFilterFactory;
         this.searchApproach = searchApproach;
         this.kMultiplier = kMultiplier;
+        this.indexEpsilon = indexEpsilon;
         this.outRecDescs[0] = outRecDesc;
 
         // Create tuple projector factory that extracts only PK fields
@@ -113,6 +118,6 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
                 retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
                 distanceFunctionFactory, partitionsMap, tupleFilterFactory, searchApproach, numSecondaryKeys,
-                kMultiplier);
+                kMultiplier, indexEpsilon);
     }
 }

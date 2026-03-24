@@ -857,6 +857,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         int num_clusters = -1;
         String quantization = "INVALID";
         String similarity = "INVALID";
+        double epsilon = 0.3;
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
@@ -870,6 +871,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             num_clusters = properties.getOptionalInt("num_clusters", -1);
             quantization = properties.getOptionalString("quantization", "INVALID");
             similarity = properties.getOptionalString("similarity", "INVALID");
+            epsilon = properties.getOptionalDouble("epsilon", 0.3);
 
             // Exactly one of train_list_number, train_list_percentage, or train_list_fraction must be set
             boolean hasNumber = train_list > 0;
@@ -951,6 +953,13 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             stringSerde.serialize(aString, fieldValue.getDataOutput());
             recordBuilder.addField(nameValue, fieldValue);
         }
+
+        nameValue.reset();
+        aString.setValue("epsilon");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        fieldValue.reset();
+        doubleSerde.serialize(new ADouble(epsilon), fieldValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
     }
 
     private AdmObjectNode readWithProperties(ARecord indexRecord) throws AlgebricksException {
@@ -961,6 +970,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         int num_clusters = -1;
         String quantization = "INVALID";
         String similarity = "INVALID";
+        double epsilon = 0.3;
+        int epsilonPos = indexRecord.getType().getFieldIndex("epsilon");
 
         // Read dimension field
         int dimensionPos = indexRecord.getType().getFieldIndex("dimension");
@@ -1016,10 +1027,19 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             }
         }
 
+        // Read epsilon field (optional for older metadata)
+        if (epsilonPos >= 0) {
+            IAObject epsilonObj = indexRecord.getValueByPos(epsilonPos);
+            if (epsilonObj != null && epsilonObj.getType().getTypeTag() == ATypeTag.DOUBLE) {
+                epsilon = ((ADouble) epsilonObj).getDoubleValue();
+            }
+        }
+
         // Reconstruct AdmObjectNode only if at least one field differs from default
         boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || (train_list_fraction >= 0)
                 || (num_clusters != -1) || (!"default".equals(quantization) && !"INVALID".equals(quantization))
-                || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity));
+                || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity))
+                || (epsilonPos >= 0 && Math.abs(epsilon - 0.3) > 1e-12);
 
         if (!hasNonDefaultValues) {
             return null;
@@ -1048,6 +1068,10 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
         if (!"euclidean".equals(similarity) && !"INVALID".equals(similarity)) {
             withObjectNode.set("similarity", new AdmStringNode(similarity));
+        }
+
+        if (epsilonPos >= 0) {
+            withObjectNode.set("epsilon", new AdmDoubleNode(epsilon));
         }
 
         return withObjectNode;
