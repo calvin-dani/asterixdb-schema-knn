@@ -852,7 +852,6 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
         // Handle case where WITH properties are null (no WITH clause was specified)
         int dimension = -1;
-        int train_list = -1;
         double train_list_fraction = -1.0;
         int num_clusters = -1;
         String quantization = "INVALID";
@@ -861,46 +860,27 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
-            // Accept both "train_list_number" (from SQL++ WITH clause) and "train_list" (from metadata roundtrip)
-            train_list = properties.getOptionalInt("train_list_number", -1);
-            if (train_list < 0) {
-                train_list = properties.getOptionalInt("train_list", -1);
-            }
-            double pct = properties.getOptionalDouble("train_list_percentage", -1.0);
-            double frac = properties.getOptionalDouble("train_list_fraction", -1.0);
+            train_list_fraction = properties.getOptionalDouble("train_list_fraction", -1.0);
             num_clusters = properties.getOptionalInt("num_clusters", -1);
             quantization = properties.getOptionalString("quantization", "INVALID");
             similarity = properties.getOptionalString("similarity", "INVALID");
             epsilon = properties.getOptionalDouble("epsilon", 0.3);
 
-            // Exactly one of train_list_number, train_list_percentage, or train_list_fraction must be set
-            boolean hasNumber = train_list > 0;
-            boolean hasPct = pct > 0 && pct <= 100;
-            boolean hasFrac = frac > 0 && frac <= 1.0;
-            int count = (hasNumber ? 1 : 0) + (hasPct ? 1 : 0) + (hasFrac ? 1 : 0);
-            if (count != 1) {
-                throw new HyracksDataException(
-                        "Exactly one of train_list_number, train_list_percentage, or train_list_fraction must be "
-                                + "specified. train_list_number: positive integer; train_list_percentage: 0-100; "
-                                + "train_list_fraction: 0.0-1.0");
-            }
-            if (hasPct) {
-                train_list_fraction = pct / 100.0;
-            } else if (hasFrac) {
-                train_list_fraction = frac;
+            boolean hasFrac = train_list_fraction > 0 && train_list_fraction <= 1.0;
+            if (!hasFrac) {
+                throw new HyracksDataException("No train_list_fraction defined in WITH clause");
             }
         }
 
         if (dimension < 0) {
             throw new HyracksDataException("No dimensions defined");
         }
-        if (train_list < 0 && train_list_fraction < 0) {
-            throw new HyracksDataException(
-                    "No train_list_number, train_list_percentage, or train_list_fraction defined");
+        if (train_list_fraction < 0) {
+            throw new HyracksDataException("No train_list_fraction defined in WITH clause");
         }
 
         if ("INVALID".equals(similarity)) {
-            throw new HyracksDataException("No similarity metric defined");
+            throw new HyracksDataException("No similarity metric defined in WITH clause");
         }
         nameValue.reset();
         aString.setValue("dimension");
@@ -909,21 +889,12 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         int32Serde.serialize(new AInt32(dimension), fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
 
-        if (train_list >= 0) {
-            nameValue.reset();
-            aString.setValue("train_list");
-            stringSerde.serialize(aString, nameValue.getDataOutput());
-            fieldValue.reset();
-            int32Serde.serialize(new AInt32(train_list), fieldValue.getDataOutput());
-            recordBuilder.addField(nameValue, fieldValue);
-        } else {
-            nameValue.reset();
-            aString.setValue("train_list_fraction");
-            stringSerde.serialize(aString, nameValue.getDataOutput());
-            fieldValue.reset();
-            doubleSerde.serialize(new ADouble(train_list_fraction), fieldValue.getDataOutput());
-            recordBuilder.addField(nameValue, fieldValue);
-        }
+        nameValue.reset();
+        aString.setValue("train_list_fraction");
+        stringSerde.serialize(aString, nameValue.getDataOutput());
+        fieldValue.reset();
+        doubleSerde.serialize(new ADouble(train_list_fraction), fieldValue.getDataOutput());
+        recordBuilder.addField(nameValue, fieldValue);
 
         if (num_clusters > 0) {
             nameValue.reset();
@@ -982,7 +953,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             }
         }
 
-        // Read train_list field
+        // Read train_list field (legacy integer count; no longer supported)
         int trainListPos = indexRecord.getType().getFieldIndex("train_list");
         if (trainListPos >= 0) {
             IAObject trainListObj = indexRecord.getValueByPos(trainListPos);
@@ -998,6 +969,12 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             if (trainListFractionObj != null && trainListFractionObj.getType().getTypeTag() == ATypeTag.DOUBLE) {
                 train_list_fraction = ((ADouble) trainListFractionObj).getDoubleValue();
             }
+        }
+
+        if (train_list >= 0 && train_list_fraction < 0) {
+            throw new AsterixException(ErrorCode.METADATA_ERROR,
+                    "This vector index uses a legacy train_list size in metadata; drop the index and recreate it "
+                            + "with train_list_fraction in the WITH clause.");
         }
 
         // Read num_clusters field
@@ -1036,8 +1013,8 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
 
         // Reconstruct AdmObjectNode only if at least one field differs from default
-        boolean hasNonDefaultValues = (dimension != -1) || (train_list != -1) || (train_list_fraction >= 0)
-                || (num_clusters != -1) || (!"default".equals(quantization) && !"INVALID".equals(quantization))
+        boolean hasNonDefaultValues = (dimension != -1) || (train_list_fraction >= 0) || (num_clusters != -1)
+                || (!"default".equals(quantization) && !"INVALID".equals(quantization))
                 || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity))
                 || (epsilonPos >= 0 && Math.abs(epsilon - 0.3) > 1e-12);
 
@@ -1051,10 +1028,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             withObjectNode.set("dimension", new AdmBigIntNode(dimension));
         }
 
-        // Use "train_list_number" or "train_list_fraction" key to match what consumers expect
-        if (train_list != -1) {
-            withObjectNode.set("train_list_number", new AdmBigIntNode(train_list));
-        } else if (train_list_fraction >= 0) {
+        if (train_list_fraction >= 0) {
             withObjectNode.set("train_list_fraction", new AdmDoubleNode(train_list_fraction));
         }
 
