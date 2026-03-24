@@ -45,7 +45,7 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_EPSILON = "epsilon";
     public static final String VECTOR_INDEX_DEFAULT_QUANTIZATION = "SQ8";
     /** Default for level-wise centroid search and ANN search predicate (matches VectorSearchPredicate). */
-    public static final double VECTOR_INDEX_DEFAULT_EPSILON = 0.3;
+    public static final double VECTOR_INDEX_DEFAULT_EPSILON = 0.25;
 
     /**
      * Canonical names for {@code similarity}, aligned with
