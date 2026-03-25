@@ -125,8 +125,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable MANHATTAN_FORMAT =
             UTF8StringPointable.generateUTF8Pointable("manhattan_distance");
-    private static final UTF8StringPointable COSINE_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("cosine_similarity");
+    private static final UTF8StringPointable COSINE_FORMAT = UTF8StringPointable.generateUTF8Pointable("cosine");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     // Serializable distance function implementations

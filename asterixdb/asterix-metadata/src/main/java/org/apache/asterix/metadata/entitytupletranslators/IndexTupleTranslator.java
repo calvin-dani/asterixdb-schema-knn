@@ -847,7 +847,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         }
     }
 
-    private void writeWithProperties(Index.VectorIndexDetails index) throws HyracksDataException {
+    private void writeWithProperties(Index.VectorIndexDetails index) throws HyracksDataException, AlgebricksException {
         AdmObjectNode properties = index.getWithObjectNode();
 
         // Handle case where WITH properties are null (no WITH clause was specified)
@@ -866,21 +866,21 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             similarity = properties.getOptionalString("similarity", "INVALID");
             epsilon = properties.getOptionalDouble("epsilon", 0.3);
 
-            boolean hasFrac = train_list_fraction > 0 && train_list_fraction <= 1.0;
-            if (!hasFrac) {
-                throw new HyracksDataException("No train_list_fraction defined in WITH clause");
-            }
+            // boolean hasFrac = train_list_fraction > 0 && train_list_fraction <= 1.0;
+            // if (!hasFrac) {
+            //     throw new HyracksDataException("No train_list_fraction defined in WITH clause");
+            // }
         }
 
         if (dimension < 0) {
-            throw new HyracksDataException("No dimensions defined");
+            throw new AsterixException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_REQUIRED);
         }
-        if (train_list_fraction < 0) {
-            throw new HyracksDataException("No train_list_fraction defined in WITH clause");
-        }
+        // if (train_list_fraction < 0) {
+        //     throw new HyracksDataException("No train_list_fraction defined in WITH clause");
+        // }
 
         if ("INVALID".equals(similarity)) {
-            throw new HyracksDataException("No similarity metric defined in WITH clause");
+            throw new AsterixException(ErrorCode.COMPILATION_VECTOR_INDEX_SIMILARITY_REQUIRED);
         }
         nameValue.reset();
         aString.setValue("dimension");
@@ -971,11 +971,11 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             }
         }
 
-        if (train_list >= 0 && train_list_fraction < 0) {
-            throw new AsterixException(ErrorCode.METADATA_ERROR,
-                    "This vector index uses a legacy train_list size in metadata; drop the index and recreate it "
-                            + "with train_list_fraction in the WITH clause.");
-        }
+        // if (train_list >= 0 && train_list_fraction < 0) {
+        //     throw new AsterixException(ErrorCode.METADATA_ERROR,
+        //             "This vector index uses a legacy train_list size in metadata; drop the index and recreate it "
+        //                     + "with train_list_fraction in the WITH clause.");
+        // }
 
         // Read num_clusters field
         int numClustersPos = indexRecord.getType().getFieldIndex("num_clusters");
@@ -1015,8 +1015,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         // Reconstruct AdmObjectNode only if at least one field differs from default
         boolean hasNonDefaultValues = (dimension != -1) || (train_list_fraction >= 0) || (num_clusters != -1)
                 || (!"default".equals(quantization) && !"INVALID".equals(quantization))
-                || (!"euclidean".equals(similarity) && !"INVALID".equals(similarity))
-                || (epsilonPos >= 0 && Math.abs(epsilon - 0.3) > 1e-12);
+                || (!"INVALID".equals(similarity)) || (epsilonPos >= 0 && Math.abs(epsilon - 0.3) > 1e-12);
 
         if (!hasNonDefaultValues) {
             return null;
@@ -1040,7 +1039,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             withObjectNode.set("quantization", new AdmStringNode(quantization));
         }
 
-        if (!"euclidean".equals(similarity) && !"INVALID".equals(similarity)) {
+        if (!"INVALID".equals(similarity)) {
             withObjectNode.set("similarity", new AdmStringNode(similarity));
         }
 

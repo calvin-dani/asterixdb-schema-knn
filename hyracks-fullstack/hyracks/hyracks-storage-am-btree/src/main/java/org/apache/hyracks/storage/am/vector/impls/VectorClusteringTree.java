@@ -880,7 +880,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     }
                     return sum; // Return squared distance (no sqrt)
                 };
-            case "manhattan distance":
             case "manhattan":
             case "l1":
                 return (a, b) -> {
@@ -890,7 +889,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     }
                     return sum;
                 };
-            case "cosine similarity":
             case "cosine":
                 return (a, b) -> {
                     // Cosine similarity returns 1 - similarity as distance (for minimization)
@@ -909,7 +907,6 @@ public class VectorClusteringTree extends AbstractTreeIndex {
                     return 1.0 - similarity; // Convert similarity to distance
                 };
             case "dot":
-            case "dot product":
                 return (a, b) -> {
                     // Dot product as distance (negated for minimization - higher dot product = closer)
                     double dotProduct = 0.0;
