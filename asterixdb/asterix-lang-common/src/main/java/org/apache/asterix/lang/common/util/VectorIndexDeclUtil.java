@@ -46,6 +46,7 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_EPSILON = "epsilon";
     public static final String VECTOR_INDEX_DEFAULT_QUANTIZATION = "SQ8";
     /** Default for level-wise centroid search and ANN search predicate (matches VectorSearchPredicate). */
+    public static final double VECTOR_INDEX_DEFAULT_TRAIN_LIST = 0.1;
     public static final double VECTOR_INDEX_DEFAULT_EPSILON = 0.25;
 
     /**
@@ -84,37 +85,8 @@ public class VectorIndexDeclUtil {
         validateWithClauseFieldNames(node, sourceLoc);
         validateDimension(node, sourceLoc);
         validateTrainList(node);
-
-        String similarity = node.getOptionalString(VECTOR_INDEX_PARAMETER_SIMILARITY, null);
-        if (similarity == null || similarity.trim().isEmpty()) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_SIMILARITY_REQUIRED);
-        }
-
-        String normalizedSimilarity = similarity.trim().toLowerCase(Locale.ROOT);
-        if (!ALLOWED_VECTOR_DISTANCE_METRICS.contains(normalizedSimilarity)) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_SIMILARITY_UNSUPPORTED,
-                    similarity.trim());
-        }
-
-        IAdmNode qNode = node.get(VECTOR_INDEX_PARAMETER_QUANTIZATION);
-        if (qNode == null || qNode.getType() == ATypeTag.NULL) {
-            node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(VECTOR_INDEX_DEFAULT_QUANTIZATION));
-        } else if (qNode.getType() != ATypeTag.STRING) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_QUANTIZATION_UNSUPPORTED,
-                    quantizationParameterValueForError(qNode));
-        } else {
-            String quantization = ((AdmStringNode) qNode).get();
-            String qNorm = quantization.trim().toUpperCase(Locale.ROOT);
-            if (qNorm.isEmpty()) {
-                node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(VECTOR_INDEX_DEFAULT_QUANTIZATION));
-            } else if (!ALLOWED_VECTOR_INDEX_QUANTIZATION.contains(qNorm)) {
-                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_QUANTIZATION_UNSUPPORTED,
-                        quantization.trim());
-            } else {
-                node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(qNorm));
-            }
-        }
-
+        validateSimilarity(node,sourceLoc);
+        validateQuantization(node,sourceLoc);
         validateEpsilon(node);
 
         return node;
@@ -124,32 +96,73 @@ public class VectorIndexDeclUtil {
             throws CompilationException {
         for (String name : node.getFieldNames()) {
             if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
-                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_UNKNOWN_WITH_FIELD, name);
+                throw new CompilationException("Failed to create vector index. Unknown field `" + name + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon");
             }
         }
     }
 
     private static void validateDimension(AdmObjectNode node, SourceLocation sourceLoc) throws CompilationException {
         IAdmNode dimNode = node.get(VECTOR_INDEX_PARAMETER_DIMENSION);
-        if (dimNode == null || dimNode.getType() == ATypeTag.NULL) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_REQUIRED);
+        if (dimNode == null) {
+             throw new CompilationException( "Failed to create vector index. Missing required parameter `dimension` in WITH clause.");
         }
         long dimValue;
         switch (dimNode.getType()) {
             case BIGINT:
                 long lv = ((AdmBigIntNode) dimNode).get();
                 if (lv <= 0 || lv > Integer.MAX_VALUE) {
-                    throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID);
+                     throw new CompilationException("Failed to create vector index. Invalid `dimension` parameter value. It must be an integer greater than 0");
                 }
                 dimValue = lv;
                 break;
-            case DOUBLE:
-                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID);
             default:
-                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID);
+                 throw new CompilationException("Failed to create vector index. Invalid `dimension` parameter value. It must be an integer greater than 0");
         }
         node.remove(VECTOR_INDEX_PARAMETER_DIMENSION);
         node.set(VECTOR_INDEX_PARAMETER_DIMENSION, new AdmBigIntNode(dimValue));
+    }
+
+    private static void validateSimilarity(AdmObjectNode node, SourceLocation sourceLoc) throws CompilationException {
+        IAdmNode simNode = node.get(VECTOR_INDEX_PARAMETER_SIMILARITY);
+        if (simNode == null) {
+             throw new CompilationException( "Failed to create vector index. Missing required parameter `similarity` in WITH clause.");
+        }
+        switch (simNode.getType()) {
+            case STRING:
+                String similarity = ((AdmStringNode) simNode).get();
+                if (similarity == null || similarity.trim().isEmpty()) {
+                     throw new CompilationException("Failed to create vector index. Invalid `similarity` parameter value. Allowed values: EUCLIDEAN, L2, EUCLIDEAN_SQUARED, L2_SQUARED, COSINE and DOT");
+
+                }
+                String normalizedSimilarity = similarity.trim().toLowerCase(Locale.ROOT);
+                if (!ALLOWED_VECTOR_DISTANCE_METRICS.contains(normalizedSimilarity)) {
+                     throw new CompilationException("Failed to create vector index. Invalid `similarity` parameter value. Allowed values: EUCLIDEAN, L2, EUCLIDEAN_SQUARED, L2_SQUARED, COSINE and DOT");
+                }
+                break;
+            default:
+                 throw new CompilationException("Failed to create vector index. Invalid `similarity` parameter value. Allowed values: EUCLIDEAN, L2, EUCLIDEAN_SQUARED, L2_SQUARED, COSINE and DOT");
+        }
+    }
+
+    private static void validateQuantization(AdmObjectNode node, SourceLocation sourceLoc) throws CompilationException {
+        IAdmNode qNode = node.get(VECTOR_INDEX_PARAMETER_QUANTIZATION);
+        if (qNode == null) {
+            node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(VECTOR_INDEX_DEFAULT_QUANTIZATION));
+            return;
+        }
+        switch (qNode.getType()) {
+            case STRING:
+                    String quantization = ((AdmStringNode) qNode).get();
+                    String qNorm = quantization.trim().toUpperCase(Locale.ROOT);
+                    if (!ALLOWED_VECTOR_INDEX_QUANTIZATION.contains(qNorm)) {
+                         throw new CompilationException( "Failed to create vector index. Invalid `quantization` parameter value. Allowed values: SQ4 and SQ8");
+                    } else {
+                        node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(qNorm));
+                    }
+                break;
+            default:
+                 throw new CompilationException( "Failed to create vector index. Invalid `quantization` parameter value. Allowed values: SQ4 and SQ8");
+        }
     }
 
   
@@ -157,20 +170,16 @@ public class VectorIndexDeclUtil {
      * Training list size is specified only via {@code train_list_fraction} (with ANALYZE/cardinality at build time).
      */
     private static void validateTrainList(AdmObjectNode node) throws CompilationException {
-        //        if (node.contains(DISALLOWED_TRAIN_LIST_NUMBER) || node.contains(DISALLOWED_TRAIN_LIST_PERCENTAGE)) {
-        //            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_CONFLICT);
-        //        }
-        //        if (!node.contains(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION)) {
-        //            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_UNSPECIFIED);
-        //        }
+
         IAdmNode fn = node.get(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION);
-        if (fn == null || fn.getType() == ATypeTag.NULL) {
+        if (fn == null) {
+            node.set(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION, new AdmDoubleNode(VECTOR_INDEX_DEFAULT_TRAIN_LIST));
             return;
         }
         double trainListFractionValue =
-                parseDoubleOrBigInt(fn, ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_FRACTION_RANGE);
+                parseDoubleOrBigInt(fn, "Failed to create vector index. Invalid `train_list_fraction` parameter value. It must be in the range of (0,1]");
         if (trainListFractionValue <= 0 || trainListFractionValue > 1) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_FRACTION_RANGE);
+             throw new CompilationException("Failed to create vector index. Invalid `train_list_fraction` parameter value. It must be in the range of (0,1]");
         }
         if (fn.getType() == ATypeTag.BIGINT) {
             node.remove(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION);
@@ -180,13 +189,13 @@ public class VectorIndexDeclUtil {
 
     private static void validateEpsilon(AdmObjectNode node) throws CompilationException {
         IAdmNode epsNode = node.get(VECTOR_INDEX_PARAMETER_EPSILON);
-        if (epsNode == null || epsNode.getType() == ATypeTag.NULL) {
+        if (epsNode == null) {
             node.set(VECTOR_INDEX_PARAMETER_EPSILON, new AdmDoubleNode(VECTOR_INDEX_DEFAULT_EPSILON));
             return;
         }
-        double v = parseDoubleOrBigInt(epsNode, ErrorCode.COMPILATION_VECTOR_INDEX_EPSILON_RANGE);
+        double v = parseDoubleOrBigInt(epsNode, "Failed to create vector index. Invalid `epsilon` parameter value. It must be in the range of [0,1]");
         if (v < 0 || v > 1) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_EPSILON_RANGE);
+             throw new CompilationException("Failed to create vector index. Invalid `epsilon` parameter value. It must be in the range of [0,1]");
         }
         if (epsNode.getType() == ATypeTag.BIGINT) {
             node.remove(VECTOR_INDEX_PARAMETER_EPSILON);
@@ -213,14 +222,14 @@ public class VectorIndexDeclUtil {
         }
     }
 
-    private static double parseDoubleOrBigInt(IAdmNode n, ErrorCode invalidTypeCode) throws CompilationException {
+    private static double parseDoubleOrBigInt(IAdmNode n, String ErrorMsg) throws CompilationException {
         switch (n.getType()) {
             case DOUBLE:
                 return ((AdmDoubleNode) n).get();
             case BIGINT:
                 return ((AdmBigIntNode) n).get();
             default:
-                throw new CompilationException(invalidTypeCode);
+                 throw new CompilationException(ErrorMsg);
         }
     }
 
