@@ -200,7 +200,7 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                     if (func == null) {
                         throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
                                 String.format(
-                                        "Illegal distance function: '%s'. Supported: euclidean, l2, cosine similarity, dot product, manhattan distance",
+                                        "Illegal distance function: '%s'. Allowed values: EUCLIDEAN, L2, EUCLIDEAN_SQUARED, L2_SQUARED, COSINE, DOT ",
                                         formatPointable.toString()));
                     }
                 } else {
