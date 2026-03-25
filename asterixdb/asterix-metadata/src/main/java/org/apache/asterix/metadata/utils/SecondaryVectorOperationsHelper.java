@@ -207,15 +207,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // Extract sampling parameters from WITH clause (train_list_fraction only; validated at compile time)
         AdmObjectNode withObjectNodeForSampling = indexDetails.getWithObjectNode();
         double trainListFraction = (withObjectNodeForSampling != null)
-                ? withObjectNodeForSampling.getOptionalDouble("train_list_fraction", -1.0) : -1.0;
+                ? withObjectNodeForSampling.getOptionalDouble("train_list_fraction", 0.1) : 0.1;
         long sampleSeed = (withObjectNodeForSampling != null)
                 ? (long) withObjectNodeForSampling.getOptionalDouble("sample_seed", System.currentTimeMillis())
                 : System.currentTimeMillis();
 
-        boolean hasFraction = trainListFraction > 0 && trainListFraction <= 1.0;
-        if (!hasFraction) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_UNSPECIFIED, sourceLoc);
-        }
+        //        boolean hasFraction = trainListFraction > 0 && trainListFraction <= 1.0;
+        //        if (!hasFraction) {
+        //            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_UNSPECIFIED, sourceLoc);
+        //        }
 
         // Retrieve cardinality from sample index metadata (needed for fraction-based sample size)
         long datasetCardinality = 0;
@@ -285,9 +285,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Extract K value from WITH clause
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
-        int K = (int) Math.sqrt((double) datasetCardinality /numPartitions); // default value
+        int K = (int) Math.sqrt((double) datasetCardinality / numPartitions); // default value
         if (withObjectNode != null) {
-            K = withObjectNode.getOptionalInt("num_clusters", (int) Math.sqrt((double) datasetCardinality /numPartitions));
+            K = withObjectNode.getOptionalInt("num_clusters",
+                    (int) Math.sqrt((double) datasetCardinality / numPartitions));
         }
 
         // Distance metric from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.)

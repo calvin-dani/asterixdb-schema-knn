@@ -51,13 +51,10 @@ public class VectorIndexDeclUtil {
      * Canonical names for {@code similarity}, aligned with
      * {@link org.apache.asterix.runtime.utils.VectorDistanceFunctionFactory} (after {@code toLowerCase()}).
      */
-    private static final Set<String> ALLOWED_VECTOR_DISTANCE_METRICS = Set.of("euclidean", "l2", "euclidean_squared",
-            "l2_squared", "manhattan_distance", "cosine_similarity", "dot");
+    private static final Set<String> ALLOWED_VECTOR_DISTANCE_METRICS =
+            Set.of("euclidean", "l2", "euclidean_squared", "l2_squared", "manhattan_distance", "cosine", "dot");
 
     private static final Set<String> ALLOWED_VECTOR_INDEX_QUANTIZATION = Set.of("SQ4", "SQ8");
-
-    private static final String DISALLOWED_TRAIN_LIST_NUMBER = "train_list_number";
-    private static final String DISALLOWED_TRAIN_LIST_PERCENTAGE = "train_list_percentage";
 
     private VectorIndexDeclUtil() {
     }
@@ -116,6 +113,25 @@ public class VectorIndexDeclUtil {
             throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_REQUIRED, sourceLoc,
                     locationSuffix(sourceLoc));
         }
+        long dimValue;
+        switch (dimNode.getType()) {
+            case BIGINT:
+                long lv = ((AdmBigIntNode) dimNode).get();
+                if (lv <= 0 || lv > Integer.MAX_VALUE) {
+                    throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID, sourceLoc,
+                            locationSuffix(sourceLoc));
+                }
+                dimValue = lv;
+                break;
+            case DOUBLE:
+                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID, sourceLoc,
+                        locationSuffix(sourceLoc));
+            default:
+                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID, sourceLoc,
+                        locationSuffix(sourceLoc));
+        }
+        node.remove(VECTOR_INDEX_PARAMETER_DIMENSION);
+        node.set(VECTOR_INDEX_PARAMETER_DIMENSION, new AdmBigIntNode(dimValue));
     }
 
     private static String locationSuffix(SourceLocation sourceLoc) {
@@ -129,15 +145,15 @@ public class VectorIndexDeclUtil {
      * Training list size is specified only via {@code train_list_fraction} (with ANALYZE/cardinality at build time).
      */
     private static void validateTrainList(AdmObjectNode node) throws CompilationException {
-        if (node.contains(DISALLOWED_TRAIN_LIST_NUMBER) || node.contains(DISALLOWED_TRAIN_LIST_PERCENTAGE)) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_CONFLICT);
-        }
-        if (!node.contains(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION)) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_UNSPECIFIED);
-        }
+        //        if (node.contains(DISALLOWED_TRAIN_LIST_NUMBER) || node.contains(DISALLOWED_TRAIN_LIST_PERCENTAGE)) {
+        //            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_CONFLICT);
+        //        }
+        //        if (!node.contains(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION)) {
+        //            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_UNSPECIFIED);
+        //        }
         IAdmNode fn = node.get(VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION);
         if (fn == null || fn.getType() == ATypeTag.NULL) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_UNSPECIFIED);
+            return;
         }
         double trainListFractionValue =
                 parseDoubleOrBigInt(fn, ErrorCode.COMPILATION_VECTOR_INDEX_TRAIN_LIST_FRACTION_RANGE);
