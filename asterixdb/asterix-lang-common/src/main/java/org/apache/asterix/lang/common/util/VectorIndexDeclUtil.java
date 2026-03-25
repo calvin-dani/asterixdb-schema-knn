@@ -25,6 +25,7 @@ import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.lang.common.expression.RecordConstructor;
 import org.apache.asterix.object.base.AdmBigIntNode;
+import org.apache.asterix.object.base.AdmBooleanNode;
 import org.apache.asterix.object.base.AdmDoubleNode;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.object.base.AdmStringNode;
@@ -56,6 +57,13 @@ public class VectorIndexDeclUtil {
 
     private static final Set<String> ALLOWED_VECTOR_INDEX_QUANTIZATION = Set.of("SQ4", "SQ8");
 
+    /**
+     * Only these keys may appear in the vector index {@code WITH} clause (unknown keys are a compile error).
+     */
+    private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS = Set.of(VECTOR_INDEX_PARAMETER_DIMENSION,
+            VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION,
+            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K);
+
     private VectorIndexDeclUtil() {
     }
 
@@ -73,6 +81,7 @@ public class VectorIndexDeclUtil {
         }
         final AdmObjectNode node = ExpressionUtils.toNode(withRecord);
 
+        validateWithClauseFieldNames(node, sourceLoc);
         validateDimension(node, sourceLoc);
         validateTrainList(node);
 
@@ -87,10 +96,14 @@ public class VectorIndexDeclUtil {
                     similarity.trim());
         }
 
-        String quantization = node.getOptionalString(VECTOR_INDEX_PARAMETER_QUANTIZATION, null);
-        if (quantization == null) {
+        IAdmNode qNode = node.get(VECTOR_INDEX_PARAMETER_QUANTIZATION);
+        if (qNode == null || qNode.getType() == ATypeTag.NULL) {
             node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(VECTOR_INDEX_DEFAULT_QUANTIZATION));
+        } else if (qNode.getType() != ATypeTag.STRING) {
+            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_QUANTIZATION_UNSUPPORTED,
+                    quantizationParameterValueForError(qNode));
         } else {
+            String quantization = ((AdmStringNode) qNode).get();
             String qNorm = quantization.trim().toUpperCase(Locale.ROOT);
             if (qNorm.isEmpty()) {
                 node.set(VECTOR_INDEX_PARAMETER_QUANTIZATION, new AdmStringNode(VECTOR_INDEX_DEFAULT_QUANTIZATION));
@@ -107,40 +120,39 @@ public class VectorIndexDeclUtil {
         return node;
     }
 
+    private static void validateWithClauseFieldNames(AdmObjectNode node, SourceLocation sourceLoc)
+            throws CompilationException {
+        for (String name : node.getFieldNames()) {
+            if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
+                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_UNKNOWN_WITH_FIELD, name);
+            }
+        }
+    }
+
     private static void validateDimension(AdmObjectNode node, SourceLocation sourceLoc) throws CompilationException {
         IAdmNode dimNode = node.get(VECTOR_INDEX_PARAMETER_DIMENSION);
         if (dimNode == null || dimNode.getType() == ATypeTag.NULL) {
-            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_REQUIRED, sourceLoc,
-                    locationSuffix(sourceLoc));
+            throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_REQUIRED);
         }
         long dimValue;
         switch (dimNode.getType()) {
             case BIGINT:
                 long lv = ((AdmBigIntNode) dimNode).get();
                 if (lv <= 0 || lv > Integer.MAX_VALUE) {
-                    throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID, sourceLoc,
-                            locationSuffix(sourceLoc));
+                    throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID);
                 }
                 dimValue = lv;
                 break;
             case DOUBLE:
-                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID, sourceLoc,
-                        locationSuffix(sourceLoc));
+                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID);
             default:
-                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID, sourceLoc,
-                        locationSuffix(sourceLoc));
+                throw new CompilationException(ErrorCode.COMPILATION_VECTOR_INDEX_DIMENSION_INVALID);
         }
         node.remove(VECTOR_INDEX_PARAMETER_DIMENSION);
         node.set(VECTOR_INDEX_PARAMETER_DIMENSION, new AdmBigIntNode(dimValue));
     }
 
-    private static String locationSuffix(SourceLocation sourceLoc) {
-        if (sourceLoc == null) {
-            return "";
-        }
-        return String.format(" (in line %d, at column %d)", sourceLoc.getLine(), sourceLoc.getColumn());
-    }
-
+  
     /**
      * Training list size is specified only via {@code train_list_fraction} (with ANALYZE/cardinality at build time).
      */
@@ -179,6 +191,25 @@ public class VectorIndexDeclUtil {
         if (epsNode.getType() == ATypeTag.BIGINT) {
             node.remove(VECTOR_INDEX_PARAMETER_EPSILON);
             node.set(VECTOR_INDEX_PARAMETER_EPSILON, new AdmDoubleNode(v));
+        }
+    }
+
+    /**
+     * Value text for {@link ErrorCode#COMPILATION_VECTOR_INDEX_QUANTIZATION_UNSUPPORTED} when {@code quantization}
+     * is present but not a string (e.g. numeric literal).
+     */
+    private static String quantizationParameterValueForError(IAdmNode qNode) {
+        switch (qNode.getType()) {
+            case BIGINT:
+                return Long.toString(((AdmBigIntNode) qNode).get());
+            case DOUBLE:
+                return Double.toString(((AdmDoubleNode) qNode).get());
+            case BOOLEAN:
+                return Boolean.toString(((AdmBooleanNode) qNode).get());
+            case STRING:
+                return ((AdmStringNode) qNode).get();
+            default:
+                return qNode.toString();
         }
     }
 
