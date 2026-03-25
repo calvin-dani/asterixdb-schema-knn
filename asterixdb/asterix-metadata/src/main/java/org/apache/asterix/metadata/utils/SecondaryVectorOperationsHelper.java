@@ -948,7 +948,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 dataset.getDatasetName());
         if (sampleIndex == null) {
             throw new CompilationException(ErrorCode.COMPILATION_ERROR, sourceLoc,
-                    "Run ANALYZE on dataset before creating VTree.");
+                    "Run ANALYZE on the dataset before creating a vector index.");
         }
 
         // 2. Extract quantization parameters (default label SQ8 matches DDL; bits 8 for SQ8)
