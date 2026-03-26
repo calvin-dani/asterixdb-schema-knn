@@ -322,7 +322,7 @@ public class LSMVCTreeLocalResource extends LsmResource implements IQuantizedRes
         //        boolean atomic = json.get("atomic").asBoolean();
 
         //TODO CALVIN DANI : MAKE DYNAMIC
-        int vectorDimensions = json.has("vectorDimensions") ? json.get("vectorDimensions").asInt() : 784;
+        int vectorDimensions = json.has("vectorDimensions") ? json.get("vectorDimensions").asInt() : -1;
         int numPrimaryKeyFields = json.has("numPrimaryKeyFields") ? json.get("numPrimaryKeyFields").asInt() : 1;
         int numIncludeFields = json.has("numIncludeFields") ? json.get("numIncludeFields").asInt() : 0;
         int[] vectorFields =
