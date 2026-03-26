@@ -95,7 +95,7 @@ public class CreateIndexStatement extends AbstractStatement {
             Identifier vectorIndexName, CreateIndexStatement.IndexedElement vectorField,
             List<CreateIndexStatement.IndexedElement> includedFields, RecordConstructor withRecord, boolean ifNotExists)
             throws CompilationException {
-        return new CreateIndexStatement(namespace, datasetName, vectorIndexName, IndexType.VECTOR,
+        return new CreateIndexStatement(namespace, datasetName, vectorIndexName, IndexType.VTREE,
                 Collections.singletonList(vectorField), false, 0, null, ifNotExists, null, null, null, includedFields,
                 withRecord);
     }

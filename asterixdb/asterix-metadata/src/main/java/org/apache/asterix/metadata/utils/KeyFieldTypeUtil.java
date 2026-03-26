@@ -274,7 +274,7 @@ public class KeyFieldTypeUtil {
                         chooseSource(keySourceIndicators, 0, recordType, metaRecordType));
                 IAType keyType = keyPairType.first;
                 return NonTaggedFormatUtil.getNumDimensions(keyType.getTypeTag()) * 2;
-            case VECTOR:
+            case VTREE:
                 return ((Index.VectorIndexDetails) index.getIndexDetails()).getKeyFieldNames().size();
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, index.getIndexType());

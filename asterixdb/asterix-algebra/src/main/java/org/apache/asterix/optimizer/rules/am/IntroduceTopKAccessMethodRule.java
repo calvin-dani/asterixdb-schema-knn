@@ -549,7 +549,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             return true;
         }
 
-        if (index.getIndexType() != IndexType.VECTOR) {
+        if (index.getIndexType() != IndexType.VTREE) {
             return false;
         }
 
@@ -793,7 +793,7 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             Map.Entry<Index, List<Pair<Integer, Integer>>> indexEntry = indexIt.next();
             Index index = indexEntry.getKey();
 
-            if (index.getIndexType() == IndexType.VECTOR) {
+            if (index.getIndexType() == IndexType.VTREE) {
                 // If query has filter, check if index has required INCLUDE fields
                 if (hasFilter && !indexHasIncludeFields(index, filterFieldNames)) {
                     // Skip this index - it doesn't have required INCLUDE fields for the filter

@@ -444,7 +444,7 @@ public class AccessMethodUtils {
             Index index, List<Object> dest) throws AlgebricksException {
         // In case of an inverted-index or vector-index search, secondary keys will not be generated.
         // For vector indexes, this avoids transferring large embeddings when only PKs are needed.
-        boolean primaryKeysOnly = isInvertedIndex(index) || index.getIndexType() == IndexType.VECTOR;
+        boolean primaryKeysOnly = isInvertedIndex(index) || index.getIndexType() == IndexType.VTREE;
         if (!primaryKeysOnly) {
             switch (index.getIndexType()) {
                 case ARRAY:
@@ -465,7 +465,7 @@ public class AccessMethodUtils {
                 case RTREE:
                     dest.addAll(KeyFieldTypeUtil.getRTreeIndexKeyTypes(index, recordType, metaRecordType));
                     break;
-                case VECTOR:
+                case VTREE:
                     dest.addAll(KeyFieldTypeUtil.getVectorIndexKeyTypes(index, recordType, metaRecordType));
                     break;
                 default:
@@ -503,7 +503,7 @@ public class AccessMethodUtils {
         int numSecondaryKeys = KeyFieldTypeUtil.getNumSecondaryKeys(index, recordType, metaRecordType);
         // In case of an inverted-index or vector-index search, secondary keys will not be generated.
         // For vector indexes, this is a significant optimization since embeddings are very large (1024+ floats).
-        boolean skipSecondaryKeys = isInvertedIndex(index) || index.getIndexType() == IndexType.VECTOR;
+        boolean skipSecondaryKeys = isInvertedIndex(index) || index.getIndexType() == IndexType.VTREE;
         int numVars = skipSecondaryKeys ? numPrimaryKeys : numPrimaryKeys + numSecondaryKeys;
 
         for (int i = 0; i < numVars; i++) {
@@ -538,7 +538,7 @@ public class AccessMethodUtils {
 
         // If a secondary-index search didn't generate SKs, set it to zero.
         // Currently, inverted-index and vector-index searches don't generate any SKs.
-        boolean skipSecondaryKeys = isInvertedIndex(index) || index.getIndexType() == IndexType.VECTOR;
+        boolean skipSecondaryKeys = isInvertedIndex(index) || index.getIndexType() == IndexType.VTREE;
         if (skipSecondaryKeys) {
             numSecondaryKeys = 0;
         }

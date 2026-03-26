@@ -147,7 +147,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
     @Override
     public boolean matchIndexType(IndexType indexType) {
-        return indexType == IndexType.VECTOR;
+        return indexType == IndexType.VTREE;
     }
 
     @Override
@@ -316,7 +316,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         context.computeAndSetTypeEnvironmentForOperator(assignSearchKeys);
 
         // Create VectorJobGenParams to pass parameters to Hyracks runtime
-        VectorJobGenParams jobGenParams = new VectorJobGenParams(chosenIndex.getIndexName(), IndexType.VECTOR,
+        VectorJobGenParams jobGenParams = new VectorJobGenParams(chosenIndex.getIndexName(), IndexType.VTREE,
                 chosenIndex.getDatabaseName(), dataset.getDataverseName(), dataset.getDatasetName(), false, // retainInput - not needed for simple case
                 false // requiresBroadcast
         );
@@ -393,7 +393,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             String queryDistanceMetric) throws AlgebricksException {
         // Check if this ANN_DISTANCE expression can use the given vector index
 
-        if (index.getIndexType() != IndexType.VECTOR) {
+        if (index.getIndexType() != IndexType.VTREE) {
             return false;
         }
 
@@ -518,15 +518,14 @@ public class VectorIndexAccessMethod implements IAccessMethod {
      * @return Normalized distance metric string, or "euclidean" as default
      */
     public static String getIndexDistanceMetric(Index index) {
-        if (index.getIndexType() != IndexType.VECTOR) {
-            return "euclidean"; // Default for non-vector indexes
+        if (index.getIndexType() != IndexType.VTREE) {
+            return ""; // Default for non-vector indexes
         }
 
         Index.VectorIndexDetails vectorDetails = (Index.VectorIndexDetails) index.getIndexDetails();
         AdmObjectNode withObjectNode = vectorDetails.getWithObjectNode();
 
-        String indexMetric =
-                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
+        String indexMetric = (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "") : "";
 
         return normalizeDistanceMetric(indexMetric);
     }

@@ -318,7 +318,7 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                 case ARRAY:
                     // These details are handled separately for array indexes.
                     break;
-                case VECTOR:
+                case VTREE:
                     // Vector indexes are handled similarly to VALUE indexes
                     Index.VectorIndexDetails vectorIndexDetails2 = (Index.VectorIndexDetails) index.getIndexDetails();
                     // Start with the vector field (key field)
@@ -872,7 +872,7 @@ public class IntroduceSecondaryIndexInsertDeleteRule implements IAlgebraicRewrit
                     skTypes = textIndexDetails.getKeyFieldTypes();
                     indicators = textIndexDetails.getKeyFieldSourceIndicators();
                     break;
-                case VECTOR:
+                case VTREE:
                     Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
                     // For vector indexes, get the vector field name
                     skNames = new ArrayList<>(vectorIndexDetails.getKeyFieldNames());

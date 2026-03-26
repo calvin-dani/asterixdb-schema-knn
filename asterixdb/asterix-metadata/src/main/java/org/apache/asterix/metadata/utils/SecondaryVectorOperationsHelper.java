@@ -292,8 +292,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         }
 
         // Distance metric from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.)
-        String distanceMetric =
-                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
+        String distanceMetric = (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "") : "";
+
+        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", -1) : -1;
 
         int maxScalableKmeansIter = 2;
 
@@ -337,7 +338,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
                         new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
-                        partitioningProperties.getComputeStorageMap(), distanceMetric);
+                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -496,9 +497,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Extract WITH clause parameters early (needed for output record descriptor construction)
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
-        String distanceMetric =
-                (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "euclidean") : "euclidean";
-        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", 384) : 384;
+        String distanceMetric = (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "") : "";
+        int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", -1) : -1;
         String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
         double levelwiseEpsilon = (withObjectNode != null) ? withObjectNode.getOptionalDouble("epsilon", 0.3) : 0.3;
         final boolean isQuantized;

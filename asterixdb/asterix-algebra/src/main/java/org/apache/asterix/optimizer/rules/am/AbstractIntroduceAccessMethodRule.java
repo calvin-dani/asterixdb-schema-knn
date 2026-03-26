@@ -874,7 +874,7 @@ public abstract class AbstractIntroduceAccessMethodRule implements IAlgebraicRew
                     keySources = textIndexDetails.getKeyFieldSourceIndicators();
                     isOverridingKeyFieldTypes = textIndexDetails.isOverridingKeyFieldTypes();
                     break;
-                case VECTOR:
+                case VTREE:
                     Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
                     keyFieldNames = vectorIndexDetails.getKeyFieldNames();
                     keyFieldTypes = new ArrayList<>();

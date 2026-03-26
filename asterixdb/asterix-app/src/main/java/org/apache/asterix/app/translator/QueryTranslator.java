@@ -1419,7 +1419,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 aRecordType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(aRecordType, ds);
             }
 
-            indexedElements = indexType == IndexType.VECTOR ? stmtCreateIndex.getIncludeElements() : indexedElements;
+            indexedElements = indexType == IndexType.VTREE ? stmtCreateIndex.getIncludeElements() : indexedElements;
             indexedElementsCount = indexedElements.size();
 
             List<List<IAType>> indexFieldTypes = new ArrayList<>(indexedElementsCount);
@@ -1580,7 +1580,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                     }
 
                     if (fieldTypePrime == null) {
-                        if (indexType != IndexType.BTREE && indexType != IndexType.VECTOR) {
+                        if (indexType != IndexType.BTREE && indexType != IndexType.VTREE) {
                             if (projectPath != null) {
                                 String fieldName =
                                         LogRedactionUtil.userData(RecordUtil.toFullyQualifiedName(projectPath));
@@ -1646,7 +1646,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
                 }
             }
             Index.IIndexDetails indexDetails;
-            if (indexType == IndexType.VECTOR) {
+            if (indexType == IndexType.VTREE) {
                 List<CreateIndexStatement.IndexedElement> includeElements = stmtCreateIndex.getIncludeElements();
                 int includeElementsCount = includeElements.size();
 
@@ -1983,7 +1983,7 @@ public class QueryTranslator extends AbstractLangTranslator implements IStatemen
             MetadataManager.INSTANCE.addIndex(metadataProvider.getMetadataTxnContext(), index);
 
             // VECTOR INDEX: Multi-job pattern (creation -> static structure -> loading)
-            if (index.getIndexType() == IndexType.VECTOR) {
+            if (index.getIndexType() == IndexType.VTREE) {
                 // JOB 1: Create empty index files
                 spec = IndexUtil.buildSecondaryIndexCreationJobSpec(ds, index, metadataProvider, sourceLoc);
                 if (spec == null) {

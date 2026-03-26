@@ -175,7 +175,7 @@ public abstract class SecondaryIndexOperationsHelper implements ISecondaryIndexO
             case BTREE:
                 indexOperationsHelper = new SecondaryBTreeOperationsHelper(dataset, index, metadataProvider, sourceLoc);
                 break;
-            case VECTOR:
+            case VTREE:
                 indexOperationsHelper =
                         new SecondaryVectorOperationsHelper(dataset, index, metadataProvider, sourceLoc);
                 break;

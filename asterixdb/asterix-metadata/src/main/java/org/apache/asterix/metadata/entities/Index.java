@@ -305,7 +305,7 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             case BTREE:
             case SAMPLE:
                 return ResourceType.LSM_BTREE;
-            case VECTOR:
+            case VTREE:
                 return ResourceType.LSM_BTREE; // VECTOR uses LSM_BTREE as base structure
             case RTREE:
                 return ResourceType.LSM_RTREE;
@@ -330,7 +330,7 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
         TEXT,
         ARRAY,
         SAMPLE,
-        VECTOR;
+        VTREE;
 
         public static IndexCategory of(IndexType indexType) {
             switch (indexType) {
@@ -346,8 +346,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
                     return ARRAY;
                 case SAMPLE:
                     return SAMPLE;
-                case VECTOR:
-                    return VECTOR;
+                case VTREE:
+                    return VTREE;
                 default:
                     throw new IllegalArgumentException(String.valueOf(indexType));
             }
@@ -519,7 +519,7 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         @Override
         IndexCategory getIndexCategory() {
-            return IndexCategory.VECTOR;
+            return IndexCategory.VTREE;
         }
 
         public List<List<String>> getIncludeFieldNames() {

@@ -122,7 +122,7 @@ public class IndexUtil {
                     .map(e -> e.getProjectList().size()).reduce(0, Integer::sum);
         } else if (index.getIndexType() == DatasetConfig.IndexType.SAMPLE) {
             return null;
-        } else if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
+        } else if (index.getIndexType() == DatasetConfig.IndexType.VTREE) {
             // VECTOR indexes use include fields for secondary keys
             numSecondaryKeys = ((Index.VectorIndexDetails) index.getIndexDetails()).getIncludeFieldNames().size();
         } else {
@@ -159,7 +159,7 @@ public class IndexUtil {
                 break;
             case SAMPLE:
                 break;
-            case VECTOR:
+            case VTREE:
                 // VECTOR indexes use include fields for secondary keys
                 numSecondaryKeys = ((Index.VectorIndexDetails) index.getIndexDetails()).getIncludeFieldNames().size();
                 return new int[] { numPrimaryKeys + numSecondaryKeys };

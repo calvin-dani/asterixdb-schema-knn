@@ -156,7 +156,7 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
         List<IAType> keyFieldTypes;
         List<Integer> keySourceIndicators;
 
-        if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
+        if (index.getIndexType() == DatasetConfig.IndexType.VTREE) {
             // VECTOR indexes use include fields for secondary keys
             Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
             numSecondaryKeys = vectorIndexDetails.getIncludeFieldNames().size();
@@ -207,7 +207,7 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
         List<IAType> keyFieldTypes;
         List<Integer> keySourceIndicators;
 
-        if (index.getIndexType() == DatasetConfig.IndexType.VECTOR) {
+        if (index.getIndexType() == DatasetConfig.IndexType.VTREE) {
             // VECTOR indexes use include fields for secondary keys
             Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
             numSecondaryKeys = vectorIndexDetails.getIncludeFieldNames().size();
@@ -262,7 +262,7 @@ public class BTreeResourceFactoryProvider implements IResourceFactoryProvider {
             case RTREE:
                 // secondary btrees and rtrees do not have bloom filters
                 return null;
-            case VECTOR:
+            case VTREE:
                 // VECTOR indexes do not have bloom filters (used for similarity search, not exact matching)
                 return null;
             case LENGTH_PARTITIONED_NGRAM_INVIX:

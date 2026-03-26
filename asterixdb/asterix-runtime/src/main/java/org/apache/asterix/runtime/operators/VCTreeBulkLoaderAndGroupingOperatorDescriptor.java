@@ -194,11 +194,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
         DistanceFunction func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
-        if (func == null) {
-            // Default to Euclidean if not found
-            System.err.println("WARNING: Unsupported distance function: " + distanceType + ", defaulting to euclidean");
-            return new EuclideanDistanceFunction();
-        }
+        //        if (func == null) {
+        //            // Default to Euclidean if not found
+        //            System.err.println("WARNING: Unsupported distance function: " + distanceType + ", defaulting to euclidean");
+        //            return new EuclideanDistanceFunction();
+        //        }
         return func;
     }
 
@@ -226,8 +226,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.permitUUID = permitUUID;
         this.materializedDataUUID = materializedDataUUID;
         this.args = args;
-        this.distanceMetric = distanceMetric != null ? distanceMetric : "euclidean";
-        this.vectorDimension = vectorDimension > 0 ? vectorDimension : 384; // Default to 384 if invalid
+        this.distanceMetric = distanceMetric;
+        this.vectorDimension = vectorDimension; // Default to 384 if invalid
         this.numPrimaryKeys = numPrimaryKeys;
         this.numIncludeFields = numIncludeFields;
         this.isQuantized = isQuantized;

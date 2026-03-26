@@ -178,7 +178,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         switch (Index.IndexCategory.of(indexType)) {
             case VALUE:
             case TEXT:
-            case VECTOR:
+            case VTREE:
                 // Read the key names from the SearchKeyName field
                 IACursor fieldNameCursor =
                         ((AOrderedList) indexRecord.getValueByPos(indexEntity.searchKeyIndex())).getCursor();
@@ -392,7 +392,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                         Triple<IAType, Boolean, Boolean> projectTypeResult =
                                 KeyFieldTypeUtil.getKeyProjectType((ARecordType) inputTypePrime, projectPath, null);
                         if (projectTypeResult == null) {
-                            if (indexType != IndexType.BTREE && indexType != IndexType.VECTOR) {
+                            if (indexType != IndexType.BTREE && indexType != IndexType.VTREE) {
                                 throw new AsterixException(ErrorCode.METADATA_ERROR, projectPath.toString());
                             }
                             projectTypePrime = BuiltinType.ANY;
@@ -467,7 +467,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
                         isOverridingKeyTypes, excludeUnknownKey, castDefaultNull, datetimeFormat, dateFormat,
                         timeFormat);
                 break;
-            case VECTOR:
+            case VTREE:
                 keyFieldNames =
                         searchElements.stream().map(Pair::getSecond).map(List::getFirst).collect(Collectors.toList());
                 keyFieldTypes = searchKeyType.stream().map(List::getFirst).collect(Collectors.toList());
@@ -671,7 +671,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             case SAMPLE:
                 searchKey = ((Index.SampleIndexDetails) index.getIndexDetails()).getKeyFieldNames();
                 break;
-            case VECTOR:
+            case VTREE:
                 searchKey = ((Index.VectorIndexDetails) index.getIndexDetails()).getKeyFieldNames();
                 break;
             default:
@@ -737,14 +737,14 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             case ARRAY:
                 writeComplexSearchKeys((Index.ArrayIndexDetails) index.getIndexDetails());
                 break;
-            case VECTOR:
+            case VTREE:
                 Index.VectorIndexDetails vectorIndexDetails = (Index.VectorIndexDetails) index.getIndexDetails();
                 writeWithProperties(vectorIndexDetails);
                 writeIncludeFields(vectorIndexDetails);
         }
         writeSearchKeyType(index);
 
-        if (Index.IndexCategory.of(index.getIndexType()) == Index.IndexCategory.VECTOR) {
+        if (Index.IndexCategory.of(index.getIndexType()) == Index.IndexCategory.VTREE) {
             // Vector indexes do not have enforced keys.
             return;
         }
@@ -1083,7 +1083,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
         switch (Index.IndexCategory.of(index.getIndexType())) {
             // For value and text indexes, we persist the type as a single string (backwards compatibility).
-            case VECTOR:
+            case VTREE:
                 itemValue.reset();
                 aString.setValue("vector");
                 stringSerde.serialize(aString, itemValue.getDataOutput());
