@@ -311,7 +311,7 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
                     AccessMethodJobGenParams params = new AccessMethodJobGenParams();
                     params.readFromFuncArgs(funcExpr.getArguments());
 
-                    if (params.getIndexType() == IndexType.VECTOR) {
+                    if (params.getIndexType() == IndexType.VTREE) {
                         // Found vector index! Check if it already has selectCondition
                         if (unnest.getSelectCondition() != null) {
                             System.err.println("=== Vector index already has selectCondition ===");
@@ -350,7 +350,7 @@ public class PushFilterIntoVectorSearchRule implements IAlgebraicRewriteRule {
 
         Index index = mp.getIndex(params.getDatabaseName(), params.getDataverseName(), params.getDatasetName(),
                 params.getIndexName());
-        if (index == null || index.getIndexType() != IndexType.VECTOR) {
+        if (index == null || index.getIndexType() != IndexType.VTREE) {
             return null;
         }
 

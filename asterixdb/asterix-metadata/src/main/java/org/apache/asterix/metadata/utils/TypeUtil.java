@@ -413,7 +413,7 @@ public class TypeUtil {
                     enforcedRecordType = appendArrayIndexTypes(enforcedRecordType,
                             (Index.ArrayIndexDetails) index.getIndexDetails(), enforcedTypeBuilder);
                     break;
-                case VECTOR:
+                case VTREE:
                     // VECTOR indexes use VectorIndexDetails, treat similar to VALUE indexes for type enforcement
                     enforcedRecordType = appendVectorIndexType(enforcedRecordType,
                             (Index.VectorIndexDetails) index.getIndexDetails(), enforcedTypeBuilder);

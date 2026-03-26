@@ -49,7 +49,7 @@ public class DatasetConfig {
         LENGTH_PARTITIONED_NGRAM_INVIX,
         ARRAY,
         SAMPLE,
-        VECTOR
+        VTREE
     }
 
     public enum TransactionState {

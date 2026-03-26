@@ -1403,7 +1403,7 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
                         primaryKeys, secondaryKeys, additionalNonKeyFields, filterFactory, prevFilterFactory,
                         inputRecordDesc, context, spec, indexOp, bulkload, operationVar, prevSecondaryKeys,
                         prevAdditionalFilteringKeys);
-            case VECTOR:
+            case VTREE:
                 return getVectorIndexModificationRuntime(database, dataverseName, datasetName, indexName,
                         propagatedSchema, primaryKeys, secondaryKeys, additionalNonKeyFields, filterFactory,
                         prevFilterFactory, inputRecordDesc, context, spec, indexOp, bulkload, operationVar,

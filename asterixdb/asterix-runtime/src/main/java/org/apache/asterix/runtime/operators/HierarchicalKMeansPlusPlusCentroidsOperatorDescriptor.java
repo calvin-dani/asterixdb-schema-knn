@@ -637,6 +637,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
     private int[][] partitionsMap; // Maps compute partition to storage partition(s)
+    private int vectorDimension;
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
@@ -658,7 +659,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             if (distanceFunction != null) {
                 return distanceFunction.apply(a, b);
             } else {
-                return euclidean_squared(a, b);
+                throw new Exception("Distance function not implemented yet");
             }
         } catch (Exception e) {
             throw new RuntimeException("Error calculating distance", e);
@@ -843,7 +844,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap,
-            String distanceMetric) {
+            String distanceMetric, int vectorDimension) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -858,6 +859,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.indexHelperFactory = indexHelperFactory;
         this.partitionsMap = partitionsMap;
+        this.vectorDimension = vectorDimension;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
         this.distanceFunction = getDistanceFunction(distanceMetric);
@@ -1108,7 +1110,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 //                                sampledVectors.add(floatPoint);
 
                                 // Write each embedding value as individual entries to run file
-                                if (scalarWriter != null) {
+                                if (scalarWriter != null && point.length > 0 && point.length == vectorDimension) {
                                     scalarWriter.writeEmbeddingAsScalars(point);
                                 }
 
@@ -1240,6 +1242,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 try {
                                     double[] point = kMeansUtils.createPrimitveList(listAccessorConstant);
                                     // Compute D(x) = min distance to current centers
+                                    if (point.length != vectorDimension) {
+                                        continue;
+                                    }
                                     double minDist = Double.POSITIVE_INFINITY;
                                     for (double[] center : currentCenters) {
                                         double dist = calculateDistance(point, center);

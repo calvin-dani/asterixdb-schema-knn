@@ -261,7 +261,7 @@ public class ValidateUtil {
         switch (indexType) {
             case ARRAY:
             case BTREE:
-            case VECTOR:
+            case VTREE:
                 switch (fieldType.getTypeTag()) {
                     case TINYINT:
                     case SMALLINT:
@@ -279,7 +279,7 @@ public class ValidateUtil {
                     case DAYTIMEDURATION:
                         break;
                     case ANY:
-                        if (indexType == IndexType.BTREE || indexType == IndexType.VECTOR) {
+                        if (indexType == IndexType.BTREE || indexType == IndexType.VTREE) {
                             // ANY is allowed for BTREE and VECTOR (include fields) indexes
                             break;
                         }

@@ -369,7 +369,7 @@ public class SetAsterixPhysicalOperatorsRule extends SetAlgebricksPhysicalOperat
                 case RTREE: {
                     return new RTreeSearchPOperator(dsi, storageDomain, requiresBroadcast);
                 }
-                case VECTOR: {
+                case VTREE: {
                     return new VectorSearchPOperator(dsi, storageDomain, requiresBroadcast);
                 }
                 case SINGLE_PARTITION_WORD_INVIX:

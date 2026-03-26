@@ -491,7 +491,7 @@ public class Dataset implements IMetadataEntity<Dataset>, IDataset {
                 resourceFactory = BTreeResourceFactoryProvider.INSTANCE.getResourceFactory(mdProvider, this, index,
                         recordType, metaType, mergePolicyFactory, mergePolicyProperties, null, null);
                 break;
-            case VECTOR:
+            case VTREE:
                 // VECTOR indexes use LSMVCTree (Vector Clustering Tree) for hierarchical IVF
                 resourceFactory = vcTreeResourceFactoryProvider.getResourceFactory(mdProvider, this, index, recordType,
                         metaType, mergePolicyFactory, mergePolicyProperties, filterTypeTraits, filterCmpFactories);

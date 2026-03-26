@@ -1625,7 +1625,7 @@ CreateIndexStatement IndexSpecification(Token startStmtToken) throws ParseExcept
         }
       }
 
-      boolean isVTree = indexParams != null && indexParams.type == IndexType.VECTOR;
+      boolean isVTree = indexParams != null && indexParams.type == IndexType.VTREE;
 
       // Validate: VECTOR annotation requires TYPE VTREE
       if (hasVectorField && !isVTree) {
@@ -1905,7 +1905,7 @@ IndexParams IndexType() throws ParseException:
   <RIGHTPAREN>
   | <VTREE>
     {
-      type = IndexType.VECTOR;
+      type = IndexType.VTREE;
     }
   )
     {
