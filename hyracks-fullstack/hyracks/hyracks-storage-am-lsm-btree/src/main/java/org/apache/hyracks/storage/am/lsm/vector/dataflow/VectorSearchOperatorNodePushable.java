@@ -193,7 +193,9 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             if (queryFields.length > 3) {
                 double minProbeFraction = DoublePointable.getDouble(queryParamsTuple.getFieldData(3),
                         queryParamsTuple.getFieldStart(3) + 1);
-                vectorPred.setMinProbeFraction(minProbeFraction);
+                if (minProbeFraction > 0.0) {
+                    vectorPred.setMinProbeFraction(minProbeFraction);
+                }
             }
 
             // Extract k_multiplier from field 4 (int, +1 to skip type tag)
