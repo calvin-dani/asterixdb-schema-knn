@@ -389,6 +389,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
         predicate.setPkStartField(ctx.getPkStartField());
+        predicate.setKMultiplier(2);
+        predicate.setMinProbeFraction(ctx.getMinProbeFraction());
 
         // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
         // Also set USE_OPTIMIZED_SEARCH flag to enable LSMVCTreeBlockedCursor
@@ -507,6 +509,8 @@ public class VectorTreeTestUtils extends TreeIndexTestUtils {
         predicate.setDistanceMetric("euclidean");
         predicate.setK(k);
         predicate.setPkStartField(ctx.getPkStartField());
+        predicate.setKMultiplier(2);
+        predicate.setMinProbeFraction(ctx.getMinProbeFraction());
 
         // 3. Create accessor with IVectorBinaryAccessorFactory in parameters
         // Set USE_NAIVE_BLOCKED_SEARCH flag to enable LSMVCTreeBlockedCursorNaive

@@ -72,6 +72,7 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
     private List<String> expectedPrimaryKeys = new ArrayList<>();
     private List<String> excludedPrimaryKeys;
     private int pkStartField = 2; // Default: non-quantized format (field 2). Set to 4 for quantized format.
+    private double minProbeFraction = 0.1; // Default fraction of leaf clusters to probe
 
     public AbstractVectorTreeTestContext(ISerializerDeserializer[] fieldSerdes, IIndex index, boolean filtered,
             int vectorDimensions) throws HyracksDataException {
@@ -152,5 +153,13 @@ public abstract class AbstractVectorTreeTestContext extends IndexTestContext<Che
 
     public void setPkStartField(int pkStartField) {
         this.pkStartField = pkStartField;
+    }
+
+    public double getMinProbeFraction() {
+        return minProbeFraction;
+    }
+
+    public void setMinProbeFraction(double minProbeFraction) {
+        this.minProbeFraction = minProbeFraction;
     }
 }

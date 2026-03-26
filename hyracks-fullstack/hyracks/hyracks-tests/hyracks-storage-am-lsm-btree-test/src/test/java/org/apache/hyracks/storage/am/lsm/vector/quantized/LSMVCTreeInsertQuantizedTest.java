@@ -133,6 +133,11 @@ public class LSMVCTreeInsertQuantizedTest extends QuantizedSearchTestDriver {
                 ctx.setQueryVector(qc.queryVector);
                 ctx.setQueryK(qc.queryK);
                 ctx.setExpectedPrimaryKeys(qc.expectedPrimaryKeys);
+                // Query 2 (multi-cluster) needs minProbeFraction=1.0 to probe all level-wise candidates.
+                // Level-wise finds 2 clusters (c4, c5) at equal distance; nprobe = floor(2 * 1.0) = 2.
+                if (i == 1) {
+                    ctx.setMinProbeFraction(1.0);
+                }
                 testUtils.naiveBlockedSearch(ctx);
                 LOGGER.info("Query case {}/{} (naive blocked) succeeded: K={}", i + 1, queryCases.size(), qc.queryK);
             }
@@ -174,7 +179,7 @@ public class LSMVCTreeInsertQuantizedTest extends QuantizedSearchTestDriver {
                 Arrays.asList("pk_ins_c4_36", "pk_ins_c4_38", "pk_ins_c4_32", "pk_ins_c4_34", "pk_2d_c4_48")));
 
         // Query 2: [50, 25] K=10 multi-cluster (equidistant from c4[25,25] and c5[75,25])
-        // With nprobe=2, probes both c4 and c5
+        // With nprobe=2 (minProbeFraction=0.15 → floor(16*0.15)=2), probes both c4 and c5
         // Symmetrical results interleaved from both clusters:
         // D=22.0: pk_ins_c4_36 [28,25], pk_ins_c5_37 [72,25]
         // D=22.3: pk_ins_c4_32 [27.7,25], pk_ins_c5_33 [72.3,25]
