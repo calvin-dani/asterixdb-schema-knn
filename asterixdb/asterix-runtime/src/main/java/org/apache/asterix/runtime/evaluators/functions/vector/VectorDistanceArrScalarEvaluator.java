@@ -192,14 +192,20 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                 evaluators[i].evaluate(null, pointables[i]);
                 isConstant[i] = true;
                 if (i == 2) {
+                    byte metricTypeTag = pointables[2].getByteArray()[pointables[2].getStartOffset()];
+                    if (metricTypeTag != ATypeTag.SERIALIZED_STRING_TYPE_TAG) {
+                        throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
+                                String.format("The third argument (metric) of function %s must be a constant string.",
+                                        funcId.getName()));
+                    }
                     formatPointable.set(pointables[2].getByteArray(), pointables[2].getStartOffset() + 1,
-                            pointables[2].getLength());
+                            pointables[2].getLength() - 1);
                     func = DISTANCE_MAP.get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(),
                             formatPointable.getStartOffset()));
                     if (func == null) {
                         throw new RuntimeDataException(ErrorCode.COMPILATION_ERROR, sourceLoc,
                                 String.format(
-                                        "Illegal distance function: '%s'. Allowed values: EUCLIDEAN, L2, EUCLIDEAN_SQUARED, L2_SQUARED, COSINE, DOT ",
+                                        "Illegal distance function: '%s'. Supported: euclidean, l2, cosine similarity, dot product, manhattan distance",
                                         formatPointable.toString()));
                     }
                 } else {
