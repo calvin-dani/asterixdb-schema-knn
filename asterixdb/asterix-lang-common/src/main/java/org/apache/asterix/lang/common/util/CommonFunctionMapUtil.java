@@ -71,6 +71,7 @@ public class CommonFunctionMapUtil {
         addFunctionMapping("regex_split", "regexp-split");
 
         // Vector functions.
+        addFunctionMapping("knn_distance", "vector-distance");
         addFunctionMapping("approx_vector_distance", "ann-distance");
 
         // Type functions.

@@ -214,7 +214,8 @@ public class VectorDistanceArrScalarEvaluator implements IScalarEvaluator {
                     if (!ATYPETAGDESERIALIZER.deserialize(pointables[i].getByteArray()[pointables[i].getStartOffset()])
                             .isListType()) {
                         throw new RuntimeDataException(ErrorCode.INVALID_FORMAT, sourceLoc, funcId.getName(),
-                                pointables[i].toString());
+                                String.format("Argument %d is expected to be a list type for function %s.", i + 1,
+                                        funcId.getName()));
                     }
                     listAccessorConstant[i].reset(pointables[i].getByteArray(), pointables[i].getStartOffset());
                     try {
