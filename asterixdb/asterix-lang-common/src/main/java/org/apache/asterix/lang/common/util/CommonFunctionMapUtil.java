@@ -70,6 +70,9 @@ public class CommonFunctionMapUtil {
         addFunctionMapping("regex_matches", "regexp-matches");
         addFunctionMapping("regex_split", "regexp-split");
 
+        // Vector functions.
+        addFunctionMapping("approx_vector_distance", "ann-distance");
+
         // Type functions.
         addFunctionMapping("gettype", "get-type"); // istype, internal: is-type
         addFunctionMapping("isnull", "is-null"); // isnull, internal: is-null
