@@ -72,6 +72,7 @@ public class CommonFunctionMapUtil {
 
         // Vector functions.
         addFunctionMapping("approx_vector_distance", "ann-distance");
+        addFunctionMapping("knn_distance", "vector-distance");
 
         // Type functions.
         addFunctionMapping("gettype", "get-type"); // istype, internal: is-type
