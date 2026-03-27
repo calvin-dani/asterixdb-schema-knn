@@ -609,7 +609,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static Map<Integer, DistanceFunction> buildDistanceMap() {
         DistanceFunction cosineFunc = new CosineDistanceFunction();
         Map<Integer, DistanceFunction> m = new HashMap<>();
-        m.put(MANHATTAN_FORMAT.hash(), new ManhattanDistanceFunction());
         m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction());
         m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction());
         m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction());

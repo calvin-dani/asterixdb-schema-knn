@@ -497,7 +497,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             case "l2_squared":
                 return "euclidean_squared";
             case "l1":
-            case "manhattan distance":
+            case "manhattan_distance":
                 return "manhattan";
             case "cosine similarity":
                 return "cosine";

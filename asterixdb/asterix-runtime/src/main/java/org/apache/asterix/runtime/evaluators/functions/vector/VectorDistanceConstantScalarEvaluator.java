@@ -92,8 +92,7 @@ public class VectorDistanceConstantScalarEvaluator implements IScalarEvaluator {
         double apply(double[] a, double[] b) throws HyracksDataException;
     }
 
-    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(MANHATTAN_FORMAT.hash(),
-            VectorDistanceArrCalculation::manhattan, EUCLIDEAN_DISTANCE.hash(), VectorDistanceArrCalculation::euclidean,
+    private static final Map<Integer, DistanceFunction> DISTANCE_MAP = Map.of(EUCLIDEAN_DISTANCE.hash(), VectorDistanceArrCalculation::euclidean,
             EUCLIDEAN_DISTANCE_L2.hash(), VectorDistanceArrCalculation::euclidean, EUCLIDEAN_DISTANCE_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, EUCLIDEAN_DISTANCE_L2_SQUARED.hash(),
             VectorDistanceArrCalculation::euclidean_squared, COSINE_FORMAT.hash(),
