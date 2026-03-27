@@ -577,15 +577,14 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                     doubleValue = ((AFloat) obj).getFloatValue();
                 } else if (obj instanceof ANull || obj instanceof AMissing) {
                     throw new AlgebricksException(
-                            "min_probe_fraction (4th argument of ann_distance) cannot be null");
+                            "Failed to run ANN_DISTANCE(). Invalid `min_probe_fraction` argument value. It must be in the range of [0,1]");
                 } else {
                     throw new AlgebricksException(
-                            "min_probe_fraction (4th argument of ann_distance) must be a number, got: " + obj);
+                            "Failed to run ANN_DISTANCE(). Invalid `min_probe_fraction` argument value. It must be in the range of [0,1]");
                 }
                 if (doubleValue < 0.0 || doubleValue > 1.0) {
                     throw new AlgebricksException(
-                            "min_probe_fraction (4th argument of ann_distance) must be between 0.0 and 1.0, got: "
-                                    + doubleValue);
+                            "Failed to run ANN_DISTANCE(). Invalid `min_probe_fraction` argument value. It must be in the range of [0,1]");
                 }
                 if (!(obj instanceof ADouble)) {
                     return new ConstantExpression(new AsterixConstantValue(new ADouble(doubleValue)));
@@ -608,10 +607,10 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                     return new ConstantExpression(new AsterixConstantValue(new AInt32(intValue)));
                 } else if (obj instanceof ADouble || obj instanceof AFloat) {
                     throw new AlgebricksException(
-                            "k_multiplier (5th argument of ann_distance) must be a positive integer, got: " + obj);
+                            "Failed to run ANN_DISTANCE(). Invalid `k_multiplier` argument value. It must be an integer greater than or equal to 0");
                 } else if (obj instanceof ANull || obj instanceof AMissing) {
                     throw new AlgebricksException(
-                            "k_multiplier (5th argument of ann_distance) cannot be null");
+                            "Failed to run ANN_DISTANCE(). Invalid `k_multiplier` argument value. It must be an integer greater than or equal to 0");
                 }
             }
         }
