@@ -33,6 +33,7 @@ import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.base.ADouble;
+import org.apache.asterix.om.base.AFloat;
 import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.base.AInt64;
 import org.apache.asterix.om.base.IAObject;
@@ -280,7 +281,8 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         LogicalVariable minProbeFractionVar = context.newVar();
         queryVarList.add(minProbeFractionVar);
         if (!isVectorDistance && annDistanceExpr.getArguments().size() > 3) {
-            queryExprList.add(new MutableObject<>(annDistanceExpr.getArguments().get(3).getValue().cloneExpression()));
+            ILogicalExpression probeFracExpr = annDistanceExpr.getArguments().get(3).getValue().cloneExpression();
+            queryExprList.add(new MutableObject<>(ensureDoubleConstant(probeFracExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(0.1)))));
         }
@@ -556,15 +558,52 @@ public class VectorIndexAccessMethod implements IAccessMethod {
      * @param expr The expression to check and potentially convert
      * @return The original expression if not an AInt64 constant, or a new AInt32 constant expression
      */
-    private static ILogicalExpression ensureInt32Constant(ILogicalExpression expr) {
+    private static ILogicalExpression ensureDoubleConstant(ILogicalExpression expr) throws AlgebricksException {
         if (expr.getExpressionTag() == LogicalExpressionTag.CONSTANT) {
             ConstantExpression constExpr = (ConstantExpression) expr;
             IAlgebricksConstantValue constVal = constExpr.getValue();
             if (constVal instanceof AsterixConstantValue) {
                 IAObject obj = ((AsterixConstantValue) constVal).getObject();
-                if (obj instanceof AInt64) {
+                double doubleValue;
+                if (obj instanceof ADouble) {
+                    doubleValue = ((ADouble) obj).getDoubleValue();
+                } else if (obj instanceof AInt32) {
+                    doubleValue = ((AInt32) obj).getIntegerValue();
+                } else if (obj instanceof AInt64) {
+                    doubleValue = ((AInt64) obj).getLongValue();
+                } else if (obj instanceof AFloat) {
+                    doubleValue = ((AFloat) obj).getFloatValue();
+                } else {
+                    throw new AlgebricksException(
+                            "min_probe_fraction (4th argument of ann_distance) must be a number, got: " + obj);
+                }
+                if (doubleValue < 0.0 || doubleValue > 1.0) {
+                    throw new AlgebricksException(
+                            "min_probe_fraction (4th argument of ann_distance) must be between 0.0 and 1.0, got: "
+                                    + doubleValue);
+                }
+                if (!(obj instanceof ADouble)) {
+                    return new ConstantExpression(new AsterixConstantValue(new ADouble(doubleValue)));
+                }
+            }
+        }
+        return expr;
+    }
+
+    private static ILogicalExpression ensureInt32Constant(ILogicalExpression expr) throws AlgebricksException {
+        if (expr.getExpressionTag() == LogicalExpressionTag.CONSTANT) {
+            ConstantExpression constExpr = (ConstantExpression) expr;
+            IAlgebricksConstantValue constVal = constExpr.getValue();
+            if (constVal instanceof AsterixConstantValue) {
+                IAObject obj = ((AsterixConstantValue) constVal).getObject();
+                if (obj instanceof AInt32) {
+                    return expr;
+                } else if (obj instanceof AInt64) {
                     int intValue = (int) ((AInt64) obj).getLongValue();
                     return new ConstantExpression(new AsterixConstantValue(new AInt32(intValue)));
+                } else if (obj instanceof ADouble || obj instanceof AFloat) {
+                    throw new AlgebricksException(
+                            "k_multiplier (5th argument of ann_distance) must be a positive integer, got: " + obj);
                 }
             }
         }
