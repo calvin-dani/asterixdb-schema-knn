@@ -824,17 +824,16 @@ public class IntroduceTopKAccessMethodRule extends AbstractIntroduceAccessMethod
             }
         }
 
-        // Select best match: exact match, or fail if only a field match exists with a known mismatched metric
+        // Select best match: exact match preferred, metric mismatch falls back to full scan
         if (exactMatch != null) {
             result.add(exactMatch);
             LOGGER.trace("Selected index with matching distance metric");
         } else if (fieldMatch != null) {
+            // Field matches but metric doesn't — skip the index and fall back to full scan (KNN)
             Index idx = fieldMatch.second;
             String indexMetric = VectorIndexAccessMethod.getIndexDistanceMetric(idx);
-            SourceLocation srcLoc =
-                    annDistanceExpr != null ? annDistanceExpr.getSourceLocation() : orderOp.getSourceLocation();
-            throw new CompilationException(ErrorCode.COMPILATION_ANN_DISTANCE_METRIC_MISMATCH, srcLoc,
-                    queryDistanceMetric, idx.getIndexName(), indexMetric);
+            LOGGER.warn("Distance metric mismatch: query uses '{}' but index '{}' uses '{}'. "
+                    + "Falling back to full scan (KNN).", queryDistanceMetric, idx.getIndexName(), indexMetric);
         }
     }
 
