@@ -97,12 +97,11 @@ public class VectorDistanceFunctionFactory implements Serializable {
     }
 
     // Distance function hash map (same as VCTreeBulkLoaderAndGroupingOperatorDescriptor)
-    private static final java.util.Map<Integer, DistanceFunction> DISTANCE_MAP =
-            java.util.Map.of(EUCLIDEAN_DISTANCE.hash(),
-                    new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction(),
-                    EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
-                    EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
-                    new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+    private static final java.util.Map<Integer, DistanceFunction> DISTANCE_MAP = java.util.Map.of(
+            EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(),
+            new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
+            EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
+            new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
 
     /**
      * Convert distance metric string to IVectorDistanceFunction implementation.
