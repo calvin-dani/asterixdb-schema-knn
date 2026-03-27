@@ -36,6 +36,8 @@ import org.apache.asterix.om.base.ADouble;
 import org.apache.asterix.om.base.AFloat;
 import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.base.AInt64;
+import org.apache.asterix.om.base.AMissing;
+import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.functions.BuiltinFunctions;
@@ -573,6 +575,9 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                     doubleValue = ((AInt64) obj).getLongValue();
                 } else if (obj instanceof AFloat) {
                     doubleValue = ((AFloat) obj).getFloatValue();
+                } else if (obj instanceof ANull || obj instanceof AMissing) {
+                    throw new AlgebricksException(
+                            "min_probe_fraction (4th argument of ann_distance) cannot be null");
                 } else {
                     throw new AlgebricksException(
                             "min_probe_fraction (4th argument of ann_distance) must be a number, got: " + obj);
@@ -604,6 +609,9 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 } else if (obj instanceof ADouble || obj instanceof AFloat) {
                     throw new AlgebricksException(
                             "k_multiplier (5th argument of ann_distance) must be a positive integer, got: " + obj);
+                } else if (obj instanceof ANull || obj instanceof AMissing) {
+                    throw new AlgebricksException(
+                            "k_multiplier (5th argument of ann_distance) cannot be null");
                 }
             }
         }
