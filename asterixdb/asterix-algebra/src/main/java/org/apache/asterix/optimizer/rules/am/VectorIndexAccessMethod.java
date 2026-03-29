@@ -41,6 +41,7 @@ import org.apache.asterix.om.base.ANull;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.functions.BuiltinFunctions;
+import org.apache.asterix.om.utils.ConstantExpressionUtil;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.IAType;
@@ -135,6 +136,19 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             // ann_distance(vectorField, queryVector, metric [, min_probe_fraction, k_multiplier])
             if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 5) {
                 return false;
+            }
+            // Manhattan distance is not supported for ANN search (only for exact KNN via vector_distance)
+            if (funcExpr.getArguments().size() >= 3) {
+                ILogicalExpression metricExpr = funcExpr.getArguments().get(2).getValue();
+                if (metricExpr.getExpressionTag() == LogicalExpressionTag.CONSTANT) {
+                    String metric = ConstantExpressionUtil.getStringConstant(metricExpr);
+                    if (metric != null) {
+                        String normalized = normalizeDistanceMetric(metric);
+                        if ("manhattan".equals(normalized)) {
+                            return false;
+                        }
+                    }
+                }
             }
         }
 
