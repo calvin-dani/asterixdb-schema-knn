@@ -202,6 +202,9 @@
     <dependency>
       <groupId>org.apache.hyracks</groupId>
       <artifactId>hyracks-cloud</artifactId>
+      <artifactId>hyracks-storage-am-vtree</artifactId>
+      <version>0.3.10-SNAPSHOT</version>
+      <scope>compile</scope>
     </dependency>
   </dependencies>
 </project>
