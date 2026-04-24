@@ -36,6 +36,7 @@ import org.apache.asterix.metadata.MetadataCache;
 import org.apache.asterix.metadata.api.IMetadataEntity;
 import org.apache.asterix.metadata.utils.Creator;
 import org.apache.asterix.metadata.utils.IndexUtil;
+import org.apache.asterix.object.base.AdmObjectNode;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.AUnionType;
 import org.apache.asterix.om.types.IAType;
@@ -304,6 +305,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
             case BTREE:
             case SAMPLE:
                 return ResourceType.LSM_BTREE;
+            case VTREE:
+                return ResourceType.LSM_BTREE; // VECTOR uses LSM_BTREE as base structure
             case RTREE:
                 return ResourceType.LSM_RTREE;
             case LENGTH_PARTITIONED_NGRAM_INVIX:
@@ -326,7 +329,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
         VALUE,
         TEXT,
         ARRAY,
-        SAMPLE;
+        SAMPLE,
+        VTREE;
 
         public static IndexCategory of(IndexType indexType) {
             switch (indexType) {
@@ -342,6 +346,8 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
                     return ARRAY;
                 case SAMPLE:
                     return SAMPLE;
+                case VTREE:
+                    return VTREE;
                 default:
                     throw new IllegalArgumentException(String.valueOf(indexType));
             }
@@ -440,6 +446,162 @@ public class Index implements IMetadataEntity<Index>, Comparable<Index> {
 
         public ARecordType getIndexExpectedType() throws AlgebricksException {
             return ProjectionFiltrationTypeUtil.getRecordType(getKeyFieldNames());
+        }
+    }
+
+    public static final class VectorIndexDetails extends AbstractIndexDetails {
+
+        private static final long serialVersionUID = 2L;
+
+        private final List<String> keyFieldNames;
+
+        private final List<List<String>> includeFieldNames;
+
+        private final List<Integer> includeFieldSourceIndicators;
+
+        private final List<IAType> includeFieldTypes;
+
+        private final boolean overrideKeyFieldTypes;
+
+        private final Boolean excludeUnknownKey;
+
+        private final Boolean castDefaultNull;
+
+        private final String castDatetimeFormat;
+
+        private final String castDateFormat;
+
+        private final String castTimeFormat;
+
+        private final AdmObjectNode withObjectNode;
+
+        // Quantization parameters (computed from ANALYZE sample during index creation)
+        private final Float quantizationMinQ;
+        private final Float quantizationMaxQ;
+        private final Float quantizationAlpha;
+        private final Integer quantizationBits;
+        private final Float quantizationConfidenceInterval;
+        private final Integer quantizationSampleCount;
+
+        public VectorIndexDetails(List<String> keyFieldNames, List<List<String>> includeFieldNames,
+                List<Integer> includeFieldSourceIndicators, List<IAType> includeFieldTypes,
+                boolean overrideKeyFieldTypes, OptionalBoolean excludeUnknownKey, OptionalBoolean castDefaultNull,
+                String castDatetimeFormat, String castDateFormat, String castTimeFormat, AdmObjectNode withObjectNode) {
+            this(keyFieldNames, includeFieldNames, includeFieldSourceIndicators, includeFieldTypes,
+                    overrideKeyFieldTypes, excludeUnknownKey, castDefaultNull, castDatetimeFormat, castDateFormat,
+                    castTimeFormat, withObjectNode, null, null, null, null, null, null);
+        }
+
+        public VectorIndexDetails(List<String> keyFieldNames, List<List<String>> includeFieldNames,
+                List<Integer> includeFieldSourceIndicators, List<IAType> includeFieldTypes,
+                boolean overrideKeyFieldTypes, OptionalBoolean excludeUnknownKey, OptionalBoolean castDefaultNull,
+                String castDatetimeFormat, String castDateFormat, String castTimeFormat, AdmObjectNode withObjectNode,
+                Float quantizationMinQ, Float quantizationMaxQ, Float quantizationAlpha, Integer quantizationBits,
+                Float quantizationConfidenceInterval, Integer quantizationSampleCount) {
+            this.keyFieldNames = keyFieldNames;
+            this.overrideKeyFieldTypes = overrideKeyFieldTypes;
+            this.excludeUnknownKey = excludeUnknownKey.isEmpty() ? null : excludeUnknownKey.get();
+            this.castDefaultNull = castDefaultNull.isEmpty() ? null : castDefaultNull.get();
+            this.castDatetimeFormat = castDatetimeFormat;
+            this.castDateFormat = castDateFormat;
+            this.castTimeFormat = castTimeFormat;
+            this.includeFieldNames = includeFieldNames;
+            this.includeFieldTypes = includeFieldTypes;
+            this.includeFieldSourceIndicators = includeFieldSourceIndicators;
+            this.withObjectNode = withObjectNode;
+            this.quantizationMinQ = quantizationMinQ;
+            this.quantizationMaxQ = quantizationMaxQ;
+            this.quantizationAlpha = quantizationAlpha;
+            this.quantizationBits = quantizationBits;
+            this.quantizationConfidenceInterval = quantizationConfidenceInterval;
+            this.quantizationSampleCount = quantizationSampleCount;
+        }
+
+        @Override
+        IndexCategory getIndexCategory() {
+            return IndexCategory.VTREE;
+        }
+
+        public List<List<String>> getIncludeFieldNames() {
+            return includeFieldNames;
+        }
+
+        public List<Integer> getIncludeFieldSourceIndicators() {
+            return includeFieldSourceIndicators;
+        }
+
+        public List<IAType> getIncludeFieldTypes() {
+            return includeFieldTypes;
+        }
+
+        public OptionalBoolean getExcludeUnknownKey() {
+            return OptionalBoolean.ofNullable(excludeUnknownKey);
+        }
+
+        public OptionalBoolean getCastDefaultNull() {
+            return OptionalBoolean.ofNullable(castDefaultNull);
+        }
+
+        public String getCastDatetimeFormat() {
+            return castDatetimeFormat;
+        }
+
+        public String getCastDateFormat() {
+            return castDateFormat;
+        }
+
+        public String getCastTimeFormat() {
+            return castTimeFormat;
+        }
+
+        public AdmObjectNode getWithObjectNode() {
+            return withObjectNode;
+        }
+
+        // Quantization parameter getters
+        public Float getQuantizationMinQ() {
+            return quantizationMinQ;
+        }
+
+        public Float getQuantizationMaxQ() {
+            return quantizationMaxQ;
+        }
+
+        public Float getQuantizationAlpha() {
+            return quantizationAlpha;
+        }
+
+        public Integer getQuantizationBits() {
+            return quantizationBits;
+        }
+
+        public Float getQuantizationConfidenceInterval() {
+            return quantizationConfidenceInterval;
+        }
+
+        public Integer getQuantizationSampleCount() {
+            return quantizationSampleCount;
+        }
+
+        public boolean hasQuantizationConstants() {
+            return quantizationMinQ != null && quantizationMaxQ != null && quantizationAlpha != null;
+        }
+
+        @Override
+        public boolean isOverridingKeyFieldTypes() {
+            return overrideKeyFieldTypes;
+        }
+
+        public List<List<String>> getKeyFieldNames() {
+            return Collections.singletonList(keyFieldNames);
+        }
+
+        public ARecordType getIndexExpectedType() throws AlgebricksException {
+            // For VECTOR indexes, we need to create a record type that includes both the key field and include fields
+            List<List<String>> allFieldNames = new ArrayList<>();
+            allFieldNames.add(keyFieldNames); // Add the vector field as the first field
+            allFieldNames.addAll(includeFieldNames); // Add include fields
+            return ProjectionFiltrationTypeUtil.getRecordType(allFieldNames);
         }
     }
 
