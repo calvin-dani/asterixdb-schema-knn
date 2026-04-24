@@ -155,6 +155,16 @@ public class VectorDistanceArrCalculation {
         return sum;
     }
 
+    /**
+     * Cosine distance = 1 - cosine similarity. Range [0, 2]; lower = more similar.
+     * Aligns with Spark and common vector DBs so "minimize distance" = "maximize similarity".
+     * Returns NaN if cosine(a,b) is NaN (e.g. zero norm).
+     */
+    public static double cosineDistance(double[] a, double[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
+    }
+
     public static double cosine(double[] a, double[] b) {
         if (a.length != b.length) {
             return Double.NaN;
@@ -169,6 +179,11 @@ public class VectorDistanceArrCalculation {
             return Double.NaN; // or throw exception for zero vector
         }
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    public static double cosineDistance(float[] a, float[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
     }
 
     public static double cosine(float[] a, float[] b) {
@@ -187,6 +202,11 @@ public class VectorDistanceArrCalculation {
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
+    public static double cosineDistance(byte[] a, byte[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
+    }
+
     public static double cosine(byte[] a, byte[] b) {
         if (a.length != b.length) {
             return Double.NaN;
@@ -201,6 +221,11 @@ public class VectorDistanceArrCalculation {
             return Double.NaN;
         }
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    public static double cosineDistance(short[] a, short[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
     }
 
     public static double cosine(short[] a, short[] b) {
@@ -219,6 +244,11 @@ public class VectorDistanceArrCalculation {
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
+    public static double cosineDistance(int[] a, int[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
+    }
+
     public static double cosine(int[] a, int[] b) {
         if (a.length != b.length) {
             return Double.NaN;
@@ -235,6 +265,11 @@ public class VectorDistanceArrCalculation {
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
+    public static double cosineDistance(long[] a, long[] b) {
+        double sim = cosine(a, b);
+        return Double.isNaN(sim) ? Double.NaN : (1.0 - sim);
+    }
+
     public static double cosine(long[] a, long[] b) {
         if (a.length != b.length) {
             return Double.NaN;
@@ -249,6 +284,32 @@ public class VectorDistanceArrCalculation {
             return Double.NaN;
         }
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    /**
+     * L2 norm of a double vector: sqrt(sum_i a[i]^2).
+     * Returns 0.0 for zero vector or NaN if any component is NaN.
+     */
+    public static double l2Norm(double[] a) {
+        double sum = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            double v = a[i];
+            sum += v * v;
+        }
+        return Double.isNaN(sum) ? Double.NaN : Math.sqrt(sum);
+    }
+
+    /**
+     * Normalize vector in place to unit L2 norm.
+     * No-op if norm is zero or NaN (avoids division by zero).
+     */
+    public static void normalizeL2(double[] a) {
+        double norm = l2Norm(a);
+        if (norm > 0.0 && !Double.isNaN(norm)) {
+            for (int i = 0; i < a.length; i++) {
+                a[i] /= norm;
+            }
+        }
     }
 
     public static double dot(double[] a, double[] b) {

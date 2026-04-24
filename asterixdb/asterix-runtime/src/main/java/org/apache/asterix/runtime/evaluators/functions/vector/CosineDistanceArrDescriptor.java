@@ -47,9 +47,10 @@ public class CosineDistanceArrDescriptor extends AbstractScalarFunctionDynamicDe
             @Override
             public IScalarEvaluator createScalarEvaluator(final IEvaluatorContext ctx) throws HyracksDataException {
                 return new VectorDistanceArrScalarEvaluator(ctx, args, getIdentifier(),
-                        VectorDistanceArrCalculation::cosine, VectorDistanceArrCalculation::cosine,
-                        VectorDistanceArrCalculation::cosine, VectorDistanceArrCalculation::cosine,
-                        VectorDistanceArrCalculation::cosine, VectorDistanceArrCalculation::cosine, sourceLoc);
+                        VectorDistanceArrCalculation::cosineDistance, VectorDistanceArrCalculation::cosineDistance,
+                        VectorDistanceArrCalculation::cosineDistance, VectorDistanceArrCalculation::cosineDistance,
+                        VectorDistanceArrCalculation::cosineDistance, VectorDistanceArrCalculation::cosineDistance,
+                        sourceLoc);
             }
         };
 
