@@ -68,6 +68,8 @@ public class JobResultCallback implements IJobResultCallback {
         metadata.setJobDuration(resultJobRecord.getJobDuration());
         metadata.setResultCount(resultJobRecord.getResultCount());
         metadata.setResultSetOrdered(resultJobRecord.isResultSetOrdered());
+        metadata.setResultCount(resultJobRecord.getResultCount());
+        metadata.setResultSetOrdered(resultJobRecord.isResultSetOrdered());
         aggregateJobStats(jobId, metadata);
     }
 
@@ -108,6 +110,7 @@ public class JobResultCallback implements IJobResultCallback {
                 }
             }
             metadata.setEndTime(System.currentTimeMillis());
+            metadata.setCreateTime(run.getCreateTime());
             metadata.setQueueWaitTimeInNanos(TimeUnit.MILLISECONDS.toNanos(run.getQueueWaitTimeInMillis()));
         }
         metadata.setProcessedObjects(processedObjects);

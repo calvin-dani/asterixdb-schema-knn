@@ -122,6 +122,9 @@ public class IndexUtil {
                     .map(e -> e.getProjectList().size()).reduce(0, Integer::sum);
         } else if (index.getIndexType() == DatasetConfig.IndexType.SAMPLE) {
             return null;
+        } else if (index.getIndexType() == DatasetConfig.IndexType.VTREE) {
+            // VECTOR indexes use include fields for secondary keys
+            numSecondaryKeys = ((Index.VectorIndexDetails) index.getIndexDetails()).getIncludeFieldNames().size();
         } else {
             throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE, index.getIndexType().toString());
         }
@@ -156,6 +159,10 @@ public class IndexUtil {
                 break;
             case SAMPLE:
                 break;
+            case VTREE:
+                // VECTOR indexes use include fields for secondary keys
+                numSecondaryKeys = ((Index.VectorIndexDetails) index.getIndexDetails()).getIncludeFieldNames().size();
+                return new int[] { numPrimaryKeys + numSecondaryKeys };
             default:
                 throw new CompilationException(ErrorCode.COMPILATION_UNKNOWN_INDEX_TYPE,
                         index.getIndexType().toString());
@@ -220,6 +227,20 @@ public class IndexUtil {
         ISecondaryIndexOperationsHelper secondaryIndexHelper =
                 SecondaryIndexOperationsHelper.createIndexOperationsHelper(dataset, index, metadataProvider, sourceLoc);
         return secondaryIndexHelper.buildCompactJobSpec();
+    }
+
+    public static JobSpecification buildSecondaryIndexStaticStructureJobSpec(Dataset dataset, Index index,
+            MetadataProvider metadataProvider, SourceLocation sourceLoc) throws AlgebricksException {
+        ISecondaryIndexOperationsHelper secondaryIndexHelper =
+                SecondaryIndexOperationsHelper.createIndexOperationsHelper(dataset, index, metadataProvider, sourceLoc);
+        return secondaryIndexHelper.buildStaticStructureJobSpec();
+    }
+
+    public static JobSpecification buildSecondaryIndexQuantizationMetadataJobSpec(Dataset dataset, Index index,
+            MetadataProvider metadataProvider, SourceLocation sourceLoc) throws AlgebricksException {
+        ISecondaryIndexOperationsHelper secondaryIndexHelper =
+                SecondaryIndexOperationsHelper.createIndexOperationsHelper(dataset, index, metadataProvider, sourceLoc);
+        return secondaryIndexHelper.buildQuantizationMetadataJobSpec();
     }
 
     /**

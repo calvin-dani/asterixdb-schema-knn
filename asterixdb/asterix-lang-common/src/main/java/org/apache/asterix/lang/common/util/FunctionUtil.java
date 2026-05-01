@@ -20,6 +20,10 @@
 package org.apache.asterix.lang.common.util;
 
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
@@ -77,6 +81,10 @@ import org.apache.hyracks.api.exceptions.SourceLocation;
 public class FunctionUtil {
 
     public static final String IMPORT_PRIVATE_FUNCTIONS = "import-private-functions";
+    private static final String AGENT_DEBUG_LOG_PATH =
+            "/home/calvin-dani/Projects/Gerrit-change/asterixdb-schema-knn/.cursor/debug-1bfe33.log";
+    private static final String AGENT_DEBUG_SESSION_ID = "1bfe33";
+    private static final String AGENT_DEBUG_RUN_ID = "run1";
     //TODO(wyk) add Multiply and Add
     private static final Set<FunctionIdentifier> COMMUTATIVE_FUNCTIONS =
             Set.of(BuiltinFunctions.EQ, BuiltinFunctions.AND, BuiltinFunctions.OR);
@@ -191,10 +199,34 @@ public class FunctionUtil {
         if (mappedName != null) {
             name = mappedName;
         }
+        // #region agent log
+        if (shouldLogVectorFunction(name, fs.getName())) {
+            agentDebugLog("H1", "FunctionUtil.resolveFunctionCall:194", "Function resolution before builtin lookup",
+                    "{\"originalSignature\":\"" + escapeJson(fs.toString()) + "\",\"originalName\":\""
+                            + escapeJson(fs.getName()) + "\",\"mappedName\":\"" + escapeJson(name) + "\",\"arity\":"
+                            + fs.getArity() + ",\"searchUdfs\":" + searchUdfs + ",\"database\":\""
+                            + escapeJson(database) + "\",\"dataverse\":\"" + escapeJson(String.valueOf(dataverse))
+                            + "\"}");
+        }
+        // #endregion
         FunctionSignature fsBuiltin = builtinFunctionResolver.apply(name, fs.getArity());
         if (fsBuiltin == null) {
+            // #region agent log
+            if (shouldLogVectorFunction(name, fs.getName())) {
+                agentDebugLog("H2", "FunctionUtil.resolveFunctionCall:198", "Builtin resolution returned null",
+                        "{\"originalSignature\":\"" + escapeJson(fs.toString()) + "\",\"mappedName\":\""
+                                + escapeJson(name) + "\",\"arity\":" + fs.getArity() + "}");
+            }
+            // #endregion
             throw new CompilationException(ErrorCode.UNKNOWN_FUNCTION, sourceLoc, fs.toString());
         }
+        // #region agent log
+        if (shouldLogVectorFunction(name, fs.getName())) {
+            agentDebugLog("H3", "FunctionUtil.resolveFunctionCall:204", "Builtin resolution succeeded",
+                    "{\"originalSignature\":\"" + escapeJson(fs.toString()) + "\",\"mappedName\":\"" + escapeJson(name)
+                            + "\",\"resolvedSignature\":\"" + escapeJson(fsBuiltin.toString()) + "\"}");
+        }
+        // #endregion
         return fsBuiltin;
     }
 
@@ -273,8 +305,12 @@ public class FunctionUtil {
         DatasetFullyQualifiedName datasetOrViewName = parseDatasetFunctionArguments(argList, 0,
                 datasetFn.getSourceLocation(), ExpressionUtils::getStringLiteral);
         boolean isView = argList.size() > 3 && Boolean.TRUE.equals(ExpressionUtils.getBooleanLiteral(argList.get(3)));
-        DatasetFullyQualifiedName synonymName = argList.size() > 4 ? parseDatasetFunctionArguments(argList, 4,
-                datasetFn.getSourceLocation(), ExpressionUtils::getStringLiteral) : null;
+        Boolean isSample = argList.size() > 4 ? ExpressionUtils.getBooleanLiteral(argList.get(4)) : null;
+        DatasetFullyQualifiedName synonymName = null;
+        if (isSample == null || !isSample) {
+            synonymName = argList.size() > 4 ? parseDatasetFunctionArguments(argList, 4, datasetFn.getSourceLocation(),
+                    ExpressionUtils::getStringLiteral) : null;
+        }
         return new Triple<>(datasetOrViewName, isView, synonymName);
     }
 
@@ -308,13 +344,41 @@ public class FunctionUtil {
         return new DatasetFullyQualifiedName(databaseName, dataverseName, datasetName);
     }
 
-    private static String getStringConstant(Mutable<ILogicalExpression> arg) {
+    public static String getStringConstant(Mutable<ILogicalExpression> arg) {
         return ConstantExpressionUtil.getStringConstant(arg.getValue());
     }
 
     private static boolean getImportPrivateFunctions(MetadataProvider metadataProvider) {
         String value = (String) metadataProvider.getConfig().get(IMPORT_PRIVATE_FUNCTIONS);
         return (value != null) && Boolean.parseBoolean(value.toLowerCase());
+    }
+
+    private static boolean shouldLogVectorFunction(String mappedName, String originalName) {
+        String mapped = mappedName == null ? "" : mappedName.toLowerCase();
+        String original = originalName == null ? "" : originalName.toLowerCase();
+        return mapped.contains("ann") || mapped.contains("vector") || mapped.contains("distance")
+                || original.contains("ann") || original.contains("vector") || original.contains("distance");
+    }
+
+    private static void agentDebugLog(String hypothesisId, String location, String message, String dataJson) {
+        long timestamp = System.currentTimeMillis();
+        String payload = "{\"sessionId\":\"" + AGENT_DEBUG_SESSION_ID + "\",\"runId\":\"" + AGENT_DEBUG_RUN_ID
+                + "\",\"hypothesisId\":\"" + escapeJson(hypothesisId) + "\",\"location\":\"" + escapeJson(location)
+                + "\",\"message\":\"" + escapeJson(message) + "\",\"data\":" + (dataJson == null ? "{}" : dataJson)
+                + ",\"timestamp\":" + timestamp + "}";
+        try {
+            Files.writeString(Paths.get(AGENT_DEBUG_LOG_PATH), payload + System.lineSeparator(), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ignored) {
+            // keep debug logging best-effort and non-failing
+        }
+    }
+
+    private static String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     public static FunctionDecl parseStoredFunction(Function function, IParserFactory parserFactory,
