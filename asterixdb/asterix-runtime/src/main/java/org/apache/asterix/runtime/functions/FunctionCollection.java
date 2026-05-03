@@ -1344,7 +1344,7 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(CosineDistanceArrDescriptor.FACTORY);
         fc.add(DotDistanceArrDescriptor.FACTORY);
         fc.add(ANNDistanceDescriptor.FACTORY);
-        
+
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
         fc.add(IsArrayDescriptor.FACTORY);
