@@ -74,7 +74,7 @@ import org.apache.logging.log4j.Logger;
  * - Lower componentId (newer component) comes first, so antimatter appears before matter
  * - Hold-and-check pattern: hold antimatter, check next tuple for same key, cancel if match
  */
-public class LSMVTreeBlockedCursor implements IIndexCursor {
+public class LSMVTreePrunedTopKSearchCursor implements IIndexCursor {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -153,7 +153,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
     private int tuplesFilteredOut;
     private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
 
-    public LSMVTreeBlockedCursor(ILSMIndexOperationContext opCtx) {
+    public LSMVTreePrunedTopKSearchCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
         this.isOpen = false;
     }
@@ -187,9 +187,10 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
         if (this.tupleFilter != null) {
             this.referenceFilterTuple = new ReferenceFrameTupleReference();
             LOGGER.log(Level.TRACE,
-                    "[LSMVTreeBlockedCursor] Tuple filter is SET - will filter INCLUDE field predicates");
+                    "[LSMVTreePrunedTopKSearchCursor] Tuple filter is SET - will filter INCLUDE field predicates");
         } else {
-            LOGGER.log(Level.TRACE, "[LSMVTreeBlockedCursor] Tuple filter is NULL - no INCLUDE field filtering");
+            LOGGER.log(Level.TRACE,
+                    "[LSMVTreePrunedTopKSearchCursor] Tuple filter is NULL - no INCLUDE field filtering");
         }
 
         // Get index access parameters
@@ -267,7 +268,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
             firstSearchCursor.setSharedVisitedSet(clusterStrategy.getVisitedCentroidIds());
 
             LOGGER.log(Level.TRACE,
-                    "[LSMVTreeBlockedCursor] Initialized with queryVector dim={}, K={}, nprobe={}, epsilon={}",
+                    "[LSMVTreePrunedTopKSearchCursor] Initialized with queryVector dim={}, K={}, nprobe={}, epsilon={}",
                     queryVector.length, K, nprobe, epsilon);
         }
 
@@ -276,7 +277,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
 
         if (firstCluster == null) {
             // No clusters available - empty tree
-            LOGGER.log(Level.TRACE, "[LSMVTreeBlockedCursor] No clusters available (empty tree)");
+            LOGGER.log(Level.TRACE, "[LSMVTreePrunedTopKSearchCursor] No clusters available (empty tree)");
             return;
         }
 
@@ -289,7 +290,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
         }
 
         LOGGER.log(Level.TRACE,
-                "[LSMVTreeBlockedCursor] First cluster: cid={}, D(q,C)_full={}, D(q,C)_quant={}, dqc_used={}, dirPage={}, levelWise={}",
+                "[LSMVTreePrunedTopKSearchCursor] First cluster: cid={}, D(q,C)_full={}, D(q,C)_quant={}, dqc_used={}, dirPage={}, levelWise={}",
                 firstCluster.centroidId, firstCluster.distance,
                 firstCluster.hasQuantizedDistance() ? firstCluster.quantizedDistance : Double.NaN, dqc,
                 firstCluster.directoryPageId, clusterStrategy.getLevelWiseClusterCount());
@@ -317,7 +318,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
             }
 
             LOGGER.log(Level.TRACE,
-                    "[LSMVTreeBlockedCursor] Advancing to cluster: cid={}, D(q,C)_full={}, D(q,C)_quant={}, dirPage={}",
+                    "[LSMVTreePrunedTopKSearchCursor] Advancing to cluster: cid={}, D(q,C)_full={}, D(q,C)_quant={}, dirPage={}",
                     nextCluster.centroidId, nextCluster.distance,
                     nextCluster.hasQuantizedDistance() ? nextCluster.quantizedDistance : Double.NaN,
                     nextCluster.directoryPageId);
@@ -332,7 +333,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
         }
 
         LOGGER.log(Level.TRACE,
-                "[LSMVTreeBlockedCursor] open() COMPLETE: {} clusters probed, topKWindow.size()={} (BEFORE consumption)",
+                "[LSMVTreePrunedTopKSearchCursor] open() COMPLETE: {} clusters probed, topKWindow.size()={} (BEFORE consumption)",
                 clustersExplored, topKWindow.size());
     }
 
@@ -497,8 +498,6 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
                         addToTopKWindow(rightTuple, dqx);
                     }
 
-                    // Per-tuple logging removed to avoid stderr blocking with large clusters
-
                     // Check right termination: D(x',C) > max{D(q,x)} + D(q,C)
                     if (topKWindow.size() >= candidateLimit && !rightCtx.queue.isEmpty()) {
                         double nextDxc = rightCtx.queue.peek().dxc;
@@ -531,8 +530,6 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
                         addToTopKWindow(leftTuple, dqx);
                     }
 
-                    // Per-tuple logging removed to avoid stderr blocking with large clusters
-
                     // Check left termination: D(x',C) < D(q,C) - max{D(q,x)}
                     // Note: When threshold is negative (kth_dqx > dqc), left cannot terminate early
                     // and must scan all tuples. This is expected when query is far from centroid.
@@ -551,7 +548,8 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
         }
 
         // Summary log kept for diagnostics
-        LOGGER.log(Level.TRACE, "[LSMVTreeBlockedCursor] Search complete: topK={}, processed={}, cancellations={}",
+        LOGGER.log(Level.TRACE,
+                "[LSMVTreePrunedTopKSearchCursor] Search complete: topK={}, processed={}, cancellations={}",
                 topKWindow.size(), totalTuplesProcessed, antimatterCancellations);
     }
 
@@ -902,7 +900,7 @@ public class LSMVTreeBlockedCursor implements IIndexCursor {
         if (isOpen) {
             // Summary logging via LOGGER (not stderr to avoid blocking)
             LOGGER.log(Level.TRACE,
-                    "[LSMVTreeBlockedCursor] Summary: K={}, nprobe={}, clusters={}, processed={}, addToTopKCalls={}, cancellations={}, filtered={}, topK={}",
+                    "[LSMVTreePrunedTopKSearchCursor] Summary: K={}, nprobe={}, clusters={}, processed={}, addToTopKCalls={}, cancellations={}, filtered={}, topK={}",
                     K, nprobe, clustersExplored, totalTuplesProcessed, addToTopKWindowCallCount,
                     antimatterCancellations, tuplesFilteredOut, topKWindow.size());
 

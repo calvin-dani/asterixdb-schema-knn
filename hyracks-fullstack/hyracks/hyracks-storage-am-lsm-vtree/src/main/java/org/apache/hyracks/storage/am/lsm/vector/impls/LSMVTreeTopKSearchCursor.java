@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 
+import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.ByteArrayPointable;
@@ -58,11 +59,11 @@ import org.apache.logging.log4j.Logger;
  * Naive blocked cursor for vector ANN search.
  *
  * This cursor combines the multi-component priority queue merging of LSMVTreeSearchCursor
- * with the blocked execution model of LSMVTreeBlockedCursor. All search work is done in
+ * with the blocked execution model of LSMVTreePrunedTopKSearchCursor. All search work is done in
  * open(), results are collected into a top-K window, and hasNext()/next()/getTuple() simply
  * drain the window.
  *
- * Key differences from LSMVTreeBlockedCursor:
+ * Key differences from LSMVTreePrunedTopKSearchCursor:
  * - Uses VTreeSearchCursor (NOT bidirectional cursor)
  * - No triangle inequality pruning
  * - Scans clusters sequentially (closest first) via the cluster selection strategy
@@ -75,7 +76,7 @@ import org.apache.logging.log4j.Logger;
  * "Blocked" means all search work is done in open(), and results are stored in topKWindow.
  * Calls to hasNext()/next()/getTuple() simply drain the window.
  */
-public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
+public class LSMVTreeTopKSearchCursor implements IIndexCursor {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -97,8 +98,10 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
     private PriorityQueueElement outputElement;
     private boolean needPushElementIntoQueue;
 
-    // Top-K window: max-heap by D(q,x) - peek() gives the worst result
-    private PriorityQueue<ResultEntry> topKWindow;
+    // Spillable top-K buffer: frame-backed in-memory heap with disk spill on budget exceeded.
+    // Encapsulates MaxHeap + VariableDeletableTupleMemoryManager + RunFileWriter spill.
+    private SpillableTopKBuffer topKBuffer;
+    private SpillableTopKDrainIterator drainIterator;
 
     // Search parameters
     private int K;
@@ -137,7 +140,6 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
 
     // Cursor state
     private boolean isOpen;
-    private ResultEntry currentResult;
 
     // Statistics
     private int totalTuplesProcessed;
@@ -146,7 +148,7 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
     private int tuplesFilteredOut;
     private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
 
-    public LSMVTreeBlockedNaiveCursor(ILSMIndexOperationContext opCtx) {
+    public LSMVTreeTopKSearchCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
         this.isOpen = false;
     }
@@ -197,8 +199,9 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
         // Create cluster selection strategy (minProbeFraction → nprobe + DFS fallback)
         this.clusterStrategy = new NprobeClusterSelectionStrategy(vectorPred.getMinProbeFraction(), epsilon);
 
-        // Top-K window: capacity = candidateLimit (2*K) for reranking
-        topKWindow = new PriorityQueue<>(Math.max(candidateLimit, 1), (a, b) -> Double.compare(b.dqx, a.dqx));
+        // Create spillable top-K buffer (follows inverted index pattern: pass ctx via IAP)
+        IHyracksTaskContext ctx = (IHyracksTaskContext) iap.getParameters().get(HyracksConstants.HYRACKS_TASK_CONTEXT);
+        this.topKBuffer = new SpillableTopKBuffer(candidateLimit, ctx);
 
         // Initialize cluster tracking arrays
         currentClusterIndex = new int[numComponents];
@@ -279,8 +282,12 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
         // Perform the blocked search: drain all clusters and collect results
         performBlockedSearch();
 
+        // Prepare drain: sort entries by dqx ascending for output (with merge if spilled)
+        this.drainIterator = topKBuffer.drain();
+
         LOGGER.trace("Search complete: topK={}, processed={}, filtered={}, cancellations={}, clusters={}",
-                topKWindow.size(), totalTuplesProcessed, tuplesFilteredOut, antimatterCancellations, clustersExplored);
+                topKBuffer.getNumEntries(), totalTuplesProcessed, tuplesFilteredOut, antimatterCancellations,
+                clustersExplored);
     }
 
     /**
@@ -344,9 +351,10 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
 
             // Check strategy for stop condition
             int minClustersExplored = getMinClustersProbed();
-            if (clusterStrategy.shouldStopAdvancing(minClustersExplored, topKWindow.size())) {
+            if (clusterStrategy.shouldStopAdvancing(minClustersExplored, topKBuffer.getNumEntries())) {
                 stopAdvancing = true;
-                LOGGER.trace("Early termination: clusters={}, topK={}", minClustersExplored, topKWindow.size());
+                LOGGER.trace("Early termination: clusters={}, topK={}", minClustersExplored,
+                        topKBuffer.getNumEntries());
                 break;
             }
 
@@ -629,23 +637,17 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
 
     /**
      * Add tuple to top-K window if it improves the results.
+     * Delegates to SpillableTopKBuffer which handles frame storage, eviction, and disk spill.
      */
     private void addToTopKWindow(ITupleReference tuple, double dqx) throws HyracksDataException {
-        if (topKWindow.size() < candidateLimit) {
-            ITupleReference tupleCopy = TupleUtils.copyTuple(tuple);
-            topKWindow.offer(new ResultEntry(tupleCopy, dqx));
-        } else if (dqx < topKWindow.peek().dqx) {
-            topKWindow.poll();
-            ITupleReference tupleCopy = TupleUtils.copyTuple(tuple);
-            topKWindow.offer(new ResultEntry(tupleCopy, dqx));
-        }
+        topKBuffer.insert(tuple, dqx);
     }
 
     // ==================== IIndexCursor Interface ====================
 
     @Override
     public boolean hasNext() throws HyracksDataException {
-        return !topKWindow.isEmpty();
+        return drainIterator != null && drainIterator.hasNext();
     }
 
     @Override
@@ -653,19 +655,21 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
         if (!hasNext()) {
             throw HyracksDataException.create(new IllegalStateException("No more tuples"));
         }
-        currentResult = topKWindow.poll();
+        drainIterator.next();
         nextCallCount++;
     }
 
     @Override
     public ITupleReference getTuple() {
-        return currentResult != null ? currentResult.tuple : null;
+        if (drainIterator == null) {
+            return null;
+        }
+        return drainIterator.getTuple();
     }
 
     @Override
     public void close() throws HyracksDataException {
         if (isOpen) {
-            // Log final summary
             LOGGER.trace("Search Summary: K={}, nprobe={}, epsilon={}", K, nprobe, epsilon);
             LOGGER.trace("Clusters explored:          {}", clustersExplored);
             LOGGER.trace("Total tuples processed:     {}", totalTuplesProcessed);
@@ -673,11 +677,18 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
             LOGGER.trace("Tuples filtered out:        {}", tuplesFilteredOut);
             LOGGER.trace("Results returned (next()):   {}", nextCallCount);
 
-            // Close all component cursors
             for (int i = 0; i < numComponents; i++) {
                 if (rangeCursors[i] != null) {
                     rangeCursors[i].close();
                 }
+            }
+            if (drainIterator != null) {
+                drainIterator.close();
+                drainIterator = null;
+            }
+            if (topKBuffer != null) {
+                topKBuffer.close();
+                topKBuffer = null;
             }
         }
         isOpen = false;
@@ -691,7 +702,7 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
     // ==================== Inner Classes ====================
 
     /**
-     * Priority queue element holding tuple and component info.
+     * Priority queue element holding tuple and component info (for multi-component merging).
      */
     private static class PriorityQueueElement {
         int componentId;
@@ -707,22 +718,8 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
     }
 
     /**
-     * Result entry for top-K window.
-     */
-    private static class ResultEntry {
-        ITupleReference tuple;
-        double dqx; // D(q, x) approximate
-
-        ResultEntry(ITupleReference tuple, double dqx) {
-            this.tuple = tuple;
-            this.dqx = dqx;
-        }
-    }
-
-    /**
      * Priority queue comparator for merging results from multiple components.
      * Compares by distance (field 0), then PK fields, then component ID.
-     * Follows LSMVTreeSearchCursor.VectorPriorityQueueComparator pattern.
      */
     private class NaivePriorityQueueComparator implements Comparator<PriorityQueueElement> {
         @Override
@@ -731,7 +728,6 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
             ITupleReference tupleB = b.tuple;
 
             try {
-                // Compare field 0 (distance to centroid)
                 int result = cmp.getComparators()[0].compare(tupleA.getFieldData(0), tupleA.getFieldStart(0),
                         tupleA.getFieldLength(0), tupleB.getFieldData(0), tupleB.getFieldStart(0),
                         tupleB.getFieldLength(0));
@@ -739,7 +735,6 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
                     return result;
                 }
 
-                // Compare PK fields starting at pkStartField
                 int numRemainingFields = cmp.getComparators().length - pkStartField;
                 for (int i = 0; i < numRemainingFields; i++) {
                     int fieldIdx = pkStartField + i;
@@ -758,7 +753,6 @@ public class LSMVTreeBlockedNaiveCursor implements IIndexCursor {
                 throw new IllegalArgumentException(e);
             }
 
-            // Tiebreaker: prefer tuples from earlier components (for antimatter reconciliation)
             return Integer.compare(a.componentId, b.componentId);
         }
     }

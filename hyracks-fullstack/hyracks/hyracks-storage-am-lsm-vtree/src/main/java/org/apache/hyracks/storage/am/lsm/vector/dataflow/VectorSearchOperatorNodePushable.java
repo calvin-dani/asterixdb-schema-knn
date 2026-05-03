@@ -84,7 +84,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     // The actual tuple filter, created from the factory
     protected ITupleFilter tupleFilter;
 
-    // Search approach: 0 = naive (LSMVTreeSearchCursor), 1 = optimized (LSMVTreeBlockedCursor)
+    // Search approach: 0 = naive (LSMVTreeSearchCursor), 1 = optimized (LSMVTreePrunedTopKSearchCursor)
     // Compile-time constant passed from descriptor for cursor selection at open() time
     protected final int searchApproach;
 
@@ -279,10 +279,10 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
 
         // Set cursor selection flags based on compile-time searchApproach constant
         // 0 = naive streaming (LSMVTreeSearchCursor)
-        // 1 = optimized bidirectional (LSMVTreeBlockedCursor)
-        // 2 = optimized bidirectional with inline filtering (LSMVTreeBlockedCursor + ITupleFilter)
-        // 3 = naive blocked (LSMVTreeBlockedCursorNaive - top-K window, quantized distance, no pruning)
-        // 4 = index-driven KNN (LSMVTreeBlockedCursor + SequentialClusterSelectionStrategy)
+        // 1 = optimized bidirectional (LSMVTreePrunedTopKSearchCursor)
+        // 2 = optimized bidirectional with inline filtering (LSMVTreePrunedTopKSearchCursor + ITupleFilter)
+        // 3 = naive blocked (LSMVTreePrunedTopKSearchCursorNaive - top-K window, quantized distance, no pruning)
+        // 4 = index-driven KNN (LSMVTreePrunedTopKSearchCursor + SequentialClusterSelectionStrategy)
         if (searchApproach == 1 || searchApproach == 2 || searchApproach == 4) {
             iap.getParameters().put(HyracksConstants.USE_OPTIMIZED_SEARCH, Boolean.TRUE);
         }
@@ -292,5 +292,8 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         if (searchApproach == 3) {
             iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
         }
+
+        // Pass task context for spillable top-K buffer (follows inverted index pattern)
+        iap.getParameters().put(HyracksConstants.HYRACKS_TASK_CONTEXT, ctx);
     }
 }

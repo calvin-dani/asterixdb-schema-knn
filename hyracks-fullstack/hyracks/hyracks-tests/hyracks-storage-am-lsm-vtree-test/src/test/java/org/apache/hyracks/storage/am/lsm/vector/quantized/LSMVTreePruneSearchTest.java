@@ -37,7 +37,7 @@ import org.junit.Before;
 
 /**
  * LSMVTree pruning search test.
- * Tests the LSMVTreeBlockedCursor (optimized/pruning search) with triangle inequality pruning.
+ * Tests the LSMVTreePrunedTopKSearchCursor (optimized/pruning search) with triangle inequality pruning.
  *
  * Uses test data from QuantizedSearchTestDriver.quantizedSearchThreeDimension():
  * - Single centroid at origin [0, 0, 0]

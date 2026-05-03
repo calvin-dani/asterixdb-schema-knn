@@ -74,7 +74,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     // When set, the cursor will only return tuples that pass this filter
     protected final ITupleFilterFactory tupleFilterFactory;
 
-    // Search approach: 0 = naive (LSMVTreeSearchCursor), 1 = optimized (LSMVTreeBlockedCursor)
+    // Search approach: 0 = naive (LSMVTreeSearchCursor), 1 = optimized (LSMVTreePrunedTopKSearchCursor)
     // This is a compile-time constant extracted from the ANN_DISTANCE function arguments
     protected final int searchApproach;
 

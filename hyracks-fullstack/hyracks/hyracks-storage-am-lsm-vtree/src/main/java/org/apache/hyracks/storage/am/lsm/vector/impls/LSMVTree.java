@@ -656,7 +656,7 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
      * @return blocked search cursor
      */
     public IIndexCursor createBlockedSearchCursor(ILSMIndexOperationContext opCtx) {
-        return new LSMVTreeBlockedCursor(opCtx);
+        return new LSMVTreePrunedTopKSearchCursor(opCtx);
     }
 
     /**
@@ -667,7 +667,7 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
      * @return naive blocked search cursor
      */
     public IIndexCursor createNaiveBlockedSearchCursor(ILSMIndexOperationContext opCtx) {
-        return new LSMVTreeBlockedNaiveCursor(opCtx);
+        return new LSMVTreeTopKSearchCursor(opCtx);
     }
 
     @Override

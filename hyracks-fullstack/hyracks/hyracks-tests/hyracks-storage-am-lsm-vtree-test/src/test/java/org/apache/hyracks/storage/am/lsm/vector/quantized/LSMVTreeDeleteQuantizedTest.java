@@ -75,7 +75,7 @@ public class LSMVTreeDeleteQuantizedTest extends QuantizedSearchTestDriver {
      *
      * After deleting specific records, antimatter tuples in the memory component cancel
      * matching matter tuples from the disk component. The optimized search cursor
-     * (LSMVTreeBlockedCursor) handles this via the hold-and-check pattern.
+     * (LSMVTreePrunedTopKSearchCursor) handles this via the hold-and-check pattern.
      */
     @Override
     protected void runTest(ISerializerDeserializer[] centroidSerdes, ISerializerDeserializer[] dataRecordSerdes,

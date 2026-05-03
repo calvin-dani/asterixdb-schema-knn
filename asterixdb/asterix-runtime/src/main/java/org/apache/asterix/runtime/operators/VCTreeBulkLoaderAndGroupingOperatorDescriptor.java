@@ -1057,6 +1057,24 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                     if (isQuantized) {
                                         quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
 
+                                        // Populate quantized D(x, C) so it matches query-time convention:
+                                        // distanceFunction(quantize(x), quantize(C))
+                                        if (quantizer != null && result.centroid != null
+                                                && !result.hasQuantizedDistance()) {
+                                            try {
+                                                double[] qEmb = quantizedEmbedding != null ? quantizedEmbedding
+                                                        : quantizer.quantize(embedding);
+                                                double[] qCen = quantizer.quantize(result.centroid);
+                                                double qDist = hyracksDistanceFunction.apply(qEmb, qCen);
+                                                result = ClusterSearchResult.create(result.leafPageId,
+                                                        result.clusterIndex, result.centroid, result.distance,
+                                                        result.centroidId, result.directoryPageId, qDist);
+                                            } catch (Exception qex) {
+                                                System.err
+                                                        .println("WARNING: failed to compute quantized D(x,C): " + qex);
+                                            }
+                                        }
+
                                         // if (quantizedVector != null) {
                                         //     Object quantizedBytes = quantizedVector.quantizedBytes;
                                         //     String typeStr = "unknown";

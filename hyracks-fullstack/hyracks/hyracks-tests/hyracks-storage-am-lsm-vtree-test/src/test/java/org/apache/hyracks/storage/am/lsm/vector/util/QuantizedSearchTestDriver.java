@@ -33,7 +33,7 @@ import org.apache.hyracks.util.encoding.VarLenIntEncoderDecoder;
 import org.junit.Test;
 
 /**
- * Test driver for optimized search (LSMVTreeBlockedCursor) tests.
+ * Test driver for optimized search (LSMVTreePrunedTopKSearchCursor) tests.
  *
  * Generates test data with tuple format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
  * This format includes the vector field required for computing D(q, x) during optimized search.
@@ -114,7 +114,7 @@ public abstract class QuantizedSearchTestDriver {
     }
 
     /**
-     * Test data for optimized search (LSMVTreeBlockedCursor).
+     * Test data for optimized search (LSMVTreePrunedTopKSearchCursor).
      * Uses a simpler single-cluster structure for testing bidirectional traversal
      * and triangle inequality termination.
      *
@@ -230,7 +230,7 @@ public abstract class QuantizedSearchTestDriver {
      * Helper method to create a record tuple for optimized search testing.
      * Format: <distance_to_centroid, centroid_id, quantized_distance, quantized_embedding, primary_key>
      *
-     * This format allows LSMVTreeBlockedCursor to:
+     * This format allows LSMVTreePrunedTopKSearchCursor to:
      * 1. Extract D(x,C) from field 0 for pivot finding and priority queue ordering
      * 2. Extract centroid_id from field 1 for cluster validation
      * 3. Extract quantized_distance from field 2 for pruning

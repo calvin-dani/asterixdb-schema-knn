@@ -37,7 +37,7 @@ import org.junit.Before;
 
 /**
  * LSMVTree quantized search test.
- * Tests the LSMVTreeBlockedCursorNaive with sequential cluster scanning and top-K window collection.
+ * Tests the LSMVTreeTopKSearchCursor with sequential cluster scanning and top-K window collection.
  *
  * Uses test data from QuantizedSearchTestDriver.quantizedSearchThreeDimension():
  * - Single centroid at origin [0, 0, 0]
