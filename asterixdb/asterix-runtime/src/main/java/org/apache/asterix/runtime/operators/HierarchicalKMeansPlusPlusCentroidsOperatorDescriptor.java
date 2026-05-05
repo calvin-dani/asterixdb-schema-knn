@@ -596,8 +596,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             UTF8StringPointable.generateUTF8Pointable("l2_squared");
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
-    private static final UTF8StringPointable MANHATTAN_FORMAT =
-            UTF8StringPointable.generateUTF8Pointable("manhattan_distance");
     private static final UTF8StringPointable COSINE_FORMAT = UTF8StringPointable.generateUTF8Pointable("cosine");
     private static final UTF8StringPointable COSINE_ALIAS = UTF8StringPointable.generateUTF8Pointable("cosine");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
