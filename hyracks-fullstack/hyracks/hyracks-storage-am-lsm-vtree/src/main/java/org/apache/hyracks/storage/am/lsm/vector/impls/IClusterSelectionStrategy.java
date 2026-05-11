@@ -22,11 +22,13 @@ package org.apache.hyracks.storage.am.lsm.vector.impls;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VTree;
 import org.apache.hyracks.storage.am.vector.impls.VTreeSearchCursor;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 
 /**
  * Strategy interface for cluster selection in multi-cluster vector search.
@@ -49,6 +51,12 @@ public interface IClusterSelectionStrategy {
      */
     void initialize(VTree vTree, double[] queryVector, IVTreeDistanceFunction distFunc, int k)
             throws HyracksDataException;
+
+    default void initializeWithRootOverride(IBufferCache navBC, int navFileId, int navRootPageId,
+            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
+            IVTreeDistanceFunction distFunc, int k) throws HyracksDataException {
+        throw new UnsupportedOperationException("Root override not supported by this strategy");
+    }
 
     /**
      * Get the next cluster to explore.

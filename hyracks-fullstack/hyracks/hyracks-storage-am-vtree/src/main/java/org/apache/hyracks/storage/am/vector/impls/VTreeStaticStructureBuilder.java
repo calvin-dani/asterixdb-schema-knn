@@ -35,6 +35,7 @@ import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.AbstractTreeIndex;
 import org.apache.hyracks.storage.am.vector.api.IVTreeFrame;
@@ -473,6 +474,73 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
     }
 
     /**
+     * Build a flat (single-level) copy of all leaf centroids for A/B experiments.
+     * Reads tuples from the hierarchical leaf pages and writes them into new flat leaf pages
+     * with the same metadata page pointers.
+     *
+     * @return the page ID of the flat root page
+     */
+    private int buildFlatStructure() throws HyracksDataException {
+        int flatRootPageId = freePageManager.takePage(metaFrame);
+
+        IVTreeLeafFrame srcFrame = (IVTreeLeafFrame) treeIndex.getLeafFrameFactory().createFrame();
+        IVTreeLeafFrame dstFrame = (IVTreeLeafFrame) treeIndex.getLeafFrameFactory().createFrame();
+        ITreeIndexTupleReference tupleRef = ((IVTreeFrame) srcFrame).createTupleReference();
+
+        // Create first flat page
+        int currentFlatPageId = flatRootPageId;
+        long dpid = BufferedFileHandle.getDiskPageId(fileId, currentFlatPageId);
+        ICachedPage flatPage = bufferCache.confiscatePage(dpid);
+        dstFrame.setPage(flatPage);
+        dstFrame.initBuffer((byte) 0);
+        dstFrame.setLevel((byte) 0);
+
+        int totalCopied = 0;
+
+        for (int pageIdx = 0; pageIdx < leafPages.size(); pageIdx++) {
+            ICachedPage srcPage = leafPages.get(pageIdx);
+            srcFrame.setPage(srcPage);
+            int tupleCount = ((ITreeIndexFrame) srcFrame).getTupleCount();
+
+            for (int i = 0; i < tupleCount; i++) {
+                tupleRef.resetByTupleIndex((ITreeIndexFrame) srcFrame, i);
+                if (totalCopied == 0) {
+                    System.err.println("[buildFlatStructure] First tuple: fieldCount=" + tupleRef.getFieldCount()
+                            + ", tupleSize=" + tupleRef.getTupleSize() + ", field0len=" + tupleRef.getFieldLength(0)
+                            + ", field1len=" + tupleRef.getFieldLength(1));
+                }
+
+                int spaceNeeded = ((ITreeIndexFrame) dstFrame).getBytesRequiredToWriteTuple(tupleRef) + slotSize;
+                int spaceAvailable = ((ITreeIndexFrame) dstFrame).getTotalFreeSpace();
+
+                if (spaceNeeded > spaceAvailable) {
+                    // Save current flat page and create overflow
+                    allPages.put(currentFlatPageId, flatPage);
+                    int overflowPageId = freePageManager.takePage(metaFrame);
+                    dstFrame.setNextLeaf(overflowPageId);
+                    dstFrame.setOverflowFlagBit(true);
+
+                    currentFlatPageId = overflowPageId;
+                    dpid = BufferedFileHandle.getDiskPageId(fileId, currentFlatPageId);
+                    flatPage = bufferCache.confiscatePage(dpid);
+                    dstFrame.setPage(flatPage);
+                    dstFrame.initBuffer((byte) 0);
+                    dstFrame.setLevel((byte) 0);
+                }
+
+                ((IVTreeFrame) dstFrame).insertSorted(tupleRef);
+                totalCopied++;
+            }
+        }
+
+        // Save last flat page
+        allPages.put(currentFlatPageId, flatPage);
+
+        System.err.println("FLAT BUILD: flatRootPageId=" + flatRootPageId + ", centroids=" + totalCopied);
+        return flatRootPageId;
+    }
+
+    /**
      * Only gets called when everything is done.
      */
     @Override
@@ -486,11 +554,33 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
         // Update leaf pages with correct directory page pointers
         updateLeafPagesWithDirectoryPointers();
 
+        // Log tree structure summary
+        StringBuilder structLog = new StringBuilder();
+        structLog.append("TREE STRUCTURE: numLevels=").append(numLevels);
+        structLog.append(", clustersPerLevel=").append(clustersPerLevel);
+        structLog.append(", totalPages=").append(allPages.size());
+        structLog.append(", leafPages=").append(leafPages.size());
+        for (int lvl = 0; lvl < numLevels; lvl++) {
+            int centroidsInLevel = 0;
+            for (int c : centroidsPerCluster.get(lvl)) {
+                centroidsInLevel += c;
+            }
+            structLog.append(String.format(", L%d: %d clusters, %d centroids, %d pages, distribution=%s", lvl,
+                    clustersPerLevel.get(lvl), centroidsInLevel, levelPageIds.get(lvl).size(),
+                    centroidsPerCluster.get(lvl)));
+        }
+        System.err.println(structLog.toString());
+
+        // Build flat structure (all leaf centroids in a single-level chain) for A/B experiments
+        int flatRootPageId = buildFlatStructure();
+
         // Store metadata key-values
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
                 LongPointable.FACTORY.createPointable(totalCentroidsUpToLevel[numLevels - 1]));
+        metaFrame.put(new MutableArrayValueReference("flat_root_page_id".getBytes()),
+                LongPointable.FACTORY.createPointable(flatRootPageId));
 
         // Set root page ID (page 0)
         freePageManager.setRootPageId(0);

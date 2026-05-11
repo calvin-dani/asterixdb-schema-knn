@@ -296,6 +296,12 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", -1) : -1;
 
+        boolean flat = false;
+        if (withObjectNode != null) {
+            String flatStr = withObjectNode.getOptionalString("flat", "false");
+            flat = "true".equalsIgnoreCase(flatStr);
+        }
+
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
@@ -338,7 +344,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
                         new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
-                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension);
+                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension, flat);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;

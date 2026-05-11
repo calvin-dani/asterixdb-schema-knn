@@ -634,6 +634,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private IIndexDataflowHelperFactory indexHelperFactory; // For accessing index directory per partition
     private int[][] partitionsMap; // Maps compute partition to storage partition(s)
     private int vectorDimension;
+    private boolean flat;
 
     private static DistanceFunction getDistanceFunction(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
@@ -840,12 +841,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap,
-            String distanceMetric, int vectorDimension) {
+            String distanceMetric, int vectorDimension, boolean flat) {
         super(spec, 1, 1);
-        // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
-        // Input record descriptor is the 2-field format with vector embeddings
-        outRecDescs[0] = outputRecDesc; // Output format (hierarchical structure with parent-child relationships)
-        this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
+        outRecDescs[0] = outputRecDesc;
+        this.secondaryRecDesc = secondaryRecDesc;
         this.sampleUUID = sampleUUID;
         this.tupleCountUUID = tupleCountUUID;
         this.materializedDataUUID = materializedDataUUID;
@@ -856,8 +855,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.indexHelperFactory = indexHelperFactory;
         this.partitionsMap = partitionsMap;
         this.vectorDimension = vectorDimension;
-
-        // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
+        this.flat = flat;
         this.distanceFunction = getDistanceFunction(distanceMetric);
     }
 
@@ -1919,7 +1917,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                     structure.levelCentroids.put(0, level0Info);
 
+                    if (flat) {
+                        System.err.println("FLAT MODE: Skipping hierarchical levels, leaf-only structure with "
+                                + initialResult.centroids.size() + " centroids");
+                        return structure;
+                    }
+
                     // Build subsequent levels using scalable K-means++ on centroids
+                    long hierarchyStartNs = System.nanoTime();
                     List<double[]> currentCentroids = initialResult.centroids;
                     // Initialize currentK using square root reduction for balanced hierarchical structure
                     // int reductionFactor = 100; // Integer reduction factor for hierarchical structure
@@ -1978,8 +1983,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         currentLevel++;
                     }
 
-                    //                    System.err
-                    //                            .println("Hierarchical clustering completed with " + structure.getNumLevels() + " levels");
+                    long hierarchyElapsedMs = (System.nanoTime() - hierarchyStartNs) / 1_000_000;
+                    System.err.println("HIERARCHY BUILD: levels=" + structure.getNumLevels() + ", leafCentroids="
+                            + initialResult.centroids.size() + ", timeMs=" + hierarchyElapsedMs);
                     return structure;
                 }
 

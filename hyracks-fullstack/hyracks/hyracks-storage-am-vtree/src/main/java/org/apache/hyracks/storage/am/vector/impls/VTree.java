@@ -105,6 +105,10 @@ public class VTree extends AbstractTreeIndex {
     private IBufferCache staticBufferCache;
     private int staticFileId;
     private int staticRootPage;
+    private int staticFlatRootPage = -1;
+    private int flatRootPage = -1;
+    private IBufferCache flatNavBufferCache;
+    private int flatNavFileId = -1;
 
     // Centroid-to-directory-page mapping (memory components only)
     private int[] centroidDirPageMap; // centroidIndex -> VBC directory page ID
@@ -995,6 +999,34 @@ public class VTree extends AbstractTreeIndex {
         return (staticBufferCache != null) ? staticRootPage : rootPage;
     }
 
+    public int getFlatNavigationRootPageId() {
+        return (staticBufferCache != null) ? staticFlatRootPage : flatRootPage;
+    }
+
+    public void setFlatRootPageId(int flatRootPageId) {
+        this.flatRootPage = flatRootPageId;
+    }
+
+    public void setFlatNavigation(int flatRootPageId, IBufferCache navBC, int navFileId) {
+        this.flatRootPage = flatRootPageId;
+        this.flatNavBufferCache = navBC;
+        this.flatNavFileId = navFileId;
+    }
+
+    public IBufferCache getFlatNavigationBufferCache() {
+        if (staticBufferCache != null) {
+            return staticBufferCache;
+        }
+        return flatNavBufferCache != null ? flatNavBufferCache : bufferCache;
+    }
+
+    public int getFlatNavigationFileId() {
+        if (staticBufferCache != null) {
+            return staticFileId;
+        }
+        return flatNavFileId >= 0 ? flatNavFileId : getFileId();
+    }
+
     /**
      * Find close centroids via level-wise traversal with global sort (delegates to
      * VTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort). Handles overflow pages for both
@@ -1094,6 +1126,14 @@ public class VTree extends AbstractTreeIndex {
         metaFrame.get(key2, value2);
         this.numLeafCentroidMem = value1.intValue();
         this.firstLeafCentroidIdMem = value2.intValue();
+
+        MutableArrayValueReference key3 = new MutableArrayValueReference("flat_root_page_id".getBytes());
+        LongPointable value3 = LongPointable.FACTORY.createPointable();
+        metaFrame.get(key3, value3);
+        this.staticFlatRootPage = value3.intValue();
+        System.err.println("[VTree.setStaticStructure] numLeafCentroids=" + numLeafCentroidMem
+                + ", firstLeafCentroidId=" + firstLeafCentroidIdMem + ", staticFlatRootPage=" + staticFlatRootPage
+                + ", staticRootPage=" + staticRootPage);
 
         // Create empty directory pages in VBC (using takePage() directly)
         ITreeIndexMetadataFrame vbcMetaFrame = freePageManager.createMetadataFrame();

@@ -205,6 +205,18 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 vectorPred.setKMultiplier(Math.max(1, queryKMult));
             }
 
+            // Extract use_flat from field 5 (int, +1 to skip type tag)
+            if (queryFields.length > 5) {
+                int useFlat = IntegerPointable.getInteger(queryParamsTuple.getFieldData(5),
+                        queryParamsTuple.getFieldStart(5) + 1);
+                vectorPred.setUseFlatNavigation(useFlat != 0);
+                System.err.println("[VectorSearchOp] queryFields.length=" + queryFields.length + ", useFlat=" + useFlat
+                        + ", useFlatNavigation=" + (useFlat != 0));
+            } else {
+                System.err.println("[VectorSearchOp] queryFields.length=" + queryFields.length
+                        + ", no useFlat field (default=false)");
+            }
+
             // Set tuple filter for INCLUDE field predicates (e.g., year > 2000)
             // This filter is applied at cursor level for proper K counting
             if (tupleFilter != null) {
@@ -216,7 +228,19 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
                 vectorPred.setKMultiplier(kMultiplier);
             }
 
-            vectorPred.setEpsilon(indexEpsilon);
+            // Extract epsilon_override from field 6 (double, +1 to skip type tag)
+            // Negative value means use index default
+            if (queryFields.length > 6) {
+                double epsOverride = DoublePointable.getDouble(queryParamsTuple.getFieldData(6),
+                        queryParamsTuple.getFieldStart(6) + 1);
+                if (epsOverride >= 0.0) {
+                    vectorPred.setEpsilon(epsOverride);
+                } else {
+                    vectorPred.setEpsilon(indexEpsilon);
+                }
+            } else {
+                vectorPred.setEpsilon(indexEpsilon);
+            }
         }
     }
 

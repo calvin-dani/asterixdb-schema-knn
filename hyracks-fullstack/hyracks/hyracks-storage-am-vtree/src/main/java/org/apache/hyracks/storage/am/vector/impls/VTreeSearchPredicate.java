@@ -47,6 +47,7 @@ public class VTreeSearchPredicate implements ISearchPredicate {
     private int searchApproach; // 0 = naive (LSMVTreeSearchCursor), 1 = optimized (LSMVTreeBlockedCursor)
     private int pkStartField; // Field index where primary keys start (2 for non-quantized, 4 for quantized)
     private int kMultiplier; // Multiplier for candidate limit: K * kMultiplier sent to PK for reranking (default 1)
+    private boolean useFlatNavigation; // Use flat (single-level) navigation instead of hierarchical tree
 
     private static final double DEFAULT_MIN_PROBE_FRACTION = 0.1;
     private static final double DEFAULT_EPSILON = 0.3;
@@ -259,6 +260,14 @@ public class VTreeSearchPredicate implements ISearchPredicate {
      */
     public int getKMultiplier() {
         return kMultiplier;
+    }
+
+    public void setUseFlatNavigation(boolean useFlatNavigation) {
+        this.useFlatNavigation = useFlatNavigation;
+    }
+
+    public boolean isUseFlatNavigation() {
+        return useFlatNavigation;
     }
 
     @Override

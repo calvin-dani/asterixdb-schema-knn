@@ -38,6 +38,7 @@ import org.apache.asterix.om.base.AInt32;
 import org.apache.asterix.om.base.AInt64;
 import org.apache.asterix.om.base.AMissing;
 import org.apache.asterix.om.base.ANull;
+import org.apache.asterix.om.base.AString;
 import org.apache.asterix.om.base.IAObject;
 import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.functions.BuiltinFunctions;
@@ -112,11 +113,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
     // - ANN_DISTANCE: approximate nearest neighbor search (probes nprobe clusters)
     // - VECTOR_DISTANCE_ARRAY: index-driven KNN when 4th arg is true (scans all clusters)
     private static final List<Pair<FunctionIdentifier, Boolean>> FUNC_IDENTIFIERS =
-            Collections.unmodifiableList(Arrays.asList(new Pair<>(BuiltinFunctions.ANN_DISTANCE, true),
-                    new Pair<>(BuiltinFunctions.EUCLIDEAN_DISTANCE_ARRAY, true),
-                    new Pair<>(BuiltinFunctions.EUCLIDEAN_SQ_DISTANCE_ARRAY, true),
-                    new Pair<>(BuiltinFunctions.COSINE_DISTANCE_ARRAY, true),
-                    new Pair<>(BuiltinFunctions.DOT_DISTANCE_ARRAY, true)));
+            Collections.unmodifiableList(Arrays.asList(new Pair<>(BuiltinFunctions.ANN_DISTANCE, true)));
 
     @Override
     public List<Pair<FunctionIdentifier, Boolean>> getOptimizableFunctions() {
@@ -130,7 +127,7 @@ public class VectorIndexAccessMethod implements IAccessMethod {
 
         FunctionIdentifier fid = funcExpr.getFunctionIdentifier();
         if (fid.equals(BuiltinFunctions.ANN_DISTANCE)) {
-            if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 5) {
+            if (funcExpr.getArguments().size() < 3 || funcExpr.getArguments().size() > 7) {
                 return false;
             }
         } else if (fid.equals(BuiltinFunctions.EUCLIDEAN_DISTANCE_ARRAY)
@@ -248,12 +245,16 @@ public class VectorIndexAccessMethod implements IAccessMethod {
         ARecordType metaRecordType = subTree.getMetaRecordType();
         AbstractDataSourceOperator dataSourceOp = (AbstractDataSourceOperator) subTree.getDataSourceRef().getValue();
 
-        // Extract parameters from ANN_DISTANCE(vectorField, queryVector, metric)
-        // arg0 = vectorField (variable reference)
-        // arg1 = queryVector (constant or variable)
-        // arg2 = distanceMetric (string constant)
+        // Extract parameters from ANN_DISTANCE(vectorField, queryVector, metric) or
+        // EUCLIDEAN_DISTANCE(vectorField, queryVector) etc.
         ILogicalExpression queryVectorExpr = annDistanceExpr.getArguments().get(1).getValue();
-        ILogicalExpression distanceMetricExpr = annDistanceExpr.getArguments().get(2).getValue();
+        ILogicalExpression distanceMetricExpr;
+        if (annDistanceExpr.getArguments().size() > 2) {
+            distanceMetricExpr = annDistanceExpr.getArguments().get(2).getValue();
+        } else {
+            String metric = inferDistanceMetric(annDistanceExpr.getFunctionIdentifier());
+            distanceMetricExpr = new ConstantExpression(new AsterixConstantValue(new AString(metric)));
+        }
 
         // Extract k value from LIMIT operator
         LimitOperator limitOp = (LimitOperator) limitRef.getValue();
@@ -306,6 +307,26 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             queryExprList.add(new MutableObject<>(ensureInt32Constant(kMultExpr)));
         } else {
             queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(1)))));
+        }
+
+        // Add use_flat variable (arg 5 for ANN_DISTANCE, default 0 = hierarchical)
+        LogicalVariable useFlatVar = context.newVar();
+        queryVarList.add(useFlatVar);
+        if (!isVectorDistance && annDistanceExpr.getArguments().size() > 5) {
+            ILogicalExpression useFlatExpr = annDistanceExpr.getArguments().get(5).getValue().cloneExpression();
+            queryExprList.add(new MutableObject<>(ensureInt32Constant(useFlatExpr)));
+        } else {
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new AInt32(0)))));
+        }
+
+        // Add epsilon_override variable (arg 6 for ANN_DISTANCE, default -1.0 = use index epsilon)
+        LogicalVariable epsilonOverrideVar = context.newVar();
+        queryVarList.add(epsilonOverrideVar);
+        if (!isVectorDistance && annDistanceExpr.getArguments().size() > 6) {
+            ILogicalExpression epsExpr = annDistanceExpr.getArguments().get(6).getValue().cloneExpression();
+            queryExprList.add(new MutableObject<>(epsExpr));
+        } else {
+            queryExprList.add(new MutableObject<>(new ConstantExpression(new AsterixConstantValue(new ADouble(-1.0)))));
         }
 
         // Add search_approach variable (always 0 for ann_distance, 4 for vector_distance)
@@ -604,6 +625,19 @@ public class VectorIndexAccessMethod implements IAccessMethod {
             }
         }
         return expr;
+    }
+
+    private static String inferDistanceMetric(FunctionIdentifier fid) {
+        if (fid.equals(BuiltinFunctions.EUCLIDEAN_DISTANCE_ARRAY)) {
+            return "euclidean";
+        } else if (fid.equals(BuiltinFunctions.EUCLIDEAN_SQ_DISTANCE_ARRAY)) {
+            return "euclidean_squared";
+        } else if (fid.equals(BuiltinFunctions.COSINE_DISTANCE_ARRAY)) {
+            return "cosine";
+        } else if (fid.equals(BuiltinFunctions.DOT_DISTANCE_ARRAY)) {
+            return "dot";
+        }
+        return "euclidean";
     }
 
     private static ILogicalExpression ensureInt32Constant(ILogicalExpression expr) throws AlgebricksException {

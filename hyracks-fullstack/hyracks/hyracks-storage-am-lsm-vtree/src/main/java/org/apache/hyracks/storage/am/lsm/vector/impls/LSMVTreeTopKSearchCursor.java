@@ -243,7 +243,19 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
             // Initialize strategy with first component's tree (candidateLimit so we collect 2*K for reranking)
             ILSMComponent firstComponent = operationalComponents.get(0);
             VTree vTree = (VTree) firstComponent.getIndex();
-            clusterStrategy.initialize(vTree, queryVector, distanceFunction, candidateLimit);
+            if (vectorPred.isUseFlatNavigation() && vTree.getFlatNavigationRootPageId() >= 0) {
+                System.err.println(
+                        "[LSMVTreeTopKSearch] FLAT navigation: flatRootPageId=" + vTree.getFlatNavigationRootPageId()
+                                + ", hierarchicalRootPageId=" + vTree.getNavigationRootPageId());
+                clusterStrategy.initializeWithRootOverride(vTree.getFlatNavigationBufferCache(),
+                        vTree.getFlatNavigationFileId(), vTree.getFlatNavigationRootPageId(),
+                        vTree.getInteriorFrameFactory(), vTree.getLeafFrameFactory(), queryVector, distanceFunction,
+                        candidateLimit);
+            } else {
+                System.err.println(
+                        "[LSMVTreeTopKSearch] HIERARCHICAL navigation: rootPageId=" + vTree.getNavigationRootPageId());
+                clusterStrategy.initialize(vTree, queryVector, distanceFunction, candidateLimit);
+            }
 
             // Set first cursor for DFS fallback
             clusterStrategy.setFirstCursorForDFS(firstSearchCursor);

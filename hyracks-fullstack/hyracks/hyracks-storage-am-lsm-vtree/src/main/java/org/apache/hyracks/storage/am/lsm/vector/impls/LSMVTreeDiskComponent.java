@@ -27,8 +27,11 @@ import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.control.common.controllers.NCConfig;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.storage.am.common.api.IMetadataPageManager;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexAccessor;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMComponentFilter;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIOOperation;
@@ -239,5 +242,20 @@ public class LSMVTreeDiskComponent extends AbstractLSMDiskComponent {
         vTree.setStaticStructureInitialized();
         int rootPageId = vTree.getPageManager().getRootPageId();
         vTree.setRootPageId(rootPageId);
+
+        // Read flat root page ID from metadata (written by VTreeStaticStructureBuilder)
+        try {
+            ITreeIndexMetadataFrame metaFrame = vTree.getPageManager().createMetadataFrame();
+            vTree.getPageManager().getMaxPageId(metaFrame);
+            MutableArrayValueReference key = new MutableArrayValueReference("flat_root_page_id".getBytes());
+            LongPointable value = LongPointable.FACTORY.createPointable();
+            metaFrame.get(key, value);
+            int flatRootPageId = value.intValue();
+            vTree.setFlatRootPageId(flatRootPageId);
+            System.err.println("[LSMVTreeDiskComponent.setInitialized] rootPageId=" + rootPageId + ", flatRootPageId="
+                    + flatRootPageId + ", isStaticStructure=" + isStaticStructure);
+        } catch (Exception e) {
+            // flat_root_page_id not present (older index format)
+        }
     }
 }

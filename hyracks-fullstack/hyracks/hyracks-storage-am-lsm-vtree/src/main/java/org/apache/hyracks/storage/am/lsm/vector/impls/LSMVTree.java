@@ -179,6 +179,16 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
 
     public void setInitialized(LSMVTreeDiskComponent diskComponent) throws HyracksDataException {
         diskComponent.setInitialized();
+        // Propagate flat navigation from static structure to data component
+        if (staticStructure != null) {
+            VTree ssTree = (VTree) staticStructure.getIndex();
+            int flatRoot = ssTree.getFlatNavigationRootPageId();
+            diskComponent.getIndex().setFlatNavigation(flatRoot, ssTree.getBufferCache(), ssTree.getFileId());
+            System.err.println("[LSMVTree.setInitialized] Propagated flatRootPageId=" + flatRoot
+                    + " to data component (staticStructure exists)");
+        } else {
+            System.err.println("[LSMVTree.setInitialized] staticStructure is NULL, cannot propagate flatRootPageId");
+        }
     }
 
     @Override
@@ -733,5 +743,17 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
             diskComponents.add(component);
         }
         loadStaticStructure();
+        // Propagate flat navigation from static structure to all data components
+        if (staticStructure != null) {
+            VTree ssTree = (VTree) staticStructure.getIndex();
+            int flatRoot = ssTree.getFlatNavigationRootPageId();
+            IBufferCache ssBC = ssTree.getBufferCache();
+            int ssFileId = ssTree.getFileId();
+            for (ILSMDiskComponent dc : diskComponents) {
+                ((VTree) dc.getIndex()).setFlatNavigation(flatRoot, ssBC, ssFileId);
+            }
+            System.err.println("[LSMVTree.loadDiskComponents] Propagated flatRootPageId=" + flatRoot
+                    + ", ssFileId=" + ssFileId + " to " + diskComponents.size() + " data components");
+        }
     }
 }

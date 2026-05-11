@@ -61,9 +61,12 @@ public class VectorIndexDeclUtil {
     /**
      * Only these keys may appear in the vector index {@code WITH} clause (unknown keys are a compile error).
      */
-    private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS = Set.of(VECTOR_INDEX_PARAMETER_DIMENSION,
-            VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION,
-            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K);
+    private static final String VECTOR_INDEX_PARAMETER_FLAT = "flat";
+
+    private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS =
+            Set.of(VECTOR_INDEX_PARAMETER_DIMENSION, VECTOR_INDEX_PARAMETER_SIMILARITY,
+                    VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION, VECTOR_INDEX_PARAMETER_QUANTIZATION,
+                    VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K, VECTOR_INDEX_PARAMETER_FLAT);
 
     private VectorIndexDeclUtil() {
     }
@@ -97,7 +100,7 @@ public class VectorIndexDeclUtil {
         for (String name : node.getFieldNames()) {
             if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
                 throw new CompilationException("Failed to create vector index. Unknown field `" + name
-                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon");
+                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon, num_clusters, flat");
             }
         }
     }

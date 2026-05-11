@@ -151,12 +151,11 @@ public class VectorSearchPOperator extends IndexSearchPOperator {
 
         // Extract searchApproach compile-time constant from ASSIGN operator.
         // queryVarList (see VectorIndexAccessMethod): [queryVector, k, metric, min_probe_fraction, k_multiplier,
-        // searchApproach]. Level-wise epsilon for ANN comes from the vector index WITH metadata in
-        // MetadataProvider.getVectorSearchRuntime, not from the query tuple.
+        // use_flat, epsilon_override, searchApproach].
         int searchApproach = 0; // default: naive
         List<LogicalVariable> queryVarList = jobGenParams.getQueryVarList();
-        if (queryVarList.size() > 5) {
-            LogicalVariable searchApproachVar = queryVarList.get(5);
+        if (queryVarList.size() > 7) {
+            LogicalVariable searchApproachVar = queryVarList.get(7);
             searchApproach = extractIntConstantForVariable(unnestMap, searchApproachVar, 0);
         }
 

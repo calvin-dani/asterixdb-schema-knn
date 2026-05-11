@@ -24,12 +24,14 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizer;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VTree;
 import org.apache.hyracks.storage.am.vector.impls.VTreeSearchCursor;
 import org.apache.hyracks.storage.am.vector.utils.VTreeNavigationUtils;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -90,10 +92,17 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         // Compute level-wise clusters using VTreeNavigationUtils
         if (queryVector != null && epsilon > 0.0 && vTree != null) {
             try {
+                VTreeNavigationUtils.resetCounters();
+                long startNs = System.nanoTime();
+
                 globalLevelWiseClusters = VTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(
                         vTree.getNavigationBufferCache(), vTree.getNavigationFileId(), vTree.getNavigationRootPageId(),
                         vTree.getInteriorFrameFactory(), vTree.getLeafFrameFactory(), queryVector, distFunc, epsilon,
                         quantizedQueryVector, quantizer);
+
+                long elapsedNs = System.nanoTime() - startNs;
+                long distComps = VTreeNavigationUtils.getAndResetDistanceComputations();
+                long pins = VTreeNavigationUtils.getAndResetPagePins();
 
                 // Compute nprobe from minProbeFraction * totalLeafClusters
                 int totalLeafClusters = globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 1;
@@ -106,13 +115,57 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                     globalClusterIndex = 1; // Skip first cluster in getNextCluster()
                 }
 
-                LOGGER.log(Level.TRACE,
-                        String.format(
-                                "[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f, minProbeFraction=%.2f, nprobe=%d",
-                                totalLeafClusters, epsilon, minProbeFraction, nprobe));
+                String lvlBreakdown = VTreeNavigationUtils.getAndResetLevelBreakdown();
+
+                LOGGER.log(Level.WARN,
+                        "[NprobeStrategy] clusters={}, epsilon={}, nprobe={}, distComps={}, pagePins={}, timeUs={}",
+                        totalLeafClusters, epsilon, nprobe, distComps, pins, elapsedNs / 1000);
+                LOGGER.log(Level.WARN, "[NprobeStrategy] breakdown: {}", lvlBreakdown);
             } catch (Exception e) {
                 LOGGER.log(Level.TRACE,
                         String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
+                globalLevelWiseClusters = null;
+            }
+        }
+    }
+
+    @Override
+    public void initializeWithRootOverride(IBufferCache navBC, int navFileId, int navRootPageId,
+            ITreeIndexFrameFactory interiorFrameFactory, ITreeIndexFrameFactory leafFrameFactory, double[] queryVector,
+            IVTreeDistanceFunction distFunc, int k) throws HyracksDataException {
+        this.K = k;
+        this.globalClusterIndex = 0;
+        this.levelWisePhaseComplete = false;
+
+        if (queryVector != null && epsilon > 0.0) {
+            try {
+                VTreeNavigationUtils.resetCounters();
+                long startNs = System.nanoTime();
+
+                globalLevelWiseClusters = VTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(navBC, navFileId,
+                        navRootPageId, interiorFrameFactory, leafFrameFactory, queryVector, distFunc, epsilon,
+                        quantizedQueryVector, quantizer);
+
+                long elapsedNs = System.nanoTime() - startNs;
+                long distComps = VTreeNavigationUtils.getAndResetDistanceComputations();
+                long pins = VTreeNavigationUtils.getAndResetPagePins();
+
+                int totalLeafClusters = globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 1;
+                this.nprobe = Math.max(1, (int) Math.floor(totalLeafClusters * minProbeFraction));
+
+                if (globalLevelWiseClusters != null && !globalLevelWiseClusters.isEmpty()) {
+                    visitedCentroidIds.add(globalLevelWiseClusters.get(0).centroidId);
+                    globalClusterIndex = 1;
+                }
+
+                String lvlBreakdown = VTreeNavigationUtils.getAndResetLevelBreakdown();
+
+                LOGGER.log(Level.WARN,
+                        "[NprobeStrategy FLAT] clusters={}, epsilon={}, nprobe={}, distComps={}, pagePins={}, timeUs={}",
+                        totalLeafClusters, epsilon, nprobe, distComps, pins, elapsedNs / 1000);
+                LOGGER.log(Level.WARN, "[NprobeStrategy FLAT] breakdown: {}", lvlBreakdown);
+            } catch (Exception e) {
+                LOGGER.log(Level.TRACE, "[NprobeStrategy FLAT] Failed: {}", e.getMessage());
                 globalLevelWiseClusters = null;
             }
         }
