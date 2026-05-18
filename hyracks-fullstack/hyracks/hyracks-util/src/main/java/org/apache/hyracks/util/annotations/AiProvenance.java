@@ -189,6 +189,11 @@ public @interface AiProvenance {
         O4_MINI(OPENAI, "o4-mini", "o4 Mini"),
 
         // =========================
+        // Anthropic — Claude Fable (Mythos-class tier)
+        // =========================
+        CLAUDE_FABLE_5(ANTHROPIC, "claude-fable-5", "Claude Fable 5"),
+
+        // =========================
         // Anthropic — Claude Opus
         // =========================
         CLAUDE_OPUS_4(ANTHROPIC, "claude-4-opus", "Claude Opus 4"),
