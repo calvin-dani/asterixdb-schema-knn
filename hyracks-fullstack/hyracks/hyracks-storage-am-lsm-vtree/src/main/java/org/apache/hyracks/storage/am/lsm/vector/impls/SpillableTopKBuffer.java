@@ -133,6 +133,17 @@ public class SpillableTopKBuffer {
      * Insert a tuple with its approximate distance. Never drops tuples.
      * Spills to disk if memory budget is exceeded.
      */
+    public boolean wouldAccept(double dqx) {
+        if (getNumEntries() < candidateLimit) {
+            return true;
+        }
+        if (topKHeap.getNumEntries() > 0) {
+            topKHeap.peekMax(peekEntry);
+            return dqx < peekEntry.dqx;
+        }
+        return true;
+    }
+
     public void insert(ITupleReference tuple, double dqx) throws HyracksDataException {
         ensureInitialized(tuple);
 
