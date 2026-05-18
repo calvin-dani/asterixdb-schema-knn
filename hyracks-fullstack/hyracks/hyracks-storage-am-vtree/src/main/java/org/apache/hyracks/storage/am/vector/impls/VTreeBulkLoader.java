@@ -72,6 +72,10 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
     // Static structure data (saved byte arrays for copying at end)
     private final List<byte[]> staticPageContents;
     private final int numStaticPages;
+    // Root page id within the static structure's page id space. After the static
+    // pages are copied into this data component starting at staticBasePageId, the
+    // root of the copied structure sits at (staticBasePageId + staticStructureRootPage).
+    private final int staticStructureRootPage;
 
     private int firstLeafCentroidId;
     private int numLeafCentroid;
@@ -146,6 +150,10 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
             vTreeAccessor.releasePage(sourcePage);
         }
         numStaticPages = staticPageContents.size();
+        // VTreeStaticStructureBuilder writes the root at the highest page id (bottom-up).
+        // Capture it now so we can translate when the static pages are copied into this
+        // data component with an offset.
+        this.staticStructureRootPage = vtree.getRootPageId();
 
         // Initialize per-cluster directory page tracking
         clusterFirstDirPageId = new int[numLeafCentroid];
@@ -516,8 +524,11 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
             write(entry.getValue());
         }
 
-        // Set root page and metadata
-        int rootPageId = staticBasePageId; // Root was page 0 in static structure
+        // Set root page and metadata. In bottom-up static structures the root sits at
+        // the highest page id; staticStructureRootPage captures that offset within the
+        // static page id space, and we translate it into this data component's space
+        // by adding staticBasePageId.
+        int rootPageId = staticBasePageId + staticStructureRootPage;
         ((VTree) treeIndex).setRootPageId(rootPageId);
         freePageManager.setRootPageId(rootPageId);
 

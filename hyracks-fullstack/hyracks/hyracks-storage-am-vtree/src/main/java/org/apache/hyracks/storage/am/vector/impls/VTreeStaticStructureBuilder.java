@@ -21,8 +21,6 @@ package org.apache.hyracks.storage.am.vector.impls;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -53,11 +51,36 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+/**
+ * Builds the static structure of a VTree (interior + leaf pages) in bottom-up,
+ * append-only fashion. Tuples must arrive leaf-first (level numLevels-1), one
+ * level at a time, ending with the root level (level 0). Within each level,
+ * clusters arrive in ascending order; within each cluster, centroids arrive in
+ * insertion order.
+ *
+ * Page IDs are assigned via {@link IPageManager#takePage(ITreeIndexMetadataFrame)}
+ * as pages are filled, so the root (allocated last) ends up at the highest page
+ * ID. Each page is written to disk as soon as its forward pointers (overflow
+ * chain within a cluster, sibling chain across leaf clusters, child pointers
+ * for interior tuples) are known, so the builder keeps at most one page
+ * confiscated at a time.
+ *
+ * Centroid IDs follow the BFS-from-root convention (root = 0..N_root-1, leaves
+ * at highest IDs), independent of arrival order. The builder simply records
+ * whatever centroid id is in each tuple and writes it back unchanged.
+ *
+ * Leaf tuples carry a sentinel metadata-page pointer of -1; {@link VTreeBulkLoader}
+ * overwrites the pointer for each leaf tuple based on its centroid id when the
+ * data component is loaded.
+ */
 public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implements IIndexBulkLoader {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
-    // Fields previously inherited from AbstractTreeIndexBulkLoader
+    /** Sentinel metadata-page pointer written into leaf tuples; overwritten by VTreeBulkLoader. */
+    private static final int LEAF_METADATA_PTR_SENTINEL = -1;
+
+    // Storage infrastructure
     private final IBufferCache bufferCache;
     private final IPageManager freePageManager;
     private final ITreeIndexMetadataFrame metaFrame;
@@ -67,36 +90,32 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
     private final IFIFOPageWriter pageWriter;
     private final ICompressedPageWriter compressedPageWriter;
 
-    // Page buffering for sequential writes at end()
-    private final TreeMap<Integer, ICachedPage> allPages = new TreeMap<>();
-    private int currentPageId = -1;
-
+    // Structure shape
     private final int numLevels;
-    private final List<Integer> clustersPerLevel; // List of cluster counts per level
-    private final List<List<Integer>> centroidsPerCluster; // List of Lists: level -> [centroids per cluster]
-    private int maxEntriesPerPage = 0;
+    private final List<Integer> clustersPerLevel;
+    private final List<List<Integer>> centroidsPerCluster;
+    private final int maxEntriesPerPage;
 
-    // Loading state
+    // Frames
+    private final IVTreeInteriorFrame interiorFrame;
+    private final IVTreeLeafFrame leafFrame;
+
+    // Build state — bottom-up traversal: leaf first, root last
     private int currentLevel;
     private int currentClusterInLevel;
     private int currentCentroidInCluster;
-
-    // Current page being built
     private ICachedPage currentPage;
     private ITreeIndexFrame currentFrame;
-    private int entriesInCurrentPage;
+    private int currentPageId;
 
-    // Helper arrays for computing page IDs
-    private int[] totalCentroidsUpToLevel; // Precomputed totals for each level
-    private int[] totalPagesUpToLevel; // Precomputed page offsets for each level
+    // firstPageIdOfCluster[L][C] = page id of the first page of cluster C at level L.
+    // Filled in by startNewClusterPage() as we visit each cluster. Used by interior
+    // tuples (at level L) to look up child page ids in level L+1, which by virtue of
+    // bottom-up ordering has already been fully written.
+    private final int[][] firstPageIdOfCluster;
 
-    // Track page IDs for debugging
-    private final List<List<Integer>> levelPageIds; // level -> list of page IDs
-
-    // Frames for different page types
-    private IVTreeInteriorFrame interiorFrame;
-    private IVTreeLeafFrame leafFrame;
-    private final List<ICachedPage> leafPages = new ArrayList<>();
+    // For first_leaf_centroid_id metadata
+    private final int[] totalCentroidsUpToLevel;
 
     public VTreeStaticStructureBuilder(IPageWriteCallback callback, VTree vectorTree, int numLevels,
             List<Integer> clustersPerLevel, List<List<Integer>> centroidsPerCluster, int maxEntriesPerPage)
@@ -108,7 +127,6 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
         this.treeIndex = vectorTree;
         this.metaFrame = freePageManager.createMetadataFrame();
 
-        // Initialize frames
         this.interiorFrame = (IVTreeInteriorFrame) vectorTree.getInteriorFrameFactory().createFrame();
         this.leafFrame = (IVTreeLeafFrame) vectorTree.getLeafFrameFactory().createFrame();
         this.slotSize = ((ITreeIndexFrame) leafFrame).getSlotSize();
@@ -117,79 +135,50 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
         this.compressedPageWriter = bufferCache.getCompressedPageWriter(fileId);
 
         this.numLevels = numLevels;
-        this.clustersPerLevel = new ArrayList<>(clustersPerLevel); // Defensive copy
+        this.clustersPerLevel = new ArrayList<>(clustersPerLevel);
         this.centroidsPerCluster = new ArrayList<>();
-        // Deep copy of nested lists
         for (List<Integer> levelCentroids : centroidsPerCluster) {
             this.centroidsPerCluster.add(new ArrayList<>(levelCentroids));
         }
-
-        this.currentLevel = 0; // Start from root level (level 0)
-        this.currentClusterInLevel = 0;
-        this.currentCentroidInCluster = 0;
-        this.entriesInCurrentPage = 0;
         this.maxEntriesPerPage = maxEntriesPerPage;
 
-        this.levelPageIds = new ArrayList<>(numLevels);
-        for (int i = 0; i < numLevels; i++) {
-            levelPageIds.add(new ArrayList<>());
+        // Bottom-up: start at leaf level
+        this.currentLevel = numLevels - 1;
+        this.currentClusterInLevel = 0;
+        this.currentCentroidInCluster = 0;
+
+        // Allocate the firstPageIdOfCluster grid (all -1 until populated)
+        this.firstPageIdOfCluster = new int[numLevels][];
+        for (int L = 0; L < numLevels; L++) {
+            this.firstPageIdOfCluster[L] = new int[this.clustersPerLevel.get(L)];
+            Arrays.fill(this.firstPageIdOfCluster[L], -1);
         }
 
-        // Precompute helper arrays for mathematical page ID calculation
-        computeHelperArrays();
-
-        // Calculate total number of clusters (pages) across all levels
-        int totalClusters = 0;
-        for (int level = 0; level < numLevels; level++) {
-            totalClusters += clustersPerLevel.get(level);
-        }
-
-        LOGGER.log(Level.TRACE, "Total clusters in structure: {}", totalClusters);
-
-        // Call freePageManager.takePage() for each cluster to update metadata frame
-        for (int i = 0; i < totalClusters; i++) {
-            int allocatedPageId = freePageManager.takePage(metaFrame);
-            LOGGER.log(Level.TRACE, "Pre-allocated page {} ({}/{})", allocatedPageId, i + 1, totalClusters);
-        }
-
-        // Create first page (root page) - page ID 0
-        createNewPage(0);
-
-        LOGGER.log(Level.TRACE, "VTreeStaticStructureLoader initialized");
-        LOGGER.log(Level.TRACE, "numLevels={}, maxEntriesPerPage={}", numLevels, maxEntriesPerPage);
-        printStructureInfo();
-    }
-
-    /**
-     * Precompute cumulative totals for efficient child page ID calculation.
-     */
-    private void computeHelperArrays() {
-        totalCentroidsUpToLevel = new int[numLevels + 1];
-        totalPagesUpToLevel = new int[numLevels + 1];
-
+        // Compute cumulative centroid counts (used for first_leaf_centroid_id metadata)
+        this.totalCentroidsUpToLevel = new int[numLevels + 1];
         totalCentroidsUpToLevel[0] = 0;
-        totalPagesUpToLevel[0] = 0;
-
-        for (int level = 0; level < numLevels; level++) {
+        for (int L = 0; L < numLevels; L++) {
             int centroidsInLevel = 0;
-            for (int cluster = 0; cluster < clustersPerLevel.get(level); cluster++) {
-                centroidsInLevel += centroidsPerCluster.get(level).get(cluster);
+            for (int c : this.centroidsPerCluster.get(L)) {
+                centroidsInLevel += c;
             }
-            totalCentroidsUpToLevel[level + 1] = totalCentroidsUpToLevel[level] + centroidsInLevel;
-            totalPagesUpToLevel[level + 1] = totalPagesUpToLevel[level] + clustersPerLevel.get(level);
+            totalCentroidsUpToLevel[L + 1] = totalCentroidsUpToLevel[L] + centroidsInLevel;
         }
 
-        LOGGER.log(Level.TRACE, "totalCentroidsUpToLevel: {}", Arrays.toString(totalCentroidsUpToLevel));
-        LOGGER.log(Level.TRACE, "totalPagesUpToLevel: {}", Arrays.toString(totalPagesUpToLevel));
+        // Open the first page (cluster 0, leaf level) so the very first add() has a target.
+        startNewClusterPage();
+
+        LOGGER.log(Level.TRACE,
+                "VTreeStaticStructureBuilder (bottom-up) initialized: numLevels={}, maxEntriesPerPage={}", numLevels,
+                maxEntriesPerPage);
+        printStructureInfo();
     }
 
     @Override
     public void add(ITupleReference tuple) throws HyracksDataException {
-        // Compute child page ID mathematically
         int childPageId = determineChildPageId();
         ITupleReference entryTuple = createEntryTuple(tuple, childPageId);
 
-        // Check if current page has SPACE for this tuple (not just entry count)
         int spaceNeeded = currentFrame.getBytesRequiredToWriteTuple(entryTuple) + slotSize;
         int spaceAvailable = currentFrame.getTotalFreeSpace();
 
@@ -198,53 +187,42 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
         }
 
         ((IVTreeFrame) currentFrame).insertSorted(entryTuple);
-        entriesInCurrentPage++;
-
-        // Advance position in structure
         advancePosition();
     }
 
     /**
-     * Compute child page ID based on current position and predetermined structure.
+     * Compute the child pointer to write for the next tuple.
+     * <p>
+     * Leaf tuples carry a sentinel — {@link VTreeBulkLoader} overwrites with the real
+     * directory page pointer when loading data. Interior tuples look up the first
+     * page of their target child cluster in level+1, which (by bottom-up order) has
+     * already been written and recorded in {@link #firstPageIdOfCluster}.
      */
-    private int determineChildPageId() throws HyracksDataException {
+    private int determineChildPageId() {
         if (currentLevel == numLevels - 1) {
-            // Leaf level - child page ID will be metadata page (created later)
-            return -1;
+            return LEAF_METADATA_PTR_SENTINEL;
         }
-
-        // Compute which cluster this centroid points to in the next level
         int childClusterIndex = computeChildClusterIndex();
-
-        // Child page ID = offset for next level + cluster index within that level
-        return totalPagesUpToLevel[currentLevel + 1] + childClusterIndex;
+        int childPageId = firstPageIdOfCluster[currentLevel + 1][childClusterIndex];
+        if (childPageId < 0) {
+            throw new IllegalStateException(
+                    "Child page id not yet recorded for level=" + (currentLevel + 1) + ", cluster=" + childClusterIndex
+                            + ". Input must be in bottom-up order (leaf level first, root last).");
+        }
+        return childPageId;
     }
 
     /**
-     * Compute which cluster in the next level this centroid points to. This is based on the BFS ordering and
-     * predetermined structure.
+     * The Nth centroid emitted in level L points to the Nth cluster in level L+1.
+     * Returns N based on the current build position.
      */
     private int computeChildClusterIndex() {
-        // In BFS order, centroids map sequentially to child clusters
-        // The Nth centroid in level L points to cluster N in level L+1
-
         int centroidsProcessedInCurrentLevel = 0;
-
-        // Count centroids processed in current level so far
-        for (int cluster = 0; cluster < currentClusterInLevel; cluster++) {
-            centroidsProcessedInCurrentLevel += centroidsPerCluster.get(currentLevel).get(cluster);
+        for (int c = 0; c < currentClusterInLevel; c++) {
+            centroidsProcessedInCurrentLevel += centroidsPerCluster.get(currentLevel).get(c);
         }
         centroidsProcessedInCurrentLevel += currentCentroidInCluster;
-
         return centroidsProcessedInCurrentLevel;
-    }
-
-    /**
-     * Compute the page ID for the current cluster being built.
-     */
-    private int computeCurrentClusterPageId() {
-        // Current cluster's page ID = offset for current level + current cluster index
-        return totalPagesUpToLevel[currentLevel] + currentClusterInLevel;
     }
 
     /**
@@ -257,7 +235,6 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
     private ITupleReference createEntryTuple(ITupleReference tuple, int childPageId) throws HyracksDataException {
         int inputFieldCount = tuple.getFieldCount();
 
-        // Deserialize centroidId and embedding (always present)
         ISerializerDeserializer[] baseFieldSerdes = new ISerializerDeserializer[2];
         baseFieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
         baseFieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
@@ -271,8 +248,7 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
 
         try {
             if (inputFieldCount == 3) {
-                // 3-field input: leaf tuple with quantization [centroidId, embedding, quantizedBytes]
-                // Deserialize the quantized bytes
+                // Leaf tuple with quantization [centroidId, embedding, quantizedBytes]
                 ISerializerDeserializer[] fullFieldSerdes = new ISerializerDeserializer[3];
                 fullFieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
                 fullFieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
@@ -284,18 +260,18 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
                 LOGGER.log(Level.TRACE, "Leaf tuple with quantization: centroidId={}, embeddingLen={}, quantizedLen={}",
                         centroidId, embedding.length, quantizedBytes.length);
 
-                // Create 4-field output tuple: [centroidId, embedding, quantizedBytes, childPageId]
+                // 4-field output: [centroidId, embedding, quantizedBytes, childPageId]
                 // childPageId (metadataPtr for leaf) is always the last field so that
-                // getMetadataPagePointer() using getFieldCount()-1 works for both
-                // 3-field (non-quantized) and 4-field (quantized) tuples.
+                // getMetadataPagePointer() using getFieldCount()-1 works for both 3-field
+                // (non-quantized) and 4-field (quantized) tuples.
                 return TupleUtils.createTuple(
                         new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
                                 DoubleArraySerializerDeserializer.INSTANCE, ByteArraySerializerDeserializer.INSTANCE,
                                 IntegerSerializerDeserializer.INSTANCE },
                         centroidId, embedding, quantizedBytes, childPageId);
             } else {
-                // 2-field input: interior or non-quantized leaf [centroidId, embedding]
-                // Create 3-field output tuple: [centroidId, embedding, childPageId]
+                // 2-field input (interior, or non-quantized leaf): [centroidId, embedding]
+                // 3-field output: [centroidId, embedding, childPageId]
                 return TupleUtils.createTuple(
                         new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
                                 DoubleArraySerializerDeserializer.INSTANCE, IntegerSerializerDeserializer.INSTANCE },
@@ -308,216 +284,166 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
     }
 
     /**
-     * Create a new page with the specified computed page ID.
+     * Allocate a fresh page id and confiscate it as the first page of the current
+     * cluster at the current level. Records the page id in firstPageIdOfCluster so
+     * the parent level can later resolve its child pointers.
      */
-    private void createNewPage(int computedPageId) throws HyracksDataException {
-        // Finish current page if exists
-        if (currentPage != null) {
-            finishCurrentPage();
-        }
-
-        // Track the page ID before confiscating
-        currentPageId = computedPageId;
-
-        // Use our computed page ID for actual allocation (ensures deterministic structure)
-        long dpid = BufferedFileHandle.getDiskPageId(fileId, computedPageId);
-        currentPage = bufferCache.confiscatePage(dpid);
-
-        // Determine frame type based on current level
-        if (currentLevel == numLevels - 1) {
-            // Leaf level
-            currentFrame = leafFrame;
-            leafFrame.setPage(currentPage);
-            leafFrame.initBuffer((byte) 0);
-            leafFrame.setLevel((byte) 0);
-            leafPages.add(currentPage);
-        } else {
-            // Interior/root level
-            currentFrame = interiorFrame;
-            interiorFrame.setPage(currentPage);
-            interiorFrame.initBuffer((byte) 0);
-            interiorFrame.setLevel((byte) 1);
-        }
-
-        entriesInCurrentPage = 0;
-
-        // Track page ID for this level (use computed ID)
-        levelPageIds.get(currentLevel).add(computedPageId);
-
-        LOGGER.log(Level.TRACE, "Created new page {} for level {}", computedPageId, currentLevel);
+    private void startNewClusterPage() throws HyracksDataException {
+        int pageId = freePageManager.takePage(metaFrame);
+        firstPageIdOfCluster[currentLevel][currentClusterInLevel] = pageId;
+        confiscateAndInitFrame(pageId);
     }
 
     /**
-     * Create overflow page for current cluster.
+     * Allocate an overflow page within the current cluster, set the current page's
+     * next-page pointer to it (overflow flag = true), flush the current page, then
+     * continue building in the new page.
      */
     private void createOverflowPage() throws HyracksDataException {
-        // Compute next overflow page ID
         int overflowPageId = freePageManager.takePage(metaFrame);
-
-        // Set next page pointer in current page
         if (currentLevel == numLevels - 1) {
-            // Leaf page - set next leaf pointer
             leafFrame.setNextLeaf(overflowPageId);
             leafFrame.setOverflowFlagBit(true);
         } else {
-            // Interior page - set next page pointer
             interiorFrame.setNextPage(overflowPageId);
             interiorFrame.setOverflowFlagBit(true);
         }
-
-        // Create the new overflow page
-        createNewPage(overflowPageId);
-
+        writePage(currentPage);
+        confiscateAndInitFrame(overflowPageId);
         LOGGER.log(Level.TRACE, "Created overflow page {} for level {}, cluster {}", overflowPageId, currentLevel,
                 currentClusterInLevel);
     }
 
     /**
-     * Advance position in the predetermined structure.
+     * Confiscate a page with the given id and initialize the appropriate frame.
+     */
+    private void confiscateAndInitFrame(int pageId) throws HyracksDataException {
+        long dpid = BufferedFileHandle.getDiskPageId(fileId, pageId);
+        currentPage = bufferCache.confiscatePage(dpid);
+        if (currentLevel == numLevels - 1) {
+            currentFrame = leafFrame;
+            leafFrame.setPage(currentPage);
+            leafFrame.initBuffer((byte) 0);
+            leafFrame.setLevel((byte) 0);
+        } else {
+            currentFrame = interiorFrame;
+            interiorFrame.setPage(currentPage);
+            interiorFrame.initBuffer((byte) 0);
+            interiorFrame.setLevel((byte) 1);
+        }
+        currentPageId = pageId;
+        LOGGER.log(Level.TRACE, "Opened page {} for level {}", pageId, currentLevel);
+    }
+
+    private void writePage(ICachedPage page) throws HyracksDataException {
+        compressedPageWriter.prepareWrite(page);
+        pageWriter.write(page);
+    }
+
+    /**
+     * Advance counters; if a cluster or level boundary is crossed, handle the
+     * transition (chain pages, flush, open a new page for the next position).
      */
     private void advancePosition() throws HyracksDataException {
         currentCentroidInCluster++;
 
-        // Check if we finished current cluster
         if (currentCentroidInCluster >= centroidsPerCluster.get(currentLevel).get(currentClusterInLevel)) {
-            // Move to next cluster
             currentCentroidInCluster = 0;
             currentClusterInLevel++;
 
-            // Check if we finished current level
             if (currentClusterInLevel >= clustersPerLevel.get(currentLevel)) {
-                // Move to next level
-                currentLevel++;
-                currentClusterInLevel = 0;
-
-                if (currentLevel < numLevels) {
-                    LOGGER.log(Level.TRACE, "Moving to level {}", currentLevel);
-                    // Create first page of new level
-                    createNewPage(computeCurrentClusterPageId());
-                }
+                transitionToNextLevel();
             } else {
-                // Start new cluster in same level
-                LOGGER.log(Level.TRACE, "Starting cluster {} in level {}", currentClusterInLevel, currentLevel);
-
-                // For leaf level: chain last page of previous cluster to first page of new cluster
-                // NOTE: We set nextLeaf but keep overflow=false (overflow only for within-cluster pages)
-                if (currentLevel == numLevels - 1 && currentPage != null) {
-                    int nextClusterPageId = computeCurrentClusterPageId();
-                    leafFrame.setNextLeaf(nextClusterPageId);
-                    leafFrame.setOverflowFlagBit(false);
-                    LOGGER.log(Level.TRACE, "Linking leaf page to next cluster: current page -> page {}",
-                            nextClusterPageId);
-                }
-
-                // Create page for new cluster
-                createNewPage(computeCurrentClusterPageId());
+                transitionToNextCluster();
             }
         }
     }
 
     /**
-     * Buffer current page for later sequential write.
+     * Move to the next cluster within the current level. For leaf level we set
+     * the just-finished page's nextLeaf to the new cluster's first page id (with
+     * overflow=false, since this is a sibling link not an intra-cluster chain).
+     * For interior levels each cluster is independent, so we simply flush the
+     * old page and start fresh.
      */
-    private void finishCurrentPage() throws HyracksDataException {
-        if (currentPage == null) {
-            return;
+    private void transitionToNextCluster() throws HyracksDataException {
+        if (currentLevel == numLevels - 1) {
+            int nextClusterPageId = freePageManager.takePage(metaFrame);
+            firstPageIdOfCluster[currentLevel][currentClusterInLevel] = nextClusterPageId;
+            leafFrame.setNextLeaf(nextClusterPageId);
+            leafFrame.setOverflowFlagBit(false);
+            writePage(currentPage);
+            confiscateAndInitFrame(nextClusterPageId);
+            LOGGER.log(Level.TRACE, "Leaf cluster transition: chained to page {} (cluster {})", nextClusterPageId,
+                    currentClusterInLevel);
+        } else {
+            writePage(currentPage);
+            startNewClusterPage();
+            LOGGER.log(Level.TRACE, "Interior cluster transition at level {} to cluster {}", currentLevel,
+                    currentClusterInLevel);
         }
-        allPages.put(currentPageId, currentPage);
-    }
-
-    private void write(ICachedPage cPage) throws HyracksDataException {
-        compressedPageWriter.prepareWrite(cPage);
-        pageWriter.write(cPage);
-    }
-
-    private int getNumLeafCentroids() {
-        return totalCentroidsUpToLevel[numLevels] - totalCentroidsUpToLevel[numLevels - 1];
     }
 
     /**
-     * Update all leaf pages to have correct directory page pointers instead of -1.
+     * Move from the current level to the next level up. Flushes the last page of
+     * the current level (no successor pointer to set) and opens the first page of
+     * the next level if any. After level 0 (root) is done, currentPage is cleared.
      */
-    private void updateLeafPagesWithDirectoryPointers() throws HyracksDataException {
-        if (leafPages.isEmpty()) {
-            LOGGER.log(Level.TRACE, "No leaf pages to update");
-            return;
+    private void transitionToNextLevel() throws HyracksDataException {
+        writePage(currentPage);
+        currentLevel--;
+        currentClusterInLevel = 0;
+        currentCentroidInCluster = 0;
+        if (currentLevel >= 0) {
+            startNewClusterPage();
+            LOGGER.log(Level.TRACE, "Moving up to level {}", currentLevel);
+        } else {
+            // All levels written; building is complete.
+            currentPage = null;
+            currentFrame = null;
         }
-
-        int nextDirectoryPageId = metaFrame.getMaxPage() + 1;
-
-        LOGGER.log(Level.TRACE, "Starting directory page ID: {}, processing {} leaf pages", nextDirectoryPageId,
-                leafPages.size());
-
-        // Process each leaf page
-        for (int pageIndex = 0; pageIndex < leafPages.size(); pageIndex++) {
-            ICachedPage leafPage = leafPages.get(pageIndex);
-
-            // Set up frame to read the leaf page
-            leafFrame.setPage(leafPage);
-
-            int tupleCount = leafFrame.getTupleCount();
-            LOGGER.log(Level.TRACE, "Processing leaf page {} with {} tuples", pageIndex, tupleCount);
-
-            // Update each tuple in the leaf page
-            for (int tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++) {
-                leafFrame.setMetadataPagePointer(tupleIndex, nextDirectoryPageId);
-                // Move to next directory page for next tuple
-                nextDirectoryPageId++;
-            }
-            LOGGER.log(Level.TRACE, "Completed updating leaf page {} with {} tuples", pageIndex, tupleCount);
-        }
-
-        LOGGER.log(Level.TRACE, "Updated all {} leaf pages with directory page pointers from {} to {}",
-                leafPages.size(), metaFrame.getMaxPage() + 1, nextDirectoryPageId - 1);
     }
 
     @Override
     public void end() throws HyracksDataException {
-        // Save the last page being built
+        // Defensive: if the structure spec didn't drain currentPage via advancePosition
+        // (e.g. caller called end() with a partially-built page), flush it now.
         if (currentPage != null) {
-            allPages.put(currentPageId, currentPage);
+            LOGGER.log(Level.TRACE, "end(): flushing unfinalized page {}", currentPageId);
+            writePage(currentPage);
             currentPage = null;
         }
 
-        // Update leaf pages with correct directory page pointers
-        updateLeafPagesWithDirectoryPointers();
+        if (hasFailed()) {
+            throw HyracksDataException.create(getFailure());
+        }
 
-        // Store metadata key-values
+        // Root cluster's first page is the entry point. In bottom-up build this is
+        // also the page with the highest id since the root level is processed last.
+        int rootPageId = firstPageIdOfCluster[0][0];
+        if (rootPageId < 0) {
+            throw HyracksDataException
+                    .create(new IllegalStateException("Root page id was never recorded; static structure incomplete."));
+        }
+
         metaFrame.put(new MutableArrayValueReference("num_leaf_centroids".getBytes()),
                 LongPointable.FACTORY.createPointable(getNumLeafCentroids()));
         metaFrame.put(new MutableArrayValueReference("first_leaf_centroid_id".getBytes()),
                 LongPointable.FACTORY.createPointable(totalCentroidsUpToLevel[numLevels - 1]));
 
-        // Set root page ID (page 0)
-        freePageManager.setRootPageId(0);
+        freePageManager.setRootPageId(rootPageId);
 
-        // Check for prior write failures
-        if (hasFailed()) {
-            throw HyracksDataException.create(getFailure());
-        }
-
-        // Write ALL pages in ascending page-ID order (0, 1, 2, 3, ...)
-        for (Map.Entry<Integer, ICachedPage> entry : allPages.entrySet()) {
-            LOGGER.log(Level.TRACE, "Writing page {} sequentially", entry.getKey());
-            write(entry.getValue());
-        }
-        allPages.clear();
+        LOGGER.log(Level.TRACE, "VTreeStaticStructureBuilder (bottom-up) done; rootPageId={}", rootPageId);
     }
 
     @Override
     public void abort() throws HyracksDataException {
-        LOGGER.log(Level.TRACE, "VTreeStaticStructureLoader aborted");
+        LOGGER.log(Level.TRACE, "VTreeStaticStructureBuilder aborted");
         compressedPageWriter.abort();
-        // Return all buffered pages
-        for (ICachedPage page : allPages.values()) {
-            if (page != null && page.confiscated()) {
-                bufferCache.returnPage(page, false);
-            }
-        }
         if (currentPage != null && currentPage.confiscated()) {
             bufferCache.returnPage(currentPage, false);
         }
-        allPages.clear();
+        currentPage = null;
         freePageManager.returnAllPages();
     }
 
@@ -526,11 +452,12 @@ public class VTreeStaticStructureBuilder extends PageWriteFailureCallback implem
         bufferCache.force(fileId, false);
     }
 
-    /**
-     * Print structure configuration for debugging.
-     */
+    private int getNumLeafCentroids() {
+        return totalCentroidsUpToLevel[numLevels] - totalCentroidsUpToLevel[numLevels - 1];
+    }
+
     private void printStructureInfo() {
-        LOGGER.log(Level.TRACE, "Structure configuration:");
+        LOGGER.log(Level.TRACE, "Structure configuration (bottom-up):");
         for (int level = 0; level < numLevels; level++) {
             StringBuilder sb = new StringBuilder();
             sb.append("Level ").append(level).append(": ").append(clustersPerLevel.get(level))
