@@ -752,8 +752,8 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
             for (ILSMDiskComponent dc : diskComponents) {
                 ((VTree) dc.getIndex()).setFlatNavigation(flatRoot, ssBC, ssFileId);
             }
-            System.err.println("[LSMVTree.loadDiskComponents] Propagated flatRootPageId=" + flatRoot
-                    + ", ssFileId=" + ssFileId + " to " + diskComponents.size() + " data components");
+            System.err.println("[LSMVTree.loadDiskComponents] Propagated flatRootPageId=" + flatRoot + ", ssFileId="
+                    + ssFileId + " to " + diskComponents.size() + " data components");
         }
     }
 }

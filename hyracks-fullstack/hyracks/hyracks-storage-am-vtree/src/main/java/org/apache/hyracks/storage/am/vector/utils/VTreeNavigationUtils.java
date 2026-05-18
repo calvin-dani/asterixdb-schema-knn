@@ -729,9 +729,9 @@ public class VTreeNavigationUtils {
 
             String type = isLeafLevel ? "LEAF" : "INTERIOR";
             if (isLeafLevel) {
-                breakdown.append(String.format("L%d(%s): pages=%d, centroids=%d, distComps=%d, pagePins=%d; ",
-                        currentLevel, type, currentLevelNodes.size(), levelCentroidsFound, levelDistComps,
-                        levelPagePins));
+                breakdown.append(
+                        String.format("L%d(%s): pages=%d, centroids=%d, distComps=%d, pagePins=%d; ", currentLevel,
+                                type, currentLevelNodes.size(), levelCentroidsFound, levelDistComps, levelPagePins));
             } else {
                 breakdown.append(String.format(
                         "L%d(%s): pages=%d, centroidsEvaluated=%d, childrenPassedEpsilon=%d, distComps=%d, pagePins=%d; ",
