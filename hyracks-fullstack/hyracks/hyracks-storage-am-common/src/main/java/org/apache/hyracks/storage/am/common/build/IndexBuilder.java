@@ -19,11 +19,13 @@
 package org.apache.hyracks.storage.am.common.build;
 
 import java.io.IOException;
+import java.util.Map;
 
 import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.storage.am.common.api.IIndexBuilder;
+import org.apache.hyracks.storage.am.common.api.IQuantizedResource;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.ILocalResourceRepository;
@@ -47,6 +49,7 @@ public class IndexBuilder implements IIndexBuilder {
     protected final boolean durable;
     private final IResourceIdFactory resourceIdFactory;
     private final String resourceRelPath;
+    private Map<String, Object> quantizationParams;
 
     /*
      * Ideally, we should not pass resource id factory to the constructor since we can obtain it through
@@ -65,6 +68,10 @@ public class IndexBuilder implements IIndexBuilder {
         resourceRelPath = resourceRef.getRelativePath();
     }
 
+    public void setQuantizationParameters(Map<String, Object> quantizationParams) {
+        this.quantizationParams = quantizationParams;
+    }
+
     @Override
     public void build() throws HyracksDataException {
         IResourceLifecycleManager<IIndex> lcManager = storageManager.getLifecycleManager(ctx);
@@ -79,6 +86,10 @@ public class IndexBuilder implements IIndexBuilder {
         }
         resourceId = resourceIdFactory.createId();
         IResource resource = localResourceFactory.createResource(resourceRef);
+        // [New Feature] Inject quantization constants if available
+        if (resource instanceof IQuantizedResource && quantizationParams != null) {
+            ((IQuantizedResource) resource).setQuantizationParameters(quantizationParams);
+        }
         lr = new LocalResource(resourceId, ITreeIndexFrame.Constants.VERSION, durable, resource);
         IIndex index = lcManager.get(resourceRelPath);
         if (index != null) {
