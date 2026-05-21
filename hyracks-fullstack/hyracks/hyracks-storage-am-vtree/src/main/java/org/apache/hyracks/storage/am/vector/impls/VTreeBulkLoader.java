@@ -153,7 +153,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
             clusterFirstDirPageId[i] = -1;
         }
 
-        LOGGER.log(Level.TRACE,
+        LOGGER.log(Level.INFO,
                 "VTreeBulkLoader initialized: numLeafCentroid={}, firstLeafCentroidId={}, numStaticPages={}",
                 numLeafCentroid, firstLeafCentroidId, numStaticPages);
     }
@@ -168,7 +168,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
         currentDirectoryFrame.setPage(currentDirectoryPage);
         currentDirectoryFrame.initBuffer((byte) 0);
 
-        LOGGER.log(Level.TRACE, "Created directory page (in-memory) for cluster {}", currentLeafClusterIndex);
+        LOGGER.log(Level.INFO, "Created directory page (in-memory) for cluster {}", currentLeafClusterIndex);
     }
 
     private int extractCentroidId(ITupleReference tuple) {
@@ -181,14 +181,14 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
         int tupleCentroidId = extractCentroidId(tuple);
         if (currentCentroidId == -1) {
             // First tuple being added - initialize for first cluster
-            LOGGER.log(Level.TRACE, "Starting bulk load with first centroid cluster: {}", tupleCentroidId);
+            LOGGER.log(Level.INFO, "Starting bulk load with first centroid cluster: {}", tupleCentroidId);
             currentCentroidId = tupleCentroidId;
             currentLeafClusterIndex = tupleCentroidId - firstLeafCentroidId;
             createDirectoryPage();
             createNewDataPage();
         } else if (currentCentroidId != tupleCentroidId) {
             // Moved to a new centroid cluster
-            LOGGER.log(Level.TRACE, "Switching from centroid {} to centroid {}", currentCentroidId, tupleCentroidId);
+            LOGGER.log(Level.INFO, "Switching from centroid {} to centroid {}", currentCentroidId, tupleCentroidId);
             currentCentroidId = tupleCentroidId;
             int targetClusterIndex = tupleCentroidId - firstLeafCentroidId;
             loadToNextLeafCluster(targetClusterIndex);
@@ -207,7 +207,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
             ((IVTreeDataFrame) currentDataFrame).insertSorted(tuple);
             entriesInCurrentDataPage++;
 
-            LOGGER.log(Level.TRACE, "Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex,
+            LOGGER.log(Level.INFO, "Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex,
                     entriesInCurrentDataPage);
         } catch (HyracksDataException | RuntimeException e) {
             logDataPageState(tuple, e);
@@ -244,7 +244,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
         createDirectoryPage();
         createNewDataPage();
 
-        LOGGER.log(Level.TRACE, "Moved to leaf cluster {} (centroid ID: {})", currentLeafClusterIndex,
+        LOGGER.log(Level.INFO, "Moved to leaf cluster {} (centroid ID: {})", currentLeafClusterIndex,
                 firstLeafCentroidId + currentLeafClusterIndex);
     }
 
@@ -264,7 +264,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
         currentDataFrame.initBuffer((byte) 0);
         entriesInCurrentDataPage = 0;
 
-        LOGGER.log(Level.TRACE, "Created new data page {} for leaf cluster {}", currentDataPageId,
+        LOGGER.log(Level.INFO, "Created new data page {} for leaf cluster {}", currentDataPageId,
                 currentLeafClusterIndex);
     }
 
@@ -305,7 +305,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
             currentDataFrame.initBuffer((byte) 0);
             entriesInCurrentDataPage = 0;
 
-            LOGGER.log(Level.TRACE, "Created new data page {} for leaf cluster {}", currentDataPageId,
+            LOGGER.log(Level.INFO, "Created new data page {} for leaf cluster {}", currentDataPageId,
                     currentLeafClusterIndex);
         }
 
@@ -332,13 +332,12 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
                 pendingDirectoryPages.add(currentDirectoryPage);
                 createDirectoryPage();
 
-                LOGGER.log(Level.TRACE, "Directory page full for cluster {}, created overflow",
-                        currentLeafClusterIndex);
+                LOGGER.log(Level.INFO, "Directory page full for cluster {}, created overflow", currentLeafClusterIndex);
             }
 
             ((IVTreeFrame) currentDirectoryFrame).insertSorted(directoryEntry);
 
-            LOGGER.log(Level.TRACE, "Added directory entry for data page {} (maxDist={}) to directory, cluster {}",
+            LOGGER.log(Level.INFO, "Added directory entry for data page {} (maxDist={}) to directory, cluster {}",
                     dataPageId, maxDistance, currentLeafClusterIndex);
 
         } catch (HyracksDataException e) {
@@ -399,7 +398,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
         clusterFirstDirPageId[currentLeafClusterIndex] = dirPageIds[0];
         pendingDirectoryPages.clear();
 
-        LOGGER.log(Level.TRACE, "Finalized directory for cluster {}: {} pages, first dir page = {}",
+        LOGGER.log(Level.INFO, "Finalized directory for cluster {}: {} pages, first dir page = {}",
                 currentLeafClusterIndex, numDirPages, dirPageIds[0]);
     }
 
@@ -410,7 +409,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
                 int spaceNeeded = dataFrameTupleWriter.bytesRequired(tuple) + slotSize;
                 int spaceUsed = currentDataFrame.getBuffer().capacity() - currentDataFrame.getTotalFreeSpace();
 
-                LOGGER.log(Level.TRACE,
+                LOGGER.log(Level.INFO,
                         "Data page state - tupleSize: {}, spaceNeeded: {}, spaceUsed: {}, entriesInCurrentDataPage: {}",
                         tupleSize, spaceNeeded, spaceUsed, entriesInCurrentDataPage);
             }
@@ -538,7 +537,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
 
     @Override
     public void abort() throws HyracksDataException {
-        LOGGER.log(Level.TRACE, "VTreeBulkLoader aborted");
+        LOGGER.log(Level.INFO, "VTreeBulkLoader aborted");
         handleException();
     }
 
