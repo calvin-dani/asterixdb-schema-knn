@@ -20,7 +20,9 @@ package org.apache.hyracks.storage.am.lsm.vector.impls;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -148,6 +150,13 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
     private int tuplesFilteredOut;
     private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
 
+    // Per-cluster contribution tracking
+    private ClusterSearchResult currentClusterForTracking;
+    private int currentClusterTuplesScanned;
+    private int currentClusterTuplesInserted;
+    private Map<Integer, int[]> clusterContributions; // cid -> [scanned, insertedToTopK]
+    private Map<Integer, Integer> finalTopKClusters; // cid -> count of tuples in final results
+
     public LSMVTreeTopKSearchCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
         this.isOpen = false;
@@ -161,6 +170,12 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
         this.antimatterCancellations = 0;
         this.tuplesFilteredOut = 0;
         this.validTuplesFromCurrentCluster = 0;
+        this.clusterContributions = new LinkedHashMap<>();
+        this.finalTopKClusters = new LinkedHashMap<>();
+        this.currentClusterForTracking = null;
+        this.currentClusterTuplesScanned = 0;
+        this.currentClusterTuplesInserted = 0;
+        long tNavStart = System.nanoTime();
 
         // Get initial state
         LSMVTreeCursorInitialState lsmInitialState = (LSMVTreeCursorInitialState) initialState;
@@ -276,18 +291,77 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
             }
         }
 
+        long tNavEnd = System.nanoTime();
+
         // Initialize priority queue for merging results from all components
         initPriorityQueue();
 
         // Perform the blocked search: drain all clusters and collect results
         performBlockedSearch();
 
+        long tScanEnd = System.nanoTime();
+
         // Prepare drain: sort entries by dqx ascending for output (with merge if spilled)
         this.drainIterator = topKBuffer.drain();
+
+        long tDrainEnd = System.nanoTime();
+        finishCurrentClusterTracking();
+
+        LOGGER.warn(String.format("[Timing] navigation=%.2fms, scan=%.2fms, drain=%.2fms, total=%.2fms",
+                (tNavEnd - tNavStart) / 1e6, (tScanEnd - tNavEnd) / 1e6, (tDrainEnd - tScanEnd) / 1e6,
+                (tDrainEnd - tNavStart) / 1e6));
+        logClusterContributions();
 
         LOGGER.trace("Search complete: topK={}, processed={}, filtered={}, cancellations={}, clusters={}",
                 topKBuffer.getNumEntries(), totalTuplesProcessed, tuplesFilteredOut, antimatterCancellations,
                 clustersExplored);
+    }
+
+    private void finishCurrentClusterTracking() {
+        if (currentClusterForTracking != null && currentClusterTuplesScanned > 0) {
+            clusterContributions.put(currentClusterForTracking.centroidId,
+                    new int[] { currentClusterTuplesScanned, currentClusterTuplesInserted });
+        }
+    }
+
+    private void logClusterContributions() {
+        if (clusterContributions.isEmpty()) {
+            return;
+        }
+        int contributing = 0;
+        int totalScanned = 0;
+        int totalInserted = 0;
+        StringBuilder sb = new StringBuilder();
+        sb.append("[ClusterContributions] K=").append(K).append(", clustersProbed=").append(clusterContributions.size())
+                .append("\n");
+        for (Map.Entry<Integer, int[]> entry : clusterContributions.entrySet()) {
+            int cid = entry.getKey();
+            int scanned = entry.getValue()[0];
+            int inserted = entry.getValue()[1];
+            totalScanned += scanned;
+            totalInserted += inserted;
+            if (inserted > 0) {
+                contributing++;
+            }
+            sb.append(String.format("  cid=%3d: scanned=%4d, insertedToTopK=%3d%s\n", cid, scanned, inserted,
+                    inserted > 0 ? " *" : ""));
+        }
+        sb.append(String.format("  TOTAL: %d clusters probed, %d contributing, %d scanned, %d inserted",
+                clusterContributions.size(), contributing, totalScanned, totalInserted));
+        LOGGER.warn(sb.toString());
+    }
+
+    private void logFinalTopKComposition() {
+        if (finalTopKClusters.isEmpty()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("[FinalTopK] K=").append(K).append(", returned=").append(nextCallCount).append(", from ")
+                .append(finalTopKClusters.size()).append(" clusters:\n");
+        finalTopKClusters.entrySet().stream().sorted(Map.Entry.<Integer, Integer> comparingByValue().reversed())
+                .forEach(e -> sb
+                        .append(String.format("  cid=%3d: %d tuples in final top-K\n", e.getKey(), e.getValue())));
+        LOGGER.warn(sb.toString());
     }
 
     /**
@@ -313,6 +387,11 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
         }
 
         clustersExplored = 1; // First cluster opened
+        if (firstSearchCursor != null) {
+            currentClusterForTracking = firstSearchCursor.getCurrentClusterResult();
+            currentClusterTuplesScanned = 0;
+            currentClusterTuplesInserted = 0;
+        }
 
         // If all components started empty, advance to next cluster
         if (allComponentsExhausted()) {
@@ -333,12 +412,19 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
             while (!outputPriorityQueue.isEmpty() || needPushElementIntoQueue) {
                 ITupleReference validTuple = getNextValidTuple();
                 if (validTuple != null) {
+                    currentClusterTuplesScanned++;
                     // Apply INCLUDE field filter
                     if (passesTupleFilter(validTuple)) {
                         validTuplesFromCurrentCluster++;
                         // Compute approximate distance using quantized embedding
                         double dqx = computeApproximateDistance(validTuple);
+                        int entriesBefore = topKBuffer.getNumEntries();
+                        double worstBefore = topKBuffer.peekWorstDqx();
+                        boolean shouldEnterTopK = entriesBefore < candidateLimit || dqx < worstBefore;
                         addToTopKWindow(validTuple, dqx);
+                        if (shouldEnterTopK) {
+                            currentClusterTuplesInserted++;
+                        }
                     }
                     totalTuplesProcessed++;
                 }
@@ -459,6 +545,7 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
     private void advanceAllComponentsToNextCluster() throws HyracksDataException {
         while (true) {
             Arrays.fill(clusterExhausted, false);
+            finishCurrentClusterTracking();
 
             ClusterSearchResult nextCluster = clusterStrategy.getNextCluster();
             if (nextCluster == null) {
@@ -468,6 +555,9 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
                 return;
             }
 
+            currentClusterForTracking = nextCluster;
+            currentClusterTuplesScanned = 0;
+            currentClusterTuplesInserted = 0;
             LOGGER.trace("Advancing to cluster cid={}, distance={}, dirPage={}", nextCluster.centroidId,
                     nextCluster.distance, nextCluster.directoryPageId);
 
@@ -657,6 +747,16 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
         }
         drainIterator.next();
         nextCallCount++;
+        try {
+            ITupleReference t = drainIterator.getTuple();
+            if (t != null && t.getFieldCount() > 1) {
+                int cid = org.apache.hyracks.data.std.primitive.IntegerPointable.getInteger(t.getFieldData(1),
+                        t.getFieldStart(1));
+                finalTopKClusters.merge(cid, 1, Integer::sum);
+            }
+        } catch (Exception e) {
+            // Ignore tracking errors
+        }
     }
 
     @Override
@@ -670,6 +770,7 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
     @Override
     public void close() throws HyracksDataException {
         if (isOpen) {
+            logFinalTopKComposition();
             LOGGER.trace("Search Summary: K={}, nprobe={}, epsilon={}", K, nprobe, epsilon);
             LOGGER.trace("Clusters explored:          {}", clustersExplored);
             LOGGER.trace("Total tuples processed:     {}", totalTuplesProcessed);

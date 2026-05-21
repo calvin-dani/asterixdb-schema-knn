@@ -53,6 +53,33 @@ import org.apache.logging.log4j.Logger;
 public class VTreeNavigationUtils {
 
     private static final Logger LOGGER = LogManager.getLogger();
+    private static final ThreadLocal<Long> distanceComputations = ThreadLocal.withInitial(() -> 0L);
+    private static final ThreadLocal<Long> pagePins = ThreadLocal.withInitial(() -> 0L);
+    private static final ThreadLocal<String> levelBreakdown = ThreadLocal.withInitial(() -> "");
+
+    public static void resetCounters() {
+        distanceComputations.set(0L);
+        pagePins.set(0L);
+        levelBreakdown.set("");
+    }
+
+    public static long getAndResetDistanceComputations() {
+        long val = distanceComputations.get();
+        distanceComputations.set(0L);
+        return val;
+    }
+
+    public static long getAndResetPagePins() {
+        long val = pagePins.get();
+        pagePins.set(0L);
+        return val;
+    }
+
+    public static String getAndResetLevelBreakdown() {
+        String val = levelBreakdown.get();
+        levelBreakdown.set("");
+        return val;
+    }
 
     /**
      * Find the closest centroid by traversing the tree from root to leaf,
@@ -182,6 +209,7 @@ public class VTreeNavigationUtils {
             try {
                 if (!isFirstPage) {
                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    pagePins.set(pagePins.get() + 1);
                     currentPage.acquireReadLatch();
                     currentFrame = (IVTreeInteriorFrame) interiorFrameFactory.createFrame();
                     currentFrame.setPage(currentPage);
@@ -202,6 +230,7 @@ public class VTreeNavigationUtils {
                         }
 
                         double distance = distanceFunction.apply(queryVector, centroid);
+                        distanceComputations.set(distanceComputations.get() + 1);
                         int childPageId = currentFrame.getChildPageId(i);
                         children.add(new VTreeChildCentroid(childPageId, distance, i));
                     } catch (Exception e) {
@@ -258,6 +287,7 @@ public class VTreeNavigationUtils {
             try {
                 if (!isFirstPage) {
                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    pagePins.set(pagePins.get() + 1);
                     currentPage.acquireReadLatch();
                     currentFrame = (IVTreeLeafFrame) leafFrameFactory.createFrame();
                     currentFrame.setPage(currentPage);
@@ -280,6 +310,7 @@ public class VTreeNavigationUtils {
                         }
 
                         double distance = distanceFunction.apply(queryVector, centroid);
+                        distanceComputations.set(distanceComputations.get() + 1);
 
                         double quantizedDistance = Double.NaN;
                         if (quantizer != null && quantizedQueryVector != null) {
@@ -287,6 +318,7 @@ public class VTreeNavigationUtils {
                             if (quantizedCentroidBytes != null) {
                                 double[] dequantizedCentroid = quantizer.dequantize(quantizedCentroidBytes);
                                 quantizedDistance = distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
+                                distanceComputations.set(distanceComputations.get() + 1);
                             }
                         }
 
@@ -601,6 +633,7 @@ public class VTreeNavigationUtils {
         Set<Integer> visitedLeafPages = new HashSet<>();
         Queue<VTreeLevelNode> queue = new ArrayDeque<>();
         queue.add(new VTreeLevelNode(rootPageId, 0));
+        StringBuilder breakdown = new StringBuilder();
 
         // Phase 1: Collect all centroids from all reachable leaf pages
         while (!queue.isEmpty()) {
@@ -612,9 +645,18 @@ public class VTreeNavigationUtils {
                 currentLevelNodes.add(queue.poll());
             }
 
+            long levelDistComps = 0;
+            long levelPagePins = 0;
+            int levelCentroidsFound = 0;
+            int levelChildrenExplored = 0;
+            boolean isLeafLevel = false;
+
             // Process all nodes at current level
             for (VTreeLevelNode node : currentLevelNodes) {
+                long preDistComps = distanceComputations.get();
+                long prePagePins = pagePins.get();
                 ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, node.pageId));
+                pagePins.set(pagePins.get() + 1);
                 try {
                     page.acquireReadLatch();
 
@@ -623,6 +665,7 @@ public class VTreeNavigationUtils {
                     boolean isLeaf = leafFrame.isLeaf();
 
                     if (isLeaf) {
+                        isLeafLevel = true;
                         // Leaf node processing - collect ALL centroids (no threshold filtering yet)
                         if (!visitedLeafPages.add(node.pageId)) {
                             continue; // Already visited
@@ -635,6 +678,8 @@ public class VTreeNavigationUtils {
                         if (leafCentroids.isEmpty()) {
                             continue;
                         }
+
+                        levelCentroidsFound += leafCentroids.size();
 
                         // Add ALL centroids from this leaf page to global collection
                         for (VTreeLeafCentroid centroid : leafCentroids) {
@@ -662,6 +707,7 @@ public class VTreeNavigationUtils {
                         for (VTreeChildCentroid child : sortedChildren) {
                             if (child.distance <= localThreshold) {
                                 queue.add(new VTreeLevelNode(child.childPageId, currentLevel + 1));
+                                levelChildrenExplored++;
                             } else {
                                 break; // Children are sorted, no more qualify
                             }
@@ -672,8 +718,23 @@ public class VTreeNavigationUtils {
                     page.releaseReadLatch();
                     bufferCache.unpin(page);
                 }
+                levelDistComps += distanceComputations.get() - preDistComps;
+                levelPagePins += pagePins.get() - prePagePins;
+            }
+
+            String type = isLeafLevel ? "LEAF" : "INTERIOR";
+            if (isLeafLevel) {
+                breakdown.append(
+                        String.format("L%d(%s): pages=%d, centroids=%d, distComps=%d, pagePins=%d; ", currentLevel,
+                                type, currentLevelNodes.size(), levelCentroidsFound, levelDistComps, levelPagePins));
+            } else {
+                breakdown.append(String.format(
+                        "L%d(%s): pages=%d, centroidsEvaluated=%d, childrenPassedEpsilon=%d, distComps=%d, pagePins=%d; ",
+                        currentLevel, type, currentLevelNodes.size(), levelDistComps, levelChildrenExplored,
+                        levelDistComps, levelPagePins));
             }
         }
+        levelBreakdown.set(breakdown.toString());
 
         if (allCentroids.isEmpty()) {
             throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "No closest clusters found");

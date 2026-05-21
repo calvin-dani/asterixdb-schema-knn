@@ -90,10 +90,17 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
         // Compute level-wise clusters using VTreeNavigationUtils
         if (queryVector != null && epsilon > 0.0 && vTree != null) {
             try {
+                VTreeNavigationUtils.resetCounters();
+                long startNs = System.nanoTime();
+
                 globalLevelWiseClusters = VTreeNavigationUtils.findCloseCentroidsLevelWiseGlobalSort(
                         vTree.getNavigationBufferCache(), vTree.getNavigationFileId(), vTree.getNavigationRootPageId(),
                         vTree.getInteriorFrameFactory(), vTree.getLeafFrameFactory(), queryVector, distFunc, epsilon,
                         quantizedQueryVector, quantizer);
+
+                long elapsedNs = System.nanoTime() - startNs;
+                long distComps = VTreeNavigationUtils.getAndResetDistanceComputations();
+                long pins = VTreeNavigationUtils.getAndResetPagePins();
 
                 // Compute nprobe from minProbeFraction * totalLeafClusters
                 int totalLeafClusters = globalLevelWiseClusters != null ? globalLevelWiseClusters.size() : 1;
@@ -106,10 +113,12 @@ public class NprobeClusterSelectionStrategy implements IClusterSelectionStrategy
                     globalClusterIndex = 1; // Skip first cluster in getNextCluster()
                 }
 
-                LOGGER.log(Level.TRACE,
-                        String.format(
-                                "[NprobeStrategy] Computed %d level-wise clusters with epsilon=%.2f, minProbeFraction=%.2f, nprobe=%d",
-                                totalLeafClusters, epsilon, minProbeFraction, nprobe));
+                String lvlBreakdown = VTreeNavigationUtils.getAndResetLevelBreakdown();
+
+                LOGGER.log(Level.WARN,
+                        "[NprobeStrategy] clusters={}, epsilon={}, nprobe={}, distComps={}, pagePins={}, timeUs={}",
+                        totalLeafClusters, epsilon, nprobe, distComps, pins, elapsedNs / 1000);
+                LOGGER.log(Level.WARN, "[NprobeStrategy] breakdown: {}", lvlBreakdown);
             } catch (Exception e) {
                 LOGGER.log(Level.TRACE,
                         String.format("[NprobeStrategy] Failed to compute level-wise clusters: %s", e.getMessage()));
