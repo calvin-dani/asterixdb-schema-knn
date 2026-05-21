@@ -245,10 +245,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static class ClusteringResult {
         public final List<double[]> centroids;
         public final int[] assignments;
+        public final double[] centroidMasses;
 
-        public ClusteringResult(List<double[]> centroids, int[] assignments) {
+        public ClusteringResult(List<double[]> centroids, int[] assignments, double[] centroidMasses) {
             this.centroids = centroids;
             this.assignments = assignments;
+            this.centroidMasses = centroidMasses;
         }
     }
 
@@ -295,13 +297,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             public final int parentClusterId;
             public final double[] embedding;
             public final int level;
+            public final double mass;
             public final List<Integer> childrenIds;
 
-            public CentroidInfo(int centroidId, int parentClusterId, double[] embedding, int level) {
+            public CentroidInfo(int centroidId, int parentClusterId, double[] embedding, int level, double mass) {
                 this.centroidId = centroidId;
                 this.parentClusterId = parentClusterId;
                 this.embedding = embedding;
                 this.level = level;
+                this.mass = mass;
                 this.childrenIds = new ArrayList<>();
             }
         }
@@ -315,7 +319,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
             // Initialize empty parent centroids
             for (int i = 0; i < parentCount; i++) {
-                parentLevel.add(new CentroidInfo(i, -1, null, level)); // -1 means no parent (root level)
+                parentLevel.add(new CentroidInfo(i, -1, null, level, 0.0)); // -1 means no parent (root level)
                 parentChildMap.put(i, new ArrayList<>());
             }
 
@@ -328,16 +332,18 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         /**
          * Build parent-child relationships using assignments
          */
-        public void buildLevelFromAssignments(List<double[]> childCentroids, List<double[]> parentCentroids,
-                int[] assignments, int parentLevel, int childLevel) {
+        public void buildLevelFromAssignments(List<double[]> childCentroids, double[] childMasses,
+                List<double[]> parentCentroids, double[] parentMasses, int[] assignments, int parentLevel,
+                int childLevel) {
 
             // 1. Populate parent centroids
             List<CentroidInfo> parentLevelInfo = this.levelCentroids.get(parentLevel);
             for (int i = 0; i < parentCentroids.size() && i < parentLevelInfo.size(); i++) {
                 CentroidInfo parentInfo = parentLevelInfo.get(i);
+                double parentMass = (parentMasses != null && i < parentMasses.length) ? parentMasses[i] : 0.0;
                 // Update parent centroid with actual embedding
                 parentLevelInfo.set(i,
-                        new CentroidInfo(parentInfo.centroidId, -1, parentCentroids.get(i), parentLevel));
+                        new CentroidInfo(parentInfo.centroidId, -1, parentCentroids.get(i), parentLevel, parentMass));
             }
 
             // 2. Create child level with proper parent assignments
@@ -347,9 +353,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             for (int i = 0; i < assignments.length; i++) {
                 int parentClusterId = assignments[i]; // Which parent cluster this child belongs to
                 int childId = i; // Child centroid index
+                double childMass = (childMasses != null && i < childMasses.length) ? childMasses[i] : 0.0;
 
                 // Create child centroid info
-                CentroidInfo childInfo = new CentroidInfo(childId, parentClusterId, childCentroids.get(i), childLevel);
+                CentroidInfo childInfo =
+                        new CentroidInfo(childId, parentClusterId, childCentroids.get(i), childLevel, childMass);
                 childLevelInfo.add(childInfo);
 
                 // Add child to parent's children list
@@ -457,6 +465,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     json.append(",\"levelLocalId\":").append(centroid.centroidId);
                     json.append(",\"parentClusterId\":").append(centroid.parentClusterId);
                     json.append(",\"childrenCount\":").append(centroid.childrenIds.size());
+                    json.append(",\"mass\":").append(centroid.mass);
 
                     if (centroid.embedding != null) {
                         json.append(",\"vectorDim\":").append(centroid.embedding.length);
@@ -1185,7 +1194,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         throws HyracksDataException, IOException {
 
                     if (k <= 0 || totalTupleCount <= 0) {
-                        return new ClusteringResult(new ArrayList<>(), new int[0]);
+                        return new ClusteringResult(new ArrayList<>(), new int[0], new double[0]);
                     }
 
                     //                    System.err.println("performKMeansParallel: starting   k-means|| with " + totalTupleCount
@@ -1199,7 +1208,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     double[] firstCentroid = getPointAtIndex(in, fta, tuple, eval, inputVal, listAccessorConstant,
                             kMeansUtils, firstIdx, ctx);
                     if (firstCentroid == null) {
-                        return new ClusteringResult(new ArrayList<>(), assignments);
+                        return new ClusteringResult(new ArrayList<>(), assignments, new double[0]);
                     }
 
                     // Current centers for distance computation (starts with first centroid)
@@ -1485,7 +1494,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     // 3. Lloyd's algorithm for refinement using streaming approach
+                    int[] lastCounts = new int[Math.max(1, centroids.size())];
                     for (int iter = 0; iter < maxIterations; iter++) {
+                        // Reset reader for assignment phase
+                        in = resetRunFileReader(ctx, sampleUUID, partition);
                         // Assignment phase: assign each point to closest centroid
                         VSizeFrame frame = new VSizeFrame(ctx);
                         int currentIdx = 0;
@@ -1568,6 +1580,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Check for convergence
                         boolean converged = true;
+                        lastCounts = Arrays.copyOf(counts, counts.length);
                         for (int i = 0; i < centroids.size(); i++) {
                             if (counts[i] > 0) {
                                 for (int d = 0; d < newCentroids[i].length; d++) {
@@ -1594,7 +1607,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     System.err.println("performKMeansParallel: generated " + centroids.size()
                             + " centroids (target was " + k + ")");
 
-                    return new ClusteringResult(centroids, assignments);
+                    double[] centroidMasses = new double[centroids.size()];
+                    for (int i = 0; i < centroids.size() && i < lastCounts.length; i++) {
+                        centroidMasses[i] = Math.max(0, lastCounts[i]);
+                    }
+                    return new ClusteringResult(centroids, assignments, centroidMasses);
                 }
 
                 /**
@@ -1913,9 +1930,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     // Add Level 0 (initial centroids) - these are the leaf nodes
                     List<HierarchicalClusterStructure.CentroidInfo> level0Info = new ArrayList<>();
+                    double[] currentMasses =
+                            sanitizeMasses(initialResult.centroidMasses, initialResult.centroids.size(), 0.0);
                     for (int i = 0; i < initialResult.centroids.size(); i++) {
+                        double mass = i < currentMasses.length ? currentMasses[i] : 0.0;
                         level0Info.add(new HierarchicalClusterStructure.CentroidInfo(i, -1,
-                                initialResult.centroids.get(i), 0));
+                                initialResult.centroids.get(i), 0, mass));
                     }
                     structure.levelCentroids.put(0, level0Info);
 
@@ -1942,7 +1962,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                         // Perform K-means++ clustering on centroids from previous level
                         ClusteringResult levelResult = performScalableKMeansPlusPlusOnCentroids(currentCentroids,
-                                currentK, rand, maxIterations);
+                                currentMasses, currentK, rand, maxIterations);
 
                         if (levelResult.centroids.isEmpty()) {
                             //                            System.err.println("K-means++ produced no centroids, stopping clustering");
@@ -1961,22 +1981,34 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             //                                    + " centroids fits in frame (estimated size: " + totalSize + " bytes, frame size: "
                             //                                    + frameSize + " bytes), stopping here as root level");
                             // Build this level before breaking (so it's stored in structure)
-                            structure.buildLevelFromAssignments(currentCentroids, levelResult.centroids,
-                                    levelResult.assignments, currentLevel, currentLevel - 1);
+                            structure.buildLevelFromAssignments(currentCentroids, currentMasses, levelResult.centroids,
+                                    levelResult.centroidMasses, levelResult.assignments, currentLevel,
+                                    currentLevel - 1);
                             break;
                         }
 
                         // Build level using assignments - currentCentroids are children, levelResult.centroids are parents
-                        structure.buildLevelFromAssignments(currentCentroids, levelResult.centroids,
-                                levelResult.assignments, currentLevel, currentLevel - 1);
+                        structure.buildLevelFromAssignments(currentCentroids, currentMasses, levelResult.centroids,
+                                levelResult.centroidMasses, levelResult.assignments, currentLevel, currentLevel - 1);
+
+                        double childMassTotal = sumMass(currentMasses);
+                        double parentMassTotal = sumMass(levelResult.centroidMasses);
+                        System.err.println("Level " + currentLevel + " mass conservation: children=" + childMassTotal
+                                + ", parents=" + parentMassTotal);
 
                         // Prepare for next level
                         currentCentroids = levelResult.centroids;
+                        currentMasses = sanitizeMasses(levelResult.centroidMasses, currentCentroids.size(), 0.0);
                         // Update currentK using square root reduction (more gradual than division by 2)
                         // currentK = Math.max(1, (int) Math.floor((double) currentK / reductionFactor));
                         currentK = Math.max(1, (int) Math.floor(Math.sqrt(currentK)));
                         currentLevel++;
                     }
+
+                    double leafMassTotal = sumMass(initialResult.centroidMasses);
+                    double finalLevelMassTotal = sumMass(currentMasses);
+                    System.err.println("Hierarchy mass summary: leafTotal=" + leafMassTotal + ", finalLevelTotal="
+                            + finalLevelMassTotal + ", delta=" + Math.abs(leafMassTotal - finalLevelMassTotal));
 
                     //                    System.err
                     //                            .println("Hierarchical clustering completed with " + structure.getNumLevels() + " levels");
@@ -1986,24 +2018,29 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Perform scalable K-means++ on centroids (not raw data).
                  */
-                private ClusteringResult performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids, int k,
-                        Random rand, int maxIterations) {
+                private ClusteringResult performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids,
+                        double[] inputMasses, int k, Random rand, int maxIterations) {
                     if (centroids.isEmpty() || k <= 0) {
-                        return new ClusteringResult(new ArrayList<>(), new int[0]);
+                        return new ClusteringResult(new ArrayList<>(), new int[0], new double[0]);
+                    }
+
+                    double[] masses = sanitizeMasses(inputMasses, centroids.size(), 0.0);
+                    if (sumMass(masses) <= 0.0) {
+                        masses = sanitizeMasses(inputMasses, centroids.size(), 1.0);
                     }
 
                     List<double[]> resultCentroids = new ArrayList<>();
                     int[] assignments = new int[centroids.size()]; // Declare assignments outside the loop
 
                     // K-means++ initialization
-                    // 1. Choose first centroid randomly
-                    int firstIdx = rand.nextInt(centroids.size());
+                    // 1. Choose first centroid weighted by represented mass.
+                    int firstIdx = selectWeightedRandomIndexByMass(masses, rand);
                     resultCentroids.add(Arrays.copyOf(centroids.get(firstIdx), centroids.get(firstIdx).length));
 
                     // 2. Choose remaining centroids using weighted selection
                     for (int i = 1; i < k && i < centroids.size(); i++) {
-                        double[] distances = new double[centroids.size()];
-                        double totalDistance = 0.0;
+                        double[] weightedDistances = new double[centroids.size()];
+                        double totalWeightedDistance = 0.0;
 
                         // Calculate minimum distance to existing centroids for each point
                         for (int j = 0; j < centroids.size(); j++) {
@@ -2012,16 +2049,20 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 double dist = calculateDistance(centroids.get(j), centroid);
                                 minDist = Math.min(minDist, dist);
                             }
-                            distances[j] = minDist;
-                            totalDistance += minDist;
+                            weightedDistances[j] = masses[j] * minDist;
+                            totalWeightedDistance += weightedDistances[j];
+                        }
+
+                        if (totalWeightedDistance <= 0) {
+                            break;
                         }
 
                         // Weighted random selection
-                        double r = rand.nextDouble() * totalDistance;
+                        double r = rand.nextDouble() * totalWeightedDistance;
                         double cumulativeDistance = 0.0;
                         int selectedIdx = 0;
                         for (int j = 0; j < centroids.size(); j++) {
-                            cumulativeDistance += distances[j];
+                            cumulativeDistance += weightedDistances[j];
                             if (cumulativeDistance >= r) {
                                 selectedIdx = j;
                                 break;
@@ -2104,23 +2145,24 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
 
                         // Update centroids
-                        double[][] newCentroids = new double[k][centroids.get(0).length];
-                        int[] counts = new int[k];
+                        int numCentroids = resultCentroids.size();
+                        double[][] newCentroids = new double[numCentroids][centroids.get(0).length];
+                        double[] weightSums = new double[numCentroids];
 
                         for (int i = 0; i < centroids.size(); i++) {
                             int centroidIdx = assignments[i];
                             for (int d = 0; d < centroids.get(i).length; d++) {
-                                newCentroids[centroidIdx][d] += centroids.get(i)[d];
+                                newCentroids[centroidIdx][d] += masses[i] * centroids.get(i)[d];
                             }
-                            counts[centroidIdx]++;
+                            weightSums[centroidIdx] += masses[i];
                         }
 
                         // Check for convergence
                         boolean converged = true;
-                        for (int i = 0; i < k; i++) {
-                            if (counts[i] > 0) {
+                        for (int i = 0; i < numCentroids; i++) {
+                            if (weightSums[i] > 0) {
                                 for (int d = 0; d < newCentroids[i].length; d++) {
-                                    newCentroids[i][d] /= counts[i];
+                                    newCentroids[i][d] /= weightSums[i];
                                 }
                                 // Check if centroid moved significantly
                                 double dist = calculateDistance(resultCentroids.get(i), newCentroids[i]);
@@ -2133,7 +2175,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 // Reinitialize empty cluster
                                 // Select random centroid from input centroids list
                                 if (!centroids.isEmpty()) {
-                                    int randomIdx = rand.nextInt(centroids.size());
+                                    int randomIdx = selectWeightedRandomIndexByMass(masses, rand);
                                     double[] reinit =
                                             Arrays.copyOf(centroids.get(randomIdx), centroids.get(randomIdx).length);
                                     maybeNormalizeCentroid(reinit);
@@ -2154,7 +2196,75 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                     }
 
-                    return new ClusteringResult(resultCentroids, assignments);
+                    // Ensure assignments align with final centers before computing parent masses.
+                    for (int i = 0; i < centroids.size(); i++) {
+                        double minDist = Double.POSITIVE_INFINITY;
+                        int closestCentroid = 0;
+                        for (int j = 0; j < resultCentroids.size(); j++) {
+                            double dist = calculateDistance(centroids.get(i), resultCentroids.get(j));
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestCentroid = j;
+                            }
+                        }
+                        assignments[i] = closestCentroid;
+                    }
+
+                    double[] parentMasses = new double[resultCentroids.size()];
+                    for (int i = 0; i < assignments.length; i++) {
+                        int assignedIdx = assignments[i];
+                        if (assignedIdx >= 0 && assignedIdx < parentMasses.length) {
+                            parentMasses[assignedIdx] += masses[i];
+                        }
+                    }
+
+                    return new ClusteringResult(resultCentroids, assignments, parentMasses);
+                }
+
+                private double[] sanitizeMasses(double[] inputMasses, int size, double defaultMass) {
+                    double[] masses = new double[size];
+                    if (inputMasses != null && inputMasses.length != size) {
+                        System.err.println("WARNING: Mass array size mismatch. expected=" + size + ", actual="
+                                + inputMasses.length + ". Missing values will use default mass.");
+                    }
+                    for (int i = 0; i < size; i++) {
+                        double source = (inputMasses != null && i < inputMasses.length) ? inputMasses[i] : defaultMass;
+                        if (Double.isFinite(source) && source >= 0.0) {
+                            masses[i] = source;
+                        } else {
+                            masses[i] = 0.0;
+                        }
+                    }
+                    return masses;
+                }
+
+                private double sumMass(double[] masses) {
+                    double total = 0.0;
+                    if (masses != null) {
+                        for (double mass : masses) {
+                            if (Double.isFinite(mass) && mass > 0.0) {
+                                total += mass;
+                            }
+                        }
+                    }
+                    return total;
+                }
+
+                private int selectWeightedRandomIndexByMass(double[] masses, Random rand) {
+                    double totalMass = sumMass(masses);
+                    if (totalMass <= 0.0) {
+                        return rand.nextInt(Math.max(1, masses.length));
+                    }
+
+                    double target = rand.nextDouble() * totalMass;
+                    double running = 0.0;
+                    for (int i = 0; i < masses.length; i++) {
+                        running += Math.max(0.0, masses[i]);
+                        if (running >= target) {
+                            return i;
+                        }
+                    }
+                    return Math.max(0, masses.length - 1);
                 }
 
             };
