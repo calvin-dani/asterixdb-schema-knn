@@ -30,7 +30,6 @@ import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.ConfigurationFactory;
 import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.apache.logging.log4j.core.config.builder.api.AppenderComponentBuilder;
-import org.apache.logging.log4j.core.config.builder.api.ComponentBuilder;
 import org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilder;
 import org.apache.logging.log4j.core.config.builder.api.LayoutComponentBuilder;
 import org.apache.logging.log4j.core.config.builder.impl.BuiltConfiguration;
@@ -50,38 +49,30 @@ public class NCLogConfigurationFactory extends ConfigurationFactory {
         LOGGER.warn("logs are being redirected to: {}", ncLog::getAbsolutePath);
         builder.setStatusLevel(Level.WARN);
         builder.setConfigurationName("RollingBuilder");
-        // create a rolling file appender
+        // Create non-rolling file appenders and keep appending across restarts.
         LayoutComponentBuilder defaultLayout = builder.newLayout("PatternLayout").addAttribute("pattern",
                 "%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n");
-        ComponentBuilder triggeringPolicy = builder.newComponent("Policies")
-                .addComponent(builder.newComponent("CronTriggeringPolicy").addAttribute("schedule", "0 0 0 * * ?"))
-                .addComponent(builder.newComponent("SizeBasedTriggeringPolicy").addAttribute("size", "50M"));
         AppenderComponentBuilder defaultRoll =
-                builder.newAppender("default", "RollingFile").addAttribute("fileName", ncLog.getAbsolutePath())
-                        .addAttribute("filePattern",
-                                new File(logDir, "nc-" + nodeId + "-%d{MM-dd-yy-ss}.log.gz").getAbsolutePath())
-                        .add(defaultLayout).addComponent(triggeringPolicy);
+                builder.newAppender("default", "File").addAttribute("fileName", ncLog.getAbsolutePath())
+                        .addAttribute("append", true).add(defaultLayout);
         builder.add(defaultRoll);
 
         // create the new logger
         builder.add(builder.newRootLogger(Level.INFO).add(builder.newAppenderRef("default")));
 
         LayoutComponentBuilder accessLayout = builder.newLayout("PatternLayout").addAttribute("pattern", "%m%n");
-        AppenderComponentBuilder accessRoll = builder.newAppender("access", "RollingFile")
+        AppenderComponentBuilder accessRoll = builder.newAppender("access", "File")
                 .addAttribute("fileName", new File(logDir, "access-" + nodeId + ".log").getAbsolutePath())
-                .addAttribute("filePattern",
-                        new File(logDir, "access-" + nodeId + "-%d{MM-dd-yy-ss}.log.gz").getAbsolutePath())
-                .add(accessLayout).addComponent(triggeringPolicy);
+                .addAttribute("append", true).add(accessLayout);
         builder.add(accessRoll);
         builder.add(builder.newLogger("org.apache.hyracks.http.server.CLFLogger", Level.forName("ACCESS", 550))
                 .add(builder.newAppenderRef("access")).addAttribute("additivity", false));
 
         LayoutComponentBuilder traceLayout = builder.newLayout("PatternLayout").addAttribute("pattern", "%m,%n")
                 .addAttribute("header", "[").addAttribute("footer", "]");
-        AppenderComponentBuilder traceRoll = builder.newAppender("trace", "RollingFile")
+        AppenderComponentBuilder traceRoll = builder.newAppender("trace", "File")
                 .addAttribute("fileName", new File(logDir, "trace-" + nodeId + ".log"))
-                .addAttribute("filePattern", new File(logDir, "trace-" + nodeId + "-%d{MM-dd-yy-ss}.log.gz"))
-                .add(traceLayout).addComponent(triggeringPolicy);
+                .addAttribute("append", true).add(traceLayout);
         builder.add(traceRoll);
         builder.add(builder.newLogger("org.apache.hyracks.util.trace.Tracer.Traces", Level.forName("TRACER", 570))
                 .add(builder.newAppenderRef("trace")).addAttribute("additivity", false));

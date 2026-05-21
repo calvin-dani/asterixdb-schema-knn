@@ -30,7 +30,6 @@ import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.ConfigurationFactory;
 import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.apache.logging.log4j.core.config.builder.api.AppenderComponentBuilder;
-import org.apache.logging.log4j.core.config.builder.api.ComponentBuilder;
 import org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilder;
 import org.apache.logging.log4j.core.config.builder.api.LayoutComponentBuilder;
 import org.apache.logging.log4j.core.config.builder.impl.BuiltConfiguration;
@@ -49,25 +48,20 @@ public class CCLogConfigurationFactory extends ConfigurationFactory {
         LOGGER.warn("logs are being redirected to: {}", ccLog::getAbsolutePath);
         builder.setStatusLevel(Level.WARN);
         builder.setConfigurationName("RollingBuilder");
-        // create a rolling file appender
+        // Create a non-rolling file appender and keep appending across restarts.
         LayoutComponentBuilder defaultLayout = builder.newLayout("PatternLayout").addAttribute("pattern",
                 "%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n");
-        ComponentBuilder triggeringPolicy = builder.newComponent("Policies")
-                .addComponent(builder.newComponent("CronTriggeringPolicy").addAttribute("schedule", "0 0 0 * * ?"))
-                .addComponent(builder.newComponent("SizeBasedTriggeringPolicy").addAttribute("size", "50M"));
-        AppenderComponentBuilder defaultRoll = builder.newAppender("default", "RollingFile")
-                .addAttribute("fileName", ccLog).addAttribute("filePattern", new File(logDir, "cc-%d{MM-dd-yy}.log.gz"))
-                .add(defaultLayout).addComponent(triggeringPolicy);
+        AppenderComponentBuilder defaultRoll = builder.newAppender("default", "File")
+                .addAttribute("fileName", ccLog).addAttribute("append", true).add(defaultLayout);
         builder.add(defaultRoll);
 
         // create the new logger
         builder.add(builder.newRootLogger(Level.INFO).add(builder.newAppenderRef("default")));
 
         LayoutComponentBuilder accessLayout = builder.newLayout("PatternLayout").addAttribute("pattern", "%m%n");
-        AppenderComponentBuilder accessRoll =
-                builder.newAppender("access", "RollingFile").addAttribute("fileName", new File(logDir, "access.log"))
-                        .addAttribute("filePattern", new File(logDir, "access-%d{MM-dd-yy}.log.gz")).add(accessLayout)
-                        .addComponent(triggeringPolicy);
+        AppenderComponentBuilder accessRoll = builder.newAppender("access", "File")
+                .addAttribute("fileName", new File(logDir, "access.log")).addAttribute("append", true)
+                .add(accessLayout);
         builder.add(accessRoll);
         builder.add(builder.newLogger("org.apache.hyracks.http.server.CLFLogger", Level.forName("ACCESS", 550))
                 .add(builder.newAppenderRef("access")).addAttribute("additivity", false));
