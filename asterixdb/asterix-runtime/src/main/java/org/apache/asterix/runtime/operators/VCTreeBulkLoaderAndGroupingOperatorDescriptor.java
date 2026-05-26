@@ -129,7 +129,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     // Serializable distance function implementations
-    private static class ManhattanDistanceFunction implements DistanceFunctionDouble, java.io.Serializable {
+    private static class ManhattanDistanceFunctionDouble implements DistanceFunctionDouble, java.io.Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
@@ -138,7 +138,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         }
     }
 
-    private static class EuclideanDistanceFunction implements DistanceFunctionDouble, java.io.Serializable {
+    private static class EuclideanDistanceFunctionDouble implements DistanceFunctionDouble, java.io.Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
@@ -147,7 +147,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         }
     }
 
-    private static class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, java.io.Serializable {
+    private static class EuclideanSquaredDistanceFunctionDouble
+            implements DistanceFunctionDouble, java.io.Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
@@ -156,7 +157,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         }
     }
 
-    private static class CosineDistanceFunction implements DistanceFunctionDouble, java.io.Serializable {
+    private static class CosineDistanceFunctionDouble implements DistanceFunctionDouble, java.io.Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
@@ -165,7 +166,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         }
     }
 
-    private static class DotProductDistanceFunction implements DistanceFunctionDouble, java.io.Serializable {
+    private static class DotProductDistanceFunctionDouble implements DistanceFunctionDouble, java.io.Serializable {
         private static final long serialVersionUID = 1L;
 
         /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
@@ -177,10 +178,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
     // Distance function hash map
     private static final java.util.Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = java.util.Map.of(
-            EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(),
-            new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
-            EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
-            new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+            EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunctionDouble(), EUCLIDEAN_DISTANCE_L2.hash(),
+            new EuclideanDistanceFunctionDouble(), EUCLIDEAN_DISTANCE_SQUARED.hash(),
+            new EuclideanSquaredDistanceFunctionDouble(), EUCLIDEAN_DISTANCE_L2_SQUARED.hash(),
+            new EuclideanSquaredDistanceFunctionDouble(), COSINE_FORMAT.hash(), new CosineDistanceFunctionDouble(),
+            DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunctionDouble());
 
     /**
      * Convert distance metric string to DistanceFunctionDouble implementation.
@@ -189,14 +191,14 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * @return DistanceFunctionDouble implementation
      * @throws IllegalArgumentException if distance type is not supported
      */
-    private static DistanceFunctionDouble getDistanceFunction(String distanceType) {
+    private static DistanceFunctionDouble getDistanceFunctionDouble(String distanceType) {
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
         DistanceFunctionDouble func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
         //        if (func == null) {
         //            // Default to Euclidean if not found
         //            System.err.println("WARNING: Unsupported distance function: " + distanceType + ", defaulting to euclidean");
-        //            return new EuclideanDistanceFunction();
+        //            return new EuclideanDistanceFunctionDouble();
         //        }
         return func;
     }
@@ -207,7 +209,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
      * @param DistanceFunctionDouble AsterixDB DistanceFunctionDouble
      * @return IVTreeDistanceFunction wrapper
      */
-    private static IVTreeDistanceFunction wrapDistanceFunction(DistanceFunctionDouble distanceFunction) {
+    private static IVTreeDistanceFunction wrapDistanceFunctionDouble(DistanceFunctionDouble distanceFunction) {
         return distanceFunction::apply;
     }
 
@@ -487,7 +489,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         private ArrayTupleReference outputTupleRef;
         private RecordDescriptor outputRecDesc;
         private DistanceFunctionDouble distanceFunction;
-        private IVTreeDistanceFunction hyracksDistanceFunction;
+        private IVTreeDistanceFunction hyracksDistanceFunctionDouble;
         private OptimizedScalarQuantizationSampleFile.Params quantizationParams;
         private ScalarVectorQuantizer quantizer; // nullable — created only for quantized indexes
 
@@ -529,9 +531,9 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 initializeOutputInfrastructure();
 
                 // Convert distance metric string to DistanceFunctionDouble
-                distanceFunction = getDistanceFunction(distanceMetric);
+                distanceFunction = getDistanceFunctionDouble(distanceMetric);
                 // Wrap for use in Hyracks modules
-                hyracksDistanceFunction = wrapDistanceFunction(distanceFunction);
+                hyracksDistanceFunctionDouble = wrapDistanceFunctionDouble(distanceFunction);
                 //                System.err.println("Initialized distance function for metric: " + distanceMetric);
 
                 // Open the output writer
@@ -614,8 +616,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                     return createDefaultQuantizationParams(vectorDimension);
                 }
 
-                // DEBUG: Log resource details
-
                 // Extract LSMVTreeLocalResource (handle DatasetLocalResource wrapper)
                 IResource resource = localResource.getResource();
                 LSMVTreeLocalResource vcResource = null;
@@ -642,8 +642,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 Float maxQuantile = vcResource.getMaxQuantile();
                 Float alpha = vcResource.getAlpha();
                 Integer sampleCount = vcResource.getSampleCount();
-
-                // DEBUG: Log what we read
 
                 // Use defaults if any required parameter is missing
                 if (!vcResource.hasQuantizationParams()) {
@@ -744,13 +742,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 // Validate distance function is initialized
                 if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
+                    throw new IllegalStateException("DistanceFunctionDouble not initialized");
                 }
 
                 // Use accessor to find closest leaf centroid with distance function
                 // Pass quantized data through for quantized distance computation
                 ClusterSearchResult result = vcTreeAccessor.findClosestLeafCentroid(queryVector,
-                        hyracksDistanceFunction, quantizedQueryVector, quantizer);
+                        hyracksDistanceFunctionDouble, quantizedQueryVector, quantizer);
 
                 if (result == null) {
                     return null;
@@ -797,11 +795,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 // Validate distance function is initialized
                 if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
+                    throw new IllegalStateException("DistanceFunctionDouble not initialized");
                 }
 
                 List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseLeafCentroid(queryVector, hyracksDistanceFunction, epi);
+                        vcTreeAccessor.findCloseLeafCentroid(queryVector, hyracksDistanceFunctionDouble, epi);
 
                 if (result == null) {
                     return null;
@@ -848,11 +846,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 // Validate distance function is initialized
                 if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
+                    throw new IllegalStateException("DistanceFunctionDouble not initialized");
                 }
 
                 List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsFrontier(queryVector, hyracksDistanceFunction, epi);
+                        vcTreeAccessor.findCloseCentroidsFrontier(queryVector, hyracksDistanceFunctionDouble, epi);
 
                 if (result == null) {
                     return null;
@@ -922,11 +920,11 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
 
                 // Validate distance function is initialized
                 if (distanceFunction == null) {
-                    throw new IllegalStateException("DistanceFunction not initialized");
+                    throw new IllegalStateException("DistanceFunctionDouble not initialized");
                 }
 
-                List<ClusterSearchResult> result =
-                        vcTreeAccessor.findCloseCentroidsLevelWiseGlobalSort(queryVector, hyracksDistanceFunction, epi);
+                List<ClusterSearchResult> result = vcTreeAccessor.findCloseCentroidsLevelWiseGlobalSort(queryVector,
+                        hyracksDistanceFunctionDouble, epi);
 
                 if (result == null) {
                     return null;
@@ -996,6 +994,24 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                     OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
                                     if (isQuantized) {
                                         quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
+
+                                        // Populate quantized D(x, C) so it matches query-time convention:
+                                        // distanceFunction(quantize(x), quantize(C))
+                                        if (quantizer != null && result.centroid != null
+                                                && !result.hasQuantizedDistance()) {
+                                            try {
+                                                double[] qEmb = quantizedEmbedding != null ? quantizedEmbedding
+                                                        : quantizer.quantize(embedding);
+                                                double[] qCen = quantizer.quantize(result.centroid);
+                                                double qDist = hyracksDistanceFunctionDouble.apply(qEmb, qCen);
+                                                result = ClusterSearchResult.create(result.leafPageId,
+                                                        result.clusterIndex, result.centroid, result.distance,
+                                                        result.centroidId, result.directoryPageId, qDist);
+                                            } catch (Exception qex) {
+                                                System.err
+                                                        .println("WARNING: failed to compute quantized D(x,C): " + qex);
+                                            }
+                                        }
                                     }
                                     // Create transformed tuple with quantized data filled in
                                     ITupleReference transformedTuple =
@@ -1146,8 +1162,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             }
 
             try {
-                // CRITICAL: Write any remaining output data before closing
-                // This ensures the downstream sort operator receives all data
+                // Write any remaining output data before closing so the downstream sort
+                // operator receives all data.
                 if (writer != null && outputAppender != null) {
                     //                    System.err.println("Writing final output data to downstream sort operator...");
                     outputAppender.write(writer, false); // false = don't clear frame, just write remaining data
@@ -1293,7 +1309,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 int tupleCount = fta.getTupleCount();
                 tuplesProcessed = tupleCount;
 
-                // Debug: Check if the frame has any data
                 if (tupleCount == 0) {
 
                     // Try to read a few bytes to see what's in the buffer
@@ -1307,8 +1322,6 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                 for (int i = 0; i < tupleCount; i++) {
                     FrameTupleReference tuple = new FrameTupleReference();
                     tuple.reset(fta, i);
-
-                    // Debug: Log tuple field count
 
                     // Stream the tuple to output
                     if (writer != null && outputAppender != null) {

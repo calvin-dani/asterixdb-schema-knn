@@ -62,11 +62,11 @@ import org.apache.hyracks.storage.common.IResourceFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.util.LogRedactionUtil;
 
-public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
+public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
 
-    public static final VCTreeResourceFactoryProvider INSTANCE = new VCTreeResourceFactoryProvider();
+    public static final VTreeResourceFactoryProvider INSTANCE = new VTreeResourceFactoryProvider();
 
-    private VCTreeResourceFactoryProvider() {
+    private VTreeResourceFactoryProvider() {
     }
 
     @Override
@@ -117,12 +117,8 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
         // Determine data tuple creator factory based on description (quantization indicator)
         String description = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
         boolean isQuantized = (description != null);
-        IVTreeDataTupleCreatorFactory dataTupleCreatorFactory;
-        if (isQuantized) {
-            dataTupleCreatorFactory = new VTreeDataTupleCreatorFactory(numIncludeFields, true);
-        } else {
-            dataTupleCreatorFactory = new VTreeDataTupleCreatorFactory(numIncludeFields, false);
-        }
+        IVTreeDataTupleCreatorFactory dataTupleCreatorFactory =
+                new VTreeDataTupleCreatorFactory(numIncludeFields, isQuantized);
 
         List<List<String>> primaryKeyFields = dataset.getPrimaryKeys();
         int numPrimaryKeys = primaryKeyFields.size();
@@ -162,9 +158,12 @@ public class VCTreeResourceFactoryProvider implements IResourceFactoryProvider {
             AsterixVirtualBufferCacheProvider vbcProvider =
                     new AsterixVirtualBufferCacheProvider(dataset.getDatasetId());
 
-            // Quantization parameters are computed in the index creation job (QuantizationConstantsAggregate)
-            // and stored on LSMVTreeLocalResource via QuantizedIndexCreateOperatorDescriptor.
+            // Pass index name to factory so LSMVTreeLocalResource can read quantization sidecar file
+            // The sidecar file is written by Job 0.5 (quantization computation) and is located at:
+            // dataset_dir/.quantization_<indexName>
             String indexName = index.getIndexName();
+            System.err.println("[VTreeResourceFactoryProvider] Creating factory with indexName=" + indexName
+                    + " for sidecar file lookup");
 
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =

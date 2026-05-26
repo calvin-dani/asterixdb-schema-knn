@@ -69,7 +69,6 @@ public class AOrderedListVectorBinaryAccessor implements IVTreeBinaryAccessor {
         return vector;
     }
 
-    @Override
     public int getDimension() throws HyracksDataException {
         if (data == null) {
             throw new IllegalStateException("Accessor not initialized. Call reset() first.");

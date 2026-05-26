@@ -92,6 +92,7 @@ public interface Statement extends ILangExpression {
         TYPE_DECL,
         TYPE_DROP,
         CREATE_INDEX,
+        CREATE_VECTOR_INDEX,
         CREATE_DATABASE,
         CREATE_DATAVERSE,
         CREATE_VIEW,
