@@ -18,10 +18,13 @@
  */
 package org.apache.asterix.common.dataflow;
 
+import java.util.Map;
+
 import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.IJsonSerializable;
 import org.apache.hyracks.api.io.IPersistedResourceRegistry;
+import org.apache.hyracks.storage.am.common.api.IQuantizedResource;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IResource;
 
@@ -31,7 +34,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 /**
  * A local resource with a dataset id and an assigned partition
  */
-public class DatasetLocalResource implements IResource {
+public class DatasetLocalResource implements IResource, IQuantizedResource {
 
     private static final long serialVersionUID = 1L;
     /**
@@ -74,6 +77,13 @@ public class DatasetLocalResource implements IResource {
 
     public IResource getResource() {
         return resource;
+    }
+
+    @Override
+    public void setQuantizationParameters(Map<String, Object> parameters) {
+        if (resource instanceof IQuantizedResource) {
+            ((IQuantizedResource) resource).setQuantizationParameters(parameters);
+        }
     }
 
     @Override

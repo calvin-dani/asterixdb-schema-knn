@@ -19,6 +19,8 @@
 package org.apache.asterix.runtime.utils;
 
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.IJsonSerializable;
@@ -41,22 +43,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFactory {
     private static final long serialVersionUID = 1L;
     private static final Logger LOGGER = LogManager.getLogger();
-
-    // Distance function constants (must stay consistent with ANNDistanceDescriptor.DISTANCE_MAP —
-    // every alias accepted by the runtime evaluator MUST also resolve here, otherwise the index
-    // search path will trip an NPE in wrapDistanceFunction(null)).
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
-            UTF8StringPointable.generateUTF8Pointable("euclidean");
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2_SQUARED =
-            UTF8StringPointable.generateUTF8Pointable("l2_squared");
-    private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
-            UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
-    private static final UTF8StringPointable COSINE_FORMAT = UTF8StringPointable.generateUTF8Pointable("cosine");
-    /** Alias the SQL++ {@code ann_distance} call site uses for cosine. */
-    private static final UTF8StringPointable COSINE_SIMILARITY =
-            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
-    private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     private static class EuclideanDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
@@ -95,14 +81,36 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
         }
     }
 
-    // Distance function hash map. Aliases must mirror ANNDistanceDescriptor.DISTANCE_MAP —
-    // anything ann_distance() accepts must also resolve here, or the index search path NPEs.
-    private static final java.util.Map<Integer, IVTreeDistanceFunction> DISTANCE_MAP = java.util.Map.of(
-            EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(),
-            new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
-            EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
-            new CosineDistanceFunction(), COSINE_SIMILARITY.hash(), new CosineDistanceFunction(),
-            DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+    // Metric-string -> index distance function, keyed by the same lowercase hash used at lookup. The
+    // alias set is owned by VectorSimilarityMetric, shared with ANNDistanceDescriptor, so the two can
+    // no longer drift (a metric resolving in one but not the other would NPE on the index search path).
+    private static final Map<Integer, IVTreeDistanceFunction> DISTANCE_MAP = buildDistanceMap();
+
+    private static Map<Integer, IVTreeDistanceFunction> buildDistanceMap() {
+        Map<Integer, IVTreeDistanceFunction> map = new HashMap<>();
+        for (VectorSimilarityMetric metric : VectorSimilarityMetric.values()) {
+            IVTreeDistanceFunction function = functionFor(metric);
+            for (String alias : metric.aliases()) {
+                map.put(UTF8StringPointable.generateUTF8Pointable(alias).hash(), function);
+            }
+        }
+        return map;
+    }
+
+    private static IVTreeDistanceFunction functionFor(VectorSimilarityMetric metric) {
+        switch (metric) {
+            case EUCLIDEAN:
+                return new EuclideanDistanceFunction();
+            case EUCLIDEAN_SQUARED:
+                return new EuclideanSquaredDistanceFunction();
+            case COSINE:
+                return new CosineDistanceFunction();
+            case DOT:
+                return new DotProductDistanceFunction();
+            default:
+                throw new IllegalStateException("Unhandled vector similarity metric: " + metric);
+        }
+    }
 
     /**
      * Convert distance metric string to IVectorDistanceFunction implementation.

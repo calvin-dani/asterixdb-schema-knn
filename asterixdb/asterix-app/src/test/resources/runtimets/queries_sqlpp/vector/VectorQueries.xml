@@ -22,4 +22,24 @@
             <output-dir compare="Clean-JSON">distance-functions</output-dir>
         </compilation-unit>
     </test-case>
+    <test-case FilePath="vector">
+        <compilation-unit name="create-index-vtree">
+            <output-dir compare="Clean-JSON">create-index-vtree</output-dir>
+        </compilation-unit>
+    </test-case>
+    <test-case FilePath="vector">
+        <compilation-unit name="create-index-vtree-composite-pk">
+            <output-dir compare="Clean-JSON">create-index-vtree-composite-pk</output-dir>
+        </compilation-unit>
+    </test-case>
+    <test-case FilePath="vector">
+        <compilation-unit name="create-index-vtree-movie">
+            <output-dir compare="Clean-JSON">create-index-vtree-movie</output-dir>
+        </compilation-unit>
+    </test-case>
+    <test-case FilePath="vector">
+        <compilation-unit name="create-index-vtree-glove">
+            <output-dir compare="Clean-JSON">create-index-vtree-glove</output-dir>
+        </compilation-unit>
+    </test-case>
 </test-group>
