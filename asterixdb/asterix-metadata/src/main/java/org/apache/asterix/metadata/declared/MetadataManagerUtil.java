@@ -224,6 +224,35 @@ public class MetadataManagerUtil {
         return lookupSourceInMetadata(clusterStateManager, mdTxnCtx, id);
     }
 
+    public static SampleDataSource findSampleDataSource(IClusterStateManager clusterStateManager,
+            MetadataTransactionContext mdTxnCtx, String sampleIndexName, DataSourceId id) throws AlgebricksException {
+        Dataset dataset = findDataset(mdTxnCtx, id.getDatabaseName(), id.getDataverseName(), id.getDatasourceName());
+        if (dataset == null) {
+            //TODO(DB): include database
+            throw new AsterixException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, id.getDatasourceName(),
+                    id.getDataverseName());
+        }
+        // Only INTERNAL / EXTERNAL datasets can have a sample data source.
+        switch (dataset.getDatasetType()) {
+            case INTERNAL:
+            case EXTERNAL:
+                break;
+            default:
+                //TODO(DB): include database
+                throw new AsterixException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, id.getDatasourceName(),
+                        id.getDataverseName());
+        }
+
+        IAType itemType = findType(mdTxnCtx, dataset.getItemTypeDatabaseName(), dataset.getItemTypeDataverseName(),
+                dataset.getItemTypeName());
+        IAType metaItemType = findType(mdTxnCtx, dataset.getMetaItemTypeDatabaseName(),
+                dataset.getMetaItemTypeDataverseName(), dataset.getMetaItemTypeName());
+        itemType = findTypeForDatasetWithoutType(itemType, dataset);
+
+        INodeDomain domain = findNodeDomain(clusterStateManager, mdTxnCtx, dataset.getNodeGroupName());
+        return new SampleDataSource(dataset, sampleIndexName, itemType, metaItemType, domain);
+    }
+
     public static DataSource lookupSourceInMetadata(IClusterStateManager clusterStateManager,
             MetadataTransactionContext mdTxnCtx, DataSourceId id) throws AlgebricksException {
         Dataset dataset = findDataset(mdTxnCtx, id.getDatabaseName(), id.getDataverseName(), id.getDatasourceName());

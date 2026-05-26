@@ -70,6 +70,9 @@ public class CommonFunctionMapUtil {
         addFunctionMapping("regex_matches", "regexp-matches");
         addFunctionMapping("regex_split", "regexp-split");
 
+        // Vector functions.
+        addFunctionMapping("approx_vector_distance", "ann-distance");
+
         // Type functions.
         addFunctionMapping("gettype", "get-type"); // istype, internal: is-type
         addFunctionMapping("isnull", "is-null"); // isnull, internal: is-null
@@ -171,6 +174,9 @@ public class CommonFunctionMapUtil {
         // Compatibility aliases
         addFunctionMapping("l2_distance", "euclidean-distance");
         addFunctionMapping("l2_squared_distance", "euclidean-squared-distance");
+        // cosine-distance is a private builtin (use vector_distance / ann_distance for cosine), so there
+        // is deliberately no public cosine_distance alias — mapping one resolves to a private function.
+        addFunctionMapping("dot_product", "dot-product");
 
         // OGC SFA geospatial function aliases.
         // Many GIS dialects use CamelCase (e.g. ST_IsEmpty) which lowercases to
