@@ -88,7 +88,7 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable {
+class EuclideanDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -97,7 +97,7 @@ class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable 
     }
 }
 
-class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, Serializable {
+class EuclideanSquaredDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -106,7 +106,7 @@ class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, Serial
     }
 }
 
-class CosineDistanceFunction implements DistanceFunctionDouble, Serializable {
+class CosineDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -115,7 +115,7 @@ class CosineDistanceFunction implements DistanceFunctionDouble, Serializable {
     }
 }
 
-class DotProductDistanceFunction implements DistanceFunctionDouble, Serializable {
+class DotProductDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
@@ -550,14 +550,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static final Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = buildDistanceMap();
 
     private static Map<Integer, DistanceFunctionDouble> buildDistanceMap() {
-        DistanceFunctionDouble cosineFunc = new CosineDistanceFunction();
+        DistanceFunctionDouble cosineFunc = new CosineDistanceFunctionDouble();
         Map<Integer, DistanceFunctionDouble> m = new HashMap<>();
-        m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction());
-        m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction());
-        m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction());
-        m.put(EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction());
+        m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunctionDouble());
+        m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunctionDouble());
+        m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunctionDouble());
+        m.put(EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunctionDouble());
         m.put(COSINE_FORMAT.hash(), cosineFunc);
-        m.put(DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+        m.put(DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunctionDouble());
         return Collections.unmodifiableMap(m);
     }
 
@@ -576,9 +576,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private int vectorDimension;
 
-    private static DistanceFunctionDouble getDistanceFunction(String distanceType) {
+    private static DistanceFunctionDouble getDistanceFunctionDouble(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
-            return new EuclideanSquaredDistanceFunction();
+            return new EuclideanSquaredDistanceFunctionDouble();
         }
         String normalized = distanceType.toLowerCase().trim();
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(normalized);
@@ -640,7 +640,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
      * centroids and does not require normalization.
      */
     private boolean requiresNormalizedCentroids() {
-        return distanceFunction instanceof CosineDistanceFunction;
+        return distanceFunction instanceof CosineDistanceFunctionDouble;
     }
 
     /**
@@ -694,7 +694,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.vectorDimension = vectorDimension;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
-        this.distanceFunction = getDistanceFunction(distanceMetric);
+        this.distanceFunction = getDistanceFunctionDouble(distanceMetric);
     }
 
     @Override
