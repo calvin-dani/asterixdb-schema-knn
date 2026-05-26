@@ -283,6 +283,8 @@ public class CompilerProperties extends AbstractProperties {
     public static final String COMPILER_DELTALAKE_FILESPLITS_KEY = Option.COMPILER_DELTALAKE_FILESPLITS.ini();
     public static final String COMPILER_PARQUET_FILESPLITS_KEY = Option.COMPILER_PARQUET_FILESPLITS.ini();
     public static final String COMPILER_HDFS_SPLIT_PARALLELISM_KEY = Option.COMPILER_HDFS_SPLIT_PARALLELISM.ini();
+    public static final String COMPILER_VECTOR_PRUNEDSEARCH_KEY = "compiler.vector.prunedsearch";
+    public static final String COMPILER_VECTOR_KMULTIPLIER_KEY = "compiler.vector.kmultiplier";
 
     public CompilerProperties(PropertiesAccessor accessor) {
         super(accessor);

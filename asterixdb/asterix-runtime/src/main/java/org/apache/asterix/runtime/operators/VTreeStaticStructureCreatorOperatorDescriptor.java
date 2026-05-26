@@ -176,7 +176,7 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                         // Use inputRecordDescriptor for reading input frames (hierarchical data)
                         fta = new FrameTupleAccessor(inputRecordDescriptor);
 
-                        // Read quantization parameters from the LSMVCTreeLocalResource
+                        // Read quantization parameters from the LSMVTreeLocalResource
                         readQuantizationParamsFromMetadata(ctx);
 
                     } catch (Exception e) {
@@ -185,7 +185,7 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                 }
 
                 /**
-                 * Reads quantization parameters from the LSMVCTreeLocalResource metadata.
+                 * Reads quantization parameters from the LSMVTreeLocalResource metadata.
                  */
                 private void readQuantizationParamsFromMetadata(IHyracksTaskContext taskCtx)
                         throws HyracksDataException {

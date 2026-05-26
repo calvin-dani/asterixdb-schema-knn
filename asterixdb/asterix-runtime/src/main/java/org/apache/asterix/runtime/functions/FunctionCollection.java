@@ -646,6 +646,7 @@ import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYear2Descr
 import org.apache.asterix.runtime.evaluators.functions.temporal.WeekOfYearDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationGreaterThanComparatorDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.temporal.YearMonthDurationLessThanComparatorDescriptor;
+import org.apache.asterix.runtime.evaluators.functions.vector.ANNDistanceDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.CosineDistanceArrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.DotDistanceArrDescriptor;
 import org.apache.asterix.runtime.evaluators.functions.vector.EuclideanDistanceArrDescriptor;
@@ -1342,6 +1343,7 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(EuclideanSquaredDistanceArrDescriptor.FACTORY);
         fc.add(CosineDistanceArrDescriptor.FACTORY);
         fc.add(DotDistanceArrDescriptor.FACTORY);
+        fc.add(ANNDistanceDescriptor.FACTORY);
 
         // Type functions.
         fc.add(GetTypeDescriptor.FACTORY);
