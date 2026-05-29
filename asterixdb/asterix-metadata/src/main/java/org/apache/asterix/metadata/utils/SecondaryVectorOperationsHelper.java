@@ -296,6 +296,11 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", -1) : -1;
 
+        // Clustering strategy: top-down (default) builds the tree root-first, splitting per-cluster run files
+        // level-by-level; set WITH {"top_down":"false"} to use the legacy bottom-up algorithm.
+        boolean topDown =
+                withObjectNode == null || !"false".equalsIgnoreCase(withObjectNode.getOptionalString("top_down", "true"));
+
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
@@ -338,7 +343,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
                         new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
-                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension);
+                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension, topDown);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
