@@ -857,6 +857,9 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         String quantization = "INVALID";
         String similarity = "INVALID";
         double epsilon = 0.3;
+        // cross_pollination_m: each record replicated into the M closest leaf centroids at bulk-load.
+        // 1 = legacy behavior (no cross-pollination).
+        int cross_pollination_m = 1;
 
         if (properties != null) {
             dimension = properties.getOptionalInt("dimension", -1);
@@ -865,6 +868,7 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             quantization = properties.getOptionalString("quantization", "INVALID");
             similarity = properties.getOptionalString("similarity", "INVALID");
             epsilon = properties.getOptionalDouble("epsilon", 0.3);
+            cross_pollination_m = properties.getOptionalInt("cross_pollination_m", 1);
 
             // boolean hasFrac = train_list_fraction > 0 && train_list_fraction <= 1.0;
             // if (!hasFrac) {
@@ -931,6 +935,16 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         fieldValue.reset();
         doubleSerde.serialize(new ADouble(epsilon), fieldValue.getDataOutput());
         recordBuilder.addField(nameValue, fieldValue);
+
+        // Only persist cross_pollination_m when > 1 — older metadata (no field) reads back as 1.
+        if (cross_pollination_m > 1) {
+            nameValue.reset();
+            aString.setValue("cross_pollination_m");
+            stringSerde.serialize(aString, nameValue.getDataOutput());
+            fieldValue.reset();
+            int32Serde.serialize(new AInt32(cross_pollination_m), fieldValue.getDataOutput());
+            recordBuilder.addField(nameValue, fieldValue);
+        }
     }
 
     private AdmObjectNode readWithProperties(ARecord indexRecord) throws AlgebricksException {
@@ -943,6 +957,9 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
         String similarity = "INVALID";
         double epsilon = 0.3;
         int epsilonPos = indexRecord.getType().getFieldIndex("epsilon");
+        // cross_pollination_m: 1 = legacy (no cross-pollination), absent in older metadata.
+        int cross_pollination_m = 1;
+        int crossPollinationMPos = indexRecord.getType().getFieldIndex("cross_pollination_m");
 
         // Read dimension field
         int dimensionPos = indexRecord.getType().getFieldIndex("dimension");
@@ -1012,10 +1029,19 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
             }
         }
 
+        // Read cross_pollination_m field (optional for older metadata; absence == 1)
+        if (crossPollinationMPos >= 0) {
+            IAObject mObj = indexRecord.getValueByPos(crossPollinationMPos);
+            if (mObj != null && mObj.getType().getTypeTag() == ATypeTag.INTEGER) {
+                cross_pollination_m = ((AInt32) mObj).getIntegerValue();
+            }
+        }
+
         // Reconstruct AdmObjectNode only if at least one field differs from default
         boolean hasNonDefaultValues = (dimension != -1) || (train_list_fraction >= 0) || (num_clusters != -1)
                 || (!"default".equals(quantization) && !"INVALID".equals(quantization))
-                || (!"INVALID".equals(similarity)) || (epsilonPos >= 0 && Math.abs(epsilon - 0.3) > 1e-12);
+                || (!"INVALID".equals(similarity)) || (epsilonPos >= 0 && Math.abs(epsilon - 0.3) > 1e-12)
+                || (cross_pollination_m > 1);
 
         if (!hasNonDefaultValues) {
             return null;
@@ -1045,6 +1071,10 @@ public class IndexTupleTranslator extends AbstractTupleTranslator<Index> {
 
         if (epsilonPos >= 0) {
             withObjectNode.set("epsilon", new AdmDoubleNode(epsilon));
+        }
+
+        if (cross_pollination_m > 1) {
+            withObjectNode.set("cross_pollination_m", new AdmBigIntNode(cross_pollination_m));
         }
 
         return withObjectNode;

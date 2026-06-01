@@ -109,6 +109,12 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
     /** Epsilon for level-wise centroid search ({@code findCloseCentroidsLevelWiseGlobalSort}); from index WITH clause. */
     private final double levelwiseEpsilon;
 
+    /**
+     * Cross-pollination factor: each record is replicated into the M closest leaf centroids at bulk-load,
+     * not just the closest one. M=1 reproduces the legacy (no cross-pollination) behavior.
+     */
+    private final int crossPollinationM;
+
     // Maps task (compute) partition to storage partition(s) for index resource lookup
     private final int[][] partitionsMap;
 
@@ -218,7 +224,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             RecordDescriptor inputRecordDescriptor, RecordDescriptor outputRecordDescriptor, UUID permitUUID,
             UUID materializedDataUUID, IScalarEvaluatorFactory args, String distanceMetric, int vectorDimension,
             int numPrimaryKeys, int numIncludeFields, boolean isQuantized, int[][] partitionsMap,
-            double levelwiseEpsilon) {
+            double levelwiseEpsilon, int crossPollinationM) {
         super(spec, 1, 1); // Changed from (1, 0) to (1, 1) - now has 1 output
         this.indexHelperFactory = indexHelperFactory;
         this.fillFactor = fillFactor;
@@ -234,6 +240,7 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         this.isQuantized = isQuantized;
         this.partitionsMap = partitionsMap;
         this.levelwiseEpsilon = levelwiseEpsilon > 0.0 && Double.isFinite(levelwiseEpsilon) ? levelwiseEpsilon : 0.3;
+        this.crossPollinationM = Math.max(1, crossPollinationM);
 
         // Set output record descriptor in the parent class array
         this.outRecDescs[0] = outputRecordDescriptor;
@@ -970,127 +977,50 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                         }
 
                         if (embedding != null && embedding.length > 0) {
-                            // Find closest centroid using the extracted embedding
-                            // Use accessor to find closest leaf centroid with distance function
-                            boolean crossPollinate = false; // Do not cross partition boundaries
-                            boolean leafPollinate = false;
-                            boolean interiorPollinate = false;
-                            if (!crossPollinate) {
-                                // Quantize embedding to double[] for distance computation (if quantized)
-                                double[] quantizedEmbedding = null;
-                                if (quantizer != null) {
-                                    quantizedEmbedding = quantizer.quantize(embedding);
+                            // Cross-pollination: assign this record to the top-M closest leaf centroids.
+                            // M = 1 reproduces legacy single-centroid behavior. M > 1 emits M copies of the
+                            // record (same vector, different (centroidId, distance) per copy). The downstream
+                            // ExternalSort on (centroidId, distance) then groups them per cluster.
+                            List<ClusterSearchResult> closeResults =
+                                    findCloseCentroidsLevelWiseGlobalSort(embedding, levelwiseEpsilon);
+
+                            if (closeResults != null && !closeResults.isEmpty()) {
+                                int assignCount = Math.min(crossPollinationM, closeResults.size());
+
+                                // Pre-compute the quantized embedding once per record (same for every copy).
+                                double[] quantizedEmbedding =
+                                        (quantizer != null) ? quantizer.quantize(embedding) : null;
+
+                                // Quantize the persisted vector (qEmbed in the data tuple) once per record.
+                                OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
+                                if (isQuantized) {
+                                    quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
                                 }
 
-                                // Find close centroids via level-wise global sort (epsilon = 0.25), use first for assignment
-                                List<ClusterSearchResult> closeResults =
-                                        findCloseCentroidsLevelWiseGlobalSort(embedding, levelwiseEpsilon);
-                                ClusterSearchResult result =
-                                        (closeResults != null && !closeResults.isEmpty()) ? closeResults.get(0) : null;
-                                if (result != null) {
-                                    successfulQueries++;
+                                successfulQueries++;
+                                for (int m = 0; m < assignCount; m++) {
+                                    ClusterSearchResult result = closeResults.get(m);
 
-                                    // Quantize ONLY if required
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
-                                    if (isQuantized) {
-                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
-
-                                        // Populate quantized D(x, C) so it matches query-time convention:
-                                        // distanceFunction(quantize(x), quantize(C))
-                                        if (quantizer != null && result.centroid != null
-                                                && !result.hasQuantizedDistance()) {
-                                            try {
-                                                double[] qEmb = quantizedEmbedding != null ? quantizedEmbedding
-                                                        : quantizer.quantize(embedding);
-                                                double[] qCen = quantizer.quantize(result.centroid);
-                                                double qDist = hyracksDistanceFunctionDouble.apply(qEmb, qCen);
-                                                result = ClusterSearchResult.create(result.leafPageId,
-                                                        result.clusterIndex, result.centroid, result.distance,
-                                                        result.centroidId, result.directoryPageId, qDist);
-                                            } catch (Exception qex) {
-                                                System.err
-                                                        .println("WARNING: failed to compute quantized D(x,C): " + qex);
-                                            }
+                                    // For quantized indexes, ensure the stored D(x, C) matches the query-time
+                                    // convention: distanceFunction(quantize(x), quantize(C)). Done per-centroid.
+                                    if (isQuantized && quantizer != null && result.centroid != null
+                                            && !result.hasQuantizedDistance()) {
+                                        try {
+                                            double[] qEmb = quantizedEmbedding != null ? quantizedEmbedding
+                                                    : quantizer.quantize(embedding);
+                                            double[] qCen = quantizer.quantize(result.centroid);
+                                            double qDist = hyracksDistanceFunctionDouble.apply(qEmb, qCen);
+                                            result = ClusterSearchResult.create(result.leafPageId, result.clusterIndex,
+                                                    result.centroid, result.distance, result.centroidId,
+                                                    result.directoryPageId, qDist);
+                                        } catch (Exception qex) {
+                                            System.err.println("WARNING: failed to compute quantized D(x,C): " + qex);
                                         }
                                     }
-                                    // Create transformed tuple with quantized data filled in
+
                                     ITupleReference transformedTuple =
                                             createTransformedTuple(tuple, result, quantizedVector);
-
-                                    // Output the transformed tuple to downstream operators
                                     outputTransformedTuple(transformedTuple);
-                                }
-                            } else if (crossPollinate && leafPollinate) {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseLeafCentroid(embedding, 0.1);
-                                if (result != null) {
-                                    successfulQueries++;
-
-                                    // Quantize ONLY if required
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
-                                    if (isQuantized) {
-                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
-                                    }
-
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with quantized data filled in
-                                        ITupleReference transformedTuple =
-                                                createTransformedTuple(tuple, res, quantizedVector);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
-                                }
-
-                            } else if (crossPollinate && interiorPollinate) {
-                                // FUTURE: Implement cross-partition centroid search
-                                int count = 0;
-                                List<ClusterSearchResult> result =
-                                        findCloseCentroidsLevelWiseGlobalSort(embedding, 0.15);
-                                if (result != null) {
-                                    successfulQueries++;
-
-                                    // Quantize ONLY if required
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
-                                    if (isQuantized) {
-                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
-                                    }
-
-                                    for (ClusterSearchResult res : result) {
-
-                                        // Create transformed tuple with quantized data filled in
-                                        ITupleReference transformedTuple =
-                                                createTransformedTuple(tuple, res, quantizedVector);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                        count++;
-                                        if (count >= 10) {
-                                            break; // Limit to top 10 results bounded
-                                        }
-                                    }
-                                }
-
-                            } else {
-                                // FUTURE: Implement cross-partition centroid search
-                                List<ClusterSearchResult> result = findCloseCentroidsFrontier(embedding, 0.1);
-                                if (result != null) {
-                                    successfulQueries++;
-
-                                    // Quantize ONLY if required
-                                    OptimizedScalarQuantizationSampleFile.QuantizedVector quantizedVector = null;
-                                    if (isQuantized) {
-                                        quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
-                                    }
-
-                                    for (ClusterSearchResult res : result) {
-                                        // Create transformed tuple with quantized data filled in
-                                        ITupleReference transformedTuple =
-                                                createTransformedTuple(tuple, res, quantizedVector);
-
-                                        // Output the transformed tuple to downstream operators
-                                        outputTransformedTuple(transformedTuple);
-                                    }
                                 }
                             }
                         }

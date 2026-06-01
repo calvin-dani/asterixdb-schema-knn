@@ -45,8 +45,19 @@ import org.apache.hyracks.dataflow.std.group.AggregateState;
 import org.apache.hyracks.dataflow.std.group.IAggregatorDescriptor;
 import org.apache.hyracks.dataflow.std.group.IAggregatorDescriptorFactory;
 import org.apache.hyracks.dataflow.std.group.IProfiledAggregatorDescriptor;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class PreclusteredGroupWriter implements IFrameWriter {
+
+    private static final Logger LOGGER = LogManager.getLogger();
+
+    // Counters for verifying cross-pollination deduplication. Tracked per writer instance,
+    // logged at close(). For a PRE_SORTED_DISTINCT_BY (zero aggregators), groupsEmitted is the
+    // number of UNIQUE keys and (inputTuples - groupsEmitted) is the number of duplicates
+    // filtered out. For a real GROUP BY this still tells you the compression ratio.
+    private long inputTuples = 0L;
+    private long groupsEmitted = 0L;
     private final int[] groupFields;
     private final IBinaryComparator[] comparators;
     private final IAggregatorDescriptor aggregator;
@@ -130,6 +141,7 @@ public class PreclusteredGroupWriter implements IFrameWriter {
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
         inFrameAccessor.reset(buffer);
         int nTuples = inFrameAccessor.getTupleCount();
+        inputTuples += nTuples;
         if (nTuples != 0) {
             for (int i = 0; i < nTuples; ++i) {
                 if (first) {
@@ -177,6 +189,7 @@ public class PreclusteredGroupWriter implements IFrameWriter {
         if (hasOutput) {
             appenderWrapper.appendSkipEmptyField(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
                     tupleBuilder.getSize());
+            groupsEmitted++;
         }
     }
 
@@ -220,6 +233,14 @@ public class PreclusteredGroupWriter implements IFrameWriter {
             throw e;
         } finally {
             appenderWrapper.close();
+        }
+        // Emit a summary of input vs output tuples so we can verify cross-pollination dedup.
+        // For PRE_SORTED_DISTINCT_BY (no aggregators) this directly equals duplicates filtered.
+        // Only logged when actually invoked (inputTuples>0) to avoid noise from no-op pipelines.
+        if (inputTuples > 0) {
+            long filtered = inputTuples - groupsEmitted;
+            LOGGER.warn("[DistinctStats] PreclusteredGroupWriter: inputTuples={}, groupsEmitted={}, "
+                    + "filteredOut={}, groupFields={}", inputTuples, groupsEmitted, filtered, groupFields.length);
         }
     }
 

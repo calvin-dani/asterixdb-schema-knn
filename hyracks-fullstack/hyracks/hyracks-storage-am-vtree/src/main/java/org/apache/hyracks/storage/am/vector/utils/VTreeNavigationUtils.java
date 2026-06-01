@@ -54,6 +54,47 @@ public class VTreeNavigationUtils {
 
     private static final Logger LOGGER = LogManager.getLogger();
 
+    // =====================================================================================
+    // Navigation counters: page pins and distance computations performed during tree
+    // navigation + cluster selection. Per-thread because each cursor's open() runs on a
+    // single Hyracks task thread; concurrent queries get independent counters.
+    //
+    // Caller convention:
+    //   1. (Optional) call resetNavCounters() at the start of an operation if you want a
+    //      caller-controlled scope. findCloseCentroidsLevelWiseGlobalSort already resets
+    //      at entry and emits a WARN summary at exit, so most users don't need to call
+    //      reset/snapshot themselves.
+    //   2. Inside any nav helper, call incPagePins()/incDistComps() right after the pin
+    //      or distance call.
+    //   3. Read counters via getPagePins()/getDistComps() if you want to aggregate across
+    //      multiple nav calls (e.g., DFS fallback + level-wise init).
+    // =====================================================================================
+    private static final ThreadLocal<long[]> NAV_COUNTERS = ThreadLocal.withInitial(() -> new long[2]);
+    private static final int IDX_PAGE_PINS = 0;
+    private static final int IDX_DIST_COMPS = 1;
+
+    public static void resetNavCounters() {
+        long[] c = NAV_COUNTERS.get();
+        c[IDX_PAGE_PINS] = 0L;
+        c[IDX_DIST_COMPS] = 0L;
+    }
+
+    public static long getPagePins() {
+        return NAV_COUNTERS.get()[IDX_PAGE_PINS];
+    }
+
+    public static long getDistComps() {
+        return NAV_COUNTERS.get()[IDX_DIST_COMPS];
+    }
+
+    private static void incPagePins() {
+        NAV_COUNTERS.get()[IDX_PAGE_PINS]++;
+    }
+
+    private static void incDistComps() {
+        NAV_COUNTERS.get()[IDX_DIST_COMPS]++;
+    }
+
     /**
      * Find the closest centroid by traversing the tree from root to leaf,
      * optionally computing a quantized distance for the best result.
@@ -88,6 +129,7 @@ public class VTreeNavigationUtils {
             }
 
             ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+            incPagePins();
 
             try {
                 page.acquireReadLatch();
@@ -182,6 +224,7 @@ public class VTreeNavigationUtils {
             try {
                 if (!isFirstPage) {
                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    incPagePins();
                     currentPage.acquireReadLatch();
                     currentFrame = (IVTreeInteriorFrame) interiorFrameFactory.createFrame();
                     currentFrame.setPage(currentPage);
@@ -202,6 +245,7 @@ public class VTreeNavigationUtils {
                         }
 
                         double distance = distanceFunction.apply(queryVector, centroid);
+                        incDistComps();
                         int childPageId = currentFrame.getChildPageId(i);
                         children.add(new VTreeChildCentroid(childPageId, distance, i));
                     } catch (Exception e) {
@@ -258,6 +302,7 @@ public class VTreeNavigationUtils {
             try {
                 if (!isFirstPage) {
                     currentPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+                    incPagePins();
                     currentPage.acquireReadLatch();
                     currentFrame = (IVTreeLeafFrame) leafFrameFactory.createFrame();
                     currentFrame.setPage(currentPage);
@@ -280,6 +325,7 @@ public class VTreeNavigationUtils {
                         }
 
                         double distance = distanceFunction.apply(queryVector, centroid);
+                        incDistComps();
 
                         double quantizedDistance = Double.NaN;
                         if (quantizer != null && quantizedQueryVector != null) {
@@ -287,6 +333,7 @@ public class VTreeNavigationUtils {
                             if (quantizedCentroidBytes != null) {
                                 double[] dequantizedCentroid = quantizer.dequantize(quantizedCentroidBytes);
                                 quantizedDistance = distanceFunction.apply(quantizedQueryVector, dequantizedCentroid);
+                                incDistComps();
                             }
                         }
 
@@ -337,6 +384,7 @@ public class VTreeNavigationUtils {
 
         while (true) {
             ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
+            incPagePins();
             try {
                 page.acquireReadLatch();
 
@@ -487,6 +535,7 @@ public class VTreeNavigationUtils {
 
         while (true) {
             ICachedPage page = state.bufferCache.pin(BufferedFileHandle.getDiskPageId(state.fileId, currentPageId));
+            incPagePins();
             try {
                 page.acquireReadLatch();
 
@@ -597,6 +646,13 @@ public class VTreeNavigationUtils {
             double[] queryVector, IVTreeDistanceFunction distanceFunction, double epsilon,
             double[] quantizedQueryVector, IVTreeQuantizer quantizer) throws HyracksDataException {
 
+        // Reset nav counters for this call. Per-thread, so concurrent queries don't interfere.
+        // The counters are also incremented by the DFS helpers (initializeClusterIterator,
+        // findNextClosestCluster, descendToLeaf) when the strategy falls back to DFS — those
+        // calls happen later in the cursor lifecycle, so the snapshot we log below covers ONLY
+        // the level-wise navigation phase.
+        resetNavCounters();
+
         List<ClusterSearchResult> allCentroids = new ArrayList<>();
         Set<Integer> visitedLeafPages = new HashSet<>();
         Queue<VTreeLevelNode> queue = new ArrayDeque<>();
@@ -615,6 +671,7 @@ public class VTreeNavigationUtils {
             // Process all nodes at current level
             for (VTreeLevelNode node : currentLevelNodes) {
                 ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, node.pageId));
+                incPagePins();
                 try {
                     page.acquireReadLatch();
 
@@ -656,8 +713,12 @@ public class VTreeNavigationUtils {
                         }
 
                         double closestDistance = sortedChildren.get(0).distance;
-                        double localThreshold =
-                                closestDistance < 0 ? closestDistance * (1.0 - epsilon) : closestDistance + epsilon;
+                        // Multiplicative epsilon (relative to |minDistance|). Equivalent to (1+epsilon)*minDistance
+                        // for positive distances and (1-epsilon)*minDistance for negative ones (dot product is
+                        // negated → smaller=better). Previously this branch used additive (d+epsilon) on the
+                        // positive side, which is essentially a no-op for euclidean_squared / high-dim L2 where
+                        // distances are O(10)–O(10^3).
+                        double localThreshold = closestDistance + Math.abs(closestDistance) * epsilon;
 
                         for (VTreeChildCentroid child : sortedChildren) {
                             if (child.distance <= localThreshold) {
@@ -683,26 +744,35 @@ public class VTreeNavigationUtils {
         allCentroids.sort(Comparator.comparingDouble(r -> r.distance));
 
         // Phase 3: Apply epsilon threshold based on globally closest centroid
+        List<ClusterSearchResult> result = allCentroids;
         if (epsilon > 0.0) {
             double globalClosestDistance = allCentroids.get(0).distance;
-            double globalThreshold = globalClosestDistance < 0 ? globalClosestDistance * (1.0 - epsilon)
-                    : globalClosestDistance + epsilon;
+            // Multiplicative epsilon (relative to |minDistance|). See note on the local threshold above:
+            // (1+epsilon)*minDistance for positive distances, (1-epsilon)*minDistance for negative ones.
+            double globalThreshold = globalClosestDistance + Math.abs(globalClosestDistance) * epsilon;
 
             // Filter centroids that exceed the global threshold
             List<ClusterSearchResult> filteredCentroids = new ArrayList<>();
-            for (ClusterSearchResult result : allCentroids) {
-                if (result.distance <= globalThreshold) {
-                    filteredCentroids.add(result);
+            for (ClusterSearchResult r : allCentroids) {
+                if (r.distance <= globalThreshold) {
+                    filteredCentroids.add(r);
                 } else {
                     // Centroids are sorted, so we can break early
                     break;
                 }
             }
-
-            return filteredCentroids;
+            result = filteredCentroids;
         }
 
-        return allCentroids;
+        // Emit nav-phase summary: pagePins and distComps both include the cluster-selection
+        // work because the level-wise traversal IS the cluster selection in this code path.
+        // (DFS fallback later in the cursor lifecycle will add to these counters; read them
+        // with getPagePins()/getDistComps() at cursor-close time if you want the full total.)
+        LOGGER.warn("[NavStats] findCloseCentroidsLevelWiseGlobalSort: pagePins={}, distComps={}, "
+                + "candidatesBeforeEpsilon={}, candidatesAfterEpsilon={}, epsilon={}", getPagePins(), getDistComps(),
+                allCentroids.size(), result.size(), epsilon);
+
+        return result;
     }
 
 }

@@ -44,10 +44,18 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_SIMILARITY = "similarity";
     public static final String VECTOR_INDEX_PARAMETER_NUM_K = "num_clusters";
     public static final String VECTOR_INDEX_PARAMETER_EPSILON = "epsilon";
+    /**
+     * Cross-pollination factor: each record is written into the M closest leaf centroids at bulk-load,
+     * not just the closest one. M=1 reproduces the legacy (no cross-pollination) behavior.
+     */
+    public static final String VECTOR_INDEX_PARAMETER_CROSS_POLLINATION_M = "cross_pollination_m";
     public static final String VECTOR_INDEX_DEFAULT_QUANTIZATION = "SQ8";
     /** Default for level-wise centroid search and ANN search predicate (matches VectorSearchPredicate). */
     public static final double VECTOR_INDEX_DEFAULT_TRAIN_LIST = 0.1;
     public static final double VECTOR_INDEX_DEFAULT_EPSILON = 0.25;
+    public static final long VECTOR_INDEX_DEFAULT_CROSS_POLLINATION_M = 1L;
+    /** Sanity cap on cross_pollination_m: anything larger almost certainly indicates a user error. */
+    public static final long VECTOR_INDEX_MAX_CROSS_POLLINATION_M = 1024L;
 
     /**
      * Canonical names for {@code similarity}, aligned with
@@ -63,7 +71,8 @@ public class VectorIndexDeclUtil {
      */
     private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS = Set.of(VECTOR_INDEX_PARAMETER_DIMENSION,
             VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION,
-            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K);
+            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K,
+            VECTOR_INDEX_PARAMETER_CROSS_POLLINATION_M);
 
     private VectorIndexDeclUtil() {
     }
@@ -88,6 +97,7 @@ public class VectorIndexDeclUtil {
         validateSimilarity(node, sourceLoc);
         validateQuantization(node, sourceLoc);
         validateEpsilon(node);
+        validateCrossPollinationM(node);
 
         return node;
     }
@@ -97,7 +107,8 @@ public class VectorIndexDeclUtil {
         for (String name : node.getFieldNames()) {
             if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
                 throw new CompilationException("Failed to create vector index. Unknown field `" + name
-                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon");
+                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, "
+                        + "epsilon, num_clusters, cross_pollination_m");
             }
         }
     }
@@ -212,6 +223,29 @@ public class VectorIndexDeclUtil {
         if (epsNode.getType() == ATypeTag.BIGINT) {
             node.remove(VECTOR_INDEX_PARAMETER_EPSILON);
             node.set(VECTOR_INDEX_PARAMETER_EPSILON, new AdmDoubleNode(v));
+        }
+    }
+
+    /**
+     * Validates {@code cross_pollination_m}: each record is written into the M closest leaf centroids at bulk-load
+     * (M=1 means no cross-pollination, matching legacy behavior). Must be a positive integer; capped at
+     * {@link #VECTOR_INDEX_MAX_CROSS_POLLINATION_M} as a sanity check.
+     */
+    private static void validateCrossPollinationM(AdmObjectNode node) throws CompilationException {
+        IAdmNode mNode = node.get(VECTOR_INDEX_PARAMETER_CROSS_POLLINATION_M);
+        if (mNode == null) {
+            node.set(VECTOR_INDEX_PARAMETER_CROSS_POLLINATION_M,
+                    new AdmBigIntNode(VECTOR_INDEX_DEFAULT_CROSS_POLLINATION_M));
+            return;
+        }
+        if (mNode.getType() != ATypeTag.BIGINT) {
+            throw new CompilationException("Failed to create vector index. Invalid `cross_pollination_m` parameter "
+                    + "value. It must be an integer in [1, " + VECTOR_INDEX_MAX_CROSS_POLLINATION_M + "]");
+        }
+        long v = ((AdmBigIntNode) mNode).get();
+        if (v < 1 || v > VECTOR_INDEX_MAX_CROSS_POLLINATION_M) {
+            throw new CompilationException("Failed to create vector index. Invalid `cross_pollination_m` parameter "
+                    + "value. It must be an integer in [1, " + VECTOR_INDEX_MAX_CROSS_POLLINATION_M + "]");
         }
     }
 

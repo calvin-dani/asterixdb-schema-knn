@@ -64,6 +64,7 @@ import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractDataSourceOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractLogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AssignOperator;
+import org.apache.hyracks.algebricks.core.algebra.operators.logical.DistinctOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.LimitOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.SelectOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOperator;
@@ -379,8 +380,69 @@ public class VectorIndexAccessMethod implements IAccessMethod {
                 null // optimizableDisjunctionConditions — vector index doesn't use OR-disjunction CBO
         );
 
+        // Cross-pollination dedup: each base record surfaces as up to M (distance, centroidId, pk) copies from
+        // the vector cursor when cross_pollination_m > 1. Splice a DistinctOperator keyed on the PK variables
+        // ABOVE the primary-index lookup. We can't put it BETWEEN the two UNNEST-MAPs because
+        // createRestOfIndexSearchPlan internally casts its inputOp to AbstractUnnestMapOperator (see
+        // AccessMethodUtils.java:533/:575). Cost is one primary-key lookup per duplicate, bounded by
+        // M * nprobe_candidates — cheap in practice. For M == 1 we skip dedup so the plan is byte-identical
+        // to the legacy path.
+        //
+        // Dedup keys are the data-source operator's PK vars (head of dataSourceOp.getVariables()), NOT the
+        // secondary UNNEST-MAP's PK vars. createRestOfIndexSearchPlan emits the primary UNNEST-MAP using the
+        // data source's variable IDs (AccessMethodUtils.java:1657 — `primaryIndexUnnestVars.addAll(
+        // dataSourceOp.getVariables())`), so those are the vars actually in scope above primaryIndexUnnestOp.
+        // Using the secondary's PK vars instead causes "Could not infer type for variable" because they are
+        // only INPUT search keys to the primary unnest, not part of its output type environment.
+        ILogicalOperator topOfIndexPlan = primaryIndexUnnestOp;
+        int crossPollinationM = extractCrossPollinationM(chosenIndex);
+        if (crossPollinationM > 1) {
+            List<LogicalVariable> dsVars = dataSourceOp.getVariables();
+            int numPkVars = dataset.getPrimaryKeys().size();
+            if (numPkVars > 0 && dsVars.size() >= numPkVars) {
+                List<LogicalVariable> dedupPkVars = new ArrayList<>(dsVars.subList(0, numPkVars));
+                List<Mutable<ILogicalExpression>> distinctExprs = new ArrayList<>(dedupPkVars.size());
+                for (LogicalVariable pkVar : dedupPkVars) {
+                    VariableReferenceExpression pkRef = new VariableReferenceExpression(pkVar);
+                    pkRef.setSourceLocation(primaryIndexUnnestOp.getSourceLocation());
+                    distinctExprs.add(new MutableObject<>(pkRef));
+                }
+                DistinctOperator dedupOp = new DistinctOperator(distinctExprs);
+                dedupOp.setSourceLocation(primaryIndexUnnestOp.getSourceLocation());
+                dedupOp.getInputs().add(new MutableObject<>(primaryIndexUnnestOp));
+                dedupOp.setExecutionMode(primaryIndexUnnestOp.getExecutionMode());
+                context.computeAndSetTypeEnvironmentForOperator(dedupOp);
+                topOfIndexPlan = dedupOp;
+                LOGGER.info("Inserted DistinctOperator (cross_pollination_m={}) on PK vars {}", crossPollinationM,
+                        dedupPkVars);
+            } else {
+                LOGGER.warn(
+                        "cross_pollination_m={} but could not splice DistinctOperator: numPkVars={}, dataSourceVars={}",
+                        crossPollinationM, numPkVars, dsVars);
+            }
+        }
+
         LOGGER.trace("Vector index search plan created successfully");
-        return primaryIndexUnnestOp;
+        return topOfIndexPlan;
+    }
+
+    /**
+     * Reads {@code cross_pollination_m} from the chosen vector index's WITH-object. Returns 1 (no cross-pollination)
+     * if the index is not a {@code VectorIndexDetails} or the field is absent.
+     */
+    private static int extractCrossPollinationM(Index chosenIndex) {
+        if (chosenIndex == null) {
+            return 1;
+        }
+        Index.IIndexDetails details = chosenIndex.getIndexDetails();
+        if (!(details instanceof Index.VectorIndexDetails)) {
+            return 1;
+        }
+        AdmObjectNode withObj = ((Index.VectorIndexDetails) details).getWithObjectNode();
+        if (withObj == null) {
+            return 1;
+        }
+        return Math.max(1, withObj.getOptionalInt("cross_pollination_m", 1));
     }
 
     @Override

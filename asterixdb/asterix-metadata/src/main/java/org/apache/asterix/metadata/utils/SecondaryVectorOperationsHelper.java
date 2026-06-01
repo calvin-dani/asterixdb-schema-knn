@@ -362,6 +362,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", -1) : -1;
         String quantization = (withObjectNode != null) ? withObjectNode.getOptionalString("quantization", null) : null;
         double levelwiseEpsilon = (withObjectNode != null) ? withObjectNode.getOptionalDouble("epsilon", 0.3) : 0.3;
+        // Cross-pollination: at bulk-load, write each record into the M closest leaf centroids (M=1 = legacy).
+        int crossPollinationM =
+                (withObjectNode != null) ? Math.max(1, withObjectNode.getOptionalInt("cross_pollination_m", 1)) : 1;
         final boolean isQuantized;
         if (withObjectNode != null) {
             resolveEffectiveQuantizationLabel(quantization);
@@ -444,7 +447,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                 new VCTreeBulkLoaderAndGroupingOperatorDescriptor(spec, dataflowHelperFactory, 128, 0.7f,
                         secondaryRecDesc, outputRecDesc, permitUUID, materializedDataUUID, vectorFieldAccessor,
                         distanceMetric, vectorDimension, numPrimaryKeys, numIncludeFieldsForBulkLoader, isQuantized,
-                        partitioningProperties.getComputeStorageMap(), levelwiseEpsilon);
+                        partitioningProperties.getComputeStorageMap(), levelwiseEpsilon, crossPollinationM);
         bulkLoaderAndGroupingOp.setSourceLocation(sourceLoc);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, bulkLoaderAndGroupingOp,
                 primaryPartitionConstraint);
