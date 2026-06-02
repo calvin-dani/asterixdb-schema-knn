@@ -69,9 +69,12 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
+import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
+import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.base.AbstractActivityNode;
 import org.apache.hyracks.dataflow.std.base.AbstractOperatorDescriptor;
 import org.apache.hyracks.dataflow.std.base.AbstractStateObject;
@@ -79,6 +82,12 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
+import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTree;
+import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -526,23 +535,39 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         }
 
         /**
-         * Computes the root branching factor (r_cluster): the largest number of centroids that fit in a
-         * single frame for the given embedding dimension (assuming DOUBLE items). This same value is used
-         * as the per-level branching factor k in the top-down build. Inverts the {@link #doesLevelFitInFrame}
-         * sizing: usableBytes = frameSize - META_DATA_LEN; perCentroid = tupleSize + offsetSlot(4).
+         * Computes the root fan-out P (Approach 2): the largest number of routing centroids that physically
+         * fit on a single disk page, given the exact per-entry byte cost of an interior routing tuple and the
+         * interior page header overhead. The single-page root bottleneck has no overflow pages, so P bounds
+         * the root branching factor directly.
          *
-         * @param embeddingDimension Dimension of embedding vectors
-         * @param frameSize Frame size in bytes
-         * @return branching factor, at least 2
+         * @param pageSize Disk page size in bytes (from the index buffer cache)
+         * @param interiorHeaderSize Bytes reserved by the interior page header (unavailable for entries)
+         * @param perEntryBytes Exact bytes to write one routing entry, including its slot
+         * @return root fan-out P, at least 2
          */
-        public static int computeRootBranching(int embeddingDimension, int frameSize) {
-            if (embeddingDimension <= 0 || frameSize <= 0) {
+        public static int computeP(int pageSize, int interiorHeaderSize, int perEntryBytes) {
+            if (pageSize <= 0 || perEntryBytes <= 0) {
                 return 2;
             }
-            long perCentroid = calculateEstimatedTupleSize(embeddingDimension) + 4L; // tuple + its offset slot
-            long usable = (long) frameSize - 9L; // minus META_DATA_LEN
-            int r = (int) (usable / perCentroid);
-            return Math.max(2, r);
+            long usable = (long) pageSize - Math.max(0, interiorHeaderSize);
+            int p = (int) (usable / perEntryBytes);
+            return Math.max(2, p);
+        }
+
+        /**
+         * Computes the intermediate fan-out K (Approach 2): an interior routing node spans one primary page
+         * plus up to V chained overflow pages, so it can route to K = P * (1 + V) children.
+         *
+         * @param p Root/per-page fan-out
+         * @param v Maximum number of overflow pages per intermediate routing node
+         * @return interior fan-out K, at least 2
+         */
+        public static int computeK(int p, int v) {
+            long k = (long) Math.max(2, p) * (1L + Math.max(0, v));
+            if (k > Integer.MAX_VALUE) {
+                return Integer.MAX_VALUE;
+            }
+            return (int) Math.max(2, k);
         }
 
         /**
@@ -605,6 +630,16 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     // Clipping constants for centroid values
     private static final double DEFAULT_CLIP_MIN = -1e3;
     private static final double DEFAULT_CLIP_MAX = 1e3;
+
+    // ===== Top-down FSCL (Approach 2) tuning constants =====
+    // Maximum overflow pages per intermediate routing node; interior fan-out K = P * (1 + V).
+    private static final int TOPDOWN_V_OVERFLOW_PAGES = 100;
+    // FSCL structural stiffness (gamma): higher forces more uniform cluster sizes.
+    private static final double TOPDOWN_FSCL_GAMMA = 3.0;
+    // FSCL batch optimization passes (epochs) per node level.
+    private static final int TOPDOWN_FSCL_EPOCHS = 20;
+    // Strict height cap: levels 0..MAX_LEVEL (height 5 => deepest level index 4).
+    private static final int TOPDOWN_MAX_LEVEL = 4;
 
     private final UUID sampleUUID;
     private final UUID tupleCountUUID;
@@ -899,8 +934,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             clusterStructure = buildTopDownHierarchicalKMeans(ctx, sampleState, fta, tuple, eval,
                                     inputVal, listAccessorConstant, KMeansUtils, partition, totalTupleCount);
                         } else {
-                            clusterStructure = performMemoryEfficientHierarchicalKMeans(ctx, in, fta, tuple, eval,
-                                    inputVal, listAccessorConstant, KMeansUtils, vSizeFrame, partition, totalTupleCount);
+                            clusterStructure =
+                                    performMemoryEfficientHierarchicalKMeans(ctx, in, fta, tuple, eval, inputVal,
+                                            listAccessorConstant, KMeansUtils, vSizeFrame, partition, totalTupleCount);
                         }
 
                         if (clusterStructure.getNumLevels() == 0) {
@@ -1605,12 +1641,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 // ============================================================================================
-                // TOP-DOWN HIERARCHICAL K-MEANS
-                // Builds the tree root-first. The root branching factor (r_cluster) is the number of centroids
-                // that fit in one frame for DOUBLE embeddings, and is reused as k at every level. The sample is
-                // clustered into r_cluster groups and partitioned into one run file per group; each file is then
-                // clustered into r_cluster sub-groups level-by-level until the cumulative cluster count reaches
-                // the target (K). Intermediate run files are deleted as soon as a level has consumed them.
+                // TOP-DOWN HIERARCHICAL K-MEANS (Approach 2)
+                // Builds the tree root-first using a page-fit fan-out: P routing centroids fit on one interior
+                // disk page (root level), and an interior node spans K = P*(1+V) children across its primary page
+                // plus V overflow pages. The sample is clustered into P groups (k-means++ + FSCL) and partitioned
+                // into one run file per group; each file is then clustered into K sub-groups level-by-level until
+                // the cumulative cluster count reaches the target (num_clusters) or the strict height cap. FSCL
+                // (Frequency-Sensitive Competitive Learning) keeps cluster sizes balanced. Intermediate run files
+                // are deleted as soon as a level has consumed them.
                 // ============================================================================================
 
                 /**
@@ -1664,11 +1702,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 /**
                  * Clusters all records in a single run file into (up to) k centroids using k-means++ initialization
-                 * followed by streaming Lloyd refinement. Operates over an arbitrary {@link RunFileSource}, so it
-                 * works for both the root sample file and per-cluster child files.
+                 * followed by streaming FSCL (Frequency-Sensitive Competitive Learning) refinement. Operates over
+                 * an arbitrary {@link RunFileSource}, so it works for both the root sample file and per-cluster
+                 * child files. Throws if FSCL leaves any cluster empty.
                  *
                  * @param recordCount total tuple count in the file (defines the index space and assignment array)
                  * @param k requested number of clusters (capped to recordCount)
+                 * @param maxIterations retained for signature compatibility; FSCL uses {@code TOPDOWN_FSCL_EPOCHS}
                  */
                 private ClusteringResult clusterRunFile(IHyracksTaskContext ctx, RunFileSource source, int recordCount,
                         int k, FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval,
@@ -1728,8 +1768,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         GeneratedRunFileReader r2 = source.openReader();
                         double[] newCentroid;
                         try {
-                            newCentroid =
-                                    getPointAtIndex(r2, fta, tuple, eval, inputVal, listAcc, kmu, chosenIdx, ctx);
+                            newCentroid = getPointAtIndex(r2, fta, tuple, eval, inputVal, listAcc, kmu, chosenIdx, ctx);
                         } finally {
                             r2.close();
                         }
@@ -1741,12 +1780,21 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 kmu);
                     }
 
-                    // Streaming Lloyd refinement.
+                    // Streaming FSCL (Frequency-Sensitive Competitive Learning) refinement. Each point is assigned
+                    // by a balancing penalty score_i = distance(x, c_i) * exp(gamma * (f_i / mu)), where f_i is the
+                    // running headcount of cluster i in this pass and mu = recordCount / k is the fair share. The
+                    // exponential repulsion keeps cluster sizes near mu, avoiding starved or overflowing nodes.
+                    // The distance is the operator's configured metric (euclidean for L2, angular for cosine).
                     int actualK = centroids.size();
                     int[] assignments = new int[recordCount];
-                    for (int iter = 0; iter < maxIterations; iter++) {
+                    double mu = actualK > 0 ? (double) recordCount / actualK : recordCount;
+                    if (mu <= 0) {
+                        mu = 1.0;
+                    }
+                    for (int iter = 0; iter < TOPDOWN_FSCL_EPOCHS; iter++) {
                         double[][] sums = new double[actualK][];
                         int[] counts = new int[actualK];
+                        long[] headcount = new long[actualK]; // running f_i accumulated within this epoch
                         GeneratedRunFileReader in = source.openReader();
                         try {
                             VSizeFrame frame = new VSizeFrame(ctx);
@@ -1770,9 +1818,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         int nearest = 0;
                                         double best = Double.POSITIVE_INFINITY;
                                         for (int c = 0; c < actualK; c++) {
-                                            double dd = calculateDistance(point, centroids.get(c));
-                                            if (dd < best) {
-                                                best = dd;
+                                            double dist = calculateDistance(point, centroids.get(c));
+                                            double penalty = Math.exp(TOPDOWN_FSCL_GAMMA * (headcount[c] / mu));
+                                            double score = dist * penalty;
+                                            if (Double.isNaN(score)) {
+                                                // 0 * Infinity (zero-distance into a saturated cluster); deprioritize.
+                                                score = Double.POSITIVE_INFINITY;
+                                            }
+                                            if (score < best) {
+                                                best = score;
                                                 nearest = c;
                                             }
                                         }
@@ -1786,6 +1840,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                             sums[nearest][d] += point[d];
                                         }
                                         counts[nearest]++;
+                                        headcount[nearest]++;
                                     } catch (IOException e) {
                                         throw new RuntimeException(e);
                                     }
@@ -1796,19 +1851,27 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             in.close();
                         }
 
+                        // FSCL must keep every cluster populated; an empty cluster breaks the height-balanced
+                        // guarantee, so fail fast rather than silently producing a skewed tree.
+                        for (int c = 0; c < actualK; c++) {
+                            if (counts[c] == 0 || sums[c] == null) {
+                                throw new HyracksDataException("FSCL produced an empty cluster (cluster " + c + " of "
+                                        + actualK + ", recordCount=" + recordCount
+                                        + "); cannot build a height-balanced tree");
+                            }
+                        }
+
                         boolean converged = true;
                         for (int c = 0; c < actualK; c++) {
-                            if (counts[c] > 0 && sums[c] != null) {
-                                double[] updated = new double[sums[c].length];
-                                for (int d = 0; d < sums[c].length; d++) {
-                                    updated[d] = sums[c][d] / counts[c];
-                                }
-                                if (calculateDistance(centroids.get(c), updated) > 1e-4) {
-                                    converged = false;
-                                }
-                                maybeNormalizeCentroid(updated);
-                                centroids.set(c, updated);
+                            double[] updated = new double[sums[c].length];
+                            for (int d = 0; d < sums[c].length; d++) {
+                                updated[d] = sums[c][d] / counts[c];
                             }
+                            if (calculateDistance(centroids.get(c), updated) > 1e-4) {
+                                converged = false;
+                            }
+                            maybeNormalizeCentroid(updated);
+                            centroids.set(c, updated);
                         }
                         if (converged) {
                             break;
@@ -1832,8 +1895,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     List<FrameTupleAppender> appenders = new ArrayList<>(kk);
                     List<Integer> counts = new ArrayList<>(kk);
                     for (int c = 0; c < kk; c++) {
-                        FileReference file =
-                                ctx.getJobletContext().createManagedWorkspaceFile("topdown-cluster");
+                        FileReference file = ctx.getJobletContext().createManagedWorkspaceFile("topdown-cluster");
                         RunFileWriter w = new RunFileWriter(file, ctx.getIoManager());
                         w.open();
                         writers.add(w);
@@ -1913,10 +1975,64 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Orchestrates the top-down build: root clustering, then a level-by-level loop that clusters and
-                 * splits each parent's run file, deleting consumed files as it goes. Stops at the first level whose
-                 * cumulative cluster count reaches the target K (keeping the overshoot), or on a level cap / no
-                 * growth guard.
+                 * Computes the Approach-2 fan-out from the index's real on-disk page geometry: P routing
+                 * centroids fit on one interior page, and an interior node spans P*(1+V) children across its
+                 * primary page plus V overflow pages. Opens the partition's VTree to size a routing entry exactly
+                 * (via the interior frame's tuple writer + page header), so build-time fan-out matches what the
+                 * static-structure layout actually writes.
+                 *
+                 * @return a two-element array {P, K}
+                 */
+                private int[] computeFanOut(IHyracksTaskContext ctx, int partition, int dim)
+                        throws HyracksDataException {
+                    int storagePartition = partition;
+                    if (partitionsMap != null && partition < partitionsMap.length && partitionsMap[partition] != null
+                            && partitionsMap[partition].length > 0) {
+                        storagePartition = partitionsMap[partition][0];
+                    }
+                    IIndexDataflowHelper indexHelper =
+                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
+                    indexHelper.open();
+                    try {
+                        IIndex indexInstance = indexHelper.getIndexInstance();
+                        if (!(indexInstance instanceof LSMVTree)) {
+                            throw new HyracksDataException(
+                                    "Top-down VTree build requires an LSMVTree index instance, got: "
+                                            + (indexInstance == null ? "null" : indexInstance.getClass().getName()));
+                        }
+                        LSMVTree lsmVTree = (LSMVTree) indexInstance;
+                        int pageSize = lsmVTree.getBufferCache().getPageSize();
+                        ITreeIndexFrame interiorFrame = lsmVTree.getInteriorFrameFactory().createFrame();
+                        // Representative interior routing entry: [centroidId:int, embedding:double[dim],
+                        // childPageId:int], identical to VTreeStaticStructureBuilder.createEntryTuple (2-field input).
+                        double[] sampleEmbedding = new double[dim];
+                        ITupleReference entry = TupleUtils.createTuple(
+                                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
+                                        DoubleArraySerializerDeserializer.INSTANCE,
+                                        IntegerSerializerDeserializer.INSTANCE },
+                                Integer.valueOf(0), sampleEmbedding, Integer.valueOf(0));
+                        int perEntryBytes = interiorFrame.getBytesRequiredToWriteTuple(entry); // includes the slot
+                        int interiorHeaderSize = interiorFrame.getPageHeaderSize();
+                        int p = HierarchicalClusterStructure.computeP(pageSize, interiorHeaderSize, perEntryBytes);
+                        int k = HierarchicalClusterStructure.computeK(p, TOPDOWN_V_OVERFLOW_PAGES);
+                        return new int[] { p, k };
+                    } finally {
+                        try {
+                            indexHelper.close();
+                        } catch (Exception e) {
+                            // best-effort cleanup; ignore
+                        }
+                    }
+                }
+
+                /**
+                 * Orchestrates the top-down Approach-2 build. Computes the page-fit fan-out (P at the root,
+                 * K = P*(1+V) at interior levels), clusters the sample into P root centroids with k-means++ then
+                 * FSCL, and splits/re-clusters each parent run file level-by-level. Enforces a strict height cap
+                 * (levels 0..{@code TOPDOWN_MAX_LEVEL}) and stops at the first level whose cumulative centroid count
+                 * reaches the target (num_clusters), keeping the overshoot. If any parent run file holds fewer
+                 * records than the interior fan-out K, the build stops and returns the height-balanced tree built so
+                 * far. Throws on a degenerate (early-leaf) clustering that would break the height-balanced guarantee.
                  */
                 private HierarchicalClusterStructure buildTopDownHierarchicalKMeans(IHyracksTaskContext ctx,
                         MaterializerTaskState sampleState, FrameTupleAccessor fta, FrameTupleReference tuple,
@@ -1927,10 +2043,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return structure;
                     }
                     Random rand = new Random();
-                    int maxIterations = 20;
-                    int maxLevels = 100;
-                    int frameSize = ctx.getInitialFrameSize();
-                    int target = K;
+                    int target = K; // num_clusters
 
                     // Determine embedding dimension (from config or first vector).
                     int dim = vectorDimension;
@@ -1948,40 +2061,44 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                         dim = firstPoint.length;
                     }
-                    int rCluster = HierarchicalClusterStructure.computeRootBranching(dim, frameSize);
 
-                    // ---- Root level (level 0): cluster the full sample into r_cluster centroids ----
-                    GeneratedRunFileReader rootIn = sampleState.createReader();
-                    rootIn.open();
-                    ClusteringResult rootResult;
-                    try {
-                        rootResult = performInitialKMeansPlusPlus(ctx, rootIn, fta, tuple, eval, inputVal, listAcc, kmu,
-                                rCluster, rand, maxIterations, totalTupleCount, partition);
-                    } finally {
-                        rootIn.close();
-                    }
-                    if (rootResult.centroids.isEmpty()) {
-                        return structure;
-                    }
-                    List<HierarchicalClusterStructure.CentroidInfo> level0 = new ArrayList<>();
-                    for (int i = 0; i < rootResult.centroids.size(); i++) {
-                        level0.add(new HierarchicalClusterStructure.CentroidInfo(i, -1, rootResult.centroids.get(i), 0));
-                    }
-                    structure.levelCentroids.put(0, level0);
-                    int cumulative = rootResult.centroids.size();
+                    // Page-fit fan-out from the index's real on-disk geometry (P at root, K at interior levels).
+                    int[] fanOut = computeFanOut(ctx, partition, dim);
+                    int pFanOut = fanOut[0];
+                    int kFanOut = fanOut[1];
 
-                    // If the root alone already reaches the target, it is the (only) leaf level.
-                    if (cumulative >= target) {
-                        return structure;
-                    }
-
-                    // Partition the sample into one run file per root cluster.
+                    // ---- Root level (level 0): cluster the full sample into P centroids (k-means++ + FSCL) ----
                     final MaterializerTaskState sampleStateRef = sampleState;
                     RunFileSource sampleSource = () -> {
                         GeneratedRunFileReader rd = sampleStateRef.createReader();
                         rd.open();
                         return rd;
                     };
+                    int kRoot = Math.min(pFanOut, totalTupleCount);
+                    ClusteringResult rootResult = clusterRunFile(ctx, sampleSource, totalTupleCount, kRoot, fta, tuple,
+                            eval, inputVal, listAcc, kmu, rand, TOPDOWN_FSCL_EPOCHS);
+                    if (rootResult.centroids.isEmpty()) {
+                        return structure;
+                    }
+                    if (rootResult.centroids.size() < kRoot) {
+                        throw new HyracksDataException(
+                                "Top-down root clustering produced " + rootResult.centroids.size()
+                                        + " centroids but expected " + kRoot + " (degenerate/early leaf)");
+                    }
+                    List<HierarchicalClusterStructure.CentroidInfo> level0 = new ArrayList<>();
+                    for (int i = 0; i < rootResult.centroids.size(); i++) {
+                        level0.add(
+                                new HierarchicalClusterStructure.CentroidInfo(i, -1, rootResult.centroids.get(i), 0));
+                    }
+                    structure.levelCentroids.put(0, level0);
+                    int cumulative = rootResult.centroids.size();
+
+                    // Root already meets the target, or the height cap is the root itself: root is the leaf level.
+                    if (cumulative >= target || TOPDOWN_MAX_LEVEL <= 0) {
+                        return structure;
+                    }
+
+                    // Partition the sample into one run file per root cluster.
                     SplitResult rootSplit = splitRunFileByAssignment(ctx, sampleSource, rootResult.centroids, fta,
                             tuple, eval, inputVal, listAcc, kmu);
                     List<RunFileWriter> parentFiles = rootSplit.files;
@@ -1989,91 +2106,93 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     List<RunFileWriter> pendingNextFiles = null; // tracked so failure paths can clean up
 
                     try {
-                    int level = 1;
-                    while (level <= maxLevels) {
-                        // Cluster each parent file independently; collect this level's centroids per parent.
-                        List<List<double[]>> perParentCentroids = new ArrayList<>(parentFiles.size());
-                        int childCount = 0;
-                        for (int p = 0; p < parentFiles.size(); p++) {
-                            final RunFileWriter pf = parentFiles.get(p);
-                            int recCount = parentCounts.get(p);
-                            if (pf == null || recCount <= 0) {
-                                perParentCentroids.add(new ArrayList<>());
-                                continue;
+                        int level = 1;
+                        while (level <= TOPDOWN_MAX_LEVEL) {
+                            // Feasibility: every parent file must hold at least K records to fan out uniformly. If
+                            // any cannot, stop the entire build and keep the height-balanced tree built so far.
+                            boolean feasible = true;
+                            for (int p = 0; p < parentFiles.size(); p++) {
+                                RunFileWriter pf = parentFiles.get(p);
+                                int recCount = parentCounts.get(p);
+                                if (pf == null || recCount < kFanOut) {
+                                    feasible = false;
+                                    break;
+                                }
                             }
-                            int kp = Math.min(rCluster, recCount);
-                            RunFileSource src = () -> {
-                                GeneratedRunFileReader rd = pf.createReader();
-                                rd.open();
-                                return rd;
-                            };
-                            ClusteringResult res = clusterRunFile(ctx, src, recCount, kp, fta, tuple, eval, inputVal,
-                                    listAcc, kmu, rand, maxIterations);
-                            perParentCentroids.add(res.centroids);
-                            childCount += res.centroids.size();
-                        }
+                            if (!feasible) {
+                                deleteRunFiles(parentFiles);
+                                break;
+                            }
 
-                        if (childCount == 0) {
-                            // No further structure could be produced; existing levels stand.
+                            // Cluster each parent file into exactly K centroids (k-means++ + FSCL).
+                            List<List<double[]>> perParentCentroids = new ArrayList<>(parentFiles.size());
+                            int childCount = 0;
+                            for (int p = 0; p < parentFiles.size(); p++) {
+                                final RunFileWriter pf = parentFiles.get(p);
+                                int recCount = parentCounts.get(p);
+                                RunFileSource src = () -> {
+                                    GeneratedRunFileReader rd = pf.createReader();
+                                    rd.open();
+                                    return rd;
+                                };
+                                ClusteringResult res = clusterRunFile(ctx, src, recCount, kFanOut, fta, tuple, eval,
+                                        inputVal, listAcc, kmu, rand, TOPDOWN_FSCL_EPOCHS);
+                                if (res.centroids.size() < kFanOut) {
+                                    throw new HyracksDataException("Top-down clustering produced "
+                                            + res.centroids.size() + " centroids but expected " + kFanOut + " at level "
+                                            + level + " (degenerate/early leaf)");
+                                }
+                                perParentCentroids.add(res.centroids);
+                                childCount += res.centroids.size();
+                            }
+
+                            // Store this level's centroids grouped by parent (parents ascending); the parent position
+                            // index is the parentClusterId, preserving the downstream ordering invariant.
+                            List<HierarchicalClusterStructure.CentroidInfo> levelInfo = new ArrayList<>(childCount);
+                            int localId = 0;
+                            for (int p = 0; p < perParentCentroids.size(); p++) {
+                                for (double[] c : perParentCentroids.get(p)) {
+                                    levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId, p, c, level));
+                                    localId++;
+                                }
+                            }
+                            structure.levelCentroids.put(level, levelInfo);
+                            cumulative = childCount;
+
+                            // Stop at the first level reaching the target (keep overshoot) or the strict height cap.
+                            if (cumulative >= target || level >= TOPDOWN_MAX_LEVEL) {
+                                deleteRunFiles(parentFiles);
+                                break;
+                            }
+
+                            // Split each parent file into K child files for the next level, preserving child order so
+                            // the i-th child file aligns with the i-th centroid stored at this level.
+                            List<RunFileWriter> nextFiles = new ArrayList<>(childCount);
+                            List<Integer> nextCounts = new ArrayList<>(childCount);
+                            pendingNextFiles = nextFiles; // visible to finally if a split throws mid-level
+                            for (int p = 0; p < parentFiles.size(); p++) {
+                                final RunFileWriter pf = parentFiles.get(p);
+                                List<double[]> centroids = perParentCentroids.get(p);
+                                RunFileSource src = () -> {
+                                    GeneratedRunFileReader rd = pf.createReader();
+                                    rd.open();
+                                    return rd;
+                                };
+                                SplitResult sp = splitRunFileByAssignment(ctx, src, centroids, fta, tuple, eval,
+                                        inputVal, listAcc, kmu);
+                                nextFiles.addAll(sp.files);
+                                nextCounts.addAll(sp.counts);
+                            }
+
+                            // Done with this level's parent files.
                             deleteRunFiles(parentFiles);
-                            break;
+                            parentFiles = nextFiles;
+                            parentCounts = nextCounts;
+                            pendingNextFiles = null;
+                            level++;
                         }
-
-                        // Store this level's centroids grouped by parent (parents in ascending order); the parent
-                        // position index is used as parentClusterId, preserving the downstream ordering invariant.
-                        List<HierarchicalClusterStructure.CentroidInfo> levelInfo = new ArrayList<>(childCount);
-                        int localId = 0;
-                        for (int p = 0; p < perParentCentroids.size(); p++) {
-                            for (double[] c : perParentCentroids.get(p)) {
-                                levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId, p, c, level));
-                                localId++;
-                            }
-                        }
-                        structure.levelCentroids.put(level, levelInfo);
-
-                        int prevCumulative = cumulative;
-                        cumulative = childCount;
-
-                        // Stop at the first level reaching the target (keep overshoot); also guard level cap and
-                        // lack of growth to avoid infinite recursion on degenerate (singleton) branches.
-                        boolean stop = cumulative >= target || level >= maxLevels || childCount <= prevCumulative;
-                        if (stop) {
-                            deleteRunFiles(parentFiles);
-                            break;
-                        }
-
-                        // Split each parent file into child files for the next level, preserving child order so the
-                        // i-th child file aligns with the i-th centroid stored at this level.
-                        List<RunFileWriter> nextFiles = new ArrayList<>(childCount);
-                        List<Integer> nextCounts = new ArrayList<>(childCount);
-                        pendingNextFiles = nextFiles; // visible to finally if a split throws mid-level
-                        for (int p = 0; p < parentFiles.size(); p++) {
-                            final RunFileWriter pf = parentFiles.get(p);
-                            List<double[]> centroids = perParentCentroids.get(p);
-                            if (pf == null || centroids.isEmpty()) {
-                                continue;
-                            }
-                            RunFileSource src = () -> {
-                                GeneratedRunFileReader rd = pf.createReader();
-                                rd.open();
-                                return rd;
-                            };
-                            SplitResult sp = splitRunFileByAssignment(ctx, src, centroids, fta, tuple, eval, inputVal,
-                                    listAcc, kmu);
-                            nextFiles.addAll(sp.files);
-                            nextCounts.addAll(sp.counts);
-                        }
-
-                        // Done with this level's parent files.
-                        deleteRunFiles(parentFiles);
-                        parentFiles = nextFiles;
-                        parentCounts = nextCounts;
-                        pendingNextFiles = null;
-                        level++;
-                    }
                     } finally {
-                        // Best-effort cleanup of any intermediate run files still around (e.g. on exception or the
-                        // final leaf level whose inputs were already consumed).
+                        // Best-effort cleanup of any intermediate run files still around (exception or final leaf).
                         deleteRunFiles(parentFiles);
                         deleteRunFiles(pendingNextFiles);
                     }

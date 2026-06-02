@@ -16,15 +16,17 @@ The original **bottom-up** build in `HierarchicalKMeansPlusPlusCentroidsOperator
 3. Repeatedly clusters **centroids** (not raw points) upward with √K reduction until centroids fit in one frame.
 4. Emits the tree in **BFS root-first** order even though levels were built bottom-up.
 
-The new **top-down** approach instead:
+The new **top-down** approach (Approach 2) instead:
 
-1. Computes how many centroids fit in one Hyracks frame → **`r_cluster`** (root branching factor).
-2. Clusters the full sample into `r_cluster` root groups, splits into **one run file per root cluster**.
-3. For each level, clusters every parent run file into up to `r_cluster` children, splits into child run files, and repeats until cumulative cluster count ≥ `num_clusters` (target `K`).
+1. Computes the **page-fit fan-out** from the index's real on-disk geometry: **`P`** = routing centroids that fit on one interior page (root), and **`K = P·(1+V)`** = interior fan-out (primary page + `V` overflow pages, `V = 100`).
+2. Clusters the full sample into `P` root groups with **k-means++ then FSCL**, splits into **one run file per root cluster**.
+3. For each level, clusters every parent run file into exactly `K` children (k-means++ + FSCL), splits into child run files, and repeats until cumulative cluster count ≥ `num_clusters` (target `K_target`) **or** the strict height cap (`TOPDOWN_MAX_LEVEL = 4`, i.e. levels 0..4).
 4. Deletes intermediate run files after each level (parent files consumed; try/finally on failure).
 5. Emits centroids **level 0 = root → increasing toward leaves**, with explicit parent links known at build time.
 
-This matches the product idea: predictable depth from `num_clusters` and frame-fit branching, and parent-child relationships are natural because clustering is top-down.
+**FSCL (Frequency-Sensitive Competitive Learning)** replaces Lloyd refinement: each point is assigned by a balancing penalty `score_i = distance(x, c_i) · exp(γ · (f_i / μ))` where `f_i` is the running headcount of cluster `i` and `μ = recordCount / k` is the fair share (`γ = 3.0`, `I = 20` epochs). The penalty pushes cluster sizes toward `μ`, producing height-balanced nodes. The distance is the operator's configured metric (euclidean for L2, angular for cosine).
+
+This matches the product idea: predictable depth, page-fit branching, and parent-child relationships natural because clustering is top-down. FSCL is expected to keep every cluster populated; an empty cluster or a degenerate (early-leaf) split **throws**, and a run file with fewer records than `K` **stops the build** and returns the height-balanced tree built so far.
 
 ## Files Touched
 
@@ -40,7 +42,7 @@ This matches the product idea: predictable depth from `num_clusters` and frame-f
 CREATE INDEX ... TYPE vtree
 WITH {
   "num_clusters": 1000,      -- target leaf centroid count (K); stop when cumulative >= this
-  "dimension": 384,          -- optional; used for r_cluster if set, else inferred from first vector
+  "dimension": 384,          -- optional; used for P/K sizing if set, else inferred from first vector
   "similarity": "euclidean", -- distance metric (same as before)
   "top_down": "true"         -- default true; set "false" for legacy bottom-up
 };
@@ -50,21 +52,23 @@ WITH {
 
 | Parameter | Meaning |
 |-----------|---------|
-| `num_clusters` | Target **K** — stop at the **first level** whose total centroid count ≥ K (overshoot allowed, e.g. 1000 when target is 900) |
-| `r_cluster` | **Not a DDL field** — computed at runtime as max centroids fitting one frame for DOUBLE embeddings |
+| `num_clusters` | Target **K_target** — stop at the **first level** whose total centroid count ≥ target (overshoot allowed) |
+| `P` | **Not a DDL field** — root fan-out, computed at runtime as routing centroids fitting one interior **disk page** |
+| `K` | **Not a DDL field** — interior fan-out `P·(1+V)`, `V = 100` (constant) |
 | `top_down` | `"true"` (default) = new path; `"false"` = legacy bottom-up |
 
-### r_cluster formula
+### P / K formula (Approach 2)
 
-Reuses existing tuple size estimate in `HierarchicalClusterStructure`:
+Computed from the index's real interior frame and buffer-cache page size (so build-time fan-out matches the static-structure layout exactly):
 
 ```
-tupleSize = 38 + 13 * dimension
-perCentroid = tupleSize + 4   (tuple + offset slot)
-r_cluster = max(2, floor((frameSize - 9) / perCentroid))
+perEntry  = interiorFrame.getBytesRequiredToWriteTuple([centroidId:int, embedding:double[D], childPageId:int])  // includes slot
+header    = interiorFrame.getPageHeaderSize()
+P = max(2, floor((pageSize - header) / perEntry))
+K = P * (1 + V)        // V = 100
 ```
 
-Same value is used as **k at every level** (root and each per-cluster file), capped by `min(r_cluster, recordCountInFile)`.
+`P` is the fan-out at the root (level 0); `K` is the fan-out at every interior level. Constants live in the operator: `TOPDOWN_V_OVERFLOW_PAGES = 100`, `TOPDOWN_FSCL_GAMMA = 3.0`, `TOPDOWN_FSCL_EPOCHS = 20`, `TOPDOWN_MAX_LEVEL = 4`.
 
 ## Operator Architecture (unchanged two-activity model)
 
@@ -84,30 +88,33 @@ The **sample run file** (`sampleUUID`) is owned by `MaterializerTaskState` and i
 ## Top-Down Algorithm (step by step)
 
 ```
-1. r_cluster = computeRootBranching(dim, frameSize)
-2. Root: k-means|| on full sample → r_cluster centroids (performInitialKMeansPlusPlus)
-3. Split sample into r_cluster child run files (splitRunFileByAssignment)
-4. Store level 0 centroids (parentClusterId = -1)
-5. If r_cluster >= K → done (root is leaf level)
-6. Loop level = 1, 2, ...:
-     For each parent run file p (in ascending parent index):
-       kp = min(r_cluster, recordCount(p))
-       clusterRunFile(p, kp) → child centroids
-       (optional) split p into child run files for next level
+1. resolve D (config or probe first vector)
+2. [P, K] = computeFanOut(ctx, partition, D)   // P=computeP(...), K=computeK(P, V)
+3. Root: clusterRunFile(sample, kRoot=min(P, total)) with k-means++ + FSCL
+4. Throw if root produced < kRoot centroids (degenerate/early leaf)
+5. Store level 0 centroids (parentClusterId = -1)
+6. If cumulative >= num_clusters OR TOPDOWN_MAX_LEVEL <= 0 → done (root is leaf level)
+7. Split sample into P child run files (splitRunFileByAssignment)
+8. Loop level = 1..TOPDOWN_MAX_LEVEL:
+     Feasibility: if ANY parent run file recordCount < K → stop build, keep tree so far
+     For each parent run file p (ascending parent index):
+       clusterRunFile(p, K) → child centroids (k-means++ + FSCL)
+       throw if it produced < K centroids (degenerate/early leaf)
        child.parentClusterId = parent index p
      cumulative = total child centroids this level
-     Stop if cumulative >= K OR level cap (100) OR no growth
-     deleteRunFiles(parent files)
-7. emit outputTopDownStructure (root level 0 first)
+     Stop if cumulative >= num_clusters OR level >= TOPDOWN_MAX_LEVEL
+     else split each parent into K child run files; deleteRunFiles(parent files)
+9. emit outputTopDownStructure (root level 0 first)
 ```
 
-### Example (r_cluster = 10, K = 1000)
+### Example (P = 10, K = 1010, num_clusters = 1000, large sample)
 
 | Level | Clusters | Notes |
 |-------|----------|-------|
-| 0 (root) | 10 | from full sample |
-| 1 | 100 | 10 × 10 |
-| 2 | 1000 | 100 × 10 → stop (≥ K) |
+| 0 (root) | 10 | P, from full sample |
+| 1 | 10100 | 10 × K → stop (≥ num_clusters, overshoot kept) |
+
+With `V = 100`, interior fan-out `K` is large, so trees are typically shallow (root + one interior level). A run file that cannot supply `K` records stops the build, leaving the previous level as the (height-balanced) leaf level.
 
 ## New Methods (FindCandidatesActivity inner class)
 
@@ -116,16 +123,18 @@ The **sample run file** (`sampleUUID`) is owned by `MaterializerTaskState` and i
 | `RunFileSource` | Functional interface: `openReader()` for multi-pass streaming |
 | `SplitResult` | Holds child `RunFileWriter` list + per-cluster record counts |
 | `streamUpdateMinDist(...)` | D² update for k-means++ seeding over a run file |
-| `clusterRunFile(...)` | k-means++ init + streaming Lloyd on **one** run file |
+| `clusterRunFile(...)` | k-means++ init + streaming **FSCL** on **one** run file; throws on empty cluster |
 | `splitRunFileByAssignment(...)` | Assign each record to nearest centroid; write to per-cluster run files |
 | `deleteRunFiles(...)` | Best-effort `FileReference.delete()` cleanup |
-| `buildTopDownHierarchicalKMeans(...)` | Level-by-level orchestrator |
+| `computeFanOut(ctx, partition, dim)` | Open LSMVTree, size a routing entry exactly, return `{P, K}` |
+| `buildTopDownHierarchicalKMeans(...)` | Level-by-level orchestrator (P root, K interior, height cap, feasibility stop) |
 
 Static helpers on `HierarchicalClusterStructure`:
 
 | Method | Purpose |
 |--------|---------|
-| `computeRootBranching(dim, frameSize)` | Compute r_cluster |
+| `computeP(pageSize, interiorHeaderSize, perEntryBytes)` | Compute root fan-out P |
+| `computeK(p, v)` | Compute interior fan-out `P·(1+V)` |
 | `outputTopDownStructure(...)` | Emit level 0 → maxLevel with global centroid ids |
 
 ## Downstream Contract (must preserve)
@@ -149,28 +158,30 @@ Consumer: `VCTreeStaticStructureCreatorOperatorDescriptor` — reads all tuples,
 
 | Aspect | Bottom-up (legacy) | Top-down (new, default) |
 |--------|-------------------|-------------------------|
-| First clustering | k-means|| on all raw data → K leaves | k-means|| on sample → r_cluster root |
-| Upper levels | Cluster centroids in memory | Cluster each parent's run file separately |
-| Stop condition | Next level fits in one frame | cumulative clusters ≥ num_clusters |
+| First clustering | k-means|| on all raw data → K leaves | k-means++ + FSCL on sample → P root |
+| Upper levels | Cluster centroids in memory | Cluster each parent's run file separately (K) |
+| Refinement | Lloyd | FSCL (balancing penalty) |
+| Fan-out | √K reduction toward root | P at root, K = P·(1+V) at interior |
+| Stop condition | Next level fits in one frame | cumulative ≥ num_clusters OR height cap (level 4); also stop if any parent < K |
 | Level numbering in structure | Internal negative/positive levels, BFS emit | Level 0 = root, emit ascending |
 | Run files | Single sample file, multi-pass | Sample + per-cluster files per level (deleted after use) |
 | Parent links | From Lloyd assignments on centroids | Known when storing each level (parent index) |
 
 ## K-Means Details Per File
 
-**Root level:** uses existing `performInitialKMeansPlusPlus` (k-means|| + streaming Lloyd) — same as legacy level-0.
+**All levels (root + interior):** `clusterRunFile` — k-means++ seeding (in-memory minDist array) followed by streaming **FSCL** refinement. Root uses `k = min(P, totalTupleCount)`; interior levels use `k = K`. The legacy k-means|| path (`performInitialKMeansPlusPlus`) is used **only** by the bottom-up algorithm now.
 
-**Child levels:** `clusterRunFile` — k-means++ seeding (in-memory minDist array) + streaming Lloyd; no k-means|| (files are smaller).
+**FSCL:** per epoch, stream the file tracking running headcount `f_i`; assign each point to `argmin_i distance(x,c_i)·exp(γ·(f_i/μ))` with `μ = recordCount/k`, `γ = 3.0`; recompute centroids from assigned sums; up to `I = 20` epochs or until convergence (`1e-4`). Throws if any cluster ends an epoch empty.
 
 **Split:** single assignment pass after centroids are finalized; copies raw tuples (secondaryRecDesc layout) into child `RunFileWriter`s.
 
 ## Known Limitations / Follow-ups
 
 1. **No unit/integration tests yet** for top-down path — add tests with small synthetic run files.
-2. **Root still uses k-means||** on full sample; child levels use simpler k-means++ — intentional for large root, may differ in quality vs bottom-up leaves.
-3. **Empty / tiny branches:** `k = min(r_cluster, recordCount)`; empty parent files skipped; stop if no growth.
+2. **Root and interior both use k-means++ + FSCL** (`clusterRunFile`); root on the full sample may be heavier than the legacy k-means|| seeding for very large samples.
+3. **Tiny branches:** if any parent run file has `recordCount < K`, the build stops and returns the height-balanced tree built so far; a degenerate split (fewer centroids than requested) or an empty FSCL cluster throws.
 4. **Per-partition independence:** each Hyracks partition builds its own tree (same as before).
-5. **Optional:** expose `r_cluster` or branching factor in WITH clause instead of frame-fit only.
+5. **Optional:** expose `V` / `P` / `K` or the FSCL `γ`, `I`, and height cap in the WITH clause instead of operator constants.
 6. **Optional:** emit cluster weights (record counts) as 5th output field if downstream needs them.
 7. **Compile verification:** run Maven on `asterix-runtime` and `asterix-metadata` modules after changes.
 
@@ -180,12 +191,13 @@ Consumer: `VCTreeStaticStructureCreatorOperatorDescriptor` — reads all tuples,
 HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.java
 ├── boolean topDown                          // constructor flag
 ├── HierarchicalClusterStructure
-│   ├── computeRootBranching()
+│   ├── computeP() / computeK()
 │   └── outputTopDownStructure()
 └── FindCandidatesActivity
     ├── initialize()                         // branches on topDown
+    ├── computeFanOut()                      // {P, K} from LSMVTree page geometry
     ├── buildTopDownHierarchicalKMeans()     // orchestrator
-    ├── clusterRunFile()
+    ├── clusterRunFile()                     // k-means++ + FSCL
     ├── splitRunFileByAssignment()
     └── performMemoryEfficientHierarchicalKMeans()  // legacy
 
@@ -197,6 +209,6 @@ SecondaryVectorOperationsHelper.java
 
 1. Run/build index creation with `top_down: true` and verify `VCTreeStaticStructureCreator` accepts output.
 2. Compare tree depth and centroid counts vs `num_clusters` for various dimensions/frame sizes.
-3. Add regression test or logging for r_cluster, level counts, and cumulative stop.
+3. Add regression test or logging for P/K, level counts, and cumulative stop.
 4. Profile disk use with many levels (intermediate run file churn).
 5. If Gerrit review requests bottom-up as default, flip default in `SecondaryVectorOperationsHelper` only.
