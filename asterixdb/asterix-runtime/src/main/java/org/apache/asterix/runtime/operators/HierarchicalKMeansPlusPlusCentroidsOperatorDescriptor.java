@@ -697,13 +697,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     // ===== Top-down FSCL (Approach 2) tuning constants =====
     // Maximum overflow pages per intermediate routing node; interior fan-out K = P * (1 + V).
-    private static final int TOPDOWN_V_OVERFLOW_PAGES = 5;
+    public static final int DEFAULT_TOPDOWN_V_OVERFLOW_PAGES = 5;
     // FSCL structural stiffness (gamma): higher forces more uniform cluster sizes.
-    private static final double TOPDOWN_FSCL_GAMMA = 3.0;
+    public static final double DEFAULT_TOPDOWN_FSCL_GAMMA = 3.0;
     // FSCL batch optimization passes (epochs) per node level.
     private static final int TOPDOWN_FSCL_EPOCHS = 20;
     // Strict height cap: levels 0..MAX_LEVEL (height 5 => deepest level index 4).
-    private static final int TOPDOWN_MAX_LEVEL = 4;
+    public static final int DEFAULT_TOPDOWN_MAX_LEVEL = 4;
 
     private final UUID sampleUUID;
     private final UUID tupleCountUUID;
@@ -722,6 +722,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     // When true, build the tree top-down (root branching computed from frame fit, split per cluster into run
     // files level-by-level). When false, use the original bottom-up memory-efficient algorithm.
     private boolean topDown;
+    private int vOverflowPages;
+    private double fsclGamma;
+    private int maxLevel;
 
     /**
      * Supplies freshly-opened readers over a run file so a clustering pass can stream the same data
@@ -950,7 +953,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter, IIndexDataflowHelperFactory indexHelperFactory, int[][] partitionsMap,
-            String distanceMetric, int vectorDimension, boolean topDown) {
+            String distanceMetric, int vectorDimension, boolean topDown, int vOverflowPages, double fsclGamma,
+            int maxLevel) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -967,6 +971,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.partitionsMap = partitionsMap;
         this.vectorDimension = vectorDimension;
         this.topDown = topDown;
+        this.vOverflowPages = vOverflowPages;
+        this.fsclGamma = fsclGamma;
+        this.maxLevel = maxLevel;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
         this.distanceFunction = getDistanceFunction(distanceMetric);
@@ -2175,7 +2182,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         double best = Double.POSITIVE_INFINITY;
                                         for (int c = 0; c < actualK; c++) {
                                             double dist = calculateDistance(point, centroids.get(c));
-                                            double penalty = Math.exp(TOPDOWN_FSCL_GAMMA * (headcount[c] / mu));
+                                            double penalty = Math.exp(fsclGamma * (headcount[c] / mu));
                                             double score = dist * penalty;
                                             if (Double.isNaN(score)) {
                                                 // 0 * Infinity (zero-distance into a saturated cluster); deprioritize.
@@ -2377,7 +2384,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         int perEntryBytes = interiorFrame.getBytesRequiredToWriteTuple(entry); // includes the slot
                         int interiorHeaderSize = interiorFrame.getPageHeaderSize();
                         int p = HierarchicalClusterStructure.computeP(pageSize, interiorHeaderSize, perEntryBytes);
-                        int k = HierarchicalClusterStructure.computeK(p, TOPDOWN_V_OVERFLOW_PAGES);
+                        int k = HierarchicalClusterStructure.computeK(p, vOverflowPages);
                         return new int[] { p, k };
                     } finally {
                         try {
@@ -2431,7 +2438,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     int pFanOut = fanOut[0];
                     int kFanOut = fanOut[1];
                     LOGGER.info("[TopDown] partition={} start: tuples={} target={} dim={} P={} K={} maxLevel={}",
-                            partition, totalTupleCount, target, dim, pFanOut, kFanOut, TOPDOWN_MAX_LEVEL);
+                            partition, totalTupleCount, target, dim, pFanOut, kFanOut, maxLevel);
 
                     // ---- Root level (level 0): cluster the full sample into P centroids (k-means++ + FSCL) ----
                     final MaterializerTaskState sampleStateRef = sampleState;
@@ -2462,7 +2469,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             cumulative, kRoot);
 
                     // Root already meets the target, or the height cap is the root itself: root is the leaf level.
-                    if (cumulative >= target || TOPDOWN_MAX_LEVEL <= 0) {
+                    if (cumulative >= target || maxLevel <= 0) {
                         String stopReason = cumulative >= target ? "target reached at root" : "maxLevel=0";
                         LOGGER.info("[TopDown] partition={} stop: {}, levels={} leafCentroids={}", partition,
                                 stopReason, structure.getNumLevels(), cumulative);
@@ -2480,7 +2487,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     try {
                         int level = 1;
-                        while (level <= TOPDOWN_MAX_LEVEL) {
+                        while (level <= maxLevel) {
                             // Feasibility: every parent file must hold at least K records to fan out uniformly. If
                             // any cannot, stop the entire build and keep the height-balanced tree built so far.
                             boolean feasible = true;
@@ -2550,7 +2557,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     partition, level, parentFiles.size(), childCount, cumulative, target);
 
                             // Stop at the first level reaching the target (keep overshoot) or the strict height cap.
-                            if (cumulative >= target || level >= TOPDOWN_MAX_LEVEL) {
+                            if (cumulative >= target || level >= maxLevel) {
                                 stopReason = cumulative >= target ? "target reached at level " + level
                                         : "height cap at level " + level;
                                 LOGGER.info("[TopDown] partition={} stop: {}", partition, stopReason);

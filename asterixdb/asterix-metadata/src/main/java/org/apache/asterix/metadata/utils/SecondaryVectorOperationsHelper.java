@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
+import org.apache.asterix.common.config.CompilerProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.OptimizationConfUtil;
 import org.apache.asterix.common.context.ITransactionSubsystemProvider;
@@ -107,8 +108,27 @@ import org.apache.hyracks.storage.am.lsm.vector.dataflow.QuantizedIndexCreateOpe
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
+
+    private static final Logger LOGGER = LogManager.getLogger(SecondaryVectorOperationsHelper.class);
+
+    /**
+     * Top-down FSCL tuning resolved from session {@code SET} parameters (see {@link CompilerProperties}).
+     */
+    private static final class TopDownTuning {
+        final int vOverflowPages;
+        final double fsclGamma;
+        final int maxLevel;
+
+        TopDownTuning(int vOverflowPages, double fsclGamma, int maxLevel) {
+            this.vOverflowPages = vOverflowPages;
+            this.fsclGamma = fsclGamma;
+            this.maxLevel = maxLevel;
+        }
+    }
 
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
@@ -169,11 +189,75 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         return "SQ4".equals(qNorm) ? 4 : DEFAULT_QUANTIZATION_BITS_SQ8;
     }
 
+    private TopDownTuning resolveTopDownTuning() {
+        int vOverflowPages = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_V_OVERFLOW_PAGES;
+        double fsclGamma = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_FSCL_GAMMA;
+        int maxLevel = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL;
+
+        String vStr = (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_V_KEY);
+        if (vStr != null && !vStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(vStr.trim());
+                if (parsed >= 0) {
+                    vOverflowPages = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}", CompilerProperties.COMPILER_VECTOR_TOPDOWN_V_KEY,
+                            vStr, vOverflowPages);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}", CompilerProperties.COMPILER_VECTOR_TOPDOWN_V_KEY, vStr,
+                        vOverflowPages);
+            }
+        }
+
+        String gammaStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_GAMMA_KEY);
+        if (gammaStr != null && !gammaStr.trim().isEmpty()) {
+            try {
+                double parsed = Double.parseDouble(gammaStr.trim());
+                if (parsed > 0) {
+                    fsclGamma = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}",
+                            CompilerProperties.COMPILER_VECTOR_TOPDOWN_GAMMA_KEY, gammaStr, fsclGamma);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}", CompilerProperties.COMPILER_VECTOR_TOPDOWN_GAMMA_KEY,
+                        gammaStr, fsclGamma);
+            }
+        }
+
+        String maxLevelStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY);
+        if (maxLevelStr != null && !maxLevelStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(maxLevelStr.trim());
+                if (parsed >= 0) {
+                    maxLevel = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}",
+                            CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY, maxLevelStr, maxLevel);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY, maxLevelStr, maxLevel);
+            }
+        }
+
+        if (vOverflowPages != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_V_OVERFLOW_PAGES
+                || fsclGamma != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_FSCL_GAMMA
+                || maxLevel != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL) {
+            LOGGER.info("Top-down FSCL tuning from SET: v={} gamma={} maxLevel={}", vOverflowPages, fsclGamma,
+                    maxLevel);
+        }
+
+        return new TopDownTuning(vOverflowPages, fsclGamma, maxLevel);
+    }
+
     @Override
     public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
-        // Force output to both System.out and System.err to ensure visibility
-        //        System.out.println(
-        //                "*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildStaticStructureJobSpec() CALLED ***");
+        LOGGER.info("[VTreeBuild] STARTING NOW phase=staticStructure dataverse={} dataset={} index={}",
+                dataset.getDataverseName(), dataset.getDatasetName(), index.getIndexName());
 
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -338,11 +422,13 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         // 1. K-means operator
         //        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
         UUID materializedDataUUID = UUID.randomUUID();
+        TopDownTuning topDownTuning = resolveTopDownTuning();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
                         new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, dataflowHelperFactory,
-                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension, topDown);
+                        partitioningProperties.getComputeStorageMap(), distanceMetric, vectorDimension, topDown,
+                        topDownTuning.vOverflowPages, topDownTuning.fsclGamma, topDownTuning.maxLevel);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -438,6 +524,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     @Override
     public JobSpecification buildLoadingJobSpec() throws AlgebricksException {
+        LOGGER.info("[VTreeBuild] STARTING NOW phase=loading dataverse={} dataset={} index={}",
+                dataset.getDataverseName(), dataset.getDatasetName(), index.getIndexName());
+
         // Force output to both System.out and System.err to ensure visibility
         //        System.out.println("*** VECTOR INDEX DEBUG: SecondaryVectorOperationsHelper.buildLoadingJobSpec() CALLED ***");
         //        System.err.println("==========================================");

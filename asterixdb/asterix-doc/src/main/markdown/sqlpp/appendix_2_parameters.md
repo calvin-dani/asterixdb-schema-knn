@@ -97,3 +97,27 @@ If there is no user-provided suffix, "B" is the default suffix. See the followin
     SELECT c.name AS cname, o.ordeno AS orderno
     FROM customers c JOIN orders o ON c.custid = o.custid;
 
+## <a id="Vector_topdown_parameters">Vector index top-down build parameters</a>
+
+These session parameters tune the top-down FSCL hierarchical k-means used during **VTREE index static-structure build**.
+They apply only when `SET` appears **before** `CREATE INDEX` in the same request. Defaults match the built-in
+constants when SET is omitted.
+
+* **`compiler.vector.topdown.v`**: overflow pages per interior routing node (default `5`). Interior fan-out is
+  `K = P * (1 + V)` where `P` is the root page-fit fan-out.
+
+* **`compiler.vector.topdown.gamma`**: FSCL structural stiffness (default `3.0`). Higher values push more uniform
+  cluster sizes during training-sample assignment.
+
+* **`compiler.vector.topdown.maxlevel`**: strict height cap as deepest level index (default `4`, i.e. height 5 with
+  levels `0..4`).
+
+##### Example
+
+    SET `compiler.vector.topdown.v` "5";
+    SET `compiler.vector.topdown.gamma` "3.0";
+    SET `compiler.vector.topdown.maxlevel` "4";
+
+    CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
+    WITH {"dimension": 384, "similarity": "cosine", "num_clusters": 157, "train_list_fraction": 0.1};
+

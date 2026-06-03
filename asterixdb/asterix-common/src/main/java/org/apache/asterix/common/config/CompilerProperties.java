@@ -252,6 +252,9 @@ public class CompilerProperties extends AbstractProperties {
     public static final String COMPILER_DELTALAKE_FILESPLITS_KEY = Option.COMPILER_DELTALAKE_FILESPLITS.ini();
     public static final String COMPILER_VECTOR_PRUNEDSEARCH_KEY = "compiler.vector.prunedsearch";
     public static final String COMPILER_VECTOR_KMULTIPLIER_KEY = "compiler.vector.kmultiplier";
+    public static final String COMPILER_VECTOR_TOPDOWN_V_KEY = "compiler.vector.topdown.v";
+    public static final String COMPILER_VECTOR_TOPDOWN_GAMMA_KEY = "compiler.vector.topdown.gamma";
+    public static final String COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY = "compiler.vector.topdown.maxlevel";
 
     public CompilerProperties(PropertiesAccessor accessor) {
         super(accessor);
