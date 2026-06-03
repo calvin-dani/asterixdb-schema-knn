@@ -298,8 +298,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Clustering strategy: top-down (default) builds the tree root-first, splitting per-cluster run files
         // level-by-level; set WITH {"top_down":"false"} to use the legacy bottom-up algorithm.
-        boolean topDown = withObjectNode == null
-                || !"false".equalsIgnoreCase(withObjectNode.getOptionalString("top_down", "true"));
+        boolean topDown = true;
 
         int maxScalableKmeansIter = 2;
 

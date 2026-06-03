@@ -210,6 +210,9 @@ class DotProductDistanceFunction implements DistanceFunction, Serializable {
  */
 public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends AbstractOperatorDescriptor {
 
+    private static final Logger LOGGER =
+            LogManager.getLogger(HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.class);
+
     /**
      * Simple state class to pass tuple count between activities.
      */
@@ -694,7 +697,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     // ===== Top-down FSCL (Approach 2) tuning constants =====
     // Maximum overflow pages per intermediate routing node; interior fan-out K = P * (1 + V).
-    private static final int TOPDOWN_V_OVERFLOW_PAGES = 100;
+    private static final int TOPDOWN_V_OVERFLOW_PAGES = 5;
     // FSCL structural stiffness (gamma): higher forces more uniform cluster sizes.
     private static final double TOPDOWN_FSCL_GAMMA = 3.0;
     // FSCL batch optimization passes (epochs) per node level.
@@ -2143,6 +2146,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     if (mu <= 0) {
                         mu = 1.0;
                     }
+                    int[] finalFsclCounts = null;
                     for (int iter = 0; iter < TOPDOWN_FSCL_EPOCHS; iter++) {
                         double[][] sums = new double[actualK][];
                         int[] counts = new int[actualK];
@@ -2226,8 +2230,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             centroids.set(c, updated);
                         }
                         if (converged) {
+                            finalFsclCounts = counts;
                             break;
                         }
+                        finalFsclCounts = counts;
+                    }
+                    if (finalFsclCounts != null) {
+                        logTopDownCountDistribution("FSCL assignment: recordCount=" + recordCount + " k=" + actualK,
+                                finalFsclCounts);
                     }
                     return new ClusteringResult(centroids, assignments);
                 }
@@ -2305,6 +2315,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
                         writers.get(c).close();
                     }
+                    logTopDownCountDistribution("nearest-neighbor split", counts);
                     return new SplitResult(writers, counts);
                 }
 
@@ -2392,6 +2403,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         int partition, int totalTupleCount) throws HyracksDataException, IOException {
                     HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
                     if (totalTupleCount <= 0) {
+                        LOGGER.info("[TopDown] partition={}: empty sample, skipping build", partition);
                         return structure;
                     }
                     Random rand = new Random();
@@ -2418,6 +2430,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     int[] fanOut = computeFanOut(ctx, partition, dim);
                     int pFanOut = fanOut[0];
                     int kFanOut = fanOut[1];
+                    LOGGER.info("[TopDown] partition={} start: tuples={} target={} dim={} P={} K={} maxLevel={}",
+                            partition, totalTupleCount, target, dim, pFanOut, kFanOut, TOPDOWN_MAX_LEVEL);
 
                     // ---- Root level (level 0): cluster the full sample into P centroids (k-means++ + FSCL) ----
                     final MaterializerTaskState sampleStateRef = sampleState;
@@ -2444,9 +2458,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                     structure.levelCentroids.put(0, level0);
                     int cumulative = rootResult.centroids.size();
+                    LOGGER.info("[TopDown] partition={} level 0 (root): centroids={} (requested {})", partition,
+                            cumulative, kRoot);
 
                     // Root already meets the target, or the height cap is the root itself: root is the leaf level.
                     if (cumulative >= target || TOPDOWN_MAX_LEVEL <= 0) {
+                        String stopReason = cumulative >= target ? "target reached at root" : "maxLevel=0";
+                        LOGGER.info("[TopDown] partition={} stop: {}, levels={} leafCentroids={}", partition,
+                                stopReason, structure.getNumLevels(), cumulative);
                         return structure;
                     }
 
@@ -2455,7 +2474,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             tuple, eval, inputVal, listAcc, kmu);
                     List<RunFileWriter> parentFiles = rootSplit.files;
                     List<Integer> parentCounts = rootSplit.counts;
+                    logTopDownCountDistribution("partition=" + partition + " root split", parentCounts);
                     List<RunFileWriter> pendingNextFiles = null; // tracked so failure paths can clean up
+                    String stopReason = null;
 
                     try {
                         int level = 1;
@@ -2463,18 +2484,30 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             // Feasibility: every parent file must hold at least K records to fan out uniformly. If
                             // any cannot, stop the entire build and keep the height-balanced tree built so far.
                             boolean feasible = true;
+                            int infeasibleParent = -1;
+                            int infeasibleCount = -1;
                             for (int p = 0; p < parentFiles.size(); p++) {
                                 RunFileWriter pf = parentFiles.get(p);
                                 int recCount = parentCounts.get(p);
                                 if (pf == null || recCount < kFanOut) {
                                     feasible = false;
+                                    infeasibleParent = p;
+                                    infeasibleCount = recCount;
                                     break;
                                 }
                             }
                             if (!feasible) {
+                                stopReason = "infeasible parent at level " + level + " (parent=" + infeasibleParent
+                                        + " recCount=" + infeasibleCount + ", need>=" + kFanOut + ")";
+                                logTopDownCountDistribution("partition=" + partition + " parent counts before stop",
+                                        parentCounts);
+                                LOGGER.info("[TopDown] partition={} stop: {}", partition, stopReason);
                                 deleteRunFiles(parentFiles);
                                 break;
                             }
+
+                            logTopDownCountDistribution("partition=" + partition + " level " + level + " parent input",
+                                    parentCounts);
 
                             // Cluster each parent file into exactly K centroids (k-means++ + FSCL).
                             List<List<double[]>> perParentCentroids = new ArrayList<>(parentFiles.size());
@@ -2482,6 +2515,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             for (int p = 0; p < parentFiles.size(); p++) {
                                 final RunFileWriter pf = parentFiles.get(p);
                                 int recCount = parentCounts.get(p);
+                                LOGGER.info("[TopDown] partition={} level {} clustering parent {}: recCount={} -> K={}",
+                                        partition, level, p, recCount, kFanOut);
                                 RunFileSource src = () -> {
                                     GeneratedRunFileReader rd = pf.createReader();
                                     rd.open();
@@ -2510,10 +2545,35 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             }
                             structure.levelCentroids.put(level, levelInfo);
                             cumulative = childCount;
+                            LOGGER.info(
+                                    "[TopDown] partition={} built level {}: parents={} -> centroids={} cumulative={} target={}",
+                                    partition, level, parentFiles.size(), childCount, cumulative, target);
 
                             // Stop at the first level reaching the target (keep overshoot) or the strict height cap.
                             if (cumulative >= target || level >= TOPDOWN_MAX_LEVEL) {
+                                stopReason = cumulative >= target ? "target reached at level " + level
+                                        : "height cap at level " + level;
+                                LOGGER.info("[TopDown] partition={} stop: {}", partition, stopReason);
+                                if (!parentFiles.isEmpty() && !perParentCentroids.isEmpty()) {
+                                    List<Integer> finalCounts = new ArrayList<>(childCount);
+                                    for (int p = 0; p < parentFiles.size(); p++) {
+                                        final RunFileWriter pf = parentFiles.get(p);
+                                        List<double[]> centroids = perParentCentroids.get(p);
+                                        RunFileSource src = () -> {
+                                            GeneratedRunFileReader rd = pf.createReader();
+                                            rd.open();
+                                            return rd;
+                                        };
+                                        SplitResult sp = splitRunFileByAssignment(ctx, src, centroids, fta, tuple, eval,
+                                                inputVal, listAcc, kmu);
+                                        finalCounts.addAll(sp.counts);
+                                        deleteRunFiles(sp.files);
+                                    }
+                                    logTopDownCountDistribution("partition=" + partition + " final leaf split (sample)",
+                                            finalCounts);
+                                }
                                 deleteRunFiles(parentFiles);
+                                parentFiles = null;
                                 break;
                             }
 
@@ -2535,6 +2595,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 nextFiles.addAll(sp.files);
                                 nextCounts.addAll(sp.counts);
                             }
+                            logTopDownCountDistribution("partition=" + partition + " level " + level + " child split",
+                                    nextCounts);
 
                             // Done with this level's parent files.
                             deleteRunFiles(parentFiles);
@@ -2549,7 +2611,46 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         deleteRunFiles(pendingNextFiles);
                     }
 
+                    int maxStoredLevel = -1;
+                    for (Integer lvl : structure.levelCentroids.keySet()) {
+                        maxStoredLevel = Math.max(maxStoredLevel, lvl);
+                    }
+                    LOGGER.info("[TopDown] partition={} complete: levels={} leafLevel={} leafCentroids={} target={}{}",
+                            partition, structure.getNumLevels(), maxStoredLevel, cumulative, target,
+                            stopReason != null ? " stopReason=" + stopReason : "");
+
                     return structure;
+                }
+
+                /** Log min/max/total/mean and full per-bucket counts. */
+                private void logTopDownCountDistribution(String label, List<Integer> counts) {
+                    if (counts == null || counts.isEmpty()) {
+                        LOGGER.info("[TopDown] {}: counts=(empty)", label);
+                        return;
+                    }
+                    int[] arr = new int[counts.size()];
+                    for (int i = 0; i < counts.size(); i++) {
+                        arr[i] = counts.get(i);
+                    }
+                    logTopDownCountDistribution(label, arr);
+                }
+
+                private void logTopDownCountDistribution(String label, int[] counts) {
+                    if (counts == null || counts.length == 0) {
+                        LOGGER.info("[TopDown] {}: counts=(empty)", label);
+                        return;
+                    }
+                    int min = Integer.MAX_VALUE;
+                    int max = Integer.MIN_VALUE;
+                    long sum = 0;
+                    for (int c : counts) {
+                        min = Math.min(min, c);
+                        max = Math.max(max, c);
+                        sum += c;
+                    }
+                    double mean = (double) sum / counts.length;
+                    LOGGER.info("[TopDown] {}: buckets={} min={} max={} sum={} mean={} counts={}", label, counts.length,
+                            min, max, sum, mean, Arrays.toString(counts));
                 }
 
                 /**

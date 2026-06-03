@@ -90,6 +90,9 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
     private final ITreeIndexTupleWriter dataFrameTupleWriter;
     private int entriesInCurrentDataPage;
 
+    // Per-leaf-cluster tuple counts for distribution logging at end of bulk load
+    private final int[] tuplesPerCluster;
+
     // Directory pages for current cluster. Confiscated with INVALID_DPID and kept in memory
     // until the cluster is finalized, at which point they receive real page IDs, get chained
     // via nextPage pointers, and are written to disk. Typically only 1 page per cluster in
@@ -149,6 +152,7 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
 
         // Initialize per-cluster directory page tracking
         clusterFirstDirPageId = new int[numLeafCentroid];
+        tuplesPerCluster = new int[numLeafCentroid];
         for (int i = 0; i < numLeafCentroid; i++) {
             clusterFirstDirPageId[i] = -1;
         }
@@ -206,6 +210,9 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
             }
             ((IVTreeDataFrame) currentDataFrame).insertSorted(tuple);
             entriesInCurrentDataPage++;
+            if (currentLeafClusterIndex >= 0 && currentLeafClusterIndex < tuplesPerCluster.length) {
+                tuplesPerCluster[currentLeafClusterIndex]++;
+            }
 
             LOGGER.log(Level.TRACE, "Added tuple to leaf cluster {}, data page entries: {}", currentLeafClusterIndex,
                     entriesInCurrentDataPage);
@@ -403,6 +410,34 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
                 currentLeafClusterIndex, numDirPages, dirPageIds[0]);
     }
 
+    private void logTupleDistribution() {
+        if (tuplesPerCluster == null || tuplesPerCluster.length == 0) {
+            return;
+        }
+        int min = Integer.MAX_VALUE;
+        int max = Integer.MIN_VALUE;
+        long sum = 0;
+        int nonEmpty = 0;
+        for (int count : tuplesPerCluster) {
+            if (count > 0) {
+                nonEmpty++;
+                min = Math.min(min, count);
+                max = Math.max(max, count);
+            }
+            sum += count;
+        }
+        if (sum == 0) {
+            LOGGER.info("[VTreeBulkLoad] firstLeafCentroidId={} numLeafCentroids={} tuplesLoaded=0",
+                    firstLeafCentroidId, numLeafCentroid);
+            return;
+        }
+        double mean = (double) sum / nonEmpty;
+        LOGGER.info(
+                "[VTreeBulkLoad] firstLeafCentroidId={} numLeafCentroids={} tuplesLoaded={} nonEmptyClusters={} emptyClusters={} min={} max={} mean={} counts={}",
+                firstLeafCentroidId, numLeafCentroid, sum, nonEmpty, numLeafCentroid - nonEmpty, min, max, mean,
+                java.util.Arrays.toString(tuplesPerCluster));
+    }
+
     private void logDataPageState(ITupleReference tuple, Exception e) {
         try {
             if (currentDataFrame != null) {
@@ -448,6 +483,8 @@ public class VTreeBulkLoader extends PageWriteFailureCallback implements IIndexB
 
         // Finalize last cluster's directory pages
         finalizeClusterDirectory();
+
+        logTupleDistribution();
 
         // --- Copy static pages to end of file ---
         int staticBasePageId = freePageManager.takePage(metaFrame);

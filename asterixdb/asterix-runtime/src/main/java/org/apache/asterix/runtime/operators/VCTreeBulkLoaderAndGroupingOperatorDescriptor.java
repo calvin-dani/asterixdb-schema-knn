@@ -20,6 +20,7 @@ package org.apache.asterix.runtime.operators;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -46,6 +47,7 @@ import org.apache.hyracks.api.exceptions.Warning;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
 import org.apache.hyracks.data.std.api.IPointable;
+import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
@@ -62,7 +64,9 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputUnaryOutputOperato
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexMetadataFrame;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.common.freepage.MutableArrayValueReference;
 import org.apache.hyracks.storage.am.common.impls.NoOpIndexAccessParameters;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
@@ -486,6 +490,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
         int successfulQueries = 0;
         int totalTuplesProcessed = 0;
         int dimensionMismatchCount = 0;
+        int assignmentFailures = 0;
+        private final Map<Integer, Integer> tuplesPerCentroidId = new HashMap<>();
 
         // Output infrastructure for transformed tuples
         private FrameTupleAppender outputAppender;
@@ -1100,10 +1106,13 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
                                     ITupleReference transformedTuple =
                                             createTransformedTuple(tuple, result, quantizedVector);
 
+                                    tuplesPerCentroidId.merge(result.centroidId, 1, Integer::sum);
+
                                     // Output the transformed tuple to downstream operators
                                     outputTransformedTuple(transformedTuple);
 
                                 } else {
+                                    assignmentFailures++;
                                     System.err.println("Failed to find closest centroid for query " + (i + 1));
                                 }
                             } else if (crossPollinate && leafPollinate) {
@@ -1228,6 +1237,101 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             }
         }
 
+        private int resolveNumLeafCentroids() {
+            try {
+                if (vcTreeAccessor != null) {
+                    ITreeIndexMetadataFrame staticMetaFrame = vcTreeAccessor.getOpContext().getMetaFrame();
+                    MutableArrayValueReference key = new MutableArrayValueReference("num_leaf_centroids".getBytes());
+                    LongPointable value = LongPointable.FACTORY.createPointable();
+                    staticMetaFrame.get(key, value);
+                    return value.intValue();
+                }
+            } catch (Exception e) {
+                // best-effort metadata read
+            }
+            return -1;
+        }
+
+        private int resolveFirstLeafCentroidId() {
+            try {
+                if (vcTreeAccessor != null) {
+                    ITreeIndexMetadataFrame staticMetaFrame = vcTreeAccessor.getOpContext().getMetaFrame();
+                    MutableArrayValueReference key =
+                            new MutableArrayValueReference("first_leaf_centroid_id".getBytes());
+                    LongPointable value = LongPointable.FACTORY.createPointable();
+                    staticMetaFrame.get(key, value);
+                    return value.intValue();
+                }
+            } catch (Exception e) {
+                // best-effort metadata read
+            }
+            return -1;
+        }
+
+        private void logAssignmentDistribution() {
+            if (tuplesPerCentroidId.isEmpty() && assignmentFailures == 0 && totalTuplesProcessed == 0) {
+                return;
+            }
+            int min = Integer.MAX_VALUE;
+            int max = Integer.MIN_VALUE;
+            long sum = 0;
+            for (int count : tuplesPerCentroidId.values()) {
+                min = Math.min(min, count);
+                max = Math.max(max, count);
+                sum += count;
+            }
+            int unique = tuplesPerCentroidId.size();
+            double mean = unique > 0 ? (double) sum / unique : 0.0;
+            LOGGER.info("[BulkLoadAssign] partition={} processed={} assigned={} failed={} uniqueLeafClusters={}{}",
+                    partition, totalTuplesProcessed, successfulQueries, assignmentFailures, unique,
+                    unique > 0 ? " min=" + min + " max=" + max + " sum=" + sum + " mean=" + mean : "");
+
+            int numLeafCentroids = resolveNumLeafCentroids();
+            int firstLeafCentroidId = resolveFirstLeafCentroidId();
+            if (numLeafCentroids > 0 && firstLeafCentroidId >= 0) {
+                int emptyLeafClusters = numLeafCentroids - unique;
+                LOGGER.info(
+                        "[BulkLoadAssign] partition={} firstLeafCentroidId={} numLeafCentroids={} emptyLeafClusters={}",
+                        partition, firstLeafCentroidId, numLeafCentroids, emptyLeafClusters);
+                int[] counts = new int[numLeafCentroids];
+                for (Map.Entry<Integer, Integer> histogramEntry : tuplesPerCentroidId.entrySet()) {
+                    int id = histogramEntry.getKey();
+                    int idx = id - firstLeafCentroidId;
+                    if (idx >= 0 && idx < numLeafCentroids) {
+                        counts[idx] = histogramEntry.getValue();
+                    }
+                }
+                LOGGER.info("[BulkLoadAssign] partition={} firstLeafCentroidId={} counts={}", partition,
+                        firstLeafCentroidId, java.util.Arrays.toString(counts));
+            } else {
+                LOGGER.warn(
+                        "[BulkLoadAssign] partition={} full histogram unavailable (numLeafCentroids={}, firstLeafCentroidId={}); logging sparse assignments",
+                        partition, numLeafCentroids, firstLeafCentroidId);
+                if (!tuplesPerCentroidId.isEmpty()) {
+                    List<Map.Entry<Integer, Integer>> sorted = new ArrayList<>(tuplesPerCentroidId.entrySet());
+                    sorted.sort((a, b) -> Integer.compare(a.getKey(), b.getKey()));
+                    StringBuilder sparse = new StringBuilder();
+                    for (Map.Entry<Integer, Integer> entry : sorted) {
+                        if (sparse.length() > 0) {
+                            sparse.append(", ");
+                        }
+                        sparse.append("cid=").append(entry.getKey()).append('=').append(entry.getValue());
+                    }
+                    LOGGER.info("[BulkLoadAssign] partition={} sparseCounts={}", partition, sparse);
+                }
+            }
+
+            if (!tuplesPerCentroidId.isEmpty()) {
+                List<Map.Entry<Integer, Integer>> topClusters = new ArrayList<>(tuplesPerCentroidId.entrySet());
+                topClusters.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+                int topN = Math.min(5, topClusters.size());
+                for (int i = 0; i < topN; i++) {
+                    Map.Entry<Integer, Integer> entry = topClusters.get(i);
+                    LOGGER.info("[BulkLoadAssign]   top cid={} count={}", entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
         @Override
         public void flush() throws HyracksDataException {
             try {
@@ -1257,6 +1361,8 @@ public class VCTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingl
             }
 
             try {
+                logAssignmentDistribution();
+
                 // CRITICAL: Write any remaining output data before closing
                 // This ensures the downstream sort operator receives all data
                 if (writer != null && outputAppender != null) {
