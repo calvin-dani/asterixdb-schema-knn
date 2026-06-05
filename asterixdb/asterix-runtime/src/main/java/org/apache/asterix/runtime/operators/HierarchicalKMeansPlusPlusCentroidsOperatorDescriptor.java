@@ -26,9 +26,11 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,10 +45,12 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
 import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunctionDouble;
+import org.apache.asterix.runtime.utils.RuntimeComponentsProvider;
 import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
+import org.apache.hyracks.api.application.INCServiceContext;
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
@@ -70,6 +74,7 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.common.data.accessors.FrameTupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.dataflow.common.data.marshalling.ByteArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
 import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
 import org.apache.hyracks.dataflow.common.io.GeneratedRunFileReader;
@@ -82,12 +87,8 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
-import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrame;
-import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
-import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
-import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTree;
-import org.apache.hyracks.storage.common.IIndex;
+import org.apache.hyracks.storage.am.vector.frames.VTreeLeafFrameFactory;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -571,6 +572,18 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         }
 
         /**
+         * Computes how many quantized leaf routing entries fit on one leaf disk page.
+         */
+        public static int computeLeafPageCapacity(int pageSize, int leafHeaderSize, int perLeafEntryBytes) {
+            if (pageSize <= 0 || perLeafEntryBytes <= 0) {
+                return 1;
+            }
+            long usable = (long) pageSize - Math.max(0, leafHeaderSize);
+            int cap = (int) (usable / perLeafEntryBytes);
+            return Math.max(1, cap);
+        }
+
+        /**
          * Emit the tree top-down (root level 0 first, then increasing levels toward the leaves), assigning
          * global centroid ids in emission order. Each centroid's {@code parentClusterId} is the position
          * index of its parent within the previous level's emission order, which is the grouping key the
@@ -631,18 +644,27 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static final double DEFAULT_CLIP_MIN = -1e3;
     private static final double DEFAULT_CLIP_MAX = 1e3;
 
-    // ===== Top-down FSCL (Approach 2) tuning constants =====
-    // Maximum overflow pages per intermediate routing node; interior fan-out K = P * (1 + V).
-    private static final int TOPDOWN_V_OVERFLOW_PAGES = 100;
-    // FSCL structural stiffness (gamma): higher forces more uniform cluster sizes.
-    private static final double TOPDOWN_FSCL_GAMMA = 3.0;
-    // FSCL batch optimization passes (epochs) per node level.
-    private static final int TOPDOWN_FSCL_EPOCHS = 20;
+    // ===== BKT-style top-down clustering (SPANN-inspired) =====
+    public static final int BKT_KMEANS_K = 32;
+    public static final int BKT_SAMPLES = 1000;
+    private static final int BKT_TRY_ITERS = 3;
+    private static final int BKT_MAX_ITERS = 100;
+    private static final double BKT_CONV_EPS = 1e-3;
+    private static final int BKT_NO_IMPROVE = 5;
+    /** Negative value selects lambda automatically via DynamicFactorSelect. */
+    public static final double DEFAULT_TOPDOWN_LAMBDA_FACTOR = -1.0;
     // Strict height cap: levels 0..MAX_LEVEL (height 5 => deepest level index 4).
     private static final int TOPDOWN_MAX_LEVEL = 4;
 
+    // ===== SPANN SelectHead (scratch BKT + head walk) =====
+    public static final double DEFAULT_HEAD_RATIO = 0.15;
+    public static final String DEFAULT_SELECT_HEAD_TYPE = "bkt";
+
     private final UUID sampleUUID;
     private final UUID tupleCountUUID;
+    private final UUID headSelectionUUID;
+    private final UUID materializedDataUUID;
+    private final UUID scalarValuesUUID;
 
     // Configuration parameters for hierarchical clustering
     private IScalarEvaluatorFactory args; // Evaluator for extracting vector data from tuples
@@ -654,6 +676,52 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     // When true, build the tree top-down (root branching computed from frame fit, split per cluster into run
     // files level-by-level). When false, use the original bottom-up memory-efficient algorithm.
     private boolean topDown;
+    private int quantizationBits;
+    private double lambdaFactor;
+    private int maxLevel;
+    private boolean selectHeadEnabled;
+    private double headRatio;
+    private int headCount;
+    private String selectHeadType;
+
+    /**
+     * Partition-scoped result of SPANN SelectHead (not consumed by static-structure build yet).
+     */
+    public static final class HeadSelectionTaskState extends AbstractStateObject {
+        private static final long serialVersionUID = 1L;
+        public final int[] headSampleIndices;
+        public final int targetHeadCount;
+        public final float achievedRatio;
+        public final int selectThreshold;
+        public final int splitThreshold;
+
+        public HeadSelectionTaskState(JobId jobId, PartitionedUUID objectId, int[] headSampleIndices,
+                int targetHeadCount, float achievedRatio, int selectThreshold, int splitThreshold) {
+            super(jobId, objectId);
+            this.headSampleIndices = headSampleIndices;
+            this.targetHeadCount = targetHeadCount;
+            this.achievedRatio = achievedRatio;
+            this.selectThreshold = selectThreshold;
+            this.splitThreshold = splitThreshold;
+        }
+
+        @Override
+        public void toBytes(DataOutput out) throws IOException {
+            out.writeInt(targetHeadCount);
+            out.writeFloat(achievedRatio);
+            out.writeInt(selectThreshold);
+            out.writeInt(splitThreshold);
+            out.writeInt(headSampleIndices.length);
+            for (int idx : headSampleIndices) {
+                out.writeInt(idx);
+            }
+        }
+
+        @Override
+        public void fromBytes(DataInput in) throws IOException {
+            throw new IOException("HeadSelectionTaskState deserialization not supported");
+        }
+    }
 
     /**
      * Supplies freshly-opened readers over a run file so a clustering pass can stream the same data
@@ -662,6 +730,127 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     @FunctionalInterface
     private interface RunFileSource {
         GeneratedRunFileReader openReader() throws HyracksDataException;
+    }
+
+    /**
+     * Temp run file with compact local indices {@code 0..recordCount-1}.
+     */
+    private static final class MaterializedRunFileSource {
+        final RunFileWriter writer;
+        final int recordCount;
+
+        MaterializedRunFileSource(RunFileWriter writer, int recordCount) {
+            this.writer = writer;
+            this.recordCount = recordCount;
+        }
+
+        RunFileSource asRunFileSource() {
+            return () -> {
+                GeneratedRunFileReader rd = writer.createReader();
+                rd.open();
+                return rd;
+            };
+        }
+
+        void cleanup() {
+            try {
+                writer.getFileReference().delete();
+            } catch (Exception e) {
+                // best-effort managed workspace cleanup
+            }
+        }
+    }
+
+    private static final Logger LOGGER = LogManager.getLogger();
+    public static final int DEFAULT_TOPDOWN_MAX_LEVEL = 5;
+
+    /**
+     * Copy sample tuples at ascending {@code globalIndices} into a compact run file (local indices
+     * {@code 0..|globalIndices|-1} in the same order).
+     */
+    private static MaterializedRunFileSource materializeIndexedRunFile(IHyracksTaskContext ctx,
+            MaterializerTaskState sampleState, int[] globalIndices, FrameTupleAccessor fta, String workspaceName)
+            throws HyracksDataException, IOException {
+        if (globalIndices == null || globalIndices.length == 0) {
+            return null;
+        }
+        FileReference file = ctx.getJobletContext().createManagedWorkspaceFile(workspaceName);
+        RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
+        writer.open();
+        FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
+        int ptr = 0;
+        int nextIndex = globalIndices[ptr];
+        int currentIndex = 0;
+        int written = 0;
+        GeneratedRunFileReader in = sampleState.createReader();
+        in.open();
+        try {
+            VSizeFrame frame = new VSizeFrame(ctx);
+            while (in.nextFrame(frame) && ptr < globalIndices.length) {
+                ByteBuffer buffer = frame.getBuffer();
+                fta.reset(buffer);
+                int tupleCount = fta.getTupleCount();
+                for (int j = 0; j < tupleCount; j++) {
+                    if (ptr >= globalIndices.length) {
+                        break;
+                    }
+                    if (currentIndex == nextIndex) {
+                        if (!appender.append(fta, j)) {
+                            appender.write(writer, true);
+                            if (!appender.append(fta, j)) {
+                                throw new HyracksDataException(
+                                        "Tuple too large to fit in a frame during indexed run-file materialization");
+                            }
+                        }
+                        written++;
+                        ptr++;
+                        if (ptr < globalIndices.length) {
+                            nextIndex = globalIndices[ptr];
+                        }
+                    }
+                    currentIndex++;
+                }
+            }
+            if (appender.getTupleCount() > 0) {
+                appender.write(writer, true);
+            }
+        } finally {
+            in.close();
+            writer.close();
+        }
+        if (written != globalIndices.length) {
+            LOGGER.warn("[SelectHead] materializeIndexedRunFile: wrote {} of {} indices (streamIndex={})", written,
+                    globalIndices.length, currentIndex);
+        }
+        return new MaterializedRunFileSource(writer, written);
+    }
+
+    private static boolean isSortedAscending(int[] values) {
+        for (int i = 1; i < values.length; i++) {
+            if (values[i] < values[i - 1]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** {@code perm[sortedPos] = originalPos} after sorting {@code values} ascending. */
+    private static int[] sortPermutation(int[] values) {
+        int n = values.length;
+        int[] perm = new int[n];
+        for (int i = 0; i < n; i++) {
+            perm[i] = i;
+        }
+        for (int i = 1; i < n; i++) {
+            int j = i;
+            while (j > 0 && values[perm[j - 1]] > values[perm[j]]) {
+                int tmp = perm[j];
+                perm[j] = perm[j - 1];
+                perm[j - 1] = tmp;
+                j--;
+            }
+        }
+        return perm;
     }
 
     /**
@@ -779,10 +968,34 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         return new RecordDescriptor(fieldSerdes);
     }
 
+    /**
+     * Sizes a representative quantized leaf routing entry via {@link VTreeLeafFrameFactory}, then computes how
+     * many such entries fit on one leaf page using the NC buffer-cache page size.
+     */
+    private int computeLeafPageCapacity(IHyracksTaskContext ctx, int dim) throws HyracksDataException {
+        INCServiceContext serviceCtx = ctx.getJobletContext().getServiceContext();
+        int pageSize = RuntimeComponentsProvider.RUNTIME_PROVIDER.getBufferCache(serviceCtx).getPageSize();
+        boolean quantized = quantizationBits > 0;
+        ITreeIndexFrame leafFrame = new VTreeLeafFrameFactory(dim, quantized, null, null).createFrame();
+        double[] sampleEmbedding = new double[dim];
+        int quantizedByteLen = (dim * quantizationBits + 7) / 8;
+        byte[] quantizedBytes = new byte[quantizedByteLen];
+        ITupleReference entry = TupleUtils.createTuple(
+                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
+                        DoubleArraySerializerDeserializer.INSTANCE, ByteArraySerializerDeserializer.INSTANCE,
+                        IntegerSerializerDeserializer.INSTANCE },
+                Integer.valueOf(0), sampleEmbedding, quantizedBytes, Integer.valueOf(0));
+        int perEntryBytes = leafFrame.getBytesRequiredToWriteTuple(entry);
+        int leafHeaderSize = leafFrame.getPageHeaderSize();
+        return HierarchicalClusterStructure.computeLeafPageCapacity(pageSize, leafHeaderSize, perEntryBytes);
+    }
+
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
-            IScalarEvaluatorFactory args, int K,
-            int maxScalableKmeansIter,String distanceMetric, int vectorDimension, boolean topDown) {
+            UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
+            int maxScalableKmeansIter, String distanceMetric, int vectorDimension, boolean topDown,
+            int quantizationBits, double lambdaFactor, int maxLevel, UUID headSelectionUUID, boolean selectHeadEnabled,
+            double headRatio, int headCount, String selectHeadType) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -790,11 +1003,21 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.secondaryRecDesc = secondaryRecDesc; // Input format (2-field with vector embeddings)
         this.sampleUUID = sampleUUID;
         this.tupleCountUUID = tupleCountUUID;
+        this.materializedDataUUID = materializedDataUUID;
+        this.scalarValuesUUID = scalarValuesUUID;
         this.args = args;
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.vectorDimension = vectorDimension;
         this.topDown = topDown;
+        this.quantizationBits = quantizationBits;
+        this.lambdaFactor = lambdaFactor;
+        this.maxLevel = maxLevel;
+        this.headSelectionUUID = headSelectionUUID;
+        this.selectHeadEnabled = selectHeadEnabled;
+        this.headRatio = headRatio;
+        this.headCount = headCount;
+        this.selectHeadType = selectHeadType != null ? selectHeadType : DEFAULT_SELECT_HEAD_TYPE;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
         this.distanceFunction = getDistanceFunctionDouble(distanceMetric);
@@ -923,16 +1146,64 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         TupleCountState tupleCountState =
                                 (TupleCountState) ctx.getStateObject(new PartitionedUUID(tupleCountUUID, partition));
                         int totalTupleCount = tupleCountState != null ? tupleCountState.getTotalTupleCount() : 0;
+                        LOGGER.info(
+                                "[FindCandidates] partition={} sampleTuples={} selectHeadEnabled={} headRatio={} headCount={} selectType={} topDown={}",
+                                partition, totalTupleCount, selectHeadEnabled, headRatio, headCount, selectHeadType,
+                                topDown);
 
                         //                        System.err.println("Retrieved total tuple count: " + totalTupleCount);
 
-                    
-
                         // Build the hierarchical clustering structure (top-down or bottom-up per the strategy flag)
                         HierarchicalClusterStructure clusterStructure;
-                        if (topDown) {
-                            clusterStructure = buildTopDownHierarchicalKMeans(ctx, sampleState, fta, tuple, eval,
+                        boolean emitTopDown = topDown;
+
+                        if (selectHeadEnabled) {
+                            HeadSelectionTaskState headState = runSelectHeadPhase(ctx, sampleState, fta, tuple, eval,
                                     inputVal, listAccessorConstant, KMeansUtils, partition, totalTupleCount);
+                            if (headState == null) {
+                                LOGGER.warn(
+                                        "[BuildHead] partition={}: SelectHead returned null (empty sample or unreadable vectors); "
+                                                + "emitting 0 tuples — VCTree will fail",
+                                        partition);
+                                return;
+                            }
+                            if (headState.headSampleIndices.length == 0) {
+                                LOGGER.warn(
+                                        "[BuildHead] partition={}: SelectHead selected 0 heads (target={}); "
+                                                + "emitting 0 tuples — VCTree will fail",
+                                        partition, headState.targetHeadCount);
+                                return;
+                            }
+                            ctx.setStateObject(headState);
+                            MaterializedRunFileSource headSource =
+                                    materializeHeadRunFile(ctx, sampleState, headState.headSampleIndices, fta, tuple);
+                            if (headSource == null || headSource.recordCount == 0) {
+                                LOGGER.warn(
+                                        "[BuildHead] partition={}: failed to materialize head run file (headsRequested={}); "
+                                                + "emitting 0 tuples — VCTree will fail",
+                                        partition, headState.headSampleIndices.length);
+                                return;
+                            }
+                            LOGGER.info(
+                                    "[BuildHead] partition={} heads={} sample={} replacing full-sample structure build",
+                                    partition, headSource.recordCount, totalTupleCount);
+                            try {
+                                clusterStructure = buildTopDownHierarchicalKMeans(ctx, headSource.asRunFileSource(),
+                                        headSource.recordCount, true, fta, tuple, eval, inputVal, listAccessorConstant,
+                                        KMeansUtils, partition);
+                            } finally {
+                                headSource.cleanup();
+                            }
+                            emitTopDown = true;
+                        } else if (topDown) {
+                            final MaterializerTaskState sampleStateRef = sampleState;
+                            RunFileSource sampleSource = () -> {
+                                GeneratedRunFileReader rd = sampleStateRef.createReader();
+                                rd.open();
+                                return rd;
+                            };
+                            clusterStructure = buildTopDownHierarchicalKMeans(ctx, sampleSource, totalTupleCount, false,
+                                    fta, tuple, eval, inputVal, listAccessorConstant, KMeansUtils, partition);
                         } else {
                             clusterStructure =
                                     performMemoryEfficientHierarchicalKMeans(ctx, in, fta, tuple, eval, inputVal,
@@ -940,12 +1211,32 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         }
 
                         if (clusterStructure.getNumLevels() == 0) {
+                            LOGGER.warn(
+                                    "[FindCandidates] partition={}: clustering produced 0 levels (selectHeadEnabled={} "
+                                            + "sampleTuples={}); emitting 0 tuples — VCTree will fail",
+                                    partition, selectHeadEnabled, totalTupleCount);
                             return;
                         }
 
-                        // Output hierarchical structure with parent-child relationships
+                        int totalCentroids = 0;
+                        for (Integer lvl : clusterStructure.levelCentroids.keySet()) {
+                            List<HierarchicalClusterStructure.CentroidInfo> infos =
+                                    clusterStructure.levelCentroids.get(lvl);
+                            if (infos != null) {
+                                totalCentroids += infos.size();
+                            }
+                        }
+                        LOGGER.info(
+                                "[FindCandidates] partition={}: emitting structure levels={} totalCentroids={} selectHeadEnabled={}",
+                                partition, clusterStructure.getNumLevels(), totalCentroids, selectHeadEnabled);
+
+                        // Log all centroids from all levels as JSON
+                        //                        clusterStructure.logAllCentroids();
+
+                        // Output hierarchical structure with parent-child relationships. Top-down stores the root at
+                        // level 0, so emit ascending; bottom-up numbers the root as the highest level (BFS emit).
                         // Manual buffer management handles flushing when needed
-                        if (topDown) {
+                        if (emitTopDown) {
                             clusterStructure.outputTopDownStructure(appender, writer, ctx);
                         } else {
                             clusterStructure.outputHierarchicalStructure(appender, writer, ctx);
@@ -955,8 +1246,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         FrameUtils.flushFrame(appender.getBuffer(), writer);
 
                     } catch (Throwable e) {
+                        LOGGER.error("[FindCandidates] partition={} selectHeadEnabled={} failed during structure build",
+                                partition, selectHeadEnabled, e);
                         writer.fail();
-                        throw new RuntimeException(e);
+                        throw HyracksDataException.create(
+                                new RuntimeException("SelectHead/BuildHead failed on partition=" + partition, e));
                     } finally {
                         in.close();
                         writer.close();
@@ -1641,15 +1935,520 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 // ============================================================================================
-                // TOP-DOWN HIERARCHICAL K-MEANS (Approach 2)
-                // Builds the tree root-first using a page-fit fan-out: P routing centroids fit on one interior
-                // disk page (root level), and an interior node spans K = P*(1+V) children across its primary page
-                // plus V overflow pages. The sample is clustered into P groups (k-means++ + FSCL) and partitioned
-                // into one run file per group; each file is then clustered into K sub-groups level-by-level until
-                // the cumulative cluster count reaches the target (num_clusters) or the strict height cap. FSCL
-                // (Frequency-Sensitive Competitive Learning) keeps cluster sizes balanced. Intermediate run files
-                // are deleted as soon as a level has consumed them.
+                // BKT-STYLE TOP-DOWN HIERARCHICAL CLUSTERING
+                // SPANN-inspired: dynamic fan-out capped at 32, lambda-balanced k-means on a sample, full-data
+                // assign, real-record pivots, leaf stop when a bag fits on one quantized leaf page.
                 // ============================================================================================
+
+                /** Work item for level-by-level expansion: one parent run file and its parent centroid index. */
+                final class ParentBatch {
+                    final RunFileWriter file;
+                    final int recCount;
+                    final int parentClusterId;
+
+                    ParentBatch(RunFileWriter file, int recCount, int parentClusterId) {
+                        this.file = file;
+                        this.recCount = recCount;
+                        this.parentClusterId = parentClusterId;
+                    }
+                }
+
+                private int dynamicK(int recordCount, int leafPageCapacity) {
+                    if (recordCount <= leafPageCapacity) {
+                        return recordCount;
+                    }
+                    int k = Math.min(recordCount / leafPageCapacity + 1, BKT_KMEANS_K);
+                    return Math.max(2, Math.min(k, recordCount));
+                }
+
+                private double[] copyVector(double[] v) {
+                    return v == null ? null : Arrays.copyOf(v, v.length);
+                }
+
+                // ============================================================================================
+                // SPANN SelectHead: scratch BKT + post-order head walk (not wired to structure build)
+                // ============================================================================================
+
+                /** Mirrors SPTAG {@code BKTNode}. */
+                final class ScratchBktNode {
+                    int centerid;
+                    int childStart;
+                    int childEnd;
+
+                    ScratchBktNode(int centerid, int childStart, int childEnd) {
+                        this.centerid = centerid;
+                        this.childStart = childStart;
+                        this.childEnd = childEnd;
+                    }
+                }
+
+                final class ScratchBktTree {
+                    final List<ScratchBktNode> nodes;
+                    final int rootIndex;
+                    final int recordCount;
+
+                    ScratchBktTree(List<ScratchBktNode> nodes, int rootIndex, int recordCount) {
+                        this.nodes = nodes;
+                        this.rootIndex = rootIndex;
+                        this.recordCount = recordCount;
+                    }
+                }
+
+                final class ScratchBktStackItem {
+                    final int nodeIndex;
+                    final int first;
+                    final int last;
+
+                    ScratchBktStackItem(int nodeIndex, int first, int last) {
+                        this.nodeIndex = nodeIndex;
+                        this.first = first;
+                        this.last = last;
+                    }
+                }
+
+                final class SelectHeadOptions {
+                    final int selectThreshold;
+                    final int splitThreshold;
+                    final int splitFactor;
+                    final int targetHeadCount;
+                    final double targetRatio;
+
+                    SelectHeadOptions(int selectThreshold, int splitThreshold, int splitFactor, int targetHeadCount,
+                            double targetRatio) {
+                        this.selectThreshold = selectThreshold;
+                        this.splitThreshold = splitThreshold;
+                        this.splitFactor = splitFactor;
+                        this.targetHeadCount = targetHeadCount;
+                        this.targetRatio = targetRatio;
+                    }
+                }
+
+                private void reorderByAssignment(int[] localIndices, int first, int size, int[] assignments,
+                        int[] counts) {
+                    int[] temp = Arrays.copyOfRange(localIndices, first, first + size);
+                    int k = counts.length;
+                    int[] writePos = new int[k];
+                    writePos[0] = first;
+                    for (int c = 1; c < k; c++) {
+                        writePos[c] = writePos[c - 1] + counts[c - 1];
+                    }
+                    int[] filled = new int[k];
+                    for (int i = 0; i < size; i++) {
+                        int c = assignments[i];
+                        localIndices[writePos[c] + filled[c]++] = temp[i];
+                    }
+                }
+
+                private ScratchBktTree buildScratchBkt(IHyracksTaskContext ctx, MaterializerTaskState sampleState,
+                        RunFileSource sampleSource, int recordCount, int leafPageCapacity, float tunedLambdaFactor,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAcc, KMeansUtils kmu, Random rand) throws HyracksDataException, IOException {
+                    int[] localIndices = new int[recordCount];
+                    for (int i = 0; i < recordCount; i++) {
+                        localIndices[i] = i;
+                    }
+                    List<ScratchBktNode> nodes = new ArrayList<>();
+                    nodes.add(new ScratchBktNode(recordCount, 0, 0));
+                    Deque<ScratchBktStackItem> stack = new ArrayDeque<>();
+                    stack.push(new ScratchBktStackItem(0, 0, recordCount));
+                    int splitCount = 0;
+                    int leafListCount = 0;
+
+                    LOGGER.info("[SelectHead] buildScratchBkt: begin records={} leafPageCap={} lambdaFactor={}",
+                            recordCount, leafPageCapacity, tunedLambdaFactor);
+
+                    while (!stack.isEmpty()) {
+                        ScratchBktStackItem item = stack.pop();
+                        int nodeIndex = item.nodeIndex;
+                        int first = item.first;
+                        int last = item.last;
+                        int size = last - first;
+                        nodes.get(nodeIndex).childStart = nodes.size();
+
+                        if (size <= leafPageCapacity) {
+                            int leafNodes = last - first;
+                            leafListCount++;
+                            LOGGER.debug(
+                                    "[SelectHead] scratch leaf-list node={} range=[{},{}] size={} stackRemaining={}",
+                                    nodeIndex, first, last, leafNodes, stack.size());
+                            for (int j = first; j < last; j++) {
+                                nodes.add(new ScratchBktNode(localIndices[j], -1, -1));
+                            }
+                        } else {
+                            int k = dynamicK(size, leafPageCapacity);
+                            splitCount++;
+                            LOGGER.info(
+                                    "[SelectHead] scratch split #{} node={} range=[{},{}] size={} k={} stackRemaining={}",
+                                    splitCount, nodeIndex, first, last, size, k, stack.size());
+
+                            RunFileSource splitSource = sampleSource;
+                            MaterializedRunFileSource subrangeMat = null;
+                            int[] perm = null;
+                            if (size < recordCount) {
+                                int[] subMap = Arrays.copyOfRange(localIndices, first, last);
+                                int[] materializeIndices = subMap;
+                                if (!isSortedAscending(subMap)) {
+                                    perm = sortPermutation(subMap);
+                                    materializeIndices = new int[size];
+                                    for (int i = 0; i < size; i++) {
+                                        materializeIndices[i] = subMap[perm[i]];
+                                    }
+                                }
+                                subrangeMat = materializeIndexedRunFile(ctx, sampleState, materializeIndices, fta,
+                                        "scratch-bkt-subrange");
+                                if (subrangeMat == null || subrangeMat.recordCount != size) {
+                                    throw new HyracksDataException(
+                                            "Failed to materialize scratch-BKT subrange of size " + size);
+                                }
+                                splitSource = subrangeMat.asRunFileSource();
+                            }
+
+                            try {
+                                ClusteringResult res = clusterRunFile(ctx, splitSource, size, k, tunedLambdaFactor, fta,
+                                        tuple, eval, inputVal, listAcc, kmu, rand);
+                                if (res.assignments == null || res.assignments.length != size) {
+                                    LOGGER.warn(
+                                            "[SelectHead] scratch split node={}: assignment length mismatch expected={} got={}",
+                                            nodeIndex, size, res.assignments == null ? -1 : res.assignments.length);
+                                }
+                                if (res.centroids.isEmpty()) {
+                                    LOGGER.warn(
+                                            "[SelectHead] scratch split node={}: clusterRunFile returned 0 centroids",
+                                            nodeIndex);
+                                }
+                                int[] assignments = res.assignments;
+                                if (perm != null && assignments != null && assignments.length == size) {
+                                    int[] restored = new int[size];
+                                    for (int i = 0; i < size; i++) {
+                                        restored[perm[i]] = assignments[i];
+                                    }
+                                    assignments = restored;
+                                }
+                                int[] counts = new int[k];
+                                if (assignments != null) {
+                                    for (int i = 0; i < size; i++) {
+                                        if (i >= assignments.length) {
+                                            break;
+                                        }
+                                        int cluster = assignments[i];
+                                        if (cluster < 0 || cluster >= k) {
+                                            LOGGER.warn(
+                                                    "[SelectHead] scratch split node={}: invalid assignment[{}]={} (k={})",
+                                                    nodeIndex, i, cluster, k);
+                                            continue;
+                                        }
+                                        counts[cluster]++;
+                                    }
+                                }
+                                reorderByAssignment(localIndices, first, size, assignments, counts);
+                                int pos = first;
+                                for (int c = 0; c < k; c++) {
+                                    if (counts[c] == 0) {
+                                        continue;
+                                    }
+                                    int childFirst = pos;
+                                    int childLast = pos + counts[c];
+                                    int centerid = localIndices[childLast - 1];
+                                    int childNodeIndex = nodes.size();
+                                    nodes.add(new ScratchBktNode(centerid, 0, 0));
+                                    if (counts[c] > 1) {
+                                        stack.push(new ScratchBktStackItem(childNodeIndex, childFirst, childLast));
+                                    }
+                                    pos = childLast;
+                                }
+                            } finally {
+                                if (subrangeMat != null) {
+                                    subrangeMat.cleanup();
+                                }
+                            }
+                        }
+                        nodes.get(nodeIndex).childEnd = nodes.size();
+                    }
+                    LOGGER.info("[SelectHead] scratch BKT built: nodes={} records={} splits={} leafLists={}",
+                            nodes.size(), recordCount, splitCount, leafListCount);
+                    return new ScratchBktTree(nodes, 0, recordCount);
+                }
+
+                private SelectHeadOptions adjustSelectHeadOptions(int recordCount, double ratio,
+                        int explicitHeadCount) {
+                    double effectiveRatio = ratio;
+                    if (explicitHeadCount > 0) {
+                        effectiveRatio = explicitHeadCount / (double) recordCount;
+                    }
+                    int targetHeadCount = Math.max(1, (int) Math.round(effectiveRatio * recordCount));
+                    if (targetHeadCount >= recordCount) {
+                        targetHeadCount = recordCount;
+                    }
+                    int selectThreshold = Math.min(recordCount - 1, Math.max(2, (int) (1.0 / effectiveRatio)));
+                    int splitThreshold = Math.min(recordCount - 1, selectThreshold * 2);
+                    int splitFactor =
+                            Math.min(recordCount - 1, Math.max(2, (int) Math.round(1.0 / effectiveRatio + 0.5)));
+                    LOGGER.info(
+                            "[SelectHead] adjustOptions: records={} ratio={} explicitHeadCount={} -> targetHeads={} "
+                                    + "selectThreshold={} splitThreshold={} splitFactor={}",
+                            recordCount, ratio, explicitHeadCount, targetHeadCount, selectThreshold, splitThreshold,
+                            splitFactor);
+                    return new SelectHeadOptions(selectThreshold, splitThreshold, splitFactor, targetHeadCount,
+                            effectiveRatio);
+                }
+
+                private int selectHeadDynamicallyInternal(ScratchBktTree tree, int nodeId, SelectHeadOptions opts,
+                        List<Integer> selected) {
+                    int childrenSize = 1;
+                    List<int[]> childMeta = new ArrayList<>();
+                    ScratchBktNode node = tree.nodes.get(nodeId);
+                    if (node.childStart >= 0) {
+                        for (int i = node.childStart; i < node.childEnd; i++) {
+                            int cs = selectHeadDynamicallyInternal(tree, i, opts, selected);
+                            if (cs > 0) {
+                                childMeta.add(new int[] { i, cs });
+                                childrenSize += cs;
+                            }
+                        }
+                    }
+
+                    if (childrenSize >= opts.selectThreshold) {
+                        int rootSentinel = tree.nodes.get(tree.rootIndex).centerid;
+                        if (node.centerid < rootSentinel && node.centerid >= 0 && node.centerid < tree.recordCount) {
+                            selected.add(node.centerid);
+                        }
+                        if (childrenSize > opts.splitThreshold && !childMeta.isEmpty()) {
+                            childMeta.sort((a, b) -> Integer.compare(b[1], a[1]));
+                            int selectCnt = (int) Math.ceil(childrenSize * 1.0 / opts.splitFactor + 0.5);
+                            for (int i = 0; i < selectCnt && i < childMeta.size(); i++) {
+                                int childId = childMeta.get(i)[0];
+                                int cid = tree.nodes.get(childId).centerid;
+                                if (cid >= 0 && cid < tree.recordCount) {
+                                    selected.add(cid);
+                                }
+                            }
+                        }
+                        return 0;
+                    }
+                    return childrenSize;
+                }
+
+                final class SelectHeadWalkResult {
+                    final int[] headIndices;
+                    final int selectThreshold;
+                    final int splitThreshold;
+
+                    SelectHeadWalkResult(int[] headIndices, int selectThreshold, int splitThreshold) {
+                        this.headIndices = headIndices;
+                        this.selectThreshold = selectThreshold;
+                        this.splitThreshold = splitThreshold;
+                    }
+                }
+
+                private SelectHeadWalkResult selectHeadDynamically(ScratchBktTree tree, SelectHeadOptions baseOpts) {
+                    LOGGER.info(
+                            "[SelectHead] walk begin: treeNodes={} records={} targetHeads={} targetRatio={} "
+                                    + "initialSelectThreshold={} initialSplitThreshold={}",
+                            tree.nodes.size(), tree.recordCount, baseOpts.targetHeadCount, baseOpts.targetRatio,
+                            baseOpts.selectThreshold, baseOpts.splitThreshold);
+                    if (baseOpts.targetHeadCount >= tree.recordCount) {
+                        LOGGER.info("[SelectHead] walk: targetHeads>={} records, selecting all indices",
+                                tree.recordCount);
+                        int[] all = new int[tree.recordCount];
+                        for (int i = 0; i < tree.recordCount; i++) {
+                            all[i] = i;
+                        }
+                        return new SelectHeadWalkResult(all, baseOpts.selectThreshold, baseOpts.splitThreshold);
+                    }
+
+                    int selectThreshold = baseOpts.selectThreshold;
+                    int splitThreshold = baseOpts.splitThreshold;
+                    double minDiff = 1.0;
+                    int tuningTrials = 0;
+                    for (int select = 2; select <= baseOpts.selectThreshold; select++) {
+                        int l = baseOpts.splitFactor;
+                        int r = baseOpts.splitThreshold;
+                        while (l < r - 1) {
+                            int mid = (l + r) / 2;
+                            SelectHeadOptions trial = new SelectHeadOptions(select, mid, baseOpts.splitFactor,
+                                    baseOpts.targetHeadCount, baseOpts.targetRatio);
+                            List<Integer> trialSelected = new ArrayList<>();
+                            selectHeadDynamicallyInternal(tree, tree.rootIndex, trial, trialSelected);
+                            int[] unique = dedupeAndSortHeads(trialSelected);
+                            double diff = unique.length / (double) tree.recordCount - baseOpts.targetRatio;
+                            tuningTrials++;
+                            LOGGER.debug("[SelectHead] walk trial #{}: select={} split={} heads={} diffFromTarget={}",
+                                    tuningTrials, select, mid, unique.length, diff);
+                            if (Math.abs(diff) < minDiff) {
+                                minDiff = Math.abs(diff);
+                                selectThreshold = select;
+                                splitThreshold = mid;
+                            }
+                            if (diff > 0) {
+                                l = mid;
+                            } else {
+                                r = mid;
+                            }
+                        }
+                    }
+
+                    SelectHeadOptions finalOpts = new SelectHeadOptions(selectThreshold, splitThreshold,
+                            baseOpts.splitFactor, baseOpts.targetHeadCount, baseOpts.targetRatio);
+                    List<Integer> selected = new ArrayList<>();
+                    selectHeadDynamicallyInternal(tree, tree.rootIndex, finalOpts, selected);
+                    int[] finalHeads = dedupeAndSortHeads(selected);
+                    LOGGER.info(
+                            "[SelectHead] walk complete: tuningTrials={} tunedSelect={} tunedSplit={} targetRatio={} "
+                                    + "selectedHeads={} achievedRatio={}",
+                            tuningTrials, selectThreshold, splitThreshold, baseOpts.targetRatio, finalHeads.length,
+                            finalHeads.length / (double) tree.recordCount);
+                    return new SelectHeadWalkResult(finalHeads, selectThreshold, splitThreshold);
+                }
+
+                private int[] dedupeAndSortHeads(List<Integer> selected) {
+                    if (selected.isEmpty()) {
+                        return new int[0];
+                    }
+                    Collections.sort(selected);
+                    List<Integer> unique = new ArrayList<>();
+                    int prev = -1;
+                    for (int id : selected) {
+                        if (id != prev) {
+                            unique.add(id);
+                            prev = id;
+                        }
+                    }
+                    int[] out = new int[unique.size()];
+                    for (int i = 0; i < unique.size(); i++) {
+                        out[i] = unique.get(i);
+                    }
+                    return out;
+                }
+
+                private int[] selectHeadsRandom(int recordCount, int targetCount, Random rand) {
+                    int[] indices = new int[recordCount];
+                    for (int i = 0; i < recordCount; i++) {
+                        indices[i] = i;
+                    }
+                    for (int i = recordCount - 1; i > 0; i--) {
+                        int j = rand.nextInt(i + 1);
+                        int tmp = indices[i];
+                        indices[i] = indices[j];
+                        indices[j] = tmp;
+                    }
+                    int take = Math.min(targetCount, recordCount);
+                    int[] heads = new int[take];
+                    System.arraycopy(indices, 0, heads, 0, take);
+                    Arrays.sort(heads);
+                    return heads;
+                }
+
+                /**
+                 * Copy sample tuples at {@code headIndices} (global sample positions) into a compact head-only run
+                 * file with local indices {@code 0..|H|-1}.
+                 */
+                private MaterializedRunFileSource materializeHeadRunFile(IHyracksTaskContext ctx,
+                        MaterializerTaskState sampleState, int[] headIndices, FrameTupleAccessor fta,
+                        FrameTupleReference tuple) throws HyracksDataException, IOException {
+                    if (headIndices == null || headIndices.length == 0) {
+                        LOGGER.warn("[SelectHead] materializeHeadRunFile: no head indices to copy");
+                        return null;
+                    }
+                    LOGGER.info("[SelectHead] materializeHeadRunFile: copying {} head indices from sample",
+                            headIndices.length);
+                    MaterializedRunFileSource result =
+                            materializeIndexedRunFile(ctx, sampleState, headIndices, fta, "head-vectors");
+                    if (result != null && result.recordCount == headIndices.length) {
+                        LOGGER.info("[SelectHead] materializeHeadRunFile: wrote all {} head tuples",
+                                result.recordCount);
+                    }
+                    return result;
+                }
+
+                private HeadSelectionTaskState runSelectHeadPhase(IHyracksTaskContext ctx,
+                        MaterializerTaskState sampleState, FrameTupleAccessor fta, FrameTupleReference tuple,
+                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu,
+                        int partition, int totalTupleCount) throws HyracksDataException, IOException {
+                    LOGGER.info(
+                            "[SelectHead] partition={}: phase begin sample={} headRatio={} headCount={} selectType={}",
+                            partition, totalTupleCount, headRatio, headCount, selectHeadType);
+                    if (totalTupleCount <= 0) {
+                        LOGGER.warn("[SelectHead] partition={}: empty sample, aborting SelectHead", partition);
+                        return null;
+                    }
+                    Random rand = new Random();
+                    int dim = vectorDimension;
+                    if (dim <= 0) {
+                        GeneratedRunFileReader probe = sampleState.createReader();
+                        probe.open();
+                        try {
+                            double[] firstPoint =
+                                    getPointAtIndex(probe, fta, tuple, eval, inputVal, listAcc, kmu, 0, ctx);
+                            if (firstPoint == null) {
+                                LOGGER.warn(
+                                        "[SelectHead] partition={}: first sample tuple at index 0 is not a readable vector",
+                                        partition);
+                                return null;
+                            }
+                            dim = firstPoint.length;
+                        } finally {
+                            probe.close();
+                        }
+                    }
+
+                    final MaterializerTaskState sampleStateRef = sampleState;
+                    RunFileSource sampleSource = () -> {
+                        GeneratedRunFileReader rd = sampleStateRef.createReader();
+                        rd.open();
+                        return rd;
+                    };
+
+                    SelectHeadOptions opts = adjustSelectHeadOptions(totalTupleCount, headRatio, headCount);
+                    int[] headIndices;
+                    int selectThreshold = opts.selectThreshold;
+                    int splitThreshold = opts.splitThreshold;
+
+                    if ("random".equalsIgnoreCase(selectHeadType)) {
+                        headIndices = selectHeadsRandom(totalTupleCount, opts.targetHeadCount, rand);
+                    } else {
+                        int leafPageCapacity = computeLeafPageCapacity(ctx, dim);
+                        float tunedLambdaFactor;
+                        if (lambdaFactor > 0) {
+                            tunedLambdaFactor = (float) lambdaFactor;
+                        } else {
+                            int probeK = dynamicK(totalTupleCount, leafPageCapacity);
+                            tunedLambdaFactor = dynamicFactorSelect(ctx, sampleSource, totalTupleCount, probeK, dim,
+                                    fta, tuple, eval, inputVal, listAcc, kmu, rand);
+                        }
+                        LOGGER.info("[SelectHead] partition={}: building scratch BKT (leafPageCap={} lambdaFactor={})",
+                                partition, leafPageCapacity, tunedLambdaFactor);
+                        ScratchBktTree scratchTree;
+                        try {
+                            scratchTree =
+                                    buildScratchBkt(ctx, sampleState, sampleSource, totalTupleCount, leafPageCapacity,
+                                            tunedLambdaFactor, fta, tuple, eval, inputVal, listAcc, kmu, rand);
+                        } catch (Throwable t) {
+                            LOGGER.error("[SelectHead] partition={}: buildScratchBkt failed", partition, t);
+                            throw t;
+                        }
+                        LOGGER.info("[SelectHead] partition={}: running SelectHead walk on scratch tree", partition);
+                        SelectHeadWalkResult walkResult;
+                        try {
+                            walkResult = selectHeadDynamically(scratchTree, opts);
+                        } catch (Throwable t) {
+                            LOGGER.error("[SelectHead] partition={}: selectHeadDynamically failed", partition, t);
+                            throw t;
+                        }
+                        headIndices = walkResult.headIndices;
+                        selectThreshold = walkResult.selectThreshold;
+                        splitThreshold = walkResult.splitThreshold;
+                    }
+
+                    float achievedRatio = headIndices.length / (float) totalTupleCount;
+                    LOGGER.info(
+                            "[SelectHead] partition={} sample={} targetHeads={} selected={} achievedRatio={} selectThreshold={} splitThreshold={}",
+                            partition, totalTupleCount, opts.targetHeadCount, headIndices.length, achievedRatio,
+                            selectThreshold, splitThreshold);
+
+                    return new HeadSelectionTaskState(ctx.getJobletContext().getJobId(),
+                            new PartitionedUUID(headSelectionUUID, partition), headIndices, opts.targetHeadCount,
+                            achievedRatio, selectThreshold, splitThreshold);
+                }
 
                 /**
                  * Streams a run file and updates {@code minDist[i]} with the minimum of its current value and the
@@ -1701,183 +2500,426 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Clusters all records in a single run file into (up to) k centroids using k-means++ initialization
-                 * followed by streaming FSCL (Frequency-Sensitive Competitive Learning) refinement. Operates over
-                 * an arbitrary {@link RunFileSource}, so it works for both the root sample file and per-cluster
-                 * child files. Throws if FSCL leaves any cluster empty.
-                 *
-                 * @param recordCount total tuple count in the file (defines the index space and assignment array)
-                 * @param k requested number of clusters (capped to recordCount)
-                 * @param maxIterations retained for signature compatibility; FSCL uses {@code TOPDOWN_FSCL_EPOCHS}
+                 * Emits one real-record centroid per vector in the run file (leaf bag, no further split).
+                 */
+                private ClusteringResult emitAllRecordsAsCentroids(IHyracksTaskContext ctx, RunFileSource source,
+                        int recordCount, FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval,
+                        IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu)
+                        throws HyracksDataException, IOException {
+                    List<double[]> centroids = new ArrayList<>();
+                    int[] assignments = new int[recordCount];
+                    GeneratedRunFileReader in = source.openReader();
+                    try {
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        int idx = 0;
+                        while (in.nextFrame(frame)) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+                            for (int j = 0; j < tupleCount; j++) {
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    if (idx < recordCount) {
+                                        assignments[idx] = centroids.size();
+                                    }
+                                    idx++;
+                                    continue;
+                                }
+                                listAcc.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                double[] point = kmu.createPrimitveList(listAcc);
+                                int cid = centroids.size();
+                                centroids.add(copyVector(point));
+                                if (idx < recordCount) {
+                                    assignments[idx] = cid;
+                                }
+                                idx++;
+                            }
+                        }
+                    } finally {
+                        in.close();
+                    }
+                    return new ClusteringResult(centroids, assignments);
+                }
+
+                /**
+                 * Lambda-balanced assignment: score = distance + lambda * priorCounts[c].
+                 */
+                private double kmeansAssign(IHyracksTaskContext ctx, RunFileSource source, int recordCount,
+                        int[] indexOrder, int batchSize, double[][] centers, int k, int[] priorCounts, double lambda,
+                        boolean updateCenters, int[] outCounts, double[][] centerSums, int[] clusterIdx,
+                        double[] clusterDist, int[] assignments, FrameTupleAccessor fta, FrameTupleReference tuple,
+                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu)
+                        throws HyracksDataException, IOException {
+                    Arrays.fill(outCounts, 0);
+                    if (centerSums != null) {
+                        for (int c = 0; c < k; c++) {
+                            if (centerSums[c] != null) {
+                                Arrays.fill(centerSums[c], 0.0);
+                            }
+                        }
+                    }
+                    Arrays.fill(clusterIdx, -1);
+                    Arrays.fill(clusterDist, Double.POSITIVE_INFINITY);
+                    double totalDist = 0.0;
+                    int limit = Math.min(batchSize, recordCount);
+                    GeneratedRunFileReader in = source.openReader();
+                    try {
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        int idx = 0;
+                        boolean[] inBatch = new boolean[recordCount];
+                        for (int i = 0; i < limit; i++) {
+                            inBatch[indexOrder[i]] = true;
+                        }
+                        while (in.nextFrame(frame)) {
+                            ByteBuffer buffer = frame.getBuffer();
+                            fta.reset(buffer);
+                            int tupleCount = fta.getTupleCount();
+                            for (int j = 0; j < tupleCount; j++) {
+                                if (idx >= recordCount) {
+                                    break;
+                                }
+                                if (!inBatch[idx]) {
+                                    idx++;
+                                    continue;
+                                }
+                                tuple.reset(fta, j);
+                                eval.evaluate(tuple, inputVal);
+                                if (!ATYPETAGDESERIALIZER
+                                        .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()]).isListType()) {
+                                    idx++;
+                                    continue;
+                                }
+                                listAcc.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                                double[] point = kmu.createPrimitveList(listAcc);
+                                int nearest = 0;
+                                double best = Double.POSITIVE_INFINITY;
+                                for (int c = 0; c < k; c++) {
+                                    double dist = calculateDistance(point, centers[c]);
+                                    double score = dist + lambda * priorCounts[c];
+                                    if (score < best) {
+                                        best = score;
+                                        nearest = c;
+                                    }
+                                }
+                                if (assignments != null && idx < assignments.length) {
+                                    assignments[idx] = nearest;
+                                }
+                                outCounts[nearest]++;
+                                totalDist += best;
+                                if (updateCenters && centerSums != null) {
+                                    if (centerSums[nearest] == null) {
+                                        centerSums[nearest] = new double[point.length];
+                                    }
+                                    for (int d = 0; d < point.length; d++) {
+                                        centerSums[nearest][d] += point[d];
+                                    }
+                                    if (best >= clusterDist[nearest]) {
+                                        clusterDist[nearest] = best;
+                                        clusterIdx[nearest] = idx;
+                                    }
+                                } else if (best <= clusterDist[nearest]) {
+                                    clusterDist[nearest] = best;
+                                    clusterIdx[nearest] = idx;
+                                }
+                                idx++;
+                            }
+                        }
+                    } finally {
+                        in.close();
+                    }
+                    return totalDist;
+                }
+
+                private double refineCentersFromSums(double[][] centers, double[][] newCenters, int k, int[] counts,
+                        double[][] centerSums, int[] clusterIdx, int dim) throws HyracksDataException {
+                    int maxCluster = -1;
+                    int maxCount = 0;
+                    for (int c = 0; c < k; c++) {
+                        if (counts[c] > maxCount && counts[c] > 0) {
+                            maxCluster = c;
+                            maxCount = counts[c];
+                        }
+                    }
+                    double diff = 0.0;
+                    for (int c = 0; c < k; c++) {
+                        if (counts[c] == 0 || centerSums[c] == null) {
+                            if (maxCluster >= 0 && clusterIdx[maxCluster] >= 0) {
+                                System.arraycopy(centers[maxCluster], 0, newCenters[c], 0, dim);
+                            } else {
+                                System.arraycopy(centers[c], 0, newCenters[c], 0, dim);
+                            }
+                        } else {
+                            for (int d = 0; d < dim; d++) {
+                                newCenters[c][d] = centerSums[c][d] / counts[c];
+                            }
+                            maybeNormalizeCentroid(newCenters[c]);
+                        }
+                        diff += calculateDistance(centers[c], newCenters[c]);
+                    }
+                    return diff;
+                }
+
+                private float refineLambda(int k, int[] counts, double[] clusterDist, double totalDist, int batchSize) {
+                    int maxCluster = -1;
+                    int maxCount = 0;
+                    for (int c = 0; c < k; c++) {
+                        if (counts[c] > maxCount && counts[c] > 0) {
+                            maxCluster = c;
+                            maxCount = counts[c];
+                        }
+                    }
+                    if (maxCluster < 0 || batchSize <= 0) {
+                        return 0f;
+                    }
+                    float avgDist = (float) (totalDist / batchSize);
+                    float lambda = (float) ((clusterDist[maxCluster] - avgDist) / batchSize);
+                    return Math.max(0f, lambda);
+                }
+
+                private float initCenters(IHyracksTaskContext ctx, RunFileSource source, int recordCount, int k,
+                        int batchSize, int[] indexOrder, double[][] centers, double[][] newCenters, int dim,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAcc, KMeansUtils kmu, Random rand) throws HyracksDataException, IOException {
+                    float adjustedLambda = 0f;
+                    double minClusterDist = Double.POSITIVE_INFINITY;
+                    int[] counts = new int[k];
+                    int[] clusterIdx = new int[k];
+                    double[] clusterDist = new double[k];
+                    double[][] centerSums = new double[k][];
+                    for (int trial = 0; trial < BKT_TRY_ITERS; trial++) {
+                        for (int c = 0; c < k; c++) {
+                            int ridx = rand.nextInt(recordCount);
+                            GeneratedRunFileReader seedReader = source.openReader();
+                            double[] pt;
+                            try {
+                                pt = getPointAtIndex(seedReader, fta, tuple, eval, inputVal, listAcc, kmu, ridx, ctx);
+                            } finally {
+                                seedReader.close();
+                            }
+                            if (pt == null) {
+                                continue;
+                            }
+                            System.arraycopy(pt, 0, centers[c], 0, dim);
+                        }
+                        Arrays.fill(counts, 0);
+                        double totalDist = kmeansAssign(ctx, source, recordCount, indexOrder, batchSize, centers, k,
+                                counts, 0.0, true, counts, centerSums, clusterIdx, clusterDist, null, fta, tuple, eval,
+                                inputVal, listAcc, kmu);
+                        if (totalDist < minClusterDist) {
+                            minClusterDist = totalDist;
+                            for (int c = 0; c < k; c++) {
+                                System.arraycopy(centers[c], 0, newCenters[c], 0, dim);
+                            }
+                            adjustedLambda = refineLambda(k, counts, clusterDist, totalDist, batchSize);
+                        }
+                    }
+                    for (int c = 0; c < k; c++) {
+                        System.arraycopy(newCenters[c], 0, centers[c], 0, dim);
+                    }
+                    return adjustedLambda;
+                }
+
+                private float countStd(int k, int[] counts, int batchSize) {
+                    float avg = batchSize * 1.0f / k;
+                    float var = 0f;
+                    int nonZero = 0;
+                    for (int c = 0; c < k; c++) {
+                        var += (counts[c] - avg) * (counts[c] - avg);
+                        if (counts[c] > 0) {
+                            nonZero++;
+                        }
+                    }
+                    if (nonZero <= 1) {
+                        return Float.MAX_VALUE;
+                    }
+                    return (float) (Math.sqrt(var / k) / avg);
+                }
+
+                private float tryClusteringCountStd(IHyracksTaskContext ctx, RunFileSource source, int recordCount,
+                        int k, float lambdaFactor, int dim, FrameTupleAccessor fta, FrameTupleReference tuple,
+                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu, Random rand)
+                        throws HyracksDataException, IOException {
+                    int batchSize = Math.min(recordCount, BKT_SAMPLES);
+                    int[] indexOrder = new int[recordCount];
+                    for (int i = 0; i < recordCount; i++) {
+                        indexOrder[i] = i;
+                    }
+                    double[][] centers = new double[k][dim];
+                    double[][] newCenters = new double[k][dim];
+                    float adjustedLambda = initCenters(ctx, source, recordCount, k, batchSize, indexOrder, centers,
+                            newCenters, dim, fta, tuple, eval, inputVal, listAcc, kmu, rand);
+                    float originalLambda = 1.0f / lambdaFactor / batchSize;
+                    int[] priorCounts = new int[k];
+                    int[] counts = new int[k];
+                    int[] clusterIdx = new int[k];
+                    double[] clusterDist = new double[k];
+                    double[][] centerSums = new double[k][];
+                    double minClusterDist = Double.POSITIVE_INFINITY;
+                    int noImprovement = 0;
+                    for (int iter = 0; iter < BKT_MAX_ITERS; iter++) {
+                        for (int i = batchSize - 1; i > 0; i--) {
+                            int j = rand.nextInt(i + 1);
+                            int tmp = indexOrder[i];
+                            indexOrder[i] = indexOrder[j];
+                            indexOrder[j] = tmp;
+                        }
+                        float lambda = Math.min(adjustedLambda, originalLambda);
+                        double totalDist = kmeansAssign(ctx, source, recordCount, indexOrder, batchSize, centers, k,
+                                priorCounts, lambda, true, counts, centerSums, clusterIdx, clusterDist, null, fta,
+                                tuple, eval, inputVal, listAcc, kmu);
+                        refineCentersFromSums(centers, newCenters, k, counts, centerSums, clusterIdx, dim);
+                        for (int c = 0; c < k; c++) {
+                            System.arraycopy(newCenters[c], 0, centers[c], 0, dim);
+                        }
+                        System.arraycopy(counts, 0, priorCounts, 0, k);
+                        if (totalDist < minClusterDist) {
+                            minClusterDist = totalDist;
+                            noImprovement = 0;
+                        } else {
+                            noImprovement++;
+                        }
+                        double diff = 0.0;
+                        for (int c = 0; c < k; c++) {
+                            diff += calculateDistance(centers[c], newCenters[c]);
+                        }
+                        if (diff < BKT_CONV_EPS || noImprovement >= BKT_NO_IMPROVE) {
+                            break;
+                        }
+                    }
+                    Arrays.fill(priorCounts, 0);
+                    kmeansAssign(ctx, source, recordCount, indexOrder, batchSize, centers, k, priorCounts, 0.0, false,
+                            counts, null, clusterIdx, clusterDist, null, fta, tuple, eval, inputVal, listAcc, kmu);
+                    return countStd(k, counts, batchSize);
+                }
+
+                private float dynamicFactorSelect(IHyracksTaskContext ctx, RunFileSource source, int recordCount, int k,
+                        int dim, FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval,
+                        IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu, Random rand)
+                        throws HyracksDataException, IOException {
+                    float bestFactor = 100.0f;
+                    float bestStd = Float.MAX_VALUE;
+                    for (float factor = 0.001f; factor <= 1000.0f + 1e-3f; factor *= 10.0f) {
+                        float std = tryClusteringCountStd(ctx, source, recordCount, k, factor, dim, fta, tuple, eval,
+                                inputVal, listAcc, kmu, rand);
+                        if (std < bestStd) {
+                            bestStd = std;
+                            bestFactor = factor;
+                        }
+                    }
+                    LOGGER.info("[TopDown] DynamicFactorSelect: bestLambdaFactor={} countStd={}", bestFactor, bestStd);
+                    return bestFactor;
+                }
+
+                /**
+                 * BKT-style split: sample-optimized lambda-balanced k-means, full assign, real-record pivots.
                  */
                 private ClusteringResult clusterRunFile(IHyracksTaskContext ctx, RunFileSource source, int recordCount,
-                        int k, FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval,
-                        IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu, Random rand, int maxIterations)
+                        int k, float tunedLambdaFactor, FrameTupleAccessor fta, FrameTupleReference tuple,
+                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu, Random rand)
                         throws HyracksDataException, IOException {
                     if (k <= 0 || recordCount <= 0) {
                         return new ClusteringResult(new ArrayList<>(), new int[0]);
                     }
                     int effectiveK = Math.min(k, recordCount);
-                    List<double[]> centroids = new ArrayList<>();
-
-                    // k-means++ seeding using a stored nearest-distance array (O(recordCount) memory).
-                    GeneratedRunFileReader idxReader = source.openReader();
-                    double[] firstCentroid;
-                    try {
-                        firstCentroid = getPointAtIndex(idxReader, fta, tuple, eval, inputVal, listAcc, kmu,
-                                rand.nextInt(recordCount), ctx);
-                    } finally {
-                        idxReader.close();
-                    }
-                    if (firstCentroid == null) {
-                        return new ClusteringResult(new ArrayList<>(), new int[0]);
-                    }
-                    centroids.add(firstCentroid);
-
-                    double[] minDist = new double[recordCount];
-                    Arrays.fill(minDist, Double.POSITIVE_INFINITY);
-                    streamUpdateMinDist(ctx, source, minDist, firstCentroid, fta, tuple, eval, inputVal, listAcc, kmu);
-
-                    while (centroids.size() < effectiveK) {
-                        double total = 0.0;
-                        for (double d : minDist) {
-                            if (d > 0 && !Double.isInfinite(d)) {
-                                total += d;
-                            }
-                        }
-                        if (total <= 0) {
-                            break;
-                        }
-                        double targetMass = rand.nextDouble() * total;
-                        double cumulative = 0.0;
-                        int chosenIdx = -1;
-                        for (int i = 0; i < recordCount; i++) {
-                            double d = minDist[i];
-                            if (d <= 0 || Double.isInfinite(d)) {
-                                continue;
-                            }
-                            cumulative += d;
-                            if (cumulative >= targetMass) {
-                                chosenIdx = i;
-                                break;
-                            }
-                        }
-                        if (chosenIdx < 0) {
-                            break;
-                        }
-                        GeneratedRunFileReader r2 = source.openReader();
-                        double[] newCentroid;
-                        try {
-                            newCentroid = getPointAtIndex(r2, fta, tuple, eval, inputVal, listAcc, kmu, chosenIdx, ctx);
-                        } finally {
-                            r2.close();
-                        }
-                        if (newCentroid == null) {
-                            break;
-                        }
-                        centroids.add(newCentroid);
-                        streamUpdateMinDist(ctx, source, minDist, newCentroid, fta, tuple, eval, inputVal, listAcc,
+                    if (effectiveK == 1) {
+                        return emitAllRecordsAsCentroids(ctx, source, recordCount, fta, tuple, eval, inputVal, listAcc,
                                 kmu);
                     }
 
-                    // Streaming FSCL (Frequency-Sensitive Competitive Learning) refinement. Each point is assigned
-                    // by a balancing penalty score_i = distance(x, c_i) * exp(gamma * (f_i / mu)), where f_i is the
-                    // running headcount of cluster i in this pass and mu = recordCount / k is the fair share. The
-                    // exponential repulsion keeps cluster sizes near mu, avoiding starved or overflowing nodes.
-                    // The distance is the operator's configured metric (euclidean for L2, angular for cosine).
-                    int actualK = centroids.size();
-                    int[] assignments = new int[recordCount];
-                    double mu = actualK > 0 ? (double) recordCount / actualK : recordCount;
-                    if (mu <= 0) {
-                        mu = 1.0;
+                    GeneratedRunFileReader dimProbe = source.openReader();
+                    double[] probe;
+                    try {
+                        probe = getPointAtIndex(dimProbe, fta, tuple, eval, inputVal, listAcc, kmu, 0, ctx);
+                    } finally {
+                        dimProbe.close();
                     }
-                    for (int iter = 0; iter < TOPDOWN_FSCL_EPOCHS; iter++) {
-                        double[][] sums = new double[actualK][];
-                        int[] counts = new int[actualK];
-                        long[] headcount = new long[actualK]; // running f_i accumulated within this epoch
-                        GeneratedRunFileReader in = source.openReader();
-                        try {
-                            VSizeFrame frame = new VSizeFrame(ctx);
-                            int idx = 0;
-                            while (in.nextFrame(frame)) {
-                                ByteBuffer buffer = frame.getBuffer();
-                                fta.reset(buffer);
-                                int tupleCount = fta.getTupleCount();
-                                for (int j = 0; j < tupleCount; j++) {
-                                    tuple.reset(fta, j);
-                                    eval.evaluate(tuple, inputVal);
-                                    if (!ATYPETAGDESERIALIZER
-                                            .deserialize(inputVal.getByteArray()[inputVal.getStartOffset()])
-                                            .isListType()) {
-                                        idx++;
-                                        continue;
-                                    }
-                                    listAcc.reset(inputVal.getByteArray(), inputVal.getStartOffset());
-                                    try {
-                                        double[] point = kmu.createPrimitveList(listAcc);
-                                        int nearest = 0;
-                                        double best = Double.POSITIVE_INFINITY;
-                                        for (int c = 0; c < actualK; c++) {
-                                            double dist = calculateDistance(point, centroids.get(c));
-                                            double penalty = Math.exp(TOPDOWN_FSCL_GAMMA * (headcount[c] / mu));
-                                            double score = dist * penalty;
-                                            if (Double.isNaN(score)) {
-                                                // 0 * Infinity (zero-distance into a saturated cluster); deprioritize.
-                                                score = Double.POSITIVE_INFINITY;
-                                            }
-                                            if (score < best) {
-                                                best = score;
-                                                nearest = c;
-                                            }
-                                        }
-                                        if (idx < recordCount) {
-                                            assignments[idx] = nearest;
-                                        }
-                                        if (sums[nearest] == null) {
-                                            sums[nearest] = new double[point.length];
-                                        }
-                                        for (int d = 0; d < point.length; d++) {
-                                            sums[nearest][d] += point[d];
-                                        }
-                                        counts[nearest]++;
-                                        headcount[nearest]++;
-                                    } catch (IOException e) {
-                                        throw new RuntimeException(e);
-                                    }
-                                    idx++;
-                                }
-                            }
-                        } finally {
-                            in.close();
-                        }
+                    if (probe == null) {
+                        return new ClusteringResult(new ArrayList<>(), new int[0]);
+                    }
+                    int dim = probe.length;
 
-                        // FSCL must keep every cluster populated; an empty cluster breaks the height-balanced
-                        // guarantee, so fail fast rather than silently producing a skewed tree.
-                        for (int c = 0; c < actualK; c++) {
-                            if (counts[c] == 0 || sums[c] == null) {
-                                throw new HyracksDataException("FSCL produced an empty cluster (cluster " + c + " of "
-                                        + actualK + ", recordCount=" + recordCount
-                                        + "); cannot build a height-balanced tree");
-                            }
-                        }
+                    int batchSize = Math.min(recordCount, BKT_SAMPLES);
+                    int[] indexOrder = new int[recordCount];
+                    for (int i = 0; i < recordCount; i++) {
+                        indexOrder[i] = i;
+                    }
+                    double[][] centers = new double[effectiveK][dim];
+                    double[][] newCenters = new double[effectiveK][dim];
+                    float adjustedLambda = initCenters(ctx, source, recordCount, effectiveK, batchSize, indexOrder,
+                            centers, newCenters, dim, fta, tuple, eval, inputVal, listAcc, kmu, rand);
+                    float originalLambda = 1.0f / tunedLambdaFactor / batchSize;
 
-                        boolean converged = true;
-                        for (int c = 0; c < actualK; c++) {
-                            double[] updated = new double[sums[c].length];
-                            for (int d = 0; d < sums[c].length; d++) {
-                                updated[d] = sums[c][d] / counts[c];
-                            }
-                            if (calculateDistance(centroids.get(c), updated) > 1e-4) {
-                                converged = false;
-                            }
-                            maybeNormalizeCentroid(updated);
-                            centroids.set(c, updated);
+                    int[] priorCounts = new int[effectiveK];
+                    int[] counts = new int[effectiveK];
+                    int[] clusterIdx = new int[effectiveK];
+                    double[] clusterDist = new double[effectiveK];
+                    double[][] centerSums = new double[effectiveK][];
+                    double minClusterDist = Double.POSITIVE_INFINITY;
+                    int noImprovement = 0;
+                    for (int iter = 0; iter < BKT_MAX_ITERS; iter++) {
+                        for (int i = batchSize - 1; i > 0; i--) {
+                            int j = rand.nextInt(i + 1);
+                            int tmp = indexOrder[i];
+                            indexOrder[i] = indexOrder[j];
+                            indexOrder[j] = tmp;
                         }
-                        if (converged) {
+                        float lambda = Math.min(adjustedLambda, originalLambda);
+                        double totalDist = kmeansAssign(ctx, source, recordCount, indexOrder, batchSize, centers,
+                                effectiveK, priorCounts, lambda, true, counts, centerSums, clusterIdx, clusterDist,
+                                null, fta, tuple, eval, inputVal, listAcc, kmu);
+                        refineCentersFromSums(centers, newCenters, effectiveK, counts, centerSums, clusterIdx, dim);
+                        for (int c = 0; c < effectiveK; c++) {
+                            System.arraycopy(newCenters[c], 0, centers[c], 0, dim);
+                        }
+                        System.arraycopy(counts, 0, priorCounts, 0, effectiveK);
+                        if (totalDist < minClusterDist) {
+                            minClusterDist = totalDist;
+                            noImprovement = 0;
+                        } else {
+                            noImprovement++;
+                        }
+                        double diff = 0.0;
+                        for (int c = 0; c < effectiveK; c++) {
+                            diff += calculateDistance(centers[c], newCenters[c]);
+                        }
+                        if (diff < BKT_CONV_EPS || noImprovement >= BKT_NO_IMPROVE) {
                             break;
                         }
                     }
-                    return new ClusteringResult(centroids, assignments);
+
+                    int[] assignments = new int[recordCount];
+                    int[] fullOrder = new int[recordCount];
+                    for (int i = 0; i < recordCount; i++) {
+                        fullOrder[i] = i;
+                    }
+                    Arrays.fill(priorCounts, 0);
+                    kmeansAssign(ctx, source, recordCount, fullOrder, recordCount, centers, effectiveK, priorCounts,
+                            0.0, false, counts, null, clusterIdx, clusterDist, assignments, fta, tuple, eval, inputVal,
+                            listAcc, kmu);
+                    logTopDownCountDistribution("BKT full assign: recordCount=" + recordCount + " k=" + effectiveK,
+                            counts);
+
+                    List<double[]> pivots = new ArrayList<>(effectiveK);
+                    for (int c = 0; c < effectiveK; c++) {
+                        if (clusterIdx[c] >= 0) {
+                            GeneratedRunFileReader pr = source.openReader();
+                            double[] pivot;
+                            try {
+                                pivot = getPointAtIndex(pr, fta, tuple, eval, inputVal, listAcc, kmu, clusterIdx[c],
+                                        ctx);
+                            } finally {
+                                pr.close();
+                            }
+                            if (pivot != null) {
+                                pivots.add(copyVector(pivot));
+                                continue;
+                            }
+                        }
+                        pivots.add(copyVector(centers[c]));
+                    }
+                    return new ClusteringResult(pivots, assignments);
                 }
 
                 /**
@@ -1975,81 +3017,28 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Computes the Approach-2 fan-out from the index's real on-disk page geometry: P routing
-                 * centroids fit on one interior page, and an interior node spans P*(1+V) children across its
-                 * primary page plus V overflow pages. Opens the partition's VTree to size a routing entry exactly
-                 * (via the interior frame's tuple writer + page header), so build-time fan-out matches what the
-                 * static-structure layout actually writes.
+                 * BKT-style top-down build: dynamic fan-out (max 32), lambda-balanced splits, real pivots, leaf stop
+                 * when a bag fits on one quantized leaf page.
                  *
-                 * @return a two-element array {P, K}
-                 */
-                private int[] computeFanOut(IHyracksTaskContext ctx, int partition, int dim)
-                        throws HyracksDataException {
-                    int storagePartition = partition;
-                    if (partitionsMap != null && partition < partitionsMap.length && partitionsMap[partition] != null
-                            && partitionsMap[partition].length > 0) {
-                        storagePartition = partitionsMap[partition][0];
-                    }
-                    IIndexDataflowHelper indexHelper =
-                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
-                    indexHelper.open();
-                    try {
-                        IIndex indexInstance = indexHelper.getIndexInstance();
-                        if (!(indexInstance instanceof LSMVTree)) {
-                            throw new HyracksDataException(
-                                    "Top-down VTree build requires an LSMVTree index instance, got: "
-                                            + (indexInstance == null ? "null" : indexInstance.getClass().getName()));
-                        }
-                        LSMVTree lsmVTree = (LSMVTree) indexInstance;
-                        int pageSize = lsmVTree.getBufferCache().getPageSize();
-                        ITreeIndexFrame interiorFrame = lsmVTree.getInteriorFrameFactory().createFrame();
-                        // Representative interior routing entry: [centroidId:int, embedding:double[dim],
-                        // childPageId:int], identical to VTreeStaticStructureBuilder.createEntryTuple (2-field input).
-                        double[] sampleEmbedding = new double[dim];
-                        ITupleReference entry = TupleUtils.createTuple(
-                                new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE,
-                                        DoubleArraySerializerDeserializer.INSTANCE,
-                                        IntegerSerializerDeserializer.INSTANCE },
-                                Integer.valueOf(0), sampleEmbedding, Integer.valueOf(0));
-                        int perEntryBytes = interiorFrame.getBytesRequiredToWriteTuple(entry); // includes the slot
-                        int interiorHeaderSize = interiorFrame.getPageHeaderSize();
-                        int p = HierarchicalClusterStructure.computeP(pageSize, interiorHeaderSize, perEntryBytes);
-                        int k = HierarchicalClusterStructure.computeK(p, TOPDOWN_V_OVERFLOW_PAGES);
-                        return new int[] { p, k };
-                    } finally {
-                        try {
-                            indexHelper.close();
-                        } catch (Exception e) {
-                            // best-effort cleanup; ignore
-                        }
-                    }
-                }
-
-                /**
-                 * Orchestrates the top-down Approach-2 build. Computes the page-fit fan-out (P at the root,
-                 * K = P*(1+V) at interior levels), clusters the sample into P root centroids with k-means++ then
-                 * FSCL, and splits/re-clusters each parent run file level-by-level. Enforces a strict height cap
-                 * (levels 0..{@code TOPDOWN_MAX_LEVEL}) and stops at the first level whose cumulative centroid count
-                 * reaches the target (num_clusters), keeping the overshoot. If any parent run file holds fewer
-                 * records than the interior fan-out K, the build stops and returns the height-balanced tree built so
-                 * far. Throws on a degenerate (early-leaf) clustering that would break the height-balanced guarantee.
+                 * @param headOnlyBuild when true (SPANN BuildHead), lambda is tuned on |H| and {@code num_clusters}
+                 *            early-stop is disabled
                  */
                 private HierarchicalClusterStructure buildTopDownHierarchicalKMeans(IHyracksTaskContext ctx,
-                        MaterializerTaskState sampleState, FrameTupleAccessor fta, FrameTupleReference tuple,
-                        IScalarEvaluator eval, IPointable inputVal, ListAccessor listAcc, KMeansUtils kmu,
-                        int partition, int totalTupleCount) throws HyracksDataException, IOException {
+                        RunFileSource sampleSource, int totalTupleCount, boolean headOnlyBuild, FrameTupleAccessor fta,
+                        FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal, ListAccessor listAcc,
+                        KMeansUtils kmu, int partition) throws HyracksDataException, IOException {
                     HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
                     if (totalTupleCount <= 0) {
+                        LOGGER.info("[TopDown] partition={}: empty input, skipping build", partition);
                         return structure;
                     }
                     Random rand = new Random();
-                    int target = K; // num_clusters
+                    int target = headOnlyBuild ? Integer.MAX_VALUE : K;
+                    String logTag = headOnlyBuild ? "BuildHead" : "TopDown";
 
-                    // Determine embedding dimension (from config or first vector).
                     int dim = vectorDimension;
                     if (dim <= 0) {
-                        GeneratedRunFileReader probe = sampleState.createReader();
-                        probe.open();
+                        GeneratedRunFileReader probe = sampleSource.openReader();
                         double[] firstPoint;
                         try {
                             firstPoint = getPointAtIndex(probe, fta, tuple, eval, inputVal, listAcc, kmu, 0, ctx);
@@ -2057,145 +3046,177 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                             probe.close();
                         }
                         if (firstPoint == null) {
+                            LOGGER.warn("[{}] partition={}: cannot read vector at index 0 from input run file", logTag,
+                                    partition);
                             return structure;
                         }
                         dim = firstPoint.length;
                     }
 
-                    // Page-fit fan-out from the index's real on-disk geometry (P at root, K at interior levels).
-                    int[] fanOut = computeFanOut(ctx, partition, dim);
-                    int pFanOut = fanOut[0];
-                    int kFanOut = fanOut[1];
+                    int leafPageCapacity = computeLeafPageCapacity(ctx, dim);
 
-                    // ---- Root level (level 0): cluster the full sample into P centroids (k-means++ + FSCL) ----
-                    final MaterializerTaskState sampleStateRef = sampleState;
-                    RunFileSource sampleSource = () -> {
-                        GeneratedRunFileReader rd = sampleStateRef.createReader();
-                        rd.open();
-                        return rd;
-                    };
-                    int kRoot = Math.min(pFanOut, totalTupleCount);
-                    ClusteringResult rootResult = clusterRunFile(ctx, sampleSource, totalTupleCount, kRoot, fta, tuple,
-                            eval, inputVal, listAcc, kmu, rand, TOPDOWN_FSCL_EPOCHS);
+                    float tunedLambdaFactor;
+                    if (lambdaFactor > 0) {
+                        tunedLambdaFactor = (float) lambdaFactor;
+                    } else {
+                        int probeK = dynamicK(totalTupleCount, leafPageCapacity);
+                        tunedLambdaFactor = dynamicFactorSelect(ctx, sampleSource, totalTupleCount, probeK, dim, fta,
+                                tuple, eval, inputVal, listAcc, kmu, rand);
+                    }
+
+                    if (headOnlyBuild) {
+                        LOGGER.info(
+                                "[BuildHead] partition={} start: heads={} dim={} leafPageCap={} lambdaFactor={} (tuned on heads) maxLevel={}",
+                                partition, totalTupleCount, dim, leafPageCapacity, tunedLambdaFactor, maxLevel);
+                    } else {
+                        LOGGER.info(
+                                "[TopDown] partition={} start: tuples={} target={} dim={} leafPageCap={} lambdaFactor={} maxLevel={}",
+                                partition, totalTupleCount, target, dim, leafPageCapacity, tunedLambdaFactor, maxLevel);
+                    }
+
+                    String stopReason = null;
+                    int cumulative = 0;
+
+                    // ---- Root level (level 0) ----
+                    ClusteringResult rootResult;
+                    if (totalTupleCount <= leafPageCapacity) {
+                        rootResult = emitAllRecordsAsCentroids(ctx, sampleSource, totalTupleCount, fta, tuple, eval,
+                                inputVal, listAcc, kmu);
+                        stopReason = "root leaf bag";
+                    } else {
+                        int kRoot = dynamicK(totalTupleCount, leafPageCapacity);
+                        rootResult = clusterRunFile(ctx, sampleSource, totalTupleCount, kRoot, tunedLambdaFactor, fta,
+                                tuple, eval, inputVal, listAcc, kmu, rand);
+                    }
                     if (rootResult.centroids.isEmpty()) {
+                        LOGGER.warn(
+                                "[{}] partition={}: root clustering produced 0 centroids (inputTuples={} headOnly={})",
+                                logTag, partition, totalTupleCount, headOnlyBuild);
                         return structure;
                     }
-                    if (rootResult.centroids.size() < kRoot) {
-                        throw new HyracksDataException(
-                                "Top-down root clustering produced " + rootResult.centroids.size()
-                                        + " centroids but expected " + kRoot + " (degenerate/early leaf)");
-                    }
+
                     List<HierarchicalClusterStructure.CentroidInfo> level0 = new ArrayList<>();
                     for (int i = 0; i < rootResult.centroids.size(); i++) {
                         level0.add(
                                 new HierarchicalClusterStructure.CentroidInfo(i, -1, rootResult.centroids.get(i), 0));
                     }
                     structure.levelCentroids.put(0, level0);
-                    int cumulative = rootResult.centroids.size();
+                    cumulative = rootResult.centroids.size();
+                    LOGGER.info("[{}] partition={} level 0 (root): centroids={}", logTag, partition, cumulative);
 
-                    // Root already meets the target, or the height cap is the root itself: root is the leaf level.
-                    if (cumulative >= target || TOPDOWN_MAX_LEVEL <= 0) {
+                    boolean stopAtRoot = maxLevel <= 0 || totalTupleCount <= leafPageCapacity;
+                    if (!headOnlyBuild) {
+                        stopAtRoot = stopAtRoot || cumulative >= target;
+                    }
+                    if (stopAtRoot) {
+                        LOGGER.info("[{}] partition={} stop at root: centroids={} target={}{}", logTag, partition,
+                                cumulative, headOnlyBuild ? "n/a" : target,
+                                stopReason != null ? " reason=" + stopReason : "");
                         return structure;
                     }
 
-                    // Partition the sample into one run file per root cluster.
                     SplitResult rootSplit = splitRunFileByAssignment(ctx, sampleSource, rootResult.centroids, fta,
                             tuple, eval, inputVal, listAcc, kmu);
-                    List<RunFileWriter> parentFiles = rootSplit.files;
-                    List<Integer> parentCounts = rootSplit.counts;
-                    List<RunFileWriter> pendingNextFiles = null; // tracked so failure paths can clean up
+                    List<ParentBatch> queue = new ArrayList<>(rootSplit.files.size());
+                    for (int i = 0; i < rootSplit.files.size(); i++) {
+                        queue.add(new ParentBatch(rootSplit.files.get(i), rootSplit.counts.get(i), i));
+                    }
+                    logTopDownCountDistribution("partition=" + partition + " root split", rootSplit.counts);
 
                     try {
                         int level = 1;
-                        while (level <= TOPDOWN_MAX_LEVEL) {
-                            // Feasibility: every parent file must hold at least K records to fan out uniformly. If
-                            // any cannot, stop the entire build and keep the height-balanced tree built so far.
-                            boolean feasible = true;
-                            for (int p = 0; p < parentFiles.size(); p++) {
-                                RunFileWriter pf = parentFiles.get(p);
-                                int recCount = parentCounts.get(p);
-                                if (pf == null || recCount < kFanOut) {
-                                    feasible = false;
-                                    break;
-                                }
-                            }
-                            if (!feasible) {
-                                deleteRunFiles(parentFiles);
-                                break;
-                            }
+                        while (level <= maxLevel && !queue.isEmpty()) {
+                            List<HierarchicalClusterStructure.CentroidInfo> levelInfo = new ArrayList<>();
+                            List<ParentBatch> nextQueue = new ArrayList<>();
+                            int localId = 0;
 
-                            // Cluster each parent file into exactly K centroids (k-means++ + FSCL).
-                            List<List<double[]>> perParentCentroids = new ArrayList<>(parentFiles.size());
-                            int childCount = 0;
-                            for (int p = 0; p < parentFiles.size(); p++) {
-                                final RunFileWriter pf = parentFiles.get(p);
-                                int recCount = parentCounts.get(p);
+                            for (ParentBatch batch : queue) {
+                                if (batch.file == null || batch.recCount <= 0) {
+                                    continue;
+                                }
                                 RunFileSource src = () -> {
-                                    GeneratedRunFileReader rd = pf.createReader();
+                                    GeneratedRunFileReader rd = batch.file.createReader();
                                     rd.open();
                                     return rd;
                                 };
-                                ClusteringResult res = clusterRunFile(ctx, src, recCount, kFanOut, fta, tuple, eval,
-                                        inputVal, listAcc, kmu, rand, TOPDOWN_FSCL_EPOCHS);
-                                if (res.centroids.size() < kFanOut) {
-                                    throw new HyracksDataException("Top-down clustering produced "
-                                            + res.centroids.size() + " centroids but expected " + kFanOut + " at level "
-                                            + level + " (degenerate/early leaf)");
+
+                                if (batch.recCount <= leafPageCapacity) {
+                                    ClusteringResult leafRes = emitAllRecordsAsCentroids(ctx, src, batch.recCount, fta,
+                                            tuple, eval, inputVal, listAcc, kmu);
+                                    for (double[] c : leafRes.centroids) {
+                                        levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId++,
+                                                batch.parentClusterId, c, level));
+                                    }
+                                    batch.file.getFileReference().delete();
+                                    continue;
                                 }
-                                perParentCentroids.add(res.centroids);
-                                childCount += res.centroids.size();
+
+                                int kSplit = dynamicK(batch.recCount, leafPageCapacity);
+                                LOGGER.info("[TopDown] partition={} level {} parent={}: recCount={} -> dynamicK={}",
+                                        partition, level, batch.parentClusterId, batch.recCount, kSplit);
+                                ClusteringResult res = clusterRunFile(ctx, src, batch.recCount, kSplit,
+                                        tunedLambdaFactor, fta, tuple, eval, inputVal, listAcc, kmu, rand);
+                                int childBase = localId;
+                                for (double[] c : res.centroids) {
+                                    levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId++,
+                                            batch.parentClusterId, c, level));
+                                }
+                                SplitResult sp = splitRunFileByAssignment(ctx, src, res.centroids, fta, tuple, eval,
+                                        inputVal, listAcc, kmu);
+                                for (int i = 0; i < sp.files.size(); i++) {
+                                    nextQueue.add(new ParentBatch(sp.files.get(i), sp.counts.get(i), childBase + i));
+                                }
+                                batch.file.getFileReference().delete();
                             }
 
-                            // Store this level's centroids grouped by parent (parents ascending); the parent position
-                            // index is the parentClusterId, preserving the downstream ordering invariant.
-                            List<HierarchicalClusterStructure.CentroidInfo> levelInfo = new ArrayList<>(childCount);
-                            int localId = 0;
-                            for (int p = 0; p < perParentCentroids.size(); p++) {
-                                for (double[] c : perParentCentroids.get(p)) {
-                                    levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId, p, c, level));
-                                    localId++;
-                                }
+                            if (levelInfo.isEmpty()) {
+                                break;
                             }
                             structure.levelCentroids.put(level, levelInfo);
-                            cumulative = childCount;
+                            cumulative = levelInfo.size();
+                            LOGGER.info("[{}] partition={} built level {}: centroids={} cumulative={} target={}",
+                                    logTag, partition, level, levelInfo.size(), cumulative,
+                                    headOnlyBuild ? "n/a" : target);
 
-                            // Stop at the first level reaching the target (keep overshoot) or the strict height cap.
-                            if (cumulative >= target || level >= TOPDOWN_MAX_LEVEL) {
-                                deleteRunFiles(parentFiles);
+                            boolean stopLevel = level >= maxLevel;
+                            if (!headOnlyBuild && cumulative >= target) {
+                                stopLevel = true;
+                                stopReason = "target reached at level " + level;
+                            } else if (stopLevel) {
+                                stopReason = "height cap at level " + level;
+                            }
+                            if (stopLevel) {
+                                LOGGER.info("[{}] partition={} stop: {}", logTag, partition, stopReason);
+                                for (ParentBatch nb : nextQueue) {
+                                    if (nb.file != null) {
+                                        nb.file.getFileReference().delete();
+                                    }
+                                }
                                 break;
                             }
 
-                            // Split each parent file into K child files for the next level, preserving child order so
-                            // the i-th child file aligns with the i-th centroid stored at this level.
-                            List<RunFileWriter> nextFiles = new ArrayList<>(childCount);
-                            List<Integer> nextCounts = new ArrayList<>(childCount);
-                            pendingNextFiles = nextFiles; // visible to finally if a split throws mid-level
-                            for (int p = 0; p < parentFiles.size(); p++) {
-                                final RunFileWriter pf = parentFiles.get(p);
-                                List<double[]> centroids = perParentCentroids.get(p);
-                                RunFileSource src = () -> {
-                                    GeneratedRunFileReader rd = pf.createReader();
-                                    rd.open();
-                                    return rd;
-                                };
-                                SplitResult sp = splitRunFileByAssignment(ctx, src, centroids, fta, tuple, eval,
-                                        inputVal, listAcc, kmu);
-                                nextFiles.addAll(sp.files);
-                                nextCounts.addAll(sp.counts);
-                            }
-
-                            // Done with this level's parent files.
-                            deleteRunFiles(parentFiles);
-                            parentFiles = nextFiles;
-                            parentCounts = nextCounts;
-                            pendingNextFiles = null;
+                            queue = nextQueue;
                             level++;
                         }
                     } finally {
-                        // Best-effort cleanup of any intermediate run files still around (exception or final leaf).
-                        deleteRunFiles(parentFiles);
-                        deleteRunFiles(pendingNextFiles);
+                        for (ParentBatch batch : queue) {
+                            if (batch.file != null) {
+                                try {
+                                    batch.file.getFileReference().delete();
+                                } catch (Exception e) {
+                                    // best-effort
+                                }
+                            }
+                        }
                     }
+
+                    int maxStoredLevel = -1;
+                    for (Integer lvl : structure.levelCentroids.keySet()) {
+                        maxStoredLevel = Math.max(maxStoredLevel, lvl);
+                    }
+                    LOGGER.info("[{}] partition={} complete: levels={} leafLevel={} lastLevelCentroids={} target={}{}",
+                            logTag, partition, structure.getNumLevels(), maxStoredLevel, cumulative,
+                            headOnlyBuild ? "n/a" : target, stopReason != null ? " stopReason=" + stopReason : "");
 
                     return structure;
                 }
@@ -2442,6 +3463,36 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     return new ClusteringResult(resultCentroids, assignments);
+                }
+
+                private void logTopDownCountDistribution(String label, List<Integer> counts) {
+                    if (counts == null || counts.isEmpty()) {
+                        LOGGER.info("[TopDown] {}: counts=(empty)", label);
+                        return;
+                    }
+                    int[] arr = new int[counts.size()];
+                    for (int i = 0; i < counts.size(); i++) {
+                        arr[i] = counts.get(i);
+                    }
+                    logTopDownCountDistribution(label, arr);
+                }
+
+                private void logTopDownCountDistribution(String label, int[] counts) {
+                    if (counts == null || counts.length == 0) {
+                        LOGGER.info("[TopDown] {}: counts=(empty)", label);
+                        return;
+                    }
+                    int min = Integer.MAX_VALUE;
+                    int max = Integer.MIN_VALUE;
+                    long sum = 0;
+                    for (int c : counts) {
+                        min = Math.min(min, c);
+                        max = Math.max(max, c);
+                        sum += c;
+                    }
+                    double mean = (double) sum / counts.length;
+                    LOGGER.info("[TopDown] {}: buckets={} min={} max={} sum={} mean={} counts={}", label, counts.length,
+                            min, max, sum, mean, Arrays.toString(counts));
                 }
 
             };

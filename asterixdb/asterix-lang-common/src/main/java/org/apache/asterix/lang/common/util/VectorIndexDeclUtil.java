@@ -95,7 +95,7 @@ public class VectorIndexDeclUtil {
         for (String name : node.getFieldNames()) {
             if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
                 throw new CompilationException("Failed to create vector index. Unknown field `" + name
-                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon");
+                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon, num_clusters");
             }
         }
     }

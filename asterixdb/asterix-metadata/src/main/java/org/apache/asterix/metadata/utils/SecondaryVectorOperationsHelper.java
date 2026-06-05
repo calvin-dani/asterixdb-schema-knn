@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
+import org.apache.asterix.common.config.CompilerProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.OptimizationConfUtil;
 import org.apache.asterix.common.context.ITransactionSubsystemProvider;
@@ -106,8 +107,44 @@ import org.apache.hyracks.storage.am.lsm.vector.dataflow.QuantizedIndexCreateOpe
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
+
+    private static final Logger LOGGER = LogManager.getLogger(SecondaryVectorOperationsHelper.class);
+
+    /**
+     * BKT-style top-down tuning resolved from session {@code SET} parameters (see {@link CompilerProperties}).
+     */
+    private static final class TopDownTuning {
+        final int quantizationBits;
+        final double lambdaFactor;
+        final int maxLevel;
+
+        TopDownTuning(int quantizationBits, double lambdaFactor, int maxLevel) {
+            this.quantizationBits = quantizationBits;
+            this.lambdaFactor = lambdaFactor;
+            this.maxLevel = maxLevel;
+        }
+    }
+
+    /**
+     * SPANN SelectHead + BuildHead tuning from session {@code SET} parameters (see {@link CompilerProperties}).
+     */
+    private static final class SelectHeadTuning {
+        final boolean enabled;
+        final double headRatio;
+        final int headCount;
+        final String selectType;
+
+        SelectHeadTuning(boolean enabled, double headRatio, int headCount, String selectType) {
+            this.enabled = enabled;
+            this.headRatio = headRatio;
+            this.headCount = headCount;
+            this.selectType = selectType;
+        }
+    }
 
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
@@ -183,8 +220,117 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         return sampleSize;
     }
 
-    private static boolean useFullScanForTrainList(int sampleSize) {
-        return sampleSize < TRAIN_LIST_MIN_SAMPLE_SIZE;
+    private TopDownTuning resolveTopDownTuning(int quantizationBits) {
+        double lambdaFactor = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR;
+        int maxLevel = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL;
+
+        String lambdaStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY);
+        if (lambdaStr != null && !lambdaStr.trim().isEmpty()) {
+            try {
+                double parsed = Double.parseDouble(lambdaStr.trim());
+                if (parsed > 0) {
+                    lambdaFactor = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using auto-tune (default)",
+                            CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY, lambdaStr);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using auto-tune (default)",
+                        CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY, lambdaStr);
+            }
+        }
+        
+
+        String maxLevelStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY);
+        if (maxLevelStr != null && !maxLevelStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(maxLevelStr.trim());
+                if (parsed >= 0) {
+                    maxLevel = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}",
+                            CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY, maxLevelStr, maxLevel);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY, maxLevelStr, maxLevel);
+            }
+        }
+
+        if (lambdaFactor != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR
+                || maxLevel != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL) {
+            LOGGER.info("Top-down BKT tuning from SET: lambdaFactor={} maxLevel={} quantizationBits={}", lambdaFactor,
+                    maxLevel, quantizationBits);
+        }
+
+        return new TopDownTuning(quantizationBits, lambdaFactor, maxLevel);
+    }
+
+    private SelectHeadTuning resolveSelectHeadTuning() {
+        boolean enabled = true;
+        double headRatio = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_HEAD_RATIO;
+        int headCount = -1;
+        String selectType = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_SELECT_HEAD_TYPE;
+
+        String enabledStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_ENABLED_KEY);
+        if (enabledStr != null && !enabledStr.trim().isEmpty()) {
+            enabled = Boolean.parseBoolean(enabledStr.trim());
+        }
+
+        String headRatioStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY);
+        if (headRatioStr != null && !headRatioStr.trim().isEmpty()) {
+            try {
+                double parsed = Double.parseDouble(headRatioStr.trim());
+                if (parsed > 0 && parsed <= 1) {
+                    headRatio = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}",
+                            CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY, headRatioStr, headRatio);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY, headRatioStr, headRatio);
+            }
+        }
+
+        String headCountStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY);
+        if (headCountStr != null && !headCountStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(headCountStr.trim());
+                if (parsed > 0) {
+                    headCount = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using unset (ratio only)",
+                            CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY, headCountStr);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using unset (ratio only)",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY, headCountStr);
+            }
+        }
+
+        String selectTypeStr = (String) metadataProvider.getConfig()
+                .get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY);
+        if (selectTypeStr != null && !selectTypeStr.trim().isEmpty()) {
+            String normalized = selectTypeStr.trim().toLowerCase(Locale.ROOT);
+            if ("bkt".equals(normalized) || "random".equals(normalized)) {
+                selectType = normalized;
+            } else {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY, selectTypeStr, selectType);
+            }
+        }
+
+        if (enabled) {
+            LOGGER.info("SelectHead + BuildHead from SET: enabled=true headRatio={} headCount={} selectType={}",
+                    headRatio, headCount, selectType);
+        }
+        return new SelectHeadTuning(enabled, headRatio, headCount, selectType);
     }
 
     @Override
@@ -313,9 +459,27 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION ======
 
+        //        System.err.println("=== RECORD DESCRIPTOR COMPARISON ===");
+
+        // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
+
+        // 1. K-means operator
+        //        System.err.println("🔧 CREATING HIERARCHICAL K-MEANS OPERATOR");
+        UUID materializedDataUUID = UUID.randomUUID();
+        UUID scalarValuesUUID = UUID.randomUUID();
+        UUID headSelectionUUID = UUID.randomUUID();
+        String qLabel = resolveEffectiveQuantizationLabel(
+                withObjectNode != null ? withObjectNode.getOptionalString("quantization", null) : null);
+        int quantizationBits = bitsForQuantizationLabel(qLabel);
+        TopDownTuning topDownTuning = resolveTopDownTuning(quantizationBits);
+        SelectHeadTuning selectHeadTuning = resolveSelectHeadTuning();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, tupleCountUUID,new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, distanceMetric, vectorDimension, topDown);
+                        sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
+                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, distanceMetric, vectorDimension,
+                        topDown, topDownTuning.quantizationBits, topDownTuning.lambdaFactor, topDownTuning.maxLevel,
+                        headSelectionUUID, selectHeadTuning.enabled, selectHeadTuning.headRatio,
+                        selectHeadTuning.headCount, selectHeadTuning.selectType);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
