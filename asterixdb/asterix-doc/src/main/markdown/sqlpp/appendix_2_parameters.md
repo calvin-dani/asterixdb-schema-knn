@@ -99,25 +99,45 @@ If there is no user-provided suffix, "B" is the default suffix. See the followin
 
 ## <a id="Vector_topdown_parameters">Vector index top-down build parameters</a>
 
-These session parameters tune the top-down FSCL hierarchical k-means used during **VTREE index static-structure build**.
-They apply only when `SET` appears **before** `CREATE INDEX` in the same request. Defaults match the built-in
-constants when SET is omitted.
+These session parameters tune the BKT-style top-down hierarchical clustering used during **VTREE index static-structure
+build**. They apply only when `SET` appears **before** `CREATE INDEX` in the same request.
 
-* **`compiler.vector.topdown.v`**: overflow pages per interior routing node (default `5`). Interior fan-out is
-  `K = P * (1 + V)` where `P` is the root page-fit fan-out.
+* **`compiler.vector.topdown.lambdaFactor`**: optional fixed balance factor for lambda-balanced k-means. When omitted,
+  the build auto-tunes λ once per partition (SPANN `DynamicFactorSelect`). Set a positive value (e.g. `100`) to fix λ.
 
-* **`compiler.vector.topdown.gamma`**: FSCL structural stiffness (default `3.0`). Higher values push more uniform
-  cluster sizes during training-sample assignment.
+* **`compiler.vector.topdown.maxlevel`**: strict height cap as deepest level index (default `4`, i.e. levels `0..4`).
 
-* **`compiler.vector.topdown.maxlevel`**: strict height cap as deepest level index (default `4`, i.e. height 5 with
-  levels `0..4`).
+* **`compiler.vector.topdown.v`** and **`compiler.vector.topdown.gamma`**: deprecated; no effect on the current BKT-style
+  top-down build (fan-out is dynamic, capped at 32, with lambda balancing instead of FSCL).
 
 ##### Example
 
-    SET `compiler.vector.topdown.v` "5";
-    SET `compiler.vector.topdown.gamma` "3.0";
+    SET `compiler.vector.topdown.lambdaFactor` "100";
     SET `compiler.vector.topdown.maxlevel` "4";
 
     CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
-    WITH {"dimension": 384, "similarity": "cosine", "num_clusters": 157, "train_list_fraction": 0.1};
+    WITH {"dimension": 384, "similarity": "cosine", "num_clusters": 157, "quantization": "SQ8"};
+
+## <a id="Vector_selecthead_parameters">Vector index SelectHead / BuildHead parameters</a>
+
+These session parameters control SPANN-style **SelectHead** + **BuildHead** during VTREE static-structure build.
+By default, SelectHead is **enabled** with BKT head selection; the routing tree is built from head vectors only
+(`num_clusters` is ignored for structure stop). Use `SET` **before** `CREATE INDEX` in the same request.
+
+* **`compiler.vector.selecthead.enabled`**: `true` (default) to run SelectHead + BuildHead; `false` for full-sample top-down.
+
+* **`compiler.vector.selecthead.headRatio`**: target fraction of sample records to select as heads (default `0.15`).
+
+* **`compiler.vector.selecthead.headCount`**: optional explicit head count; when set, overrides `headRatio`.
+
+* **`compiler.vector.selecthead.selectType`**: `bkt` (default) or `random`.
+
+* **Lambda**: BuildHead re-tunes `compiler.vector.topdown.lambdaFactor` on the head subset when that SET value is omitted.
+
+##### Example
+
+    SET `compiler.vector.selecthead.headRatio` "0.2";
+
+    CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
+    WITH {"dimension": 384, "similarity": "euclidean", "num_clusters": 1000, "quantization": "SQ8"};
 
