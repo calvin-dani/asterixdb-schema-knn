@@ -18,6 +18,9 @@
  */
 package org.apache.hyracks.storage.am.vector.utils;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,12 +29,8 @@ import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializerDeserializer;
-import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDeserializer;
-import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
@@ -53,6 +52,9 @@ import org.apache.logging.log4j.Logger;
 public class VTreeNavigationUtils {
 
     private static final Logger LOGGER = LogManager.getLogger();
+
+    /** Upper bound on routing embedding dimension when deserializing index tuples (guards corrupt pointers). */
+    private static final int MAX_ROUTING_EMBEDDING_DIMENSION = 32768;
 
     /**
      * Find the closest centroid by traversing the tree from root to leaf,
@@ -137,19 +139,52 @@ public class VTreeNavigationUtils {
     }
 
     /**
-     * Extract centroid from an interior frame tuple (format: <cid, centroid, child_ptr>).
-     * Uses TupleUtils.deserializeTuple() which correctly handles TypeAwareTupleWriter's
-     * VarLengthInt field size encoding.
+     * Extract the routing embedding from field 1 of an index tuple.
+     * Interior: {@code <cid, embedding, child_ptr>}; leaf (quantized): {@code <cid, embedding, quantizedBytes, metadataPtr>}.
+     * Only field 1 is deserialized (never field 2+), with a bounded array length check.
+     */
+    private static double[] extractCentroidEmbedding(ITreeIndexTupleReference tuple) throws HyracksDataException {
+        if (tuple.getFieldCount() < 2) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                    "Routing tuple has fewer than 2 fields (fieldCount=" + tuple.getFieldCount() + ")");
+        }
+        return deserializeBoundedDoubleArray(tuple.getFieldData(1), tuple.getFieldStart(1), tuple.getFieldLength(1),
+                MAX_ROUTING_EMBEDDING_DIMENSION);
+    }
+
+    private static double[] deserializeBoundedDoubleArray(byte[] data, int start, int length, int maxDim)
+            throws HyracksDataException {
+        if (length < 4) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Embedding field too short: " + length);
+        }
+        try {
+            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data, start, length));
+            int len = dis.readInt();
+            if (len <= 0 || len > maxDim) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                        "Invalid routing embedding length: " + len + " (max " + maxDim + ")");
+            }
+            long requiredBytes = 4L + (long) len * 8;
+            if (length < requiredBytes) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                        "Embedding field length " + length + " < declared " + requiredBytes + " bytes");
+            }
+            double[] array = new double[len];
+            for (int i = 0; i < len; i++) {
+                array[i] = dis.readDouble();
+            }
+            return array;
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    /**
+     * Extract centroid from an interior frame tuple (format: {@code <cid, centroid, child_ptr>}).
      */
     private static double[] extractCentroidFromInteriorTuple(ITreeIndexTupleReference tuple)
             throws HyracksDataException {
-        ISerializerDeserializer<?>[] fieldSerdes = new ISerializerDeserializer<?>[3];
-        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
-        fieldSerdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
-        fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE;
-
-        Object[] fieldValues = TupleUtils.deserializeTuple(tuple, fieldSerdes);
-        return (double[]) fieldValues[1];
+        return extractCentroidEmbedding(tuple);
     }
 
     /**
@@ -271,7 +306,7 @@ public class VTreeNavigationUtils {
                     try {
                         ITreeIndexTupleReference frameTuple = currentFrame.createTupleReference();
                         frameTuple.resetByTupleIndex(currentFrame, i);
-                        double[] centroid = extractCentroidFromInteriorTuple(frameTuple);
+                        double[] centroid = extractCentroidEmbedding(frameTuple);
                         int centroidId = currentFrame.getCentroidId(i);
                         long directoryPageId = currentFrame.getMetadataPagePointer(i);
 
