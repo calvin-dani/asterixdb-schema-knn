@@ -825,6 +825,53 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         return new MaterializedRunFileSource(writer, written);
     }
 
+    /**
+     * Materialize a single training-format tuple (field 0 = embedding) for childless-centroid promotion.
+     * Non-embedding fields are copied from {@code prototypeTuple} so the run file matches {@code recDesc}.
+     */
+    private static RunFileWriter materializeSingleVectorRunFile(IHyracksTaskContext ctx,
+            FrameTupleReference prototypeTuple, double[] embedding, RecordDescriptor recDesc)
+            throws HyracksDataException, IOException {
+        FileReference file = ctx.getJobletContext().createManagedWorkspaceFile("topdown-promote");
+        RunFileWriter writer = new RunFileWriter(file, ctx.getIoManager());
+        writer.open();
+        try {
+            int nFields = recDesc.getFieldCount();
+            ArrayTupleBuilder tupleBuilder = new ArrayTupleBuilder(nFields);
+            tupleBuilder.reset();
+
+            OrderedListBuilder listBuilder = new OrderedListBuilder();
+            listBuilder.reset(new AOrderedListType(ADOUBLE, "embedding"));
+            ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
+            AMutableDouble aDouble = new AMutableDouble(0.0);
+            for (double v : embedding) {
+                aDouble.setValue(v);
+                storage.reset();
+                storage.getDataOutput().writeByte(ATypeTag.DOUBLE.serialize());
+                ADoubleSerializerDeserializer.INSTANCE.serialize(aDouble, storage.getDataOutput());
+                listBuilder.addItem(storage);
+            }
+            storage.reset();
+            listBuilder.write(storage.getDataOutput(), true);
+            tupleBuilder.addField(storage.getByteArray(), 0, storage.getLength());
+
+            for (int f = 1; f < nFields; f++) {
+                tupleBuilder.addField(prototypeTuple.getFieldData(f), prototypeTuple.getFieldStart(f),
+                        prototypeTuple.getFieldLength(f));
+            }
+
+            FrameTupleAppender appender = new FrameTupleAppender(new VSizeFrame(ctx));
+            if (!appender.append(tupleBuilder.getFieldEndOffsets(), tupleBuilder.getByteArray(), 0,
+                    tupleBuilder.getSize())) {
+                throw new HyracksDataException("Tuple too large to fit in a frame during single-vector promotion");
+            }
+            appender.write(writer, true);
+        } finally {
+            writer.close();
+        }
+        return writer;
+    }
+
     private static boolean isSortedAscending(int[] values) {
         for (int i = 1; i < values.length; i++) {
             if (values[i] < values[i - 1]) {
@@ -2499,6 +2546,26 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                 }
 
+                /** Read the first tuple from a run file as a template for non-embedding fields in promotion batches. */
+                private FrameTupleReference readPrototypeTuple(IHyracksTaskContext ctx, RunFileSource source,
+                        FrameTupleAccessor fta, FrameTupleReference tuple) throws HyracksDataException, IOException {
+                    GeneratedRunFileReader in = source.openReader();
+                    try {
+                        VSizeFrame frame = new VSizeFrame(ctx);
+                        if (!in.nextFrame(frame)) {
+                            throw new HyracksDataException("Cannot read prototype tuple from empty run file");
+                        }
+                        fta.reset(frame.getBuffer());
+                        if (fta.getTupleCount() <= 0) {
+                            throw new HyracksDataException("Cannot read prototype tuple from empty frame");
+                        }
+                        tuple.reset(fta, 0);
+                        return tuple;
+                    } finally {
+                        in.close();
+                    }
+                }
+
                 /**
                  * Emits one real-record centroid per vector in the run file (leaf bag, no further split).
                  */
@@ -3104,7 +3171,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     cumulative = rootResult.centroids.size();
                     LOGGER.info("[{}] partition={} level 0 (root): centroids={}", logTag, partition, cumulative);
 
-                    boolean stopAtRoot = maxLevel <= 0 || totalTupleCount <= leafPageCapacity;
+                    boolean stopAtRoot = maxLevel <= 0;
                     if (!headOnlyBuild) {
                         stopAtRoot = stopAtRoot || cumulative >= target;
                     }
@@ -3115,13 +3182,29 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         return structure;
                     }
 
-                    SplitResult rootSplit = splitRunFileByAssignment(ctx, sampleSource, rootResult.centroids, fta,
-                            tuple, eval, inputVal, listAcc, kmu);
-                    List<ParentBatch> queue = new ArrayList<>(rootSplit.files.size());
-                    for (int i = 0; i < rootSplit.files.size(); i++) {
-                        queue.add(new ParentBatch(rootSplit.files.get(i), rootSplit.counts.get(i), i));
+                    List<ParentBatch> queue;
+                    if (totalTupleCount <= leafPageCapacity) {
+                        FrameTupleReference prototypeTuple = readPrototypeTuple(ctx, sampleSource, fta, tuple);
+                        queue = new ArrayList<>(rootResult.centroids.size());
+                        int promoted = 0;
+                        for (int i = 0; i < rootResult.centroids.size(); i++) {
+                            RunFileWriter promo = materializeSingleVectorRunFile(ctx, prototypeTuple,
+                                    rootResult.centroids.get(i), secondaryRecDesc);
+                            queue.add(new ParentBatch(promo, 1, i));
+                            promoted++;
+                        }
+                        LOGGER.info(
+                                "[{}/Promote] partition={} level=0 root leaf-bag: centroids={} promoted={} (maxLevel={})",
+                                logTag, partition, rootResult.centroids.size(), promoted, maxLevel);
+                    } else {
+                        SplitResult rootSplit = splitRunFileByAssignment(ctx, sampleSource, rootResult.centroids, fta,
+                                tuple, eval, inputVal, listAcc, kmu);
+                        queue = new ArrayList<>(rootSplit.files.size());
+                        for (int i = 0; i < rootSplit.files.size(); i++) {
+                            queue.add(new ParentBatch(rootSplit.files.get(i), rootSplit.counts.get(i), i));
+                        }
+                        logTopDownCountDistribution("partition=" + partition + " root split", rootSplit.counts);
                     }
-                    logTopDownCountDistribution("partition=" + partition + " root split", rootSplit.counts);
 
                     try {
                         int level = 1;
@@ -3143,9 +3226,24 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 if (batch.recCount <= leafPageCapacity) {
                                     ClusteringResult leafRes = emitAllRecordsAsCentroids(ctx, src, batch.recCount, fta,
                                             tuple, eval, inputVal, listAcc, kmu);
+                                    FrameTupleReference prototypeTuple = readPrototypeTuple(ctx, src, fta, tuple);
+                                    int promotedCount = 0;
                                     for (double[] c : leafRes.centroids) {
-                                        levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId++,
+                                        int idAtLevel = localId++;
+                                        levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(idAtLevel,
                                                 batch.parentClusterId, c, level));
+                                        if (level < maxLevel) {
+                                            RunFileWriter promo = materializeSingleVectorRunFile(ctx, prototypeTuple, c,
+                                                    secondaryRecDesc);
+                                            nextQueue.add(new ParentBatch(promo, 1, idAtLevel));
+                                            promotedCount++;
+                                        }
+                                    }
+                                    if (promotedCount > 0) {
+                                        LOGGER.info(
+                                                "[{}/Promote] partition={} level={} parent={} leaf-bag centroids={} promoted={}",
+                                                logTag, partition, level, batch.parentClusterId,
+                                                leafRes.centroids.size(), promotedCount);
                                     }
                                     batch.file.getFileReference().delete();
                                     continue;

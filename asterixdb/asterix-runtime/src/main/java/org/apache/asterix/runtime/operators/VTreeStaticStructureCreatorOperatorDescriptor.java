@@ -71,6 +71,7 @@ import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndex;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMComponentId;
+import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkLoader;
 import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTreeDiskComponent;
@@ -95,6 +96,15 @@ import org.apache.logging.log4j.Logger;
 public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOperatorDescriptor {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Optional debug dump of the built VTree via BFS. Disabled by default — full-tree logging can OOM on large
+     * indexes. Enable with JVM flag {@code -Dasterix.vtree.bfs.print=true} (output is capped).
+     */
+    private static final boolean ENABLE_VTREE_BFS_PRINT =
+            Boolean.parseBoolean(System.getProperty("asterix.vtree.bfs.print", "false"));
+    private static final int BFS_PRINT_MAX_PAGES = 16;
+    private static final int BFS_PRINT_MAX_TUPLES = 64;
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final int maxEntriesPerPage;
     private final float fillFactor;
@@ -601,6 +611,18 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                         LOGGER.info("Static structure finalized on storage partition {} ({} tuples)", storagePartition,
                                 totalTuplesProcessed);
 
+                        // Optional capped BFS debug dump (disabled by default; see ENABLE_VTREE_BFS_PRINT)
+                        if (ENABLE_VTREE_BFS_PRINT && storagePartition == storagePartitions[0]) {
+                            try {
+                                LSMVTreeDiskComponent component =
+                                        (LSMVTreeDiskComponent) ((LSMIndexDiskComponentBulkLoader) partitionBulkLoader)
+                                                .getComponent();
+                                printStaticStructureBFS(component, null);
+                            } catch (Throwable t) {
+                                LOGGER.warn("BFS structure print failed (non-fatal)", t);
+                            }
+                        }
+
                     } catch (Exception e) {
                         throw HyracksDataException.create(e);
                     } finally {
@@ -643,8 +665,13 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
 
                     int visitedPages = 0;
                     long processedTuples = 0L;
+                    boolean truncated = false;
 
                     while (!queue.isEmpty()) {
+                        if (visitedPages >= BFS_PRINT_MAX_PAGES) {
+                            truncated = true;
+                            break;
+                        }
                         int[] entry = queue.poll();
                         int currentPageId = entry[0];
                         int level = entry[1];
@@ -661,6 +688,10 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                                 LOGGER.info("=== LEVEL {} | PAGE {} | TYPE: LEAF ===", level, currentPageId);
                                 int tupleCount = leafFrame.getTupleCount();
                                 for (int i = 0; i < tupleCount; i++) {
+                                    if (processedTuples >= BFS_PRINT_MAX_TUPLES) {
+                                        truncated = true;
+                                        break;
+                                    }
                                     try {
                                         ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
                                         frameTuple.resetByTupleIndex(leafFrame, i);
@@ -687,12 +718,14 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                                     }
                                 }
 
-                                // Only follow next leaf if overflow flag is set
-                                boolean hasOverflow = leafFrame.getOverflowFlagBit();
-                                if (hasOverflow) {
-                                    int nextLeaf = leafFrame.getNextLeaf();
-                                    if (visited.add(nextLeaf)) {
-                                        queue.add(new int[] { nextLeaf, level });
+                                if (!truncated) {
+                                    // Only follow next leaf if overflow flag is set
+                                    boolean hasOverflow = leafFrame.getOverflowFlagBit();
+                                    if (hasOverflow) {
+                                        int nextLeaf = leafFrame.getNextLeaf();
+                                        if (visited.add(nextLeaf)) {
+                                            queue.add(new int[] { nextLeaf, level });
+                                        }
                                     }
                                 }
 
@@ -703,6 +736,10 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                                 LOGGER.info("=== LEVEL {} | PAGE {} | TYPE: INTERIOR ===", level, currentPageId);
                                 int tupleCount = interiorFrame.getTupleCount();
                                 for (int i = 0; i < tupleCount; i++) {
+                                    if (processedTuples >= BFS_PRINT_MAX_TUPLES) {
+                                        truncated = true;
+                                        break;
+                                    }
                                     try {
                                         ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
                                         frameTuple.resetByTupleIndex(interiorFrame, i);
@@ -731,24 +768,34 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                                     }
                                 }
 
-                                // Only follow next page if overflow flag is set
-                                boolean hasOverflow = interiorFrame.getOverflowFlagBit();
-                                if (hasOverflow) {
-                                    int nextPage = interiorFrame.getNextPage();
-                                    if (visited.add(nextPage)) {
-                                        queue.add(new int[] { nextPage, level });
+                                if (!truncated) {
+                                    // Only follow next page if overflow flag is set
+                                    boolean hasOverflow = interiorFrame.getOverflowFlagBit();
+                                    if (hasOverflow) {
+                                        int nextPage = interiorFrame.getNextPage();
+                                        if (visited.add(nextPage)) {
+                                            queue.add(new int[] { nextPage, level });
+                                        }
                                     }
                                 }
                             }
 
                             visitedPages++;
+                            if (truncated) {
+                                break;
+                            }
                         } finally {
                             page.releaseReadLatch();
                             bufferCache.unpin(page);
                         }
                     }
 
-                    LOGGER.info("=== BFS PRINT COMPLETE | pages={} | tuples={} ===", visitedPages, processedTuples);
+                    if (truncated) {
+                        LOGGER.info("=== BFS PRINT TRUNCATED | pages={} | tuples={} (maxPages={} maxTuples={}) ===",
+                                visitedPages, processedTuples, BFS_PRINT_MAX_PAGES, BFS_PRINT_MAX_TUPLES);
+                    } else {
+                        LOGGER.info("=== BFS PRINT COMPLETE | pages={} | tuples={} ===", visitedPages, processedTuples);
+                    }
                 }
 
                 /**

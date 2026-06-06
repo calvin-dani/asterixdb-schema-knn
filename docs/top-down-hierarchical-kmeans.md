@@ -6,7 +6,7 @@ This document explains the **top-down** hierarchical clustering path in the VTre
 
 1. Computes **leaf page capacity** from the index's real leaf frame and quantized routing tuple size (SQ8/SQ4 from DDL `quantization`).
 2. **Dynamic fan-out** per node: `dynamicK = min(N / leafPageCapacity + 1, 32)` (max 32 children).
-3. **Leaf stop:** when a bag has `N <= leafPageCapacity`, emit each record as its own real-pivot centroid (no further split).
+3. **Leaf stop:** when a bag has `N <= leafPageCapacity`, emit each record as its own real-pivot centroid (no further split). Before `maxLevel`, each childless centroid is **promoted** to the next level as a 1-vector batch (itself) so routing height stays aligned with the static-structure builder’s Nth-centroid→cluster-N rule.
 4. **Lambda-balanced k-means** on a sample (≤1000 records): `score = distance + λ · priorCount`; λ auto-tuned once per partition (or fixed via SET).
 5. **Full-data assign** with λ=0, then **real pivots** = nearest actual record per cluster (not arithmetic means).
 6. Repeats level-by-level until cumulative centroid count ≥ `num_clusters` or `maxLevel` cap.
@@ -64,14 +64,18 @@ leafPageCapacity = max(1, floor((pageSize - leafHeader) / perEntry))
 2. leafPageCapacity = computeLeafPageCapacity(dim, quantizationBits)
 3. lambdaFactor = auto-tune on sample OR fixed from SET
 4. Root:
-     if total <= leafPageCapacity → emit each record as level-0 centroid; stop
+     if total <= leafPageCapacity → emit each record as level-0 centroids;
+       if maxLevel > 0 → promote each centroid as a 1-vector batch and continue at level 1
+       else stop
      else clusterRunFile(dynamicK(total)) → real pivots; store level 0
-5. Split sample into child run files
+5. Split sample into child run files (skipped when root was a promoted leaf bag)
 6. Loop level = 1..maxLevel:
      For each parent batch:
-       if recCount <= leafPageCapacity → emit each record as centroids at this level
+       if recCount <= leafPageCapacity → emit each record as centroids at this level;
+         if level < maxLevel → enqueue each centroid as a 1-vector promotion batch (parentClusterId = local id)
        else clusterRunFile(dynamicK(recCount)) → split into child files
      Stop if level centroid count >= num_clusters OR level >= maxLevel
+     At level == maxLevel, leaf-bag centroids are terminal (no promotion)
 7. emit outputTopDownStructure (root level 0 first)
 ```
 
