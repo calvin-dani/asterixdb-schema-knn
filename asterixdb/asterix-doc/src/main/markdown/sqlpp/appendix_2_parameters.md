@@ -141,3 +141,26 @@ By default, SelectHead is **enabled** with BKT head selection; the routing tree 
     CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
     WITH {"dimension": 384, "similarity": "euclidean", "num_clusters": 1000, "quantization": "SQ8"};
 
+## <a id="Vector_vtree_print_parameters">Vector index VTree debug print parameters</a>
+
+Optional capped BFS dumps of the VTree **static routing structure** to NC server logs (default off).
+Output is truncated (16 pages / 64 tuples max) and does not appear in the SQL result set.
+
+* **`compiler.vector.vtree.printTreeOnBuild`**: when `true`, print after static structure build (`CREATE INDEX ... TYPE vctree`).
+
+* **`compiler.vector.vtree.printTreeOnSearch`**: when `true`, print on the first ANN query tuple per task (compute partition 0).
+
+##### Example (build)
+
+    SET `compiler.vector.vtree.printTreeOnBuild` "true";
+
+    CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
+    WITH {"dimension": 384, "similarity": "euclidean", "num_clusters": 1000, "quantization": "SQ8"};
+
+##### Example (ANN query)
+
+    SET `compiler.vector.vtree.printTreeOnSearch` "true";
+
+    SELECT pk FROM myDataset
+    ORDER BY similarity(embedding, [0.1, 0.2, ...]) LIMIT 10;
+

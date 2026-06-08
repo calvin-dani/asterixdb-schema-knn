@@ -84,12 +84,15 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     /** Epsilon from vector index WITH metadata (ANN / cluster search). */
     protected final double indexEpsilon;
 
+    /** When true, dump capped BFS view of static structure on first query tuple (compute partition 0). */
+    protected final boolean printTreeOnSearch;
+
     public VectorSearchOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVTreeBinaryAccessorFactory vectorAccessorFactory,
             java.io.Serializable distanceFunctionFactory, int[][] partitionsMap, int numPrimaryKeys,
             int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory, int searchApproach, int kMultiplier,
-            double indexEpsilon) {
+            double indexEpsilon, boolean printTreeOnSearch) {
         super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
@@ -104,6 +107,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         this.searchApproach = searchApproach;
         this.kMultiplier = kMultiplier;
         this.indexEpsilon = indexEpsilon;
+        this.printTreeOnSearch = printTreeOnSearch;
         this.outRecDescs[0] = outRecDesc;
 
         // Create tuple projector factory that extracts only PK fields
@@ -118,6 +122,6 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
                 retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
                 distanceFunctionFactory, partitionsMap, tupleFilterFactory, searchApproach, numSecondaryKeys,
-                kMultiplier, indexEpsilon);
+                kMultiplier, indexEpsilon, printTreeOnSearch);
     }
 }

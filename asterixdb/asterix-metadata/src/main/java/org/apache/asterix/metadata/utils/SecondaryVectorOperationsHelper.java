@@ -147,6 +147,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         }
     }
 
+    /** VTree static-structure BFS debug print tuning from session {@code SET} parameters. */
+    private static final class VTreePrintTuning {
+        final boolean printTreeOnBuild;
+        final boolean printTreeOnSearch;
+
+        VTreePrintTuning(boolean printTreeOnBuild, boolean printTreeOnSearch) {
+            this.printTreeOnBuild = printTreeOnBuild;
+            this.printTreeOnSearch = printTreeOnSearch;
+        }
+    }
+
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
     /**
@@ -316,6 +327,29 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                     headRatio, headCount, selectType);
         }
         return new SelectHeadTuning(enabled, headRatio, headCount, selectType);
+    }
+
+    private VTreePrintTuning resolveVTreePrintTuning() {
+        boolean printTreeOnBuild = false;
+        boolean printTreeOnSearch = false;
+
+        String buildStr = (String) metadataProvider.getConfig()
+                .get(CompilerProperties.COMPILER_VECTOR_VTREE_PRINT_TREE_ON_BUILD_KEY);
+        if (buildStr != null && !buildStr.trim().isEmpty()) {
+            printTreeOnBuild = Boolean.parseBoolean(buildStr.trim());
+        }
+
+        String searchStr = (String) metadataProvider.getConfig()
+                .get(CompilerProperties.COMPILER_VECTOR_VTREE_PRINT_TREE_ON_SEARCH_KEY);
+        if (searchStr != null && !searchStr.trim().isEmpty()) {
+            printTreeOnSearch = Boolean.parseBoolean(searchStr.trim());
+        }
+
+        if (printTreeOnBuild || printTreeOnSearch) {
+            LOGGER.info("VTree BFS print from SET: printTreeOnBuild={} printTreeOnSearch={}", printTreeOnBuild,
+                    printTreeOnSearch);
+        }
+        return new VTreePrintTuning(printTreeOnBuild, printTreeOnSearch);
     }
 
     @Override
@@ -492,6 +526,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         int quantizationBits = bitsForQuantizationLabel(qLabel);
         TopDownTuning topDownTuning = resolveTopDownTuning(quantizationBits);
         SelectHeadTuning selectHeadTuning = resolveSelectHeadTuning();
+        VTreePrintTuning vtreePrintTuning = resolveVTreePrintTuning();
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
@@ -518,7 +553,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         VCTreeStaticStructureCreatorOperatorDescriptor vcTreeCreator =
                 new VCTreeStaticStructureCreatorOperatorDescriptor(spec, dataflowHelperFactory, 100, 0.7f,
                         hierarchicalRecDesc, permitUUID, materializedDataUUID, scalarValuesUUID, scalarRecDesc,
-                        partitioningProperties.getComputeStorageMap());
+                        partitioningProperties.getComputeStorageMap(), vtreePrintTuning.printTreeOnBuild);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, vcTreeCreator,
                 primaryPartitionConstraint);
         targetOp = vcTreeCreator;

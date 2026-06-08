@@ -93,6 +93,7 @@ leafPageCapacity = max(1, floor((pageSize - leafHeader) / perEntry))
 See `appendix_2_parameters.md`:
 - `compiler.vector.topdown.lambdaFactor` — optional fixed λ factor (omit for auto-tune)
 - `compiler.vector.topdown.maxlevel` — height cap
+- `compiler.vector.vtree.printTreeOnBuild` / `printTreeOnSearch` — optional capped BFS debug dump of static routing tree (server logs only)
 
 Deprecated (no effect on BKT build): `compiler.vector.topdown.v`, `compiler.vector.topdown.gamma`
 

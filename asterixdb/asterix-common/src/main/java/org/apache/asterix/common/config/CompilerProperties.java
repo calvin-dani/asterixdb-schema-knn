@@ -263,6 +263,11 @@ public class CompilerProperties extends AbstractProperties {
     public static final String COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY = "compiler.vector.selecthead.headRatio";
     public static final String COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY = "compiler.vector.selecthead.headCount";
     public static final String COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY = "compiler.vector.selecthead.selectType";
+    /** When true, dump capped BFS view of VTree static structure after CREATE INDEX build. */
+    public static final String COMPILER_VECTOR_VTREE_PRINT_TREE_ON_BUILD_KEY = "compiler.vector.vtree.printTreeOnBuild";
+    /** When true, dump capped BFS view of loaded static structure on first ANN query tuple. */
+    public static final String COMPILER_VECTOR_VTREE_PRINT_TREE_ON_SEARCH_KEY =
+            "compiler.vector.vtree.printTreeOnSearch";
 
     public CompilerProperties(PropertiesAccessor accessor) {
         super(accessor);

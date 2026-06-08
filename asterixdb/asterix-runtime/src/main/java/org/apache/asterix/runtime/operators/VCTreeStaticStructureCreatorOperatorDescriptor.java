@@ -18,6 +18,9 @@
  */
 package org.apache.asterix.runtime.operators;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -46,6 +49,7 @@ import org.apache.hyracks.api.dataflow.IOperatorNodePushable;
 import org.apache.hyracks.api.dataflow.value.IRecordDescriptorProvider;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
+import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.job.IOperatorDescriptorRegistry;
@@ -106,14 +110,11 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
 
     private static final long serialVersionUID = 1L;
 
-    /**
-     * Optional debug dump of the built VTree via BFS. Disabled by default — full-tree logging can OOM on large
-     * indexes. Enable with JVM flag {@code -Dasterix.vtree.bfs.print=true} (output is capped).
-     */
-    private static final boolean ENABLE_VTREE_BFS_PRINT =
-            Boolean.parseBoolean(System.getProperty("asterix.vtree.bfs.print", "false"));
     private static final int BFS_PRINT_MAX_PAGES = 16;
     private static final int BFS_PRINT_MAX_TUPLES = 64;
+    /** Upper bound on routing embedding dimension when deserializing index tuples. */
+    private static final int MAX_ROUTING_EMBEDDING_DIMENSION = 32768;
+
     private final IIndexDataflowHelperFactory indexHelperFactory;
     private final int maxEntriesPerPage;
     private final float fillFactor;
@@ -122,11 +123,12 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
     private final UUID scalarValuesUUID;
     private final RecordDescriptor inputRecordDescriptor; // Store for CreateStructureActivity
     private final int[][] partitionsMap; // Maps task partition to storage partition(s)
+    private final boolean printTreeOnBuild;
 
     public VCTreeStaticStructureCreatorOperatorDescriptor(IOperatorDescriptorRegistry spec,
             IIndexDataflowHelperFactory indexHelperFactory, int maxEntriesPerPage, float fillFactor,
             RecordDescriptor inputRecordDescriptor, UUID permitUUID, UUID materializedDataUUID, UUID scalarValuesUUID,
-            RecordDescriptor scalarRecDesc, int[][] partitionsMap) {
+            RecordDescriptor scalarRecDesc, int[][] partitionsMap, boolean printTreeOnBuild) {
         super(spec, 1, 1);
         this.indexHelperFactory = indexHelperFactory;
         this.maxEntriesPerPage = maxEntriesPerPage;
@@ -136,6 +138,7 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
         this.scalarValuesUUID = scalarValuesUUID;
         this.inputRecordDescriptor = inputRecordDescriptor; // Store for CreateStructureActivity
         this.partitionsMap = partitionsMap; // Store partition mapping
+        this.printTreeOnBuild = printTreeOnBuild;
         // PassThroughActivity outputs scalar values, so use scalarRecDesc
         // CreateStructureActivity uses inputRecordDescriptor (stored separately)
         this.outRecDescs[0] = scalarRecDesc != null ? scalarRecDesc : inputRecordDescriptor;
@@ -1290,8 +1293,8 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                         LOGGER.info("Static structure finalized on storage partition {} ({} tuples)", storagePartition,
                                 totalTuplesProcessed);
 
-                        // Optional capped BFS debug dump (disabled by default; see ENABLE_VTREE_BFS_PRINT)
-                        if (ENABLE_VTREE_BFS_PRINT && storagePartition == storagePartitions[0]) {
+                        // Optional capped BFS debug dump (disabled by default; SET printTreeOnBuild)
+                        if (printTreeOnBuild && storagePartition == storagePartitions[0]) {
                             try {
                                 LSMVTreeDiskComponent component =
                                         (LSMVTreeDiskComponent) ((LSMIndexDiskComponentBulkLoader) partitionBulkLoader)
@@ -1375,15 +1378,10 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
                                         frameTuple.resetByTupleIndex(leafFrame, i);
 
-                                        ISerializerDeserializer<?>[] serdes = new ISerializerDeserializer<?>[3];
-                                        serdes[0] = IntegerSerializerDeserializer.INSTANCE;
-                                        serdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
-                                        serdes[2] = IntegerSerializerDeserializer.INSTANCE;
-                                        Object[] fields = TupleUtils.deserializeTuple(frameTuple, serdes);
-
-                                        int cid = (Integer) fields[0];
-                                        double[] centroid = (double[]) fields[1];
-                                        int metadataPtr = (Integer) fields[2];
+                                        int cid = IntegerPointable.getInteger(frameTuple.getFieldData(0),
+                                                frameTuple.getFieldStart(0));
+                                        double[] centroid = deserializeRoutingEmbedding(frameTuple);
+                                        int metadataPtr = leafFrame.getMetadataPagePointer(i);
                                         int centroidId = leafFrame.getCentroidId(i);
 
                                         String centroidStr = formatCentroid(centroid, printLimit);
@@ -1425,14 +1423,9 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                         ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
                                         frameTuple.resetByTupleIndex(interiorFrame, i);
 
-                                        ISerializerDeserializer<?>[] serdes = new ISerializerDeserializer<?>[3];
-                                        serdes[0] = IntegerSerializerDeserializer.INSTANCE;
-                                        serdes[1] = DoubleArraySerializerDeserializer.INSTANCE;
-                                        serdes[2] = IntegerSerializerDeserializer.INSTANCE;
-                                        Object[] fields = TupleUtils.deserializeTuple(frameTuple, serdes);
-
-                                        int cid = (Integer) fields[0];
-                                        double[] centroid = (double[]) fields[1];
+                                        int cid = IntegerPointable.getInteger(frameTuple.getFieldData(0),
+                                                frameTuple.getFieldStart(0));
+                                        double[] centroid = deserializeRoutingEmbedding(frameTuple);
                                         int childPageId = interiorFrame.getChildPageId(i);
 
                                         String centroidStr = formatCentroid(centroid, printLimit);
@@ -1478,6 +1471,45 @@ public class VCTreeStaticStructureCreatorOperatorDescriptor extends AbstractOper
                                 visitedPages, processedTuples, BFS_PRINT_MAX_PAGES, BFS_PRINT_MAX_TUPLES);
                     } else {
                         LOGGER.info("=== BFS PRINT COMPLETE | pages={} | tuples={} ===", visitedPages, processedTuples);
+                    }
+                }
+
+                /**
+                 * Extract routing embedding from field 1 (interior or quantized leaf tuples).
+                 */
+                private double[] deserializeRoutingEmbedding(ITreeIndexTupleReference tuple)
+                        throws HyracksDataException {
+                    if (tuple.getFieldCount() < 2) {
+                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                                "Routing tuple has fewer than 2 fields (fieldCount=" + tuple.getFieldCount() + ")");
+                    }
+                    byte[] data = tuple.getFieldData(1);
+                    int start = tuple.getFieldStart(1);
+                    int length = tuple.getFieldLength(1);
+                    if (length < 4) {
+                        throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                                "Embedding field too short: " + length);
+                    }
+                    try {
+                        DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data, start, length));
+                        int len = dis.readInt();
+                        if (len <= 0 || len > MAX_ROUTING_EMBEDDING_DIMENSION) {
+                            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                                    "Invalid routing embedding length: " + len + " (max "
+                                            + MAX_ROUTING_EMBEDDING_DIMENSION + ")");
+                        }
+                        long requiredBytes = 4L + (long) len * 8;
+                        if (length < requiredBytes) {
+                            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                                    "Embedding field length " + length + " < declared " + requiredBytes + " bytes");
+                        }
+                        double[] array = new double[len];
+                        for (int i = 0; i < len; i++) {
+                            array[i] = dis.readDouble();
+                        }
+                        return array;
+                    } catch (IOException e) {
+                        throw HyracksDataException.create(e);
                     }
                 }
 

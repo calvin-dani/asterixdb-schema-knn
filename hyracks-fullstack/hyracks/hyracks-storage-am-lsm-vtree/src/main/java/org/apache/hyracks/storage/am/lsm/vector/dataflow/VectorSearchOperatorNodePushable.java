@@ -18,8 +18,17 @@
  */
 package org.apache.hyracks.storage.am.lsm.vector.dataflow;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.Queue;
+import java.util.Set;
+
 import org.apache.hyracks.api.context.IHyracksTaskContext;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
+import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.DoublePointable;
@@ -28,15 +37,27 @@ import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.dataflow.common.data.accessors.PermutingFrameTupleReference;
 import org.apache.hyracks.storage.am.common.api.ISearchOperationCallbackFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
+import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleReference;
 import org.apache.hyracks.storage.am.common.api.ITupleFilter;
 import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTree;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTreeDiskComponent;
+import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessor;
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeInteriorFrame;
+import org.apache.hyracks.storage.am.vector.api.IVTreeLeafFrame;
+import org.apache.hyracks.storage.am.vector.impls.VTree;
 import org.apache.hyracks.storage.am.vector.impls.VTreeSearchPredicate;
+import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
 import org.apache.hyracks.storage.common.ISearchPredicate;
+import org.apache.hyracks.storage.common.buffercache.IBufferCache;
+import org.apache.hyracks.storage.common.buffercache.ICachedPage;
+import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -61,6 +82,10 @@ import org.apache.logging.log4j.Logger;
 public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePushable {
 
     private static final Logger LOGGER = LogManager.getLogger();
+
+    private static final int BFS_PRINT_MAX_PAGES = 16;
+    private static final int BFS_PRINT_MAX_TUPLES = 64;
+    private static final int MAX_ROUTING_EMBEDDING_DIMENSION = 32768;
 
     // Field indexes in input tuple: [query_vector_field, k_field, metric_field]
     protected final int[] queryFields;
@@ -97,12 +122,19 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     /** Epsilon from vector index metadata (default 0.3 when absent in catalog). */
     protected final double indexEpsilon;
 
+    /** When true, dump capped BFS view of static structure on first query tuple. */
+    protected final boolean printTreeOnSearch;
+
+    private final int computePartition;
+
+    private boolean treePrinted;
+
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
             IVTreeBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
             int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys,
-            int kMultiplier, double indexEpsilon) throws HyracksDataException {
+            int kMultiplier, double indexEpsilon, boolean printTreeOnSearch) throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -133,6 +165,8 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.numSecondaryKeys = numSecondaryKeys;
         this.kMultiplier = kMultiplier;
         this.indexEpsilon = indexEpsilon;
+        this.printTreeOnSearch = printTreeOnSearch;
+        this.computePartition = partition;
 
         // Setup permuting tuple reference to extract query parameters
         if (queryFields != null && queryFields.length > 0) {
@@ -217,7 +251,237 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
             }
 
             vectorPred.setEpsilon(indexEpsilon);
+
+            maybePrintStaticStructureOnSearch();
         }
+    }
+
+    private void maybePrintStaticStructureOnSearch() {
+        if (!printTreeOnSearch || treePrinted || computePartition != 0 || indexes == null || indexes.length == 0) {
+            return;
+        }
+        try {
+            IIndex index = indexes[0];
+            if (!(index instanceof LSMVTree)) {
+                return;
+            }
+            LSMVTreeDiskComponent component = ((LSMVTree) index).getStaticStructure();
+            IVTreeBinaryAccessor acc = vectorAccessorFactory.createAccessor();
+            acc.reset(queryParamsTuple.getFieldData(0), queryParamsTuple.getFieldStart(0),
+                    queryParamsTuple.getFieldLength(0));
+            printStaticStructureBFS(component, acc.getVector());
+            treePrinted = true;
+        } catch (Throwable t) {
+            LOGGER.warn("BFS structure print on search failed (non-fatal)", t);
+        }
+    }
+
+    private void printStaticStructureBFS(LSMVTreeDiskComponent component, double[] queryVector)
+            throws HyracksDataException {
+        VTree vcTree = component.getIndex();
+        IBufferCache bufferCache = vcTree.getBufferCache();
+        int fileId = vcTree.getFileId();
+        int rootPageId = vcTree.getRootPageId();
+        ITreeIndexFrameFactory interiorFrameFactory = vcTree.getInteriorFrameFactory();
+        ITreeIndexFrameFactory leafFrameFactory = vcTree.getLeafFrameFactory();
+
+        if (bufferCache == null || interiorFrameFactory == null || leafFrameFactory == null) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Required components are not initialized");
+        }
+
+        final int printLimit = 8;
+
+        Queue<int[]> queue = new ArrayDeque<>();
+        Set<Integer> visited = new HashSet<>();
+        queue.add(new int[] { rootPageId, 0 });
+        visited.add(rootPageId);
+
+        int visitedPages = 0;
+        long processedTuples = 0L;
+        boolean truncated = false;
+
+        while (!queue.isEmpty()) {
+            if (visitedPages >= BFS_PRINT_MAX_PAGES) {
+                truncated = true;
+                break;
+            }
+            int[] entry = queue.poll();
+            int currentPageId = entry[0];
+            int level = entry[1];
+
+            ICachedPage page = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, currentPageId));
+            try {
+                page.acquireReadLatch();
+
+                IVTreeLeafFrame leafFrame = (IVTreeLeafFrame) leafFrameFactory.createFrame();
+                leafFrame.setPage(page);
+                boolean isLeaf = leafFrame.isLeaf();
+
+                if (isLeaf) {
+                    LOGGER.info("=== LEVEL {} | PAGE {} | TYPE: LEAF ===", level, currentPageId);
+                    int tupleCount = leafFrame.getTupleCount();
+                    for (int i = 0; i < tupleCount; i++) {
+                        if (processedTuples >= BFS_PRINT_MAX_TUPLES) {
+                            truncated = true;
+                            break;
+                        }
+                        try {
+                            ITreeIndexTupleReference frameTuple = leafFrame.createTupleReference();
+                            frameTuple.resetByTupleIndex(leafFrame, i);
+
+                            int cid = IntegerPointable.getInteger(frameTuple.getFieldData(0),
+                                    frameTuple.getFieldStart(0));
+                            double[] centroid = deserializeRoutingEmbedding(frameTuple);
+                            int metadataPtr = leafFrame.getMetadataPagePointer(i);
+                            int centroidId = leafFrame.getCentroidId(i);
+
+                            String centroidStr = formatCentroid(centroid, printLimit);
+                            String distStr = computeDistanceString(queryVector, centroid);
+
+                            LOGGER.info("tuple={} | cid={} | centroidId={} | centroid={} | dist={} | metadata={}", i,
+                                    cid, centroidId, centroidStr, distStr, metadataPtr);
+                            processedTuples++;
+                        } catch (Exception e) {
+                            // skip bad tuple
+                        }
+                    }
+
+                    if (!truncated) {
+                        boolean hasOverflow = leafFrame.getOverflowFlagBit();
+                        if (hasOverflow) {
+                            int nextLeaf = leafFrame.getNextLeaf();
+                            if (visited.add(nextLeaf)) {
+                                queue.add(new int[] { nextLeaf, level });
+                            }
+                        }
+                    }
+
+                } else {
+                    IVTreeInteriorFrame interiorFrame = (IVTreeInteriorFrame) interiorFrameFactory.createFrame();
+                    interiorFrame.setPage(page);
+                    LOGGER.info("=== LEVEL {} | PAGE {} | TYPE: INTERIOR ===", level, currentPageId);
+                    int tupleCount = interiorFrame.getTupleCount();
+                    for (int i = 0; i < tupleCount; i++) {
+                        if (processedTuples >= BFS_PRINT_MAX_TUPLES) {
+                            truncated = true;
+                            break;
+                        }
+                        try {
+                            ITreeIndexTupleReference frameTuple = interiorFrame.createTupleReference();
+                            frameTuple.resetByTupleIndex(interiorFrame, i);
+
+                            int cid = IntegerPointable.getInteger(frameTuple.getFieldData(0),
+                                    frameTuple.getFieldStart(0));
+                            double[] centroid = deserializeRoutingEmbedding(frameTuple);
+                            int childPageId = interiorFrame.getChildPageId(i);
+
+                            String centroidStr = formatCentroid(centroid, printLimit);
+                            String distStr = computeDistanceString(queryVector, centroid);
+
+                            LOGGER.info("tuple={} | cid={} | centroid={} | dist={} | child={}", i, cid, centroidStr,
+                                    distStr, childPageId);
+                            processedTuples++;
+
+                            if (childPageId != -1 && visited.add(childPageId)) {
+                                queue.add(new int[] { childPageId, level + 1 });
+                            }
+                        } catch (Exception e) {
+                            // skip bad tuple
+                        }
+                    }
+
+                    if (!truncated) {
+                        boolean hasOverflow = interiorFrame.getOverflowFlagBit();
+                        if (hasOverflow) {
+                            int nextPage = interiorFrame.getNextPage();
+                            if (visited.add(nextPage)) {
+                                queue.add(new int[] { nextPage, level });
+                            }
+                        }
+                    }
+                }
+
+                visitedPages++;
+                if (truncated) {
+                    break;
+                }
+            } finally {
+                page.releaseReadLatch();
+                bufferCache.unpin(page);
+            }
+        }
+
+        if (truncated) {
+            LOGGER.info("=== BFS PRINT TRUNCATED | pages={} | tuples={} (maxPages={} maxTuples={}) ===", visitedPages,
+                    processedTuples, BFS_PRINT_MAX_PAGES, BFS_PRINT_MAX_TUPLES);
+        } else {
+            LOGGER.info("=== BFS PRINT COMPLETE | pages={} | tuples={} ===", visitedPages, processedTuples);
+        }
+    }
+
+    private double[] deserializeRoutingEmbedding(ITreeIndexTupleReference tuple) throws HyracksDataException {
+        if (tuple.getFieldCount() < 2) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                    "Routing tuple has fewer than 2 fields (fieldCount=" + tuple.getFieldCount() + ")");
+        }
+        byte[] data = tuple.getFieldData(1);
+        int start = tuple.getFieldStart(1);
+        int length = tuple.getFieldLength(1);
+        if (length < 4) {
+            throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE, "Embedding field too short: " + length);
+        }
+        try {
+            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data, start, length));
+            int len = dis.readInt();
+            if (len <= 0 || len > MAX_ROUTING_EMBEDDING_DIMENSION) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                        "Invalid routing embedding length: " + len + " (max " + MAX_ROUTING_EMBEDDING_DIMENSION + ")");
+            }
+            long requiredBytes = 4L + (long) len * 8;
+            if (length < requiredBytes) {
+                throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
+                        "Embedding field length " + length + " < declared " + requiredBytes + " bytes");
+            }
+            double[] array = new double[len];
+            for (int i = 0; i < len; i++) {
+                array[i] = dis.readDouble();
+            }
+            return array;
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    private String formatCentroid(double[] centroid, int limit) {
+        if (centroid == null) {
+            return "null";
+        }
+        int n = centroid.length;
+        int toPrint = Math.min(limit, n);
+        StringBuilder sb = new StringBuilder();
+        sb.append('[');
+        for (int i = 0; i < toPrint; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(String.format("%.4f", centroid[i]));
+        }
+        sb.append(']');
+        if (n > toPrint) {
+            sb.append(" (+").append(n - toPrint).append(" more)");
+        }
+        return sb.toString();
+    }
+
+    private String computeDistanceString(double[] queryVector, double[] centroid) {
+        if (queryVector == null || centroid == null) {
+            return "NA";
+        }
+        if (centroid.length != queryVector.length) {
+            return "NA (dim mismatch)";
+        }
+        double d = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+        return String.format("%.4f", d);
     }
 
     /**

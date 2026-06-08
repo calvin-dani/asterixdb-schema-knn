@@ -897,12 +897,19 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
         // without creating circular dependencies
         VectorDistanceFunctionFactory distanceFunctionFactory = new VectorDistanceFunctionFactory();
 
+        boolean printTreeOnSearch = false;
+        String printSearchStr =
+                (String) getConfig().get(CompilerProperties.COMPILER_VECTOR_VTREE_PRINT_TREE_ON_SEARCH_KEY);
+        if (printSearchStr != null && !printSearchStr.trim().isEmpty()) {
+            printTreeOnSearch = Boolean.parseBoolean(printSearchStr.trim());
+        }
+
         // Create VectorSearchOperatorDescriptor
         int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
         VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
                 queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
                 distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory,
-                searchApproach, kMultiplier, indexEpsilon);
+                searchApproach, kMultiplier, indexEpsilon, printTreeOnSearch);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }
