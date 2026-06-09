@@ -33,6 +33,8 @@ import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizerFactory;
 import org.apache.hyracks.storage.am.vector.impls.VTreeSearchPredicate;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -69,7 +71,11 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     protected final IVTreeBinaryAccessorFactory vectorAccessorFactory;
 
     // Factory for creating distance functions (passed from AsterixDB layer, wraps VectorDistanceArrCalculation)
-    protected final java.io.Serializable distanceFunctionFactory;
+    protected final IVTreeDistanceFunctionFactory distanceFunctionFactory;
+
+    // Factory for creating per-query quantizers (passed from AsterixDB layer). Nullable for
+    // non-quantized indexes and for test contexts that pre-inject a pre-built IVTreeQuantizer.
+    protected final IVTreeQuantizerFactory quantizerFactory;
 
     // Tuple reference for extracting query parameters
     protected PermutingFrameTupleReference queryParamsTuple;
@@ -100,9 +106,10 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
-            IVTreeBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
-            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys,
-            int kMultiplier, double indexEpsilon) throws HyracksDataException {
+            IVTreeBinaryAccessorFactory vectorAccessorFactory, IVTreeDistanceFunctionFactory distanceFunctionFactory,
+            IVTreeQuantizerFactory quantizerFactory, int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory,
+            int searchApproach, int numSecondaryKeys, int kMultiplier, double indexEpsilon)
+            throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -128,6 +135,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.queryFields = queryFields;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.distanceFunctionFactory = distanceFunctionFactory;
+        this.quantizerFactory = quantizerFactory;
         this.tupleFilterFactory = tupleFilterFactory;
         this.searchApproach = searchApproach;
         this.numSecondaryKeys = numSecondaryKeys;
@@ -269,6 +277,14 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         // The VTree will use this factory to create IVTreeDistanceFunction implementations
         // that wrap VectorDistanceArrCalculation from AsterixDB
         iap.getParameters().put(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY, distanceFunctionFactory);
+
+        // Store the quantizer factory (nullable). The VTree will use it to build a per-query
+        // IVTreeQuantizer from the float[6] params persisted on the index. Skipped for non-
+        // quantized indexes and for test contexts that inject a pre-built IVTreeQuantizer
+        // directly under VECTOR_QUANTIZER.
+        if (quantizerFactory != null) {
+            iap.getParameters().put(HyracksConstants.VECTOR_QUANTIZER_FACTORY, quantizerFactory);
+        }
 
         // Cursor selection based on compile-time searchApproach:
         // 0 = naive streaming (LSMVTreeSearchCursor)

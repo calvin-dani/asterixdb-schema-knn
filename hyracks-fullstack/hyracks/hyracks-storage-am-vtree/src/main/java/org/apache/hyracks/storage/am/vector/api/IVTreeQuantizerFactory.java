@@ -20,11 +20,28 @@ package org.apache.hyracks.storage.am.vector.api;
 
 import java.io.Serializable;
 
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+
 /**
- * Serializable factory for {@link IVTreeQuantizer}. Persisted with index resource metadata
- * and used at activation time to construct the quantizer instance.
+ * Factory for {@link IVTreeQuantizer} instances, supplied to the storage layer through the
+ * index-access-parameters map (key {@code HyracksConstants.VECTOR_QUANTIZER_FACTORY}).
+ * <p>
+ * Replaces the previous {@code Class.forName} / constructor-reflection block in
+ * {@code VTree#search} that constructed an AsterixDB {@code ScalarVectorQuantizer} from a
+ * {@code float[]} quantization-params payload.
  */
 public interface IVTreeQuantizerFactory extends Serializable {
 
-    IVTreeQuantizer createQuantizer();
+    /**
+     * Build a quantizer for the given metric and dimensionality. The {@code params} payload
+     * is the {@code float[6]} returned by {@code VTree#getQuantizationParams()}, laid out as
+     * {@code {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}} — the
+     * last two are integers stored as floats.
+     *
+     * @param distanceMetric   e.g. {@code "euclidean"}, {@code "euclidean_squared"}, {@code "cosine"}, {@code "dot"}
+     * @param vectorDimensions vector dimensionality the index was built with
+     * @param params           {@code float[6]} sample-file params; never null
+     */
+    IVTreeQuantizer createQuantizer(String distanceMetric, int vectorDimensions, float[] params)
+            throws HyracksDataException;
 }

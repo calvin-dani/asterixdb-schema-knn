@@ -52,8 +52,14 @@ public class HyracksConstants {
     // Flag to enable sequential scan of all clusters (index-driven KNN with bidirectional pruning)
     public static final String USE_SEQUENTIAL_SCAN = "USE_SEQUENTIAL_SCAN";
 
-    // Pre-configured vector quantizer (IVectorQuantizer) to use when reflection-based creation is unavailable
+    // Pre-configured vector quantizer (IVTreeQuantizer) for direct injection — used by test
+    // fixtures (e.g. NoOpVectorQuantizer.INSTANCE). Production code paths should use
+    // VECTOR_QUANTIZER_FACTORY below and let the storage layer construct the quantizer per query.
     public static final String VECTOR_QUANTIZER = "VECTOR_QUANTIZER";
+
+    // Vector quantizer factory (IVTreeQuantizerFactory). Replaces the previous reflective
+    // construction of ScalarVectorQuantizer in VTree#search.
+    public static final String VECTOR_QUANTIZER_FACTORY = "VECTOR_QUANTIZER_FACTORY";
 
     private HyracksConstants() {
     }
