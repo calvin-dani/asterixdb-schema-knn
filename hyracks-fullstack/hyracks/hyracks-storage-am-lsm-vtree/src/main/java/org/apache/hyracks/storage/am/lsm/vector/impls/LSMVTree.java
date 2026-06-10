@@ -596,11 +596,13 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
     }
 
     /**
-     * Creates a blocked top-K search cursor: all search work happens in {@code open()}, results
+     * Creates the top-K search cursor: all search work happens in {@code open()}, results
      * are collected into a quantized-distance-keyed top-K window, and the cursor drains that
-     * window on subsequent {@code hasNext()/next()/getTuple()} calls.
+     * window on subsequent {@code hasNext()/next()/getTuple()} calls. This is the canonical
+     * search cursor for the VTree index; the streaming {@link LSMVTreeSearchCursor} is reserved
+     * for component merges.
      */
-    public IIndexCursor createNaiveBlockedSearchCursor(ILSMIndexOperationContext opCtx) {
+    public IIndexCursor createTopKSearchCursor(ILSMIndexOperationContext opCtx) {
         return new LSMVTreeTopKSearchCursor(opCtx);
     }
 

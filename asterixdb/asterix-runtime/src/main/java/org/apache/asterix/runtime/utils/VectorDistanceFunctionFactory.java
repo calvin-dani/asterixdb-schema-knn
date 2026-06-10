@@ -24,6 +24,7 @@ import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrS
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -34,7 +35,7 @@ import org.apache.logging.log4j.Logger;
  * without creating circular dependencies.
  * The factory is serializable and can be passed through the job pipeline.
  */
-public class VectorDistanceFunctionFactory implements Serializable {
+public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFactory {
     private static final long serialVersionUID = 1L;
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -106,6 +107,7 @@ public class VectorDistanceFunctionFactory implements Serializable {
      * @param distanceMetric Distance metric string (e.g., "euclidean", "cosine similarity", etc.)
      * @return IVTreeDistanceFunction implementation wrapping VectorDistanceArrCalculation, or Euclidean as default
      */
+    @Override
     public IVTreeDistanceFunction createDistanceFunction(String distanceMetric) {
 
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceMetric.toLowerCase());

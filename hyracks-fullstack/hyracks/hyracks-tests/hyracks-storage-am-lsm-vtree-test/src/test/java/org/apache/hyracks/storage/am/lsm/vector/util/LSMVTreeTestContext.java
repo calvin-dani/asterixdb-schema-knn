@@ -158,40 +158,24 @@ public final class LSMVTreeTestContext extends AbstractVectorTreeTestContext {
             }
         }
 
-        LSMVTree lsmVTree;
-        if (dataTupleCreatorFactory != null || numIncludeFields > 0) {
-            // When dataTupleCreatorFactory is null but numIncludeFields > 0,
-            // create a default factory with the correct include field count
-            IVTreeDataTupleCreatorFactory effectiveFactory = dataTupleCreatorFactory != null ? dataTupleCreatorFactory
-                    : new VTreeDataTupleCreatorFactory(numIncludeFields, false);
-            // Use full overload with custom factory and/or include fields
-            lsmVTree = LSMVTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache,
-                    typeTraits, cmpFactories, 0.0, // bloomFilterFalsePositiveRate
-                    mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, false, // needKeyDupCheck
-                    numVectorFields, // vectorDimensions
-                    new int[] { 0 }, // vectorFields
-                    (int[]) null, // filterFields
-                    (ILSMComponentFilterFrameFactory) null, // filterFrameFactory
-                    (LSMComponentFilterManager) null, // filterManager
-                    (IComponentFilterHelper) null, // filterHelper
-                    true, // durable
-                    metadataPageManagerFactory, false, // atomic
-                    (RecordDescriptor) null, TestDoubleArrayVectorAccessor.Factory.INSTANCE, // inputRecDesc, vectorAccessorFactory
-                    1, numIncludeFields, // numPrimaryKeyFields, numIncludeFields
-                    effectiveFactory, (float[]) null, "euclidean"); // dataTupleCreatorFactory, quantizer, distanceMetric
-        } else {
-            // Use simplified overload with default factory
-            lsmVTree = LSMVTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file, diskBufferCache,
-                    typeTraits, cmpFactories, null, // valueProviderFactories
-                    0.0, // bloomFilterFalsePositiveRate
-                    mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, false, // needKeyDupCheck
-                    numVectorFields, // vectorDimensions
-                    new int[] { 0 }, // vectorFields
-                    null, // filterFields
-                    true, // durable
-                    metadataPageManagerFactory, null, // inputRecDesc
-                    TestDoubleArrayVectorAccessor.Factory.INSTANCE); // vectorAccessorFactory
-        }
+        // Test fixtures always use the non-quantized data-tuple creator (quantization is verified
+        // separately by the quantized-* test suite which constructs its own factory).
+        IVTreeDataTupleCreatorFactory effectiveFactory = dataTupleCreatorFactory != null ? dataTupleCreatorFactory
+                : new VTreeDataTupleCreatorFactory(numIncludeFields, false);
+        LSMVTree lsmVTree = LSMVTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, file,
+                diskBufferCache, typeTraits, cmpFactories, 0.0, // bloomFilterFalsePositiveRate
+                mergePolicy, opTracker, ioScheduler, ioOpCallbackFactory, pageWriteCallbackFactory, false, // needKeyDupCheck
+                numVectorFields, // vectorDimensions
+                new int[] { 0 }, // vectorFields
+                (int[]) null, // filterFields
+                (ILSMComponentFilterFrameFactory) null, // filterFrameFactory
+                (LSMComponentFilterManager) null, // filterManager
+                (IComponentFilterHelper) null, // filterHelper
+                true, // durable
+                metadataPageManagerFactory, false, // atomic
+                (RecordDescriptor) null, TestDoubleArrayVectorAccessor.Factory.INSTANCE, // inputRecDesc, vectorAccessorFactory
+                1, numIncludeFields, // numPrimaryKeyFields, numIncludeFields
+                effectiveFactory, (float[]) null, "euclidean"); // dataTupleCreatorFactory, quantizer, distanceMetric
 
         return new LSMVTreeTestContext(fieldSerdes, lsmVTree, numVectorFields);
     }

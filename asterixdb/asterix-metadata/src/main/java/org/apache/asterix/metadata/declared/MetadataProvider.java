@@ -57,6 +57,7 @@ import org.apache.asterix.common.metadata.MetadataConstants;
 import org.apache.asterix.common.metadata.MetadataUtil;
 import org.apache.asterix.common.metadata.Namespace;
 import org.apache.asterix.common.storage.ICompressionManager;
+import org.apache.asterix.common.storage.OptimizedScalarQuantizerFactory;
 import org.apache.asterix.common.transactions.ITxnIdFactory;
 import org.apache.asterix.common.transactions.TxnId;
 import org.apache.asterix.common.utils.StorageConstants;
@@ -892,12 +893,13 @@ public class MetadataProvider implements IMetadataProvider<DataSourceId, String>
 
         AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory = new AOrderedListVectorBinaryAccessorFactory();
         VectorDistanceFunctionFactory distanceFunctionFactory = new VectorDistanceFunctionFactory();
+        OptimizedScalarQuantizerFactory quantizerFactory = new OptimizedScalarQuantizerFactory();
 
         int[][] partitionsMap = partitioningProperties.getComputeStorageMap();
         VectorSearchOperatorDescriptor vectorSearchOp = new VectorSearchOperatorDescriptor(jobSpec, outputRecDesc,
                 queryFields, indexDataflowHelperFactory, retainInput, searchCallbackFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys, tupleFilterFactory,
-                searchApproach, kMultiplier, indexEpsilon);
+                distanceFunctionFactory, quantizerFactory, partitionsMap, numPrimaryKeys, numSecondaryKeys,
+                tupleFilterFactory, searchApproach, kMultiplier, indexEpsilon);
 
         return new Pair<>(vectorSearchOp, partitioningProperties.getConstraints());
     }

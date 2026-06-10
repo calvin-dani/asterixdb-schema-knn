@@ -32,7 +32,10 @@ import org.apache.hyracks.storage.am.common.api.ITupleFilter;
 import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IndexSearchOperatorNodePushable;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTreeTopKSearchCursor;
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizerFactory;
 import org.apache.hyracks.storage.am.vector.impls.VTreeSearchPredicate;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexAccessParameters;
@@ -69,7 +72,11 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     protected final IVTreeBinaryAccessorFactory vectorAccessorFactory;
 
     // Factory for creating distance functions (passed from AsterixDB layer, wraps VectorDistanceArrCalculation)
-    protected final java.io.Serializable distanceFunctionFactory;
+    protected final IVTreeDistanceFunctionFactory distanceFunctionFactory;
+
+    // Factory for creating per-query quantizers (passed from AsterixDB layer). Nullable for
+    // non-quantized indexes and for test contexts that pre-inject a pre-built IVTreeQuantizer.
+    protected final IVTreeQuantizerFactory quantizerFactory;
 
     // Tuple reference for extracting query parameters
     protected PermutingFrameTupleReference queryParamsTuple;
@@ -100,9 +107,10 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
     public VectorSearchOperatorNodePushable(IHyracksTaskContext ctx, int partition, RecordDescriptor inputRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, ITupleProjectorFactory projectorFactory,
-            IVTreeBinaryAccessorFactory vectorAccessorFactory, java.io.Serializable distanceFunctionFactory,
-            int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory, int searchApproach, int numSecondaryKeys,
-            int kMultiplier, double indexEpsilon) throws HyracksDataException {
+            IVTreeBinaryAccessorFactory vectorAccessorFactory, IVTreeDistanceFunctionFactory distanceFunctionFactory,
+            IVTreeQuantizerFactory quantizerFactory, int[][] partitionsMap, ITupleFilterFactory tupleFilterFactory,
+            int searchApproach, int numSecondaryKeys, int kMultiplier, double indexEpsilon)
+            throws HyracksDataException {
         // Call parent constructor
         // Note: Vector search doesn't need min/max filter fields (pass null)
         // Note: Vector search doesn't need missing writer (pass null for retainMissing)
@@ -128,6 +136,7 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
         this.queryFields = queryFields;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.distanceFunctionFactory = distanceFunctionFactory;
+        this.quantizerFactory = quantizerFactory;
         this.tupleFilterFactory = tupleFilterFactory;
         this.searchApproach = searchApproach;
         this.numSecondaryKeys = numSecondaryKeys;
@@ -254,30 +263,28 @@ public class VectorSearchOperatorNodePushable extends IndexSearchOperatorNodePus
 
     @Override
     protected void addAdditionalIndexAccessorParams(IIndexAccessParameters iap) {
-        // Store the vector accessor factory in parameters
-        // The VTree accessor will extract the query vector from the predicate during search()
-        // This maintains layer separation: extraction happens in storage layer using the factory
-        iap.getParameters().put(HyracksConstants.VECTOR_QUERY, vectorAccessorFactory);
+        // Vector accessor factory: storage layer uses this to extract the query vector from the
+        // search predicate's tuple, keeping the extraction in the storage layer (no AsterixDB types
+        // leak down).
+        iap.getParameters().put(IVTreeBinaryAccessorFactory.IAP_KEY, vectorAccessorFactory);
 
-        // Store the K field index (field 1 in queryFields: [vector, k, metric])
-        // The cursor will extract K from the query tuple using this index
-        if (queryFields != null && queryFields.length > 1) {
-            iap.getParameters().put(HyracksConstants.VECTOR_K, 1); // K is at field index 1
+        // Distance function factory wraps VectorDistanceArrCalculation from AsterixDB so the VTree
+        // can build an IVTreeDistanceFunction without depending on asterix-runtime types.
+        iap.getParameters().put(IVTreeDistanceFunctionFactory.IAP_KEY, distanceFunctionFactory);
+
+        // Quantizer factory (nullable). The VTree builds a per-query IVTreeQuantizer from the
+        // float[6] params persisted on the index. Null for non-quantized indexes and for test
+        // contexts that inject a pre-built IVTreeQuantizer under IVTreeQuantizer.IAP_KEY.
+        if (quantizerFactory != null) {
+            iap.getParameters().put(IVTreeQuantizerFactory.IAP_KEY, quantizerFactory);
         }
 
-        // Store the distance function factory in parameters
-        // The VTree will use this factory to create IVTreeDistanceFunction implementations
-        // that wrap VectorDistanceArrCalculation from AsterixDB
-        iap.getParameters().put(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY, distanceFunctionFactory);
-
-        // Cursor selection based on compile-time searchApproach:
-        // 0 = naive streaming (LSMVTreeSearchCursor)
-        // 3 = top-K with quantized distance (LSMVTreeTopKSearchCursor)
-        if (searchApproach == 3) {
-            iap.getParameters().put(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.TRUE);
-        }
-
-        // Pass task context for spillable top-K buffer (follows inverted index pattern)
+        // Task context for the spillable top-K buffer (follows inverted-index pattern).
         iap.getParameters().put(HyracksConstants.HYRACKS_TASK_CONTEXT, ctx);
+
+        // Production ANN search always uses the quantized top-K cursor. Without this flag,
+        // LSMVTreeIndexAccessor defaults to the streaming LSMVTreeSearchCursor (used by component
+        // merges and by test fixtures that verify through full-scan iteration).
+        iap.getParameters().put(LSMVTreeTopKSearchCursor.IAP_KEY, Boolean.TRUE);
     }
 }

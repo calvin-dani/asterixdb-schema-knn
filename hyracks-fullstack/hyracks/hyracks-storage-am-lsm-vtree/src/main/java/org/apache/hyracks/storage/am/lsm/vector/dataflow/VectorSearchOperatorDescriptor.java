@@ -30,6 +30,8 @@ import org.apache.hyracks.storage.am.common.api.ITupleFilterFactory;
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.lsm.vector.impls.PKOnlyTupleProjectorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
+import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizerFactory;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
 
 /**
@@ -66,9 +68,14 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     // Factory for creating vector binary accessors (for extracting AOrderedList<ADouble>)
     protected final IVTreeBinaryAccessorFactory vectorAccessorFactory;
 
-    // Factory for creating distance functions (wraps VectorDistanceArrCalculation from AsterixDB)
-    // This is passed from AsterixDB layer to avoid circular dependencies
-    protected final java.io.Serializable distanceFunctionFactory;
+    // Factory for creating distance functions (wraps VectorDistanceArrCalculation from AsterixDB).
+    // Passed from the AsterixDB layer via a Hyracks-side interface to keep this module free of
+    // AsterixDB type dependencies.
+    protected final IVTreeDistanceFunctionFactory distanceFunctionFactory;
+
+    // Factory for creating per-query quantizers from the float[6] params persisted on the tree.
+    // Provided by AsterixDB (OptimizedScalarQuantizerFactory). Nullable for non-quantized indexes.
+    protected final IVTreeQuantizerFactory quantizerFactory;
 
     // Factory for creating tuple filters for INCLUDE field predicates (e.g., year > 2000)
     // When set, the cursor will only return tuples that pass this filter
@@ -87,9 +94,9 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
     public VectorSearchOperatorDescriptor(IOperatorDescriptorRegistry spec, RecordDescriptor outRecDesc,
             int[] queryFields, IIndexDataflowHelperFactory indexHelperFactory, boolean retainInput,
             ISearchOperationCallbackFactory searchCallbackFactory, IVTreeBinaryAccessorFactory vectorAccessorFactory,
-            java.io.Serializable distanceFunctionFactory, int[][] partitionsMap, int numPrimaryKeys,
-            int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory, int searchApproach, int kMultiplier,
-            double indexEpsilon) {
+            IVTreeDistanceFunctionFactory distanceFunctionFactory, IVTreeQuantizerFactory quantizerFactory,
+            int[][] partitionsMap, int numPrimaryKeys, int numSecondaryKeys, ITupleFilterFactory tupleFilterFactory,
+            int searchApproach, int kMultiplier, double indexEpsilon) {
         super(spec, 1, 1); // 1 input, 1 output
         this.queryFields = queryFields;
         this.indexHelperFactory = indexHelperFactory;
@@ -97,6 +104,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         this.searchCallbackFactory = searchCallbackFactory;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.distanceFunctionFactory = distanceFunctionFactory;
+        this.quantizerFactory = quantizerFactory;
         this.partitionsMap = partitionsMap;
         this.numPrimaryKeys = numPrimaryKeys;
         this.numSecondaryKeys = numSecondaryKeys;
@@ -117,7 +125,7 @@ public class VectorSearchOperatorDescriptor extends AbstractSingleActivityOperat
         return new VectorSearchOperatorNodePushable(ctx, partition,
                 recordDescProvider.getInputRecordDescriptor(getActivityId(), 0), queryFields, indexHelperFactory,
                 retainInput, searchCallbackFactory, tupleProjectorFactory, vectorAccessorFactory,
-                distanceFunctionFactory, partitionsMap, tupleFilterFactory, searchApproach, numSecondaryKeys,
-                kMultiplier, indexEpsilon);
+                distanceFunctionFactory, quantizerFactory, partitionsMap, tupleFilterFactory, searchApproach,
+                numSecondaryKeys, kMultiplier, indexEpsilon);
     }
 }

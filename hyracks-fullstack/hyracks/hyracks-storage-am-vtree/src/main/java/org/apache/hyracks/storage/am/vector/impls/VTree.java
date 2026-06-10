@@ -30,7 +30,6 @@ import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
-import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.data.std.primitive.LongPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.common.api.IPageManager;
@@ -49,8 +48,10 @@ import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDataTupleCreatorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeMetadataFrame;
 import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizer;
+import org.apache.hyracks.storage.am.vector.api.IVTreeQuantizerFactory;
 import org.apache.hyracks.storage.am.vector.frames.VTreeDataFrame;
 import org.apache.hyracks.storage.am.vector.frames.VTreeMetadataFrame;
 import org.apache.hyracks.storage.am.vector.tuples.VTreeTupleUtils;
@@ -1137,7 +1138,7 @@ public class VTree extends AbstractTreeIndex {
                 if (queryTuple != null) {
                     // Accessor factory is stored on the index accessor parameters during creation
                     IVTreeBinaryAccessorFactory factory =
-                            (IVTreeBinaryAccessorFactory) iap.getParameters().get(HyracksConstants.VECTOR_QUERY);
+                            (IVTreeBinaryAccessorFactory) iap.getParameters().get(IVTreeBinaryAccessorFactory.IAP_KEY);
                     queryVector = VTreeTupleUtils.extractVectorFromTuple(queryTuple, queryFieldIndex, factory);
                 }
 
@@ -1145,29 +1146,16 @@ public class VTree extends AbstractTreeIndex {
                 distanceMetric = vectorPred.getDistanceMetric();
             }
 
-            // Convert distance metric string to IVTreeDistanceFunction
-            // Try to use factory from AsterixDB (wraps VectorDistanceArrCalculation) if available
-            // Otherwise fall back to local implementation for backward compatibility
-            IVTreeDistanceFunction distanceFunction = null;
-            java.io.Serializable factoryObj =
-                    (java.io.Serializable) iap.getParameters().get(HyracksConstants.VECTOR_DISTANCE_FUNCTION_FACTORY);
-
-            if (factoryObj != null) {
-                // Use factory from AsterixDB (wraps VectorDistanceArrCalculation)
-                try {
-                    // Use reflection to call createDistanceFunction() method
-                    // This avoids importing AsterixDB classes in Hyracks
-                    java.lang.reflect.Method createMethod =
-                            factoryObj.getClass().getMethod("createDistanceFunction", String.class);
-                    distanceFunction = (IVTreeDistanceFunction) createMethod.invoke(factoryObj, distanceMetric);
-                } catch (Exception e) {
-                    LOGGER.log(Level.TRACE,
-                            "Failed to use distance function factory, falling back to local implementation: {}",
-                            e.getMessage());
-                    distanceFunction = VectorUtils.forMetric(distanceMetric);
-                }
+            // Convert distance metric string to IVTreeDistanceFunction. AsterixDB supplies a typed
+            // IVTreeDistanceFunctionFactory through IAP at job-setup time (see
+            // VectorSearchOperatorNodePushable#addAdditionalIndexAccessorParams). Fall back to
+            // VectorUtils.forMetric only if no factory was registered — used by test harnesses.
+            IVTreeDistanceFunction distanceFunction;
+            IVTreeDistanceFunctionFactory distanceFunctionFactory = (IVTreeDistanceFunctionFactory) iap.getParameters()
+                    .get(IVTreeDistanceFunctionFactory.IAP_KEY);
+            if (distanceFunctionFactory != null) {
+                distanceFunction = distanceFunctionFactory.createDistanceFunction(distanceMetric);
             } else {
-                // Fallback to local implementation (for backward compatibility or when factory not provided)
                 distanceFunction = VectorUtils.forMetric(distanceMetric);
             }
 
@@ -1185,52 +1173,29 @@ public class VTree extends AbstractTreeIndex {
             }
             initialState.setDistanceFunction(distanceFunction);
 
-            // Create quantizer at query time using params from tree + distanceMetric from predicate
+            // Create quantizer at query time. Production: IVTreeQuantizerFactory supplied via IAP
+            // by VectorSearchOperatorNodePushable; the factory builds a ScalarVectorQuantizer from
+            // the float[6] quantization params persisted on the tree. Test fallback: a pre-built
+            // IVTreeQuantizer may be injected directly under IVTreeQuantizer.IAP_KEY
+            // (e.g. NoOpVectorQuantizer.INSTANCE in VectorTreeTestUtils).
             float[] qParams = tree.getQuantizationParams();
             if (qParams != null && queryVector != null && distanceMetric != null) {
-                try {
-                    // Create ScalarVectorQuantizer via reflection (AsterixDB class, can't import directly)
-                    // qParams = {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
-                    Class<?> sampleFileClass =
-                            Class.forName("org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile");
-                    Class<?> paramsClass = Class
-                            .forName("org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$Params");
-                    Class<?> simFuncClass = Class.forName(
-                            "org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile$SimilarityFunction");
-                    Class<?> quantizerClass = Class.forName("org.apache.asterix.common.storage.ScalarVectorQuantizer");
-
-                    // Params(int bits, int vectorDimensions, int sampleCount, float confidenceInterval,
-                    //        float minQuantile, float maxQuantile, float alpha)
-                    Object params = paramsClass.getConstructor(int.class, int.class, int.class, float.class,
-                            float.class, float.class, float.class).newInstance((int) qParams[4], tree.vectorDimensions,
-                                    (int) qParams[5], qParams[3], qParams[0], qParams[1], qParams[2]);
-
-                    // SimilarityFunction fromDistanceMetric(String)
-                    java.lang.reflect.Method fromMetric = sampleFileClass.getMethod("fromDistanceMetric", String.class);
-                    Object simFunc = fromMetric.invoke(null, distanceMetric);
-
-                    // new ScalarVectorQuantizer(Params, SimilarityFunction)
-                    IVTreeQuantizer quantizer = (IVTreeQuantizer) quantizerClass
-                            .getConstructor(paramsClass, simFuncClass).newInstance(params, simFunc);
-
+                IVTreeQuantizerFactory quantizerFactory =
+                        (IVTreeQuantizerFactory) iap.getParameters().get(IVTreeQuantizerFactory.IAP_KEY);
+                if (quantizerFactory != null) {
+                    IVTreeQuantizer quantizer =
+                            quantizerFactory.createQuantizer(distanceMetric, tree.vectorDimensions, qParams);
                     initialState.setQuantizedQueryVector(quantizer.quantize(queryVector));
                     initialState.setQuantizer(quantizer);
-                } catch (Exception e) {
-                    LOGGER.log(Level.TRACE, "Failed to create quantizer via reflection: {}", e.getMessage());
                 }
             }
 
-            // If reflection-based quantizer not available, check IAP for pre-configured quantizer
+            // Fallback: a pre-built IVTreeQuantizer injected directly under IVTreeQuantizer.IAP_KEY.
             if (initialState.getQuantizer() == null && queryVector != null) {
-                IVTreeQuantizer iapQuantizer =
-                        (IVTreeQuantizer) iap.getParameters().get(HyracksConstants.VECTOR_QUANTIZER);
+                IVTreeQuantizer iapQuantizer = (IVTreeQuantizer) iap.getParameters().get(IVTreeQuantizer.IAP_KEY);
                 if (iapQuantizer != null) {
-                    try {
-                        initialState.setQuantizedQueryVector(iapQuantizer.quantize(queryVector));
-                        initialState.setQuantizer(iapQuantizer);
-                    } catch (Exception e) {
-                        LOGGER.log(Level.TRACE, "Failed to use IAP quantizer: {}", e.getMessage());
-                    }
+                    initialState.setQuantizedQueryVector(iapQuantizer.quantize(queryVector));
+                    initialState.setQuantizer(iapQuantizer);
                 }
             }
 

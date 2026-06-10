@@ -70,6 +70,15 @@ import org.apache.logging.log4j.Logger;
  */
 public class LSMVTreeTopKSearchCursor implements IIndexCursor {
 
+    /**
+     * Index-access-parameters key — set {@code Boolean.TRUE} under this key to route search to
+     * this cursor (the quantized top-K window cursor used by production ANN queries). When absent
+     * or false, {@link LSMVTreeIndexAccessor#createSearchCursor(boolean)} returns the streaming
+     * {@link LSMVTreeSearchCursor} — also the cursor used by component merges and by test
+     * fixtures that verify inserts/deletes through full-scan iteration.
+     */
+    public static final String IAP_KEY = "USE_TOPK_SEARCH";
+
     private static final Logger LOGGER = LogManager.getLogger();
 
     // Operation context
@@ -179,7 +188,7 @@ public class LSMVTreeTopKSearchCursor implements IIndexCursor {
 
         // Initialize vector accessor from factory in parameters
         IVTreeBinaryAccessorFactory vectorAccessorFactory =
-                (IVTreeBinaryAccessorFactory) iap.getParameters().get(HyracksConstants.VECTOR_QUERY);
+                (IVTreeBinaryAccessorFactory) iap.getParameters().get(IVTreeBinaryAccessorFactory.IAP_KEY);
         if (vectorAccessorFactory != null) {
             this.vectorAccessor = vectorAccessorFactory.createAccessor();
         }

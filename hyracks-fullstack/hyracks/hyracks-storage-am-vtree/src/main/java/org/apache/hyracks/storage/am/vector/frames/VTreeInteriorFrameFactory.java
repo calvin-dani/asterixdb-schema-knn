@@ -19,29 +19,42 @@
 
 package org.apache.hyracks.storage.am.vector.frames;
 
+import org.apache.hyracks.api.dataflow.value.ITypeTraits;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.VarLengthTypeTrait;
+import org.apache.hyracks.storage.am.common.api.INullIntrospector;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexFrameFactory;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriter;
 import org.apache.hyracks.storage.am.common.api.ITreeIndexTupleWriterFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeInteriorFrame;
+import org.apache.hyracks.storage.am.vector.tuples.VTreeTupleWriterFactory;
 
 /**
  * Factory for {@link VTreeInteriorFrame} instances. {@code centroidDimensions} is retained for
  * future per-factory dimension validation.
+ *
+ * <p>Interior tuples are NOT caller-parameterized — every VTree interior frame uses the same
+ * fixed three-field layout {@code <cluster_id, centroid, child_page_pointer>}. The schema and the
+ * tuple writer it implies are owned by this factory so call sites need only supply the dimension
+ * and null-handling knobs.
  */
 public class VTreeInteriorFrameFactory implements ITreeIndexFrameFactory {
+
+    /** Tuple schema: {@code <cluster_id : int, centroid : float[], child_page_pointer : int>}. */
+    private static final ITypeTraits[] TYPE_TRAITS = { IntegerPointable.TYPE_TRAITS, // cluster ID
+            VarLengthTypeTrait.INSTANCE, // centroid (float[])
+            IntegerPointable.TYPE_TRAITS // child page pointer
+    };
 
     private static final long serialVersionUID = 1L;
     private final ITreeIndexTupleWriter tupleWriter;
     private final int centroidDimensions;
 
-    public VTreeInteriorFrameFactory(ITreeIndexTupleWriter tupleWriter, int centroidDimensions) {
-        this.tupleWriter = tupleWriter;
+    public VTreeInteriorFrameFactory(int centroidDimensions, ITypeTraits nullTypeTraits,
+            INullIntrospector nullIntrospector) {
         this.centroidDimensions = centroidDimensions;
-    }
-
-    public VTreeInteriorFrameFactory(int centroidDimensions) {
-        this.tupleWriter = null;
-        this.centroidDimensions = centroidDimensions;
+        this.tupleWriter =
+                new VTreeTupleWriterFactory(TYPE_TRAITS, nullTypeTraits, nullIntrospector).createTupleWriter();
     }
 
     @Override

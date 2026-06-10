@@ -66,15 +66,12 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
     public static final String KEY_SAMPLE_COUNT = "sampleCount";
 
     private static final double BLOOM_FILTER_FALSE_POSITIVE_RATE = 0.01;
-    /** TODO: persist the distance metric on the resource so different indexes can use different metrics. */
-    private static final String DEFAULT_DISTANCE_METRIC = "euclidean";
-    /**
-     * Fully-qualified class name of the AsterixDB binary accessor factory. Loaded reflectively in
-     * {@link #createInstance(INCServiceContext)} when the resource is reconstituted from JSON,
-     * since at that point the asterixdb-om classpath dependency may not be available at compile time.
-     */
-    private static final String ACCESSOR_FACTORY_CLASSNAME =
-            "org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory";
+    /** JSON key under which the distance metric string is persisted. */
+    private static final String KEY_DISTANCE_METRIC = "distanceMetric";
+    /** Fallback distance metric for resources persisted before the metric was round-tripped. */
+    private static final String LEGACY_DEFAULT_DISTANCE_METRIC = "euclidean";
+    /** JSON key under which the vector accessor factory is persisted. */
+    private static final String KEY_VECTOR_ACCESSOR_FACTORY = "vectorAccessorFactory";
 
     protected final int vectorDimensions;
     protected final int[] vectorFields;
@@ -85,8 +82,12 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
     protected final int numIncludeFields;
     protected final IVTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
-    // Index name (optional metadata, persisted for resource identification)
-    protected final String indexName;
+    /**
+     * Distance metric supplied at DDL time (e.g. {@code "euclidean"}, {@code "cosine"}). Persisted
+     * to JSON so cluster-routing for inserts/deletes/bulkload on a restarted index uses the metric
+     * the user actually requested, not a hard-coded default.
+     */
+    protected final String distanceMetric;
 
     // Quantization parameters (optional, set by QuantizedIndexCreate during index creation)
     protected Float confidenceInterval;
@@ -106,25 +107,7 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
             IVTreeBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-            IVTreeDataTupleCreatorFactory dataTupleCreatorFactory) {
-        this(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
-                opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
-                vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions,
-                vectorFields, nullTypeTraits, nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields,
-                numIncludeFields, dataTupleCreatorFactory, null, null, null, null, null, null, null);
-    }
-
-    public LSMVTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
-            IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
-            IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
-            ILSMOperationTrackerFactory opTrackerProvider, ILSMIOOperationCallbackFactory ioOpCallbackFactory,
-            ILSMPageWriteCallbackFactory pageWriteCallbackFactory,
-            IMetadataPageManagerFactory metadataPageManagerFactory, IVirtualBufferCacheProvider vbcProvider,
-            ILSMIOOperationSchedulerProvider ioSchedulerProvider, ILSMMergePolicyFactory mergePolicyFactory,
-            Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
-            ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
-            IVTreeBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-            IVTreeDataTupleCreatorFactory dataTupleCreatorFactory, String indexName, Float confidenceInterval,
+            IVTreeDataTupleCreatorFactory dataTupleCreatorFactory, String distanceMetric, Float confidenceInterval,
             Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount) {
         super(path, storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerProvider, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
@@ -134,7 +117,7 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
-        this.indexName = indexName;
+        this.distanceMetric = distanceMetric;
         this.confidenceInterval = confidenceInterval;
         this.minQuantile = minQuantile;
         this.maxQuantile = maxQuantile;
@@ -148,15 +131,7 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
     }
 
     protected LSMVTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-            int[] vectorFields, int[] filterFields, boolean atomic, IVTreeBinaryAccessorFactory vectorAccessorFactory,
-            int numPrimaryKeyFields, int numIncludeFields, IVTreeDataTupleCreatorFactory dataTupleCreatorFactory)
-            throws HyracksDataException {
-        this(registry, json, vectorDimensions, vectorFields, filterFields, atomic, null, null, null, null, null, null,
-                null, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
-    }
-
-    protected LSMVTreeLocalResource(IPersistedResourceRegistry registry, JsonNode json, int vectorDimensions,
-            int[] vectorFields, int[] filterFields, boolean atomic, String indexName, Float confidenceInterval,
+            int[] vectorFields, int[] filterFields, boolean atomic, String distanceMetric, Float confidenceInterval,
             Float minQuantile, Float maxQuantile, Float alpha, Integer bits, Integer sampleCount,
             IVTreeBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
             IVTreeDataTupleCreatorFactory dataTupleCreatorFactory) throws HyracksDataException {
@@ -165,7 +140,7 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         this.vectorFields = vectorFields;
         this.filterFields = filterFields;
         this.atomic = atomic;
-        this.indexName = indexName;
+        this.distanceMetric = distanceMetric;
         this.confidenceInterval = confidenceInterval;
         this.minQuantile = minQuantile;
         this.maxQuantile = maxQuantile;
@@ -188,16 +163,13 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         ioOpCallbackFactory.initialize(ncServiceCtx, this);
         pageWriteCallbackFactory.initialize(ncServiceCtx, this);
 
-        // Create vector accessor factory if not provided (e.g., when loaded from JSON)
-        IVTreeBinaryAccessorFactory accessorFactory = vectorAccessorFactory;
-        if (accessorFactory == null) {
-            try {
-                Class<?> factoryClass = Class.forName(ACCESSOR_FACTORY_CLASSNAME);
-                accessorFactory = (IVTreeBinaryAccessorFactory) factoryClass.getDeclaredConstructor().newInstance();
-            } catch (ReflectiveOperationException e) {
-                throw new HyracksDataException(
-                        "Failed to create vector accessor factory: " + ACCESSOR_FACTORY_CLASSNAME, e);
-            }
+        // Construction-time invariant: vectorAccessorFactory is always supplied — by
+        // VTreeResourceFactoryProvider in production and by the test harness in tests, and round-
+        // tripped through the resource registry on JSON read. A null here indicates a corrupted
+        // resource (e.g., a JSON file with the {@link #KEY_VECTOR_ACCESSOR_FACTORY} key missing).
+        if (vectorAccessorFactory == null) {
+            throw new HyracksDataException("Vector accessor factory missing from LSMVTreeLocalResource (path=" + path
+                    + "); resource is corrupted or was written by an unsupported codebase version.");
         }
 
         // Pack quantization params into float[] for lazy quantizer creation at query time
@@ -214,8 +186,9 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
                 vectorDimensions, vectorFields, filterFields, null, // filterFrameFactory
                 null, // filterManager
                 null, // filterHelper
-                durable, metadataPageManagerFactory, atomic, null, accessorFactory, numPrimaryKeyFields,
-                numIncludeFields, dataTupleCreatorFactory, quantizationParams, DEFAULT_DISTANCE_METRIC);
+                durable, metadataPageManagerFactory, atomic, null, vectorAccessorFactory, numPrimaryKeyFields,
+                numIncludeFields, dataTupleCreatorFactory, quantizationParams,
+                distanceMetric != null ? distanceMetric : LEGACY_DEFAULT_DISTANCE_METRIC);
     }
 
     @Override
@@ -233,6 +206,16 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         json.putPOJO("vectorFields", vectorFields);
         json.putPOJO("filterFields", filterFields);
         json.put("atomic", atomic);
+        // Distance metric — DDL-supplied; absence is treated as legacy euclidean on read.
+        if (distanceMetric != null) {
+            json.put(KEY_DISTANCE_METRIC, distanceMetric);
+        }
+        // Vector accessor factory — round-tripped via IPersistedResourceRegistry. The factory
+        // implementation (AOrderedListVectorBinaryAccessorFactory) must be registered with the
+        // registry; see PersistedResourceRegistry#registerClasses.
+        if (vectorAccessorFactory != null) {
+            json.set(KEY_VECTOR_ACCESSOR_FACTORY, vectorAccessorFactory.toJson(registry));
+        }
         // Write quantization parameters only when set (a non-quantized index has none).
         putIfNotNull(json, KEY_CONFIDENCE_INTERVAL, confidenceInterval);
         putIfNotNull(json, KEY_MIN_QUANTILE, minQuantile);
@@ -253,8 +236,16 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
                 json.has("vectorFields") ? OBJECT_MAPPER.convertValue(json.get("vectorFields"), int[].class) : null;
         int[] filterFields =
                 json.has("filterFields") ? OBJECT_MAPPER.convertValue(json.get("filterFields"), int[].class) : null;
-        boolean atomic = json.has("atomic") ? json.get("atomic").asBoolean() : false;
-        String indexName = json.has("indexName") ? json.get("indexName").asText() : null;
+        boolean atomic = json.has("atomic") && json.get("atomic").asBoolean();
+        // Distance metric — back-compat: pre-fix resources didn't persist it; default to euclidean.
+        String distanceMetric =
+                json.has(KEY_DISTANCE_METRIC) ? json.get(KEY_DISTANCE_METRIC).asText() : LEGACY_DEFAULT_DISTANCE_METRIC;
+
+        // Vector accessor factory — required on read; createInstance() throws if absent. New
+        // resources always carry it (see appendToJson). A missing key indicates a corrupted or
+        // unsupported-version JSON file.
+        IVTreeBinaryAccessorFactory vectorAccessorFactory = json.has(KEY_VECTOR_ACCESSOR_FACTORY)
+                ? (IVTreeBinaryAccessorFactory) registry.deserialize(json.get(KEY_VECTOR_ACCESSOR_FACTORY)) : null;
 
         // Read quantization parameters with backward compatibility (missing → null).
         Float confidenceInterval = readOptionalFloat(json, KEY_CONFIDENCE_INTERVAL);
@@ -269,8 +260,8 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
                 new VTreeDataTupleCreatorFactory(numIncludeFields, isQuantized);
 
         return new LSMVTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic,
-                indexName, confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount, null,
-                numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
+                distanceMetric, confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount,
+                vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleCreatorFactory);
     }
 
     /** Read an optional float field from JSON; returns {@code null} if the field is missing or null. */
@@ -343,8 +334,9 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         return atomic;
     }
 
-    public String getIndexName() {
-        return indexName;
+    /** @return the DDL-supplied distance metric (e.g. {@code "euclidean"}, {@code "cosine"}). */
+    public String getDistanceMetric() {
+        return distanceMetric;
     }
 
     /** @return true iff all required quantization parameters are present. */

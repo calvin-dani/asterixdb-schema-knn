@@ -49,12 +49,9 @@ public class LSMVTreeLocalResourceFactory extends LsmResourceFactory {
     protected final int numIncludeFields;
     protected final IVTreeDataTupleCreatorFactory dataTupleCreatorFactory;
 
-    // Index name (stored on LSMVTreeLocalResource for identification and JSON persistence)
-    protected final String indexName;
+    /** Distance metric supplied at DDL time; threaded onto {@link LSMVTreeLocalResource} for JSON persistence. */
+    protected final String distanceMetric;
 
-    /**
-     * Constructor with index name for the vector index resource.
-     */
     public LSMVTreeLocalResourceFactory(IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
             IBinaryComparatorFactory[] filterCmpFactories, int[] filterFields,
@@ -65,7 +62,7 @@ public class LSMVTreeLocalResourceFactory extends LsmResourceFactory {
             Map<String, String> mergePolicyProperties, boolean durable, int vectorDimensions, int[] vectorFields,
             ITypeTraits nullTypeTraits, INullIntrospector nullIntrospector, boolean atomic,
             IVTreeBinaryAccessorFactory vectorAccessorFactory, int numPrimaryKeyFields, int numIncludeFields,
-            IVTreeDataTupleCreatorFactory dataTupleCreatorFactory, String indexName) {
+            IVTreeDataTupleCreatorFactory dataTupleCreatorFactory, String distanceMetric) {
         super(storageManager, typeTraits, cmpFactories, filterTypeTraits, filterCmpFactories, filterFields,
                 opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory, metadataPageManagerFactory,
                 vbcProvider, ioSchedulerProvider, mergePolicyFactory, mergePolicyProperties, durable, nullTypeTraits,
@@ -73,7 +70,7 @@ public class LSMVTreeLocalResourceFactory extends LsmResourceFactory {
         this.vectorDimensions = vectorDimensions;
         this.vectorFields = vectorFields;
         this.atomic = atomic;
-        this.indexName = indexName;
+        this.distanceMetric = distanceMetric;
         this.vectorAccessorFactory = vectorAccessorFactory;
         this.numPrimaryKeyFields = numPrimaryKeyFields;
         this.numIncludeFields = numIncludeFields;
@@ -87,6 +84,6 @@ public class LSMVTreeLocalResourceFactory extends LsmResourceFactory {
                 pageWriteCallbackFactory, metadataPageManagerFactory, vbcProvider, ioSchedulerProvider,
                 mergePolicyFactory, mergePolicyProperties, durable, vectorDimensions, vectorFields, nullTypeTraits,
                 nullIntrospector, atomic, vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields,
-                dataTupleCreatorFactory, indexName, null, null, null, null, null, null);
+                dataTupleCreatorFactory, distanceMetric, null, null, null, null, null, null);
     }
 }

@@ -66,6 +66,13 @@ public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
 
     public static final VTreeResourceFactoryProvider INSTANCE = new VTreeResourceFactoryProvider();
 
+    /**
+     * WITH-clause key carrying the distance metric. Mirrors
+     * {@code VectorIndexDeclUtil.VECTOR_INDEX_PARAMETER_SIMILARITY}; inlined here because
+     * {@code asterix-metadata} does not depend on {@code asterix-lang-common}.
+     */
+    private static final String WITH_KEY_SIMILARITY = "similarity";
+
     private VTreeResourceFactoryProvider() {
     }
 
@@ -164,7 +171,12 @@ public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
 
             // Quantization parameters are computed in the index creation job (QuantizationConstantsAggregate)
             // and stored on LSMVTreeLocalResource via QuantizedIndexCreateOperatorDescriptor.
-            String indexName = index.getIndexName();
+
+            // Pull the DDL-supplied similarity (normalized form is already validated by VectorIndexDeclUtil).
+            // Threaded onto the resource so insert/delete/bulkload routing uses the user's metric even
+            // after the resource is reconstituted from JSON (e.g., after NC restart).
+            String distanceMetric =
+                    (withObjectNode != null) ? withObjectNode.getOptionalString(WITH_KEY_SIMILARITY, null) : null;
 
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
@@ -174,7 +186,7 @@ public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
-                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, dataTupleCreatorFactory, indexName);
+                    vectorAccessorFactory, numPrimaryKeys, numIncludeFields, dataTupleCreatorFactory, distanceMetric);
         } else {
             return null;
         }

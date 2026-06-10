@@ -19,7 +19,6 @@
 
 package org.apache.hyracks.storage.am.lsm.vector.impls;
 
-import org.apache.hyracks.api.util.HyracksConstants;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMHarness;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexOperationContext;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor;
@@ -29,8 +28,11 @@ import org.apache.hyracks.storage.common.IIndexCursor;
 /**
  * LSM Vector Clustering Tree Index Accessor.
  *
- * Extends the standard LSM tree accessor to dispatch to the naive-blocked search cursor
- * when the access parameters request it; otherwise delegates to the default search cursor.
+ * <p>Default search routes through the streaming {@link LSMVTreeSearchCursor} (registered on the
+ * parent accessor as the {@code cursorFactory}). Production ANN queries opt in to the quantized
+ * top-K cursor by setting {@link LSMVTreeTopKSearchCursor#IAP_KEY} to {@code Boolean.TRUE} in the
+ * index-access parameters; the test fixtures that don't set the flag get the streaming cursor,
+ * which is the same cursor used by component merges.
  */
 public class LSMVTreeIndexAccessor extends LSMTreeIndexAccessor {
 
@@ -45,12 +47,11 @@ public class LSMVTreeIndexAccessor extends LSMTreeIndexAccessor {
     @Override
     public IIndexCursor createSearchCursor(boolean exclusive) {
         if (ctx instanceof LSMVTreeOpContext) {
-            LSMVTreeOpContext opCtx = (LSMVTreeOpContext) ctx;
-            IIndexAccessParameters iap = opCtx.getIndexAccessParameters();
+            IIndexAccessParameters iap = ((LSMVTreeOpContext) ctx).getIndexAccessParameters();
             if (iap != null) {
-                Boolean useNaiveBlocked = iap.getParameter(HyracksConstants.USE_NAIVE_BLOCKED_SEARCH, Boolean.class);
-                if (Boolean.TRUE.equals(useNaiveBlocked)) {
-                    return lsmVTree.createNaiveBlockedSearchCursor(ctx);
+                Boolean useTopK = iap.getParameter(LSMVTreeTopKSearchCursor.IAP_KEY, Boolean.class);
+                if (Boolean.TRUE.equals(useTopK)) {
+                    return lsmVTree.createTopKSearchCursor(ctx);
                 }
             }
         }
