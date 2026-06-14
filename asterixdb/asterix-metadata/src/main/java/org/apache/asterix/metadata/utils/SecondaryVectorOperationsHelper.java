@@ -310,8 +310,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter,
-                        distanceMetric, vectorDimension);
+                        sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K,
+                        maxScalableKmeansIter, distanceMetric, vectorDimension);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;

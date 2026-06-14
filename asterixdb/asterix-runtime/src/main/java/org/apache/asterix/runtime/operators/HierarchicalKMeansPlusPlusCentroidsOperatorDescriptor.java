@@ -30,10 +30,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Random;
 import java.util.UUID;
 
@@ -83,7 +81,7 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable {
+class EuclideanDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -92,7 +90,7 @@ class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable 
     }
 }
 
-class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, Serializable {
+class EuclideanSquaredDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -101,7 +99,7 @@ class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, Serial
     }
 }
 
-class CosineDistanceFunction implements DistanceFunctionDouble, Serializable {
+class CosineDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
@@ -110,7 +108,7 @@ class CosineDistanceFunction implements DistanceFunctionDouble, Serializable {
     }
 }
 
-class DotProductDistanceFunction implements DistanceFunctionDouble, Serializable {
+class DotProductDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
     private static final long serialVersionUID = 1L;
 
     /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
@@ -336,7 +334,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
          */
         public void outputHierarchicalStructure(FrameTupleAppender appender, IFrameWriter writer,
                 IHyracksTaskContext ctx) throws HyracksDataException {
-            // Find the root level (highest level number)
+            // levelCentroids keys: 0 = leaf level in k-means terms, maxLevel = root.
             int maxLevel = -1;
             for (Integer level : levelCentroids.keySet()) {
                 maxLevel = Math.max(maxLevel, level);
@@ -346,30 +344,35 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 return;
             }
 
-            // BFS traversal starting from root level
-            Queue<Integer> levelQueue = new LinkedList<>();
-            levelQueue.offer(maxLevel); // Start from root
-            int treeLevel = 0;
-            int globalCentroidId = 0;
-            while (!levelQueue.isEmpty()) {
-                int currentLevel = levelQueue.poll();
-                List<CentroidInfo> levelInfo = levelCentroids.get(currentLevel);
+            // Emission order: bottom-up (leaves first, root last) so that
+            // VTreeStaticStructureBuilder writes leaves at the lowest page ids and
+            // the root last (at the highest page id).
+            //
+            // Centroid IDs preserve the BFS-from-root convention (root = 0..N_root-1,
+            // leaves at the highest IDs), independent of emission order. To achieve
+            // that with bottom-up emission, we pre-compute per-level ID offsets so the
+            // root level starts at 0, the next level down starts at root_size, etc.
+            int[] idOffset = new int[maxLevel + 1];
+            idOffset[maxLevel] = 0;
+            for (int L = maxLevel - 1; L >= 0; L--) {
+                List<CentroidInfo> levelAbove = levelCentroids.get(L + 1);
+                int sizeAbove = (levelAbove != null) ? levelAbove.size() : 0;
+                idOffset[L] = idOffset[L + 1] + sizeAbove;
+            }
 
-                if (levelInfo == null)
+            // Walk levels bottom-up: levelCentroids key 0 (leaves) → key maxLevel (root).
+            // The tuple's treeLevel field keeps the existing convention: root = 0, leaf = maxLevel.
+            for (int L = 0; L <= maxLevel; L++) {
+                List<CentroidInfo> levelInfo = levelCentroids.get(L);
+                if (levelInfo == null) {
                     continue;
-
-                // Output all centroids in current level
+                }
+                int treeLevel = maxLevel - L;
+                int globalCentroidId = idOffset[L];
                 for (CentroidInfo centroid : levelInfo) {
                     createHierarchicalTuple(treeLevel, globalCentroidId, centroid.parentClusterId, centroid.embedding,
                             appender, writer, ctx);
                     globalCentroidId++;
-                }
-
-                // Add child level to queue if it exists
-                int childLevel = currentLevel - 1;
-                treeLevel++;
-                if (levelCentroids.containsKey(childLevel)) {
-                    levelQueue.offer(childLevel);
                 }
             }
         }
@@ -380,7 +383,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
          * Uses BFS traversal to assign global IDs matching outputHierarchicalStructure().
          */
         public void logAllCentroids() {
-            // Find the root level (highest level number)
             int maxLevel = -1;
             for (Integer level : levelCentroids.keySet()) {
                 maxLevel = Math.max(maxLevel, level);
@@ -390,25 +392,26 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 return;
             }
 
-            // BFS traversal starting from root level (same as outputHierarchicalStructure)
-            Queue<Integer> levelQueue = new LinkedList<>();
-            levelQueue.offer(maxLevel); // Start from root
-            int treeLevel = 0;
-            int globalCentroidId = 0;
+            // Same offset table as outputHierarchicalStructure so that the IDs we log
+            // here line up with the IDs written into the static structure tuples.
+            int[] idOffset = new int[maxLevel + 1];
+            idOffset[maxLevel] = 0;
+            for (int L = maxLevel - 1; L >= 0; L--) {
+                List<CentroidInfo> levelAbove = levelCentroids.get(L + 1);
+                int sizeAbove = (levelAbove != null) ? levelAbove.size() : 0;
+                idOffset[L] = idOffset[L + 1] + sizeAbove;
+            }
 
-            while (!levelQueue.isEmpty()) {
-                int currentLevel = levelQueue.poll();
-                List<CentroidInfo> levelInfo = levelCentroids.get(currentLevel);
-
+            for (int L = 0; L <= maxLevel; L++) {
+                List<CentroidInfo> levelInfo = levelCentroids.get(L);
                 if (levelInfo == null) {
                     continue;
                 }
-
-                // Log all centroids in current level with global IDs
+                int globalCentroidId = idOffset[L];
                 for (CentroidInfo centroid : levelInfo) {
                     StringBuilder json = new StringBuilder();
                     json.append("{\"event\":\"hierarchical_centroid\"");
-                    json.append(",\"level\":").append(currentLevel);
+                    json.append(",\"level\":").append(L);
                     json.append(",\"centroidId\":").append(globalCentroidId);
                     json.append(",\"levelLocalId\":").append(centroid.centroidId);
                     json.append(",\"parentClusterId\":").append(centroid.parentClusterId);
@@ -425,13 +428,6 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     json.append("}");
                     LOGGER.info(json.toString());
                     globalCentroidId++;
-                }
-
-                // Add child level to queue if it exists
-                int childLevel = currentLevel - 1;
-                treeLevel++;
-                if (levelCentroids.containsKey(childLevel)) {
-                    levelQueue.offer(childLevel);
                 }
             }
         }
@@ -543,14 +539,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static final Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = buildDistanceMap();
 
     private static Map<Integer, DistanceFunctionDouble> buildDistanceMap() {
-        DistanceFunctionDouble cosineFunc = new CosineDistanceFunction();
+        DistanceFunctionDouble cosineFunc = new CosineDistanceFunctionDouble();
         Map<Integer, DistanceFunctionDouble> m = new HashMap<>();
-        m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction());
-        m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction());
-        m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction());
-        m.put(EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction());
+        m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunctionDouble());
+        m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunctionDouble());
+        m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunctionDouble());
+        m.put(EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunctionDouble());
         m.put(COSINE_FORMAT.hash(), cosineFunc);
-        m.put(DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+        m.put(DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunctionDouble());
         return Collections.unmodifiableMap(m);
     }
 
@@ -569,9 +565,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private int vectorDimension;
 
-    private static DistanceFunctionDouble getDistanceFunction(String distanceType) {
+    private static DistanceFunctionDouble getDistanceFunctionDouble(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
-            return new EuclideanSquaredDistanceFunction();
+            return new EuclideanSquaredDistanceFunctionDouble();
         }
         String normalized = distanceType.toLowerCase().trim();
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(normalized);
@@ -633,7 +629,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
      * centroids and does not require normalization.
      */
     private boolean requiresNormalizedCentroids() {
-        return distanceFunction instanceof CosineDistanceFunction;
+        return distanceFunction instanceof CosineDistanceFunctionDouble;
     }
 
     /**
@@ -688,7 +684,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.vectorDimension = vectorDimension;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
-        this.distanceFunction = getDistanceFunction(distanceMetric);
+        this.distanceFunction = getDistanceFunctionDouble(distanceMetric);
     }
 
     @Override

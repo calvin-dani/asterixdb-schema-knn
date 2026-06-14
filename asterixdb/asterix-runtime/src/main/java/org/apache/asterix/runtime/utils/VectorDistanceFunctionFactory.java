@@ -26,6 +26,8 @@ import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
 import org.apache.hyracks.util.string.UTF8StringUtil;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Factory for creating IVectorDistanceFunction implementations that wrap VectorDistanceArrCalculation methods.
@@ -35,8 +37,11 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
  */
 public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFactory {
     private static final long serialVersionUID = 1L;
+    private static final Logger LOGGER = LogManager.getLogger();
 
-    // Distance function constants (same as VTreeBulkLoaderAndGroupingOperatorDescriptor)
+    // Distance function constants (must stay consistent with ANNDistanceDescriptor.DISTANCE_MAP —
+    // every alias accepted by the runtime evaluator MUST also resolve here, otherwise the index
+    // search path will trip an NPE in wrapDistanceFunction(null)).
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
             UTF8StringPointable.generateUTF8Pointable("euclidean");
@@ -45,6 +50,9 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_SQUARED =
             UTF8StringPointable.generateUTF8Pointable("euclidean_squared");
     private static final UTF8StringPointable COSINE_FORMAT = UTF8StringPointable.generateUTF8Pointable("cosine");
+    /** Alias the SQL++ {@code ann_distance} call site uses for cosine. */
+    private static final UTF8StringPointable COSINE_SIMILARITY =
+            UTF8StringPointable.generateUTF8Pointable("cosine similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     private static class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable {
@@ -84,12 +92,14 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
         }
     }
 
-    // Distance function hash map (same as VTreeBulkLoaderAndGroupingOperatorDescriptor)
+    // Distance function hash map. Aliases must mirror ANNDistanceDescriptor.DISTANCE_MAP —
+    // anything ann_distance() accepts must also resolve here, or the index search path NPEs.
     private static final java.util.Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = java.util.Map.of(
             EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(),
             new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
             EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
-            new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
+            new CosineDistanceFunction(), COSINE_SIMILARITY.hash(), new CosineDistanceFunction(),
+            DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
 
     /**
      * Convert distance metric string to IVectorDistanceFunction implementation.
@@ -103,6 +113,12 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceMetric.toLowerCase());
         DistanceFunctionDouble func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
+
+        if (func == null) {
+            LOGGER.warn("Unsupported distance metric '{}', defaulting to euclidean. Ensure DISTANCE_MAP "
+                    + "stays in sync with ANNDistanceDescriptor.DISTANCE_MAP.", distanceMetric);
+            return wrapDistanceFunction(new EuclideanDistanceFunction());
+        }
 
         return wrapDistanceFunction(func);
     }
