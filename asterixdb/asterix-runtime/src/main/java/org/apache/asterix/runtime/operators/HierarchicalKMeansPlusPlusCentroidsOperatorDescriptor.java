@@ -2273,20 +2273,38 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     }
                                 }
                                 reorderByAssignment(localIndices, first, size, assignments, counts);
-                                int pos = first;
+                                int nonEmpty = 0;
                                 for (int c = 0; c < k; c++) {
-                                    if (counts[c] == 0) {
-                                        continue;
+                                    if (counts[c] > 0) {
+                                        nonEmpty++;
                                     }
-                                    int childFirst = pos;
-                                    int childLast = pos + counts[c];
-                                    int centerid = localIndices[childLast - 1];
-                                    int childNodeIndex = nodes.size();
-                                    nodes.add(new ScratchBktNode(centerid, 0, 0));
-                                    if (counts[c] > 1) {
-                                        stack.push(new ScratchBktStackItem(childNodeIndex, childFirst, childLast));
+                                }
+                                if (nonEmpty <= 1) {
+                                    // SPTAG numClusters <= 1: treat as leaf-list, do not re-push
+                                    LOGGER.warn(
+                                            "[SelectHead] scratch split node={} range=[{},{}] size={} k={}: "
+                                                    + "degenerate assignment (nonEmpty={}), emitting leaf-list",
+                                            nodeIndex, first, last, size, k, nonEmpty);
+                                    leafListCount++;
+                                    for (int j = first; j < last; j++) {
+                                        nodes.add(new ScratchBktNode(localIndices[j], -1, -1));
                                     }
-                                    pos = childLast;
+                                } else {
+                                    int pos = first;
+                                    for (int c = 0; c < k; c++) {
+                                        if (counts[c] == 0) {
+                                            continue;
+                                        }
+                                        int childFirst = pos;
+                                        int childLast = pos + counts[c];
+                                        int centerid = localIndices[childLast - 1];
+                                        int childNodeIndex = nodes.size();
+                                        nodes.add(new ScratchBktNode(centerid, 0, 0));
+                                        if (counts[c] > 1) {
+                                            stack.push(new ScratchBktStackItem(childNodeIndex, childFirst, childLast));
+                                        }
+                                        pos = childLast;
+                                    }
                                 }
                             } finally {
                                 if (subrangeMat != null) {
