@@ -18,7 +18,7 @@ This document explains the **top-down** hierarchical clustering path in the VTre
 |------|------|
 | `asterixdb/asterix-runtime/.../HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.java` | BKT top-down algorithm |
 | `asterixdb/asterix-metadata/.../SecondaryVectorOperationsHelper.java` | Passes quantization bits + lambda tuning |
-| `asterixdb/asterix-runtime/.../VCTreeStaticStructureCreatorOperatorDescriptor.java` | **Unchanged** — consumes same 4-field output |
+| `asterixdb/asterix-runtime/.../VTreeStaticStructureCreatorOperatorDescriptor.java` | **Unchanged** — consumes same 4-field output |
 
 ## Configuration (DDL / WITH clause)
 
@@ -67,17 +67,23 @@ leafPageCapacity = max(1, floor((pageSize - leafHeader) / perEntry))
      if total <= leafPageCapacity → emit each record as level-0 centroids;
        if maxLevel > 0 → promote each centroid as a 1-vector batch and continue at level 1
        else stop
-     else clusterRunFile(dynamicK(total)) → real pivots; store level 0
-5. Split sample into child run files (skipped when root was a promoted leaf bag)
+     else clusterRunFile(dynamicK(total)) → split sample → register level-0 centroids only for non-empty buckets
+5. Child run files from root split (skipped when root was a promoted leaf bag)
 6. Loop level = 1..maxLevel:
      For each parent batch:
        if recCount <= leafPageCapacity → emit each record as centroids at this level;
          if level < maxLevel → enqueue each centroid as a 1-vector promotion batch (parentClusterId = local id)
-       else clusterRunFile(dynamicK(recCount)) → split into child files
+       else clusterRunFile(dynamicK(recCount)) → split → register centroids and child batches only for non-empty buckets
      Stop if level centroid count >= num_clusters OR level >= maxLevel
      At level == maxLevel, leaf-bag centroids are terminal (no promotion)
 7. assign centroid ids by scanning levels 0..maxLevel (same as top-down), then emit **`outputBottomUpForStaticStructure`** (leaf level first, root last) for `VTreeStaticStructureBuilder`
 ```
+
+### Empty k-means buckets
+
+λ-balanced k-means may return `k` centroids while full-data assignment leaves some buckets empty (`min=0` in `[TopDown] BKT full assign` logs). BuildHead **does not emit routing centroids** for empty buckets — the same policy as scratch BKT SelectHead. This keeps the invariant required by `VTreeStaticStructureBuilder`: **total centroids at level L = cluster count at level L+1** (the Nth centroid at L points to the Nth cluster at L+1).
+
+K-means optimization and assignment are unchanged; only empty-bucket pivots are omitted from the routing tree.
 
 ## Output contract (unchanged)
 
@@ -85,7 +91,7 @@ leafPageCapacity = max(1, floor((pageSize - leafHeader) / perEntry))
 <treeLevel, centroidId, parentClusterId, embedding>
 ```
 
-- `parentClusterId`: parent's position index within the previous level's emission order
+- `parentClusterId`: parent's **local index** among emitted centroids at the previous level (contiguous after empty-bucket filtering), not the raw k-means bucket index
 - Centroid embeddings are **real sample vectors** (pivot records)
 - Tuple stream order for the static-structure build is **leaf-first** (levels `maxLevel` → `0`); the 4-field wire format is unchanged
 
@@ -104,7 +110,7 @@ By default, the static-structure build runs **SelectHead** then **BuildHead** (S
 ```
 sample run file → scratch BKT → SelectHead walk → HeadSelectionTaskState
 head indices    → materializeHeadRunFile → buildTopDownHierarchicalKMeans (|H| only)
-              → 4-field hierarchical tuples → VCTreeStaticStructureCreator
+              → 4-field hierarchical tuples → VTreeStaticStructureCreator
 ```
 
 - Head indices are **real sample record indices** (pivots), stored in `HeadSelectionTaskState`.

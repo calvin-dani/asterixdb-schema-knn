@@ -134,6 +134,8 @@ By default, SelectHead is **enabled** with BKT head selection; the routing tree 
 
 * **Lambda**: BuildHead re-tunes `compiler.vector.topdown.lambdaFactor` on the head subset when that SET value is omitted.
 
+* **Empty buckets**: k-means splits may produce buckets with zero assigned records; these are omitted from the routing tree (no SET parameter).
+
 ##### Example
 
     SET `compiler.vector.selecthead.headRatio` "0.2";

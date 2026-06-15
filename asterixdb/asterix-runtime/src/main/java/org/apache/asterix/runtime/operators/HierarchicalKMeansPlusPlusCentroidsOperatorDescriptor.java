@@ -2063,6 +2063,40 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     return v == null ? null : Arrays.copyOf(v, v.length);
                 }
 
+                private void deleteRunFile(RunFileWriter file) {
+                    if (file != null) {
+                        try {
+                            file.getFileReference().delete();
+                        } catch (Exception e) {
+                            // best-effort cleanup; ignore
+                        }
+                    }
+                }
+
+                /**
+                 * Register routing centroids and child run files only for k-means buckets with assigned records.
+                 * Empty buckets are dropped so level-L centroid count matches level-(L+1) cluster count for
+                 * {@code VTreeStaticStructureBuilder} (Nth centroid at L points to Nth cluster at L+1).
+                 */
+                private int registerNonEmptySplitBuckets(String logTag, int partition, int level, int parentClusterId,
+                        List<HierarchicalClusterStructure.CentroidInfo> centroidsOut, List<ParentBatch> batchesOut,
+                        List<double[]> centroids, SplitResult split, int localId) {
+                    int k = centroids.size();
+                    for (int i = 0; i < k; i++) {
+                        if (split.counts.get(i) <= 0) {
+                            LOGGER.info("[{}] partition={} level={} parent={}: dropped empty bucket {}/{} (recCount=0)",
+                                    logTag, partition, level, parentClusterId, i, k);
+                            deleteRunFile(split.files.get(i));
+                            continue;
+                        }
+                        int idAtLevel = localId++;
+                        centroidsOut.add(new HierarchicalClusterStructure.CentroidInfo(idAtLevel, parentClusterId,
+                                centroids.get(i), level));
+                        batchesOut.add(new ParentBatch(split.files.get(i), split.counts.get(i), idAtLevel));
+                    }
+                    return localId;
+                }
+
                 // ============================================================================================
                 // SPANN SelectHead: scratch BKT + post-order head walk (not wired to structure build)
                 // ============================================================================================
@@ -3044,7 +3078,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                  * Partitions a run file into one child run file per centroid by assigning each record to its
                  * nearest centroid. Child files use the same {@code secondaryRecDesc} layout as the input, so they
                  * can be re-read by the same clustering code. Returns the (closed) child writers and per-cluster
-                 * record counts; the caller owns and must delete them.
+                 * record counts; the caller owns and must delete them. Some buckets may have count 0 — callers
+                 * feeding the static-structure pipeline must not emit routing centroids for those buckets.
                  */
                 private SplitResult splitRunFileByAssignment(IHyracksTaskContext ctx, RunFileSource source,
                         List<double[]> centroids, FrameTupleAccessor fta, FrameTupleReference tuple,
@@ -3136,7 +3171,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 /**
                  * BKT-style top-down build: dynamic fan-out (max 32), lambda-balanced splits, real pivots, leaf stop
-                 * when a bag fits on one quantized leaf page.
+                 * when a bag fits on one quantized leaf page. After each split, only non-empty assignment buckets
+                 * are registered as routing centroids so counts match {@code VTreeStaticStructureBuilder}.
                  *
                  * @param headOnlyBuild when true (SPANN BuildHead), lambda is tuned on |H| and {@code num_clusters}
                  *            early-stop is disabled
@@ -3214,27 +3250,28 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
 
                     List<HierarchicalClusterStructure.CentroidInfo> level0 = new ArrayList<>();
-                    for (int i = 0; i < rootResult.centroids.size(); i++) {
-                        level0.add(
-                                new HierarchicalClusterStructure.CentroidInfo(i, -1, rootResult.centroids.get(i), 0));
-                    }
-                    structure.levelCentroids.put(0, level0);
-                    cumulative = rootResult.centroids.size();
-                    LOGGER.info("[{}] partition={} level 0 (root): centroids={}", logTag, partition, cumulative);
-
-                    boolean stopAtRoot = maxLevel <= 0;
-                    if (!headOnlyBuild) {
-                        stopAtRoot = stopAtRoot || cumulative >= target;
-                    }
-                    if (stopAtRoot) {
-                        LOGGER.info("[{}] partition={} stop at root: centroids={} target={}{}", logTag, partition,
-                                cumulative, headOnlyBuild ? "n/a" : target,
-                                stopReason != null ? " reason=" + stopReason : "");
-                        return structure;
-                    }
-
                     List<ParentBatch> queue;
+
                     if (totalTupleCount <= leafPageCapacity) {
+                        for (int i = 0; i < rootResult.centroids.size(); i++) {
+                            level0.add(new HierarchicalClusterStructure.CentroidInfo(i, -1, rootResult.centroids.get(i),
+                                    0));
+                        }
+                        structure.levelCentroids.put(0, level0);
+                        cumulative = level0.size();
+                        LOGGER.info("[{}] partition={} level 0 (root): centroids={}", logTag, partition, cumulative);
+
+                        boolean stopAtRoot = maxLevel <= 0;
+                        if (!headOnlyBuild) {
+                            stopAtRoot = stopAtRoot || cumulative >= target;
+                        }
+                        if (stopAtRoot) {
+                            LOGGER.info("[{}] partition={} stop at root: centroids={} target={}{}", logTag, partition,
+                                    cumulative, headOnlyBuild ? "n/a" : target,
+                                    stopReason != null ? " reason=" + stopReason : "");
+                            return structure;
+                        }
+
                         FrameTupleReference prototypeTuple = readPrototypeTuple(ctx, sampleSource, fta, tuple);
                         queue = new ArrayList<>(rootResult.centroids.size());
                         int promoted = 0;
@@ -3250,11 +3287,27 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     } else {
                         SplitResult rootSplit = splitRunFileByAssignment(ctx, sampleSource, rootResult.centroids, fta,
                                 tuple, eval, inputVal, listAcc, kmu);
-                        queue = new ArrayList<>(rootSplit.files.size());
-                        for (int i = 0; i < rootSplit.files.size(); i++) {
-                            queue.add(new ParentBatch(rootSplit.files.get(i), rootSplit.counts.get(i), i));
-                        }
+                        queue = new ArrayList<>();
+                        registerNonEmptySplitBuckets(logTag, partition, 0, -1, level0, queue, rootResult.centroids,
+                                rootSplit, 0);
+                        structure.levelCentroids.put(0, level0);
+                        cumulative = level0.size();
+                        LOGGER.info("[{}] partition={} level 0 (root): centroids={}", logTag, partition, cumulative);
                         logTopDownCountDistribution("partition=" + partition + " root split", rootSplit.counts);
+
+                        boolean stopAtRoot = maxLevel <= 0;
+                        if (!headOnlyBuild) {
+                            stopAtRoot = stopAtRoot || cumulative >= target;
+                        }
+                        if (stopAtRoot) {
+                            LOGGER.info("[{}] partition={} stop at root: centroids={} target={}{}", logTag, partition,
+                                    cumulative, headOnlyBuild ? "n/a" : target,
+                                    stopReason != null ? " reason=" + stopReason : "");
+                            for (ParentBatch batch : queue) {
+                                deleteRunFile(batch.file);
+                            }
+                            return structure;
+                        }
                     }
 
                     try {
@@ -3305,16 +3358,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         partition, level, batch.parentClusterId, batch.recCount, kSplit);
                                 ClusteringResult res = clusterRunFile(ctx, src, batch.recCount, kSplit,
                                         tunedLambdaFactor, fta, tuple, eval, inputVal, listAcc, kmu, rand);
-                                int childBase = localId;
-                                for (double[] c : res.centroids) {
-                                    levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(localId++,
-                                            batch.parentClusterId, c, level));
-                                }
                                 SplitResult sp = splitRunFileByAssignment(ctx, src, res.centroids, fta, tuple, eval,
                                         inputVal, listAcc, kmu);
-                                for (int i = 0; i < sp.files.size(); i++) {
-                                    nextQueue.add(new ParentBatch(sp.files.get(i), sp.counts.get(i), childBase + i));
-                                }
+                                localId = registerNonEmptySplitBuckets(logTag, partition, level, batch.parentClusterId,
+                                        levelInfo, nextQueue, res.centroids, sp, localId);
                                 batch.file.getFileReference().delete();
                             }
 
