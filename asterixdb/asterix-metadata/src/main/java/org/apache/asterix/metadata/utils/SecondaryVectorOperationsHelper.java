@@ -220,6 +220,10 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         return sampleSize;
     }
 
+    private static boolean useFullScanForTrainList(int sampleSize) {
+        return sampleSize < TRAIN_LIST_MIN_SAMPLE_SIZE;
+    }
+
     private TopDownTuning resolveTopDownTuning(int quantizationBits) {
         double lambdaFactor = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR;
         int maxLevel = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL;
@@ -240,7 +244,6 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
                         CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY, lambdaStr);
             }
         }
-        
 
         String maxLevelStr =
                 (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY);

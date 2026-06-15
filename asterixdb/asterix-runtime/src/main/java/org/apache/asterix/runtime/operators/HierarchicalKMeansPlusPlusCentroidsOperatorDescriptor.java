@@ -257,7 +257,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     /**
      * Data structure to hold hierarchical clustering results with parent-child relationships.
      */
-    private static class HierarchicalClusterStructure {
+    static class HierarchicalClusterStructure {
         // Store centroids for each level (separate parent and child levels)
         private static final Logger LOGGER = LogManager.getLogger();
         private final Map<Integer, List<CentroidInfo>> levelCentroids;
@@ -589,6 +589,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
          * index of its parent within the previous level's emission order, which is the grouping key the
          * downstream {@code VCTreeStaticStructureCreator} relies on (it sorts children by this key and
          * matches them to parents by order). Reuses {@link #createHierarchicalTuple}.
+         * <p>
+         * Not for the static-structure pipeline — use {@link #outputBottomUpForStaticStructure} instead.
          */
         public void outputTopDownStructure(FrameTupleAppender appender, IFrameWriter writer, IHyracksTaskContext ctx)
                 throws HyracksDataException {
@@ -609,6 +611,55 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     createHierarchicalTuple(level, globalCentroidId, centroid.parentClusterId, centroid.embedding,
                             appender, writer, ctx);
                     globalCentroidId++;
+                }
+            }
+        }
+
+        /**
+         * Emit for {@code VTreeStaticStructureBuilder}: leaf-first order with top-down {@code levelCentroids}
+         * layout (key 0 = root, key maxLevel = leaves). Centroid ids are pre-assigned by scanning levels
+         * 0..maxLevel in the same order as {@link #outputTopDownStructure}; only emission order differs
+         * (levels maxLevel..0). Use this instead of {@link #outputTopDownStructure} for the static-structure
+         * pipeline.
+         */
+        public void outputBottomUpForStaticStructure(FrameTupleAppender appender, IFrameWriter writer,
+                IHyracksTaskContext ctx) throws HyracksDataException {
+            int maxLevel = -1;
+            for (Integer level : levelCentroids.keySet()) {
+                maxLevel = Math.max(maxLevel, level);
+            }
+            if (maxLevel == -1) {
+                return;
+            }
+
+            // Pre-assign global ids in top-down scan order (same as outputTopDownStructure).
+            List<List<Integer>> levelGlobalIds = new ArrayList<>(maxLevel + 1);
+            for (int level = 0; level <= maxLevel; level++) {
+                levelGlobalIds.add(new ArrayList<>());
+            }
+            int globalCentroidId = 0;
+            for (int level = 0; level <= maxLevel; level++) {
+                List<CentroidInfo> levelInfo = levelCentroids.get(level);
+                if (levelInfo == null) {
+                    continue;
+                }
+                List<Integer> idsAtLevel = levelGlobalIds.get(level);
+                for (int i = 0; i < levelInfo.size(); i++) {
+                    idsAtLevel.add(globalCentroidId++);
+                }
+            }
+
+            // Emit bottom-up: leaves first, root last.
+            for (int level = maxLevel; level >= 0; level--) {
+                List<CentroidInfo> levelInfo = levelCentroids.get(level);
+                if (levelInfo == null) {
+                    continue;
+                }
+                List<Integer> idsAtLevel = levelGlobalIds.get(level);
+                for (int i = 0; i < levelInfo.size(); i++) {
+                    CentroidInfo centroid = levelInfo.get(i);
+                    createHierarchicalTuple(level, idsAtLevel.get(i), centroid.parentClusterId, centroid.embedding,
+                            appender, writer, ctx);
                 }
             }
         }
@@ -1280,11 +1331,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Log all centroids from all levels as JSON
                         //                        clusterStructure.logAllCentroids();
 
-                        // Output hierarchical structure with parent-child relationships. Top-down stores the root at
-                        // level 0, so emit ascending; bottom-up numbers the root as the highest level (BFS emit).
-                        // Manual buffer management handles flushing when needed
+                        // Output hierarchical structure with parent-child relationships. Top-down/SPANN stores
+                        // the root at level 0 internally; emit leaf-first for VTreeStaticStructureBuilder.
+                        // Legacy bottom-up k-means uses outputHierarchicalStructure (BFS id offsets).
                         if (emitTopDown) {
-                            clusterStructure.outputTopDownStructure(appender, writer, ctx);
+                            clusterStructure.outputBottomUpForStaticStructure(appender, writer, ctx);
                         } else {
                             clusterStructure.outputHierarchicalStructure(appender, writer, ctx);
                         }

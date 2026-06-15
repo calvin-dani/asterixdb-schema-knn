@@ -76,7 +76,7 @@ leafPageCapacity = max(1, floor((pageSize - leafHeader) / perEntry))
        else clusterRunFile(dynamicK(recCount)) → split into child files
      Stop if level centroid count >= num_clusters OR level >= maxLevel
      At level == maxLevel, leaf-bag centroids are terminal (no promotion)
-7. emit outputTopDownStructure (root level 0 first)
+7. assign centroid ids by scanning levels 0..maxLevel (same as top-down), then emit **`outputBottomUpForStaticStructure`** (leaf level first, root last) for `VTreeStaticStructureBuilder`
 ```
 
 ## Output contract (unchanged)
@@ -87,6 +87,7 @@ leafPageCapacity = max(1, floor((pageSize - leafHeader) / perEntry))
 
 - `parentClusterId`: parent's position index within the previous level's emission order
 - Centroid embeddings are **real sample vectors** (pivot records)
+- Tuple stream order for the static-structure build is **leaf-first** (levels `maxLevel` → `0`); the 4-field wire format is unchanged
 
 ## Session SET parameters
 
