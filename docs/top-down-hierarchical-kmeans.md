@@ -115,8 +115,11 @@ head indices    → materializeHeadRunFile → buildTopDownHierarchicalKMeans (|
 
 - Head indices are **real sample record indices** (pivots), stored in `HeadSelectionTaskState`.
 - **BuildHead** re-tunes λ on |H| (separate from SelectHead scratch-BKT λ when auto-tune is enabled).
-- With SelectHead enabled (default), **`num_clusters` is ignored** for structure stop; splitting stops on `leafPageCapacity` and `maxLevel` only.
-- Set `compiler.vector.selecthead.enabled` to `false` to use the full-sample top-down path (`num_clusters` applies).
+- With SelectHead enabled (default), **`num_clusters` is ignored** for BuildHead structure stop.
+- **BuildHead split fan-out:** fixed `K = min(32, segmentSize)` (SPANN `dynamicK=false`), not `dynamicK`.
+- **BuildHead global stop:** after each level, stop when **no pending bucket** has `recCount > leafPageCapacity` (`stopReason: all buckets fit one leaf page`). Promotion may still run on the last productive level; the loop does not continue to `maxLevel` when every bucket already fits one leaf page.
+- **`maxLevel`** remains a **safety cap** if some buckets never shrink below `leafPageCapacity`.
+- Set `compiler.vector.selecthead.enabled` to `false` to use the full-sample top-down path (`num_clusters` + `dynamicK` apply).
 
 ### SelectHead SET parameters
 
@@ -149,5 +152,7 @@ WITH {
 |--|--------------------------|---------------------|
 | Input | Full sample N | Selected heads \|H\| only |
 | Purpose | Temporary partition for head picking | Routing centroids for VTree |
-| Stop split | `N <= leafPageCapacity` | `leafPageCapacity` / `maxLevel` (no `num_clusters`) |
+| Split fan-out | `dynamicK(N, leafPageCapacity)` | **Fixed `K = min(32, n)`** |
+| Per-bucket split stop | `N <= leafPageCapacity` | `recCount <= leafPageCapacity` |
+| Global stop | Stack empty (recursive build) | No bucket needs split (`recCount > leafPageCapacity`); **`maxLevel` safety fallback** |
 | Output | In-memory tree, discarded after walk | 4-field hierarchical tuples downstream |

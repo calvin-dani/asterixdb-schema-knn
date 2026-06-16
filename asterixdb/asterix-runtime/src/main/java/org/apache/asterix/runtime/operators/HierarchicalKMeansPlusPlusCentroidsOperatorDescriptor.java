@@ -2059,6 +2059,33 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     return Math.max(2, Math.min(k, recordCount));
                 }
 
+                /**
+                 * Fan-out for a k-means split: BuildHead uses fixed {@link #BKT_KMEANS_K} (SPANN {@code dynamicK=false});
+                 * full-sample TopDown and SelectHead scratch BKT use {@link #dynamicK}.
+                 */
+                private int splitK(int recordCount, int leafPageCapacity, boolean headOnlyBuild) {
+                    if (recordCount <= leafPageCapacity) {
+                        return recordCount;
+                    }
+                    if (headOnlyBuild) {
+                        return Math.max(2, Math.min(BKT_KMEANS_K, recordCount));
+                    }
+                    return dynamicK(recordCount, leafPageCapacity);
+                }
+
+                /** True when any pending batch still needs a k-means split (exceeds one leaf page). */
+                private boolean anyBucketNeedsSplit(List<ParentBatch> batches, int leafPageCapacity) {
+                    if (batches == null) {
+                        return false;
+                    }
+                    for (ParentBatch batch : batches) {
+                        if (batch != null && batch.recCount > leafPageCapacity) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
                 private double[] copyVector(double[] v) {
                     return v == null ? null : Arrays.copyOf(v, v.length);
                 }
@@ -3188,9 +3215,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * BKT-style top-down build: dynamic fan-out (max 32), lambda-balanced splits, real pivots, leaf stop
-                 * when a bag fits on one quantized leaf page. After each split, only non-empty assignment buckets
-                 * are registered as routing centroids so counts match {@code VTreeStaticStructureBuilder}.
+                 * BKT-style top-down build: lambda-balanced splits, real pivots, leaf stop when a bag fits on one
+                 * quantized leaf page. BuildHead ({@code headOnlyBuild}) uses fixed fan-out
+                 * {@link #BKT_KMEANS_K}; full-sample TopDown uses {@link #dynamicK}. BuildHead stops when no pending
+                 * bucket exceeds {@code leafPageCapacity} (plus {@code maxLevel} safety cap). After each split, only
+                 * non-empty assignment buckets are registered as routing centroids so counts match
+                 * {@code VTreeStaticStructureBuilder}.
                  *
                  * @param headOnlyBuild when true (SPANN BuildHead), lambda is tuned on |H| and {@code num_clusters}
                  *            early-stop is disabled
@@ -3231,7 +3261,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     if (lambdaFactor > 0) {
                         tunedLambdaFactor = (float) lambdaFactor;
                     } else {
-                        int probeK = dynamicK(totalTupleCount, leafPageCapacity);
+                        int probeK = splitK(totalTupleCount, leafPageCapacity, headOnlyBuild);
                         tunedLambdaFactor = dynamicFactorSelect(ctx, sampleSource, totalTupleCount, probeK, dim, fta,
                                 tuple, eval, inputVal, listAcc, kmu, rand);
                     }
@@ -3256,7 +3286,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 inputVal, listAcc, kmu);
                         stopReason = "root leaf bag";
                     } else {
-                        int kRoot = dynamicK(totalTupleCount, leafPageCapacity);
+                        int kRoot = splitK(totalTupleCount, leafPageCapacity, headOnlyBuild);
+                        LOGGER.info("[{}] partition={} root: recCount={} -> splitK={}{}", logTag, partition,
+                                totalTupleCount, kRoot, headOnlyBuild ? " (fixed)" : " (dynamicK)");
                         rootResult = clusterRunFile(ctx, sampleSource, totalTupleCount, kRoot, tunedLambdaFactor, fta,
                                 tuple, eval, inputVal, listAcc, kmu, rand);
                     }
@@ -3279,11 +3311,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         cumulative = level0.size();
                         LOGGER.info("[{}] partition={} level 0 (root): centroids={}", logTag, partition, cumulative);
 
-                        boolean stopAtRoot = maxLevel <= 0;
+                        boolean stopAtRoot = maxLevel <= 0 || headOnlyBuild;
                         if (!headOnlyBuild) {
                             stopAtRoot = stopAtRoot || cumulative >= target;
                         }
                         if (stopAtRoot) {
+                            if (headOnlyBuild && stopReason == null) {
+                                stopReason = "all heads fit one leaf page at root";
+                            }
                             LOGGER.info("[{}] partition={} stop at root: centroids={} target={}{}", logTag, partition,
                                     cumulative, headOnlyBuild ? "n/a" : target,
                                     stopReason != null ? " reason=" + stopReason : "");
@@ -3371,15 +3406,48 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     continue;
                                 }
 
-                                int kSplit = dynamicK(batch.recCount, leafPageCapacity);
-                                LOGGER.info("[TopDown] partition={} level {} parent={}: recCount={} -> dynamicK={}",
-                                        partition, level, batch.parentClusterId, batch.recCount, kSplit);
+                                int kSplit = splitK(batch.recCount, leafPageCapacity, headOnlyBuild);
+                                LOGGER.info("[{}] partition={} level {} parent={}: recCount={} -> splitK={}{}", logTag,
+                                        partition, level, batch.parentClusterId, batch.recCount, kSplit,
+                                        headOnlyBuild ? " (fixed)" : " (dynamicK)");
                                 ClusteringResult res = clusterRunFile(ctx, src, batch.recCount, kSplit,
                                         tunedLambdaFactor, fta, tuple, eval, inputVal, listAcc, kmu, rand);
                                 SplitResult sp = splitRunFileByAssignment(ctx, src, res.centroids, fta, tuple, eval,
                                         inputVal, listAcc, kmu);
-                                localId = registerNonEmptySplitBuckets(logTag, partition, level, batch.parentClusterId,
-                                        levelInfo, nextQueue, res.centroids, sp, localId);
+                                int nonEmpty = 0;
+                                for (int c : sp.counts) {
+                                    if (c > 0) {
+                                        nonEmpty++;
+                                    }
+                                }
+                                if (headOnlyBuild && nonEmpty <= 1) {
+                                    LOGGER.info(
+                                            "[{}] partition={} level {} parent={}: degenerate split (nonEmpty={}), "
+                                                    + "emitting leaf-list",
+                                            logTag, partition, level, batch.parentClusterId, nonEmpty);
+                                    deleteRunFiles(sp.files);
+                                    RunFileSource leafSrc = () -> {
+                                        GeneratedRunFileReader rd = batch.file.createReader();
+                                        rd.open();
+                                        return rd;
+                                    };
+                                    ClusteringResult leafRes = emitAllRecordsAsCentroids(ctx, leafSrc, batch.recCount,
+                                            fta, tuple, eval, inputVal, listAcc, kmu);
+                                    FrameTupleReference prototypeTuple = readPrototypeTuple(ctx, leafSrc, fta, tuple);
+                                    for (double[] c : leafRes.centroids) {
+                                        int idAtLevel = localId++;
+                                        levelInfo.add(new HierarchicalClusterStructure.CentroidInfo(idAtLevel,
+                                                batch.parentClusterId, c, level));
+                                        if (level < maxLevel) {
+                                            RunFileWriter promo = materializeSingleVectorRunFile(ctx, prototypeTuple, c,
+                                                    secondaryRecDesc);
+                                            nextQueue.add(new ParentBatch(promo, 1, idAtLevel));
+                                        }
+                                    }
+                                } else {
+                                    localId = registerNonEmptySplitBuckets(logTag, partition, level,
+                                            batch.parentClusterId, levelInfo, nextQueue, res.centroids, sp, localId);
+                                }
                                 batch.file.getFileReference().delete();
                             }
 
@@ -3398,6 +3466,12 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 stopReason = "target reached at level " + level;
                             } else if (stopLevel) {
                                 stopReason = "height cap at level " + level;
+                            }
+                            if (headOnlyBuild && !anyBucketNeedsSplit(nextQueue, leafPageCapacity)) {
+                                stopLevel = true;
+                                if (stopReason == null) {
+                                    stopReason = "all buckets fit one leaf page at level " + level;
+                                }
                             }
                             if (stopLevel) {
                                 LOGGER.info("[{}] partition={} stop: {}", logTag, partition, stopReason);
