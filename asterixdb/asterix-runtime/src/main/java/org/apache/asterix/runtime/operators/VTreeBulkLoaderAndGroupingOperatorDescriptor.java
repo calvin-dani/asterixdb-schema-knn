@@ -30,8 +30,7 @@ import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
 import org.apache.asterix.common.storage.ScalarVectorQuantizer;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunctionDouble;
-import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -130,71 +129,71 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     // Serializable distance function implementations
-    private static class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class EuclideanDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.euclidean(a, b);
+            return VectorDistanceCalculation.euclidean(a, b);
         }
     }
 
-    private static class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class EuclideanSquaredDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.euclideanSquared(a, b);
+            return VectorDistanceCalculation.euclideanSquared(a, b);
         }
     }
 
-    private static class CosineDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class CosineDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.cosineDistance(a, b);
+            return VectorDistanceCalculation.cosineDistance(a, b);
         }
     }
 
-    private static class DotProductDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class DotProductDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return -VectorDistanceArrCalculation.dot(a, b);
+            return -VectorDistanceCalculation.dotProduct(a, b);
         }
     }
 
     // Distance function hash map
-    private static final Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = Map.of(EUCLIDEAN_DISTANCE.hash(),
+    private static final Map<Integer, IVTreeDistanceFunction> DISTANCE_MAP = Map.of(EUCLIDEAN_DISTANCE.hash(),
             new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunction(),
             EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
             EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
             new CosineDistanceFunction(), DOT_PRODUCT_FORMAT.hash(), new DotProductDistanceFunction());
 
     /**
-     * Convert distance metric string to DistanceFunctionDouble implementation.
+     * Convert distance metric string to IVTreeDistanceFunction implementation.
      *
      * @param distanceType Distance metric string (e.g., "euclidean", "cosine similarity", etc.)
-     * @return DistanceFunctionDouble implementation
+     * @return IVTreeDistanceFunction implementation
      * @throws IllegalArgumentException if distance type is not supported
      */
-    private static DistanceFunctionDouble getDistanceFunction(String distanceType) {
+    private static IVTreeDistanceFunction getDistanceFunction(String distanceType) {
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceType.toLowerCase());
-        DistanceFunctionDouble func = DISTANCE_MAP
+        IVTreeDistanceFunction func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
         return func;
     }
 
     /**
-     * Convert DistanceFunctionDouble to IVTreeDistanceFunction for use in Hyracks modules.
+     * Convert IVTreeDistanceFunction to IVTreeDistanceFunction for use in Hyracks modules.
      *
-     * @param distanceFunction AsterixDB DistanceFunctionDouble
+     * @param distanceFunction AsterixDB IVTreeDistanceFunction
      * @return IVTreeDistanceFunction wrapper
      */
-    private static IVTreeDistanceFunction wrapDistanceFunction(DistanceFunctionDouble distanceFunction) {
+    private static IVTreeDistanceFunction wrapDistanceFunction(IVTreeDistanceFunction distanceFunction) {
         return distanceFunction::apply;
     }
 
@@ -428,7 +427,7 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
         // Output infrastructure for transformed tuples
         private FrameTupleAppender outputAppender;
         private RecordDescriptor outputRecDesc;
-        private DistanceFunctionDouble distanceFunction;
+        private IVTreeDistanceFunction distanceFunction;
         private IVTreeDistanceFunction hyracksDistanceFunction;
         private OptimizedScalarQuantizationSampleFile.Params quantizationParams;
         private ScalarVectorQuantizer quantizer; // nullable — created only for quantized indexes
@@ -462,7 +461,7 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
                 // Initialize output infrastructure for transformed tuples
                 initializeOutputInfrastructure();
 
-                // Convert distance metric string to DistanceFunctionDouble
+                // Convert distance metric string to IVTreeDistanceFunction
                 distanceFunction = getDistanceFunction(distanceMetric);
                 // Wrap for use in Hyracks modules
                 hyracksDistanceFunction = wrapDistanceFunction(distanceFunction);

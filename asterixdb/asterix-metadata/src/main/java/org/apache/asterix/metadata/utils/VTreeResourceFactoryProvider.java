@@ -38,6 +38,7 @@ import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.types.IAType;
+import org.apache.asterix.runtime.utils.VectorDistanceFunctionFactory;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.utils.Pair;
 import org.apache.hyracks.algebricks.data.IBinaryComparatorFactoryProvider;
@@ -196,13 +197,16 @@ public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
             // Create vector accessor factory for extracting vectors from ADM ordered lists
             AOrderedListVectorBinaryAccessorFactory vectorAccessorFactory =
                     new AOrderedListVectorBinaryAccessorFactory();
+            // Distance-function factory — persisted on the resource so a restarted index reconstructs
+            // the same distance implementation.
+            VectorDistanceFunctionFactory distanceFunctionFactory = new VectorDistanceFunctionFactory();
             return new LSMVTreeLocalResourceFactory(storageManager, typeTraits, cmpFactories, filterTypeTraits,
                     filterCmpFactories, filterFields, opTrackerFactory, ioOpCallbackFactory, pageWriteCallbackFactory,
                     metadataPageManagerFactory, vbcProvider, ioSchedulerProvider, mergePolicyFactory,
                     mergePolicyProperties, true, vectorDimensions, vectorFields,
                     typeTraitProvider.getTypeTrait(BuiltinType.ANULL), NullIntrospector.INSTANCE, false,
                     vectorAccessorFactory, numPrimaryKeys, numIncludeFields, dataTupleCreatorFactory, distanceMetric,
-                    crossPollination);
+                    distanceFunctionFactory, crossPollination);
         } else {
             return null;
         }

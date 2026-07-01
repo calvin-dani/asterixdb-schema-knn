@@ -20,8 +20,9 @@ package org.apache.asterix.runtime.utils;
 
 import java.io.Serializable;
 
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunctionDouble;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.api.io.IJsonSerializable;
+import org.apache.hyracks.api.io.IPersistedResourceRegistry;
 import org.apache.hyracks.data.std.primitive.UTF8StringPointable;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
@@ -29,9 +30,11 @@ import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 /**
- * Factory for creating IVectorDistanceFunction implementations that wrap VectorDistanceArrCalculation methods.
- * This factory allows passing VectorDistanceArrCalculation implementations from AsterixDB to Hyracks modules
+ * Factory for creating IVectorDistanceFunction implementations that wrap VectorDistanceCalculation methods.
+ * This factory allows passing VectorDistanceCalculation implementations from AsterixDB to Hyracks modules
  * without creating circular dependencies.
  * The factory is serializable and can be passed through the job pipeline.
  */
@@ -55,46 +58,46 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
             UTF8StringPointable.generateUTF8Pointable("cosine similarity");
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
-    private static class EuclideanDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class EuclideanDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.euclidean(a, b);
+            return VectorDistanceCalculation.euclidean(a, b);
         }
     }
 
-    private static class EuclideanSquaredDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class EuclideanSquaredDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.euclideanSquared(a, b);
+            return VectorDistanceCalculation.euclideanSquared(a, b);
         }
     }
 
-    private static class CosineDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class CosineDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return VectorDistanceArrCalculation.cosineDistance(a, b);
+            return VectorDistanceCalculation.cosineDistance(a, b);
         }
     }
 
-    private static class DotProductDistanceFunction implements DistanceFunctionDouble, Serializable {
+    private static class DotProductDistanceFunction implements IVTreeDistanceFunction, Serializable {
         private static final long serialVersionUID = 1L;
 
         /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
         @Override
         public double apply(double[] a, double[] b) throws HyracksDataException {
-            return -VectorDistanceArrCalculation.dot(a, b);
+            return -VectorDistanceCalculation.dotProduct(a, b);
         }
     }
 
     // Distance function hash map. Aliases must mirror ANNDistanceDescriptor.DISTANCE_MAP —
     // anything ann_distance() accepts must also resolve here, or the index search path NPEs.
-    private static final java.util.Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = java.util.Map.of(
+    private static final java.util.Map<Integer, IVTreeDistanceFunction> DISTANCE_MAP = java.util.Map.of(
             EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_L2.hash(),
             new EuclideanDistanceFunction(), EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunction(),
             EUCLIDEAN_DISTANCE_L2_SQUARED.hash(), new EuclideanSquaredDistanceFunction(), COSINE_FORMAT.hash(),
@@ -103,15 +106,15 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
 
     /**
      * Convert distance metric string to IVectorDistanceFunction implementation.
-     * Uses VectorDistanceArrCalculation methods wrapped in IVectorDistanceFunction.
+     * Uses VectorDistanceCalculation methods wrapped in IVectorDistanceFunction.
      * @param distanceMetric Distance metric string (e.g., "euclidean", "cosine similarity", etc.)
-     * @return IVTreeDistanceFunction implementation wrapping VectorDistanceArrCalculation, or Euclidean as default
+     * @return IVTreeDistanceFunction implementation wrapping VectorDistanceCalculation, or Euclidean as default
      */
     @Override
     public IVTreeDistanceFunction createDistanceFunction(String distanceMetric) {
 
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(distanceMetric.toLowerCase());
-        DistanceFunctionDouble func = DISTANCE_MAP
+        IVTreeDistanceFunction func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
 
         if (func == null) {
@@ -124,11 +127,22 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
     }
 
     /**
-     * Convert DistanceFunctionDouble to IVectorDistanceFunction for use in Hyracks modules.
-     * @param distanceFunction AsterixDB DistanceFunctionDouble
+     * Convert IVTreeDistanceFunction to IVectorDistanceFunction for use in Hyracks modules.
+     * @param distanceFunction AsterixDB IVTreeDistanceFunction
      * @return IVectorDistanceFunction wrapper
      */
-    private static IVTreeDistanceFunction wrapDistanceFunction(DistanceFunctionDouble distanceFunction) {
+    private static IVTreeDistanceFunction wrapDistanceFunction(IVTreeDistanceFunction distanceFunction) {
         return distanceFunction::apply;
+    }
+
+    // Stateless factory: the persisted form is just the class identifier.
+    @Override
+    public JsonNode toJson(IPersistedResourceRegistry registry) throws HyracksDataException {
+        return registry.getClassIdentifier(getClass(), serialVersionUID);
+    }
+
+    @SuppressWarnings("unused")
+    public static IJsonSerializable fromJson(IPersistedResourceRegistry registry, JsonNode json) {
+        return new VectorDistanceFunctionFactory();
     }
 }

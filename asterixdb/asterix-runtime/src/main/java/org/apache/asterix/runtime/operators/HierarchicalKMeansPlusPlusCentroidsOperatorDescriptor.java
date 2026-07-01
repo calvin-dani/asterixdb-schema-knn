@@ -42,8 +42,7 @@ import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
-import org.apache.asterix.runtime.evaluators.functions.vector.VectorDistanceArrScalarEvaluator.DistanceFunctionDouble;
-import org.apache.asterix.runtime.utils.VectorDistanceArrCalculation;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -77,44 +76,45 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-class EuclideanDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
+class EuclideanDistanceFunctionDouble implements IVTreeDistanceFunction, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
     public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.euclidean(a, b);
+        return VectorDistanceCalculation.euclidean(a, b);
     }
 }
 
-class EuclideanSquaredDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
+class EuclideanSquaredDistanceFunctionDouble implements IVTreeDistanceFunction, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
     public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.euclideanSquared(a, b);
+        return VectorDistanceCalculation.euclideanSquared(a, b);
     }
 }
 
-class CosineDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
+class CosineDistanceFunctionDouble implements IVTreeDistanceFunction, Serializable {
     private static final long serialVersionUID = 1L;
 
     @Override
     public double apply(double[] a, double[] b) throws HyracksDataException {
-        return VectorDistanceArrCalculation.cosineDistance(a, b);
+        return VectorDistanceCalculation.cosineDistance(a, b);
     }
 }
 
-class DotProductDistanceFunctionDouble implements DistanceFunctionDouble, Serializable {
+class DotProductDistanceFunctionDouble implements IVTreeDistanceFunction, Serializable {
     private static final long serialVersionUID = 1L;
 
     /** Returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS). */
     @Override
     public double apply(double[] a, double[] b) throws HyracksDataException {
-        return -VectorDistanceArrCalculation.dot(a, b);
+        return -VectorDistanceCalculation.dotProduct(a, b);
     }
 }
 
@@ -536,11 +536,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static final UTF8StringPointable DOT_PRODUCT_FORMAT = UTF8StringPointable.generateUTF8Pointable("dot");
 
     // Distance function hash map (includes "cosine" alias for DDL-normalized metric)
-    private static final Map<Integer, DistanceFunctionDouble> DISTANCE_MAP = buildDistanceMap();
+    private static final Map<Integer, IVTreeDistanceFunction> DISTANCE_MAP = buildDistanceMap();
 
-    private static Map<Integer, DistanceFunctionDouble> buildDistanceMap() {
-        DistanceFunctionDouble cosineFunc = new CosineDistanceFunctionDouble();
-        Map<Integer, DistanceFunctionDouble> m = new HashMap<>();
+    private static Map<Integer, IVTreeDistanceFunction> buildDistanceMap() {
+        IVTreeDistanceFunction cosineFunc = new CosineDistanceFunctionDouble();
+        Map<Integer, IVTreeDistanceFunction> m = new HashMap<>();
         m.put(EUCLIDEAN_DISTANCE.hash(), new EuclideanDistanceFunctionDouble());
         m.put(EUCLIDEAN_DISTANCE_L2.hash(), new EuclideanDistanceFunctionDouble());
         m.put(EUCLIDEAN_DISTANCE_SQUARED.hash(), new EuclideanSquaredDistanceFunctionDouble());
@@ -561,17 +561,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private IScalarEvaluatorFactory args; // Evaluator for extracting vector data from tuples
     private int K; // Number of clusters for initial level (leaf nodes)
     private int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
-    private DistanceFunctionDouble distanceFunction;
+    private IVTreeDistanceFunction distanceFunction;
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private int vectorDimension;
 
-    private static DistanceFunctionDouble getDistanceFunctionDouble(String distanceType) {
+    private static IVTreeDistanceFunction getDistanceFunctionDouble(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
             return new EuclideanSquaredDistanceFunctionDouble();
         }
         String normalized = distanceType.toLowerCase().trim();
         UTF8StringPointable formatPointable = UTF8StringPointable.generateUTF8Pointable(normalized);
-        DistanceFunctionDouble func = DISTANCE_MAP
+        IVTreeDistanceFunction func = DISTANCE_MAP
                 .get(UTF8StringUtil.lowerCaseHash(formatPointable.getByteArray(), formatPointable.getStartOffset()));
         if (func == null) {
             throw new IllegalArgumentException("Unsupported distance function: " + distanceType);
@@ -639,8 +639,31 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
      */
     private void maybeNormalizeCentroid(double[] centroid) {
         if (centroid != null && requiresNormalizedCentroids()) {
-            VectorDistanceArrCalculation.normalizeL2(centroid);
+            normalizeL2(centroid);
         }
+    }
+
+    /**
+     * Normalize {@code a} in place to unit L2 norm (no-op if the norm is zero or NaN). Local copy of the
+     * former {@code VectorDistanceArrCalculation.normalizeL2}, which the reorganized VectorDistanceCalculation
+     * (double[]-only distance API) no longer exposes.
+     */
+    private static void normalizeL2(double[] a) {
+        double norm = l2Norm(a);
+        if (norm > 0.0 && !Double.isNaN(norm)) {
+            for (int i = 0; i < a.length; i++) {
+                a[i] /= norm;
+            }
+        }
+    }
+
+    private static double l2Norm(double[] a) {
+        double sum = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            double v = a[i];
+            sum += v * v;
+        }
+        return Double.isNaN(sum) ? Double.NaN : Math.sqrt(sum);
     }
 
     /**

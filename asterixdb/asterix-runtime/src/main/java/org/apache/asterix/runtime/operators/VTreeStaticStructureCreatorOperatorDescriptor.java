@@ -34,6 +34,7 @@ import org.apache.asterix.common.storage.OptimizedScalarQuantizationSampleFile;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.evaluators.ColumnAccessEvalFactory;
 import org.apache.hyracks.algebricks.runtime.evaluators.EvaluatorContext;
@@ -77,7 +78,6 @@ import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVTreeInteriorFrame;
 import org.apache.hyracks.storage.am.vector.api.IVTreeLeafFrame;
 import org.apache.hyracks.storage.am.vector.impls.VTree;
-import org.apache.hyracks.storage.am.vector.utils.VectorUtils;
 import org.apache.hyracks.storage.common.IIndex;
 import org.apache.hyracks.storage.common.IIndexBulkLoader;
 import org.apache.hyracks.storage.common.IResource;
@@ -798,7 +798,7 @@ public class VTreeStaticStructureCreatorOperatorDescriptor extends AbstractOpera
                     if (centroid.length != queryVector.length) {
                         return "NA (dim mismatch)";
                     }
-                    double d = VectorUtils.calculateEuclideanDistance(queryVector, centroid);
+                    double d = VectorDistanceCalculation.euclidean(queryVector, centroid);
                     return String.format("%.4f", d);
                 }
 
