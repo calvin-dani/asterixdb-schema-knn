@@ -46,12 +46,16 @@ import org.apache.hyracks.storage.common.ISearchPredicate;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Search cursor for vector clustering tree operations.
  * Performs centroid finding via tree traversal and then iterates through data pages of the selected cluster.
  */
 public class VTreeSearchCursor implements IIndexCursor {
+
+    private static final Logger LOGGER = LogManager.getLogger();
 
     // Tree navigation fields (used for static structure traversal)
     private IBufferCache bufferCache;
@@ -513,6 +517,14 @@ public class VTreeSearchCursor implements IIndexCursor {
 
         // Guard: directoryPageId=-1 means empty cluster (no data assigned during bulk loading)
         if (directoryPageId == -1) {
+            if (!fullScanMode) {
+                // In query mode a -1 sentinel usually means the directory page could not be
+                // resolved in this component (e.g., a corrupt/wrong component root made the
+                // cluster unreachable) — flag it instead of silently yielding an empty cluster.
+                // Merge (full-scan) mode legitimately sees -1 for empty clusters, so stay quiet there.
+                LOGGER.warn("VTreeSearchCursor: -1 directory page sentinel in query mode (fileId={}, rootPageId={}); "
+                        + "treating cluster as empty", fileId, rootPageId);
+            }
             this.currentDataPageId = -1;
             this.tupleCount = 0;
             this.currentTupleIndex = 0;
@@ -862,6 +874,16 @@ public class VTreeSearchCursor implements IIndexCursor {
         }
 
         // Fallback: use directoryPageId from ClusterSearchResult
+        if (clusterResult.directoryPageId == -1) {
+            // The cluster is not in this component's leaf pages AND the caller-provided result
+            // carries the -1 sentinel: the cluster will be silently treated as empty. This is
+            // expected for genuinely empty clusters, but it is also the signature of an
+            // unreachable static structure (e.g., a wrong persisted component root).
+            LOGGER.warn(
+                    "VTreeSearchCursor: unresolved directory page for centroidId={} (clusterIndex={}) in "
+                            + "component fileId={} (rootPageId={}); cluster will be treated as empty",
+                    clusterResult.centroidId, clusterResult.clusterIndex, fileId, rootPageId);
+        }
         return clusterResult.directoryPageId;
     }
 

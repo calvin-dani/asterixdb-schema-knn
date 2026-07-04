@@ -46,6 +46,7 @@ import org.apache.hyracks.storage.common.buffercache.PageWriteFailureCallback;
 import org.apache.hyracks.storage.common.buffercache.context.write.DefaultBufferCacheWriteContext;
 import org.apache.hyracks.storage.common.compression.file.ICompressedPageWriter;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Flush loader for VTree that writes memory component (VBC) pages
@@ -101,8 +102,11 @@ public class VTreeFlushLoader extends PageWriteFailureCallback implements IIndex
      * Leaf next-page pointers are offset by staticBasePageId.
      *
      * @param staticAccessor accessor to the static structure disk component
-     * @return the root page ID (staticBasePageId) for the flushed component
+     * @return the root page ID of the flushed component: staticBasePageId offset by the static
+     *         tree's own root page id (bottom-up layout puts leaves first and the root at the
+     *         highest static page id, so the first copied page is a LEAF, not the root)
      */
+    @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED, notes = "Fix: flush recorded first static (leaf) page as component root")
     public int copyStaticStructure(VTree.VTreeAccessor staticAccessor) throws HyracksDataException {
 
         VTree staticTree = staticAccessor.getIndex();
@@ -189,7 +193,10 @@ public class VTreeFlushLoader extends PageWriteFailureCallback implements IIndex
             write(entry.getValue());
         }
 
-        return staticBasePageId;
+        // The static structure's root sits at its own root page id within the copied range
+        // (mirrors VTreeBulkLoader#end: rootPageId = staticBasePageId + staticStructureRootPage).
+        // Returning staticBasePageId itself would persist the first copied LEAF page as root.
+        return staticBasePageId + staticTree.getRootPageId();
     }
 
     /**
