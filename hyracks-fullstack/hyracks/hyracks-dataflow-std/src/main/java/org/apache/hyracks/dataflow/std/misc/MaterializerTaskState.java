@@ -118,4 +118,15 @@ public class MaterializerTaskState extends AbstractStateObject {
     public GeneratedRunFileReader createReader() throws HyracksDataException {
         return out.createReader();
     }
+
+    /**
+     * Deletes the backing run file. Consumers that read via {@link #createReader()} (bypassing
+     * {@link #writeOut}'s last-consumer accounting) must call this once all readers are closed,
+     * or the file leaks until the workspace is purged.
+     */
+    public void deleteFile() {
+        if (out != null) {
+            out.getFileReference().delete();
+        }
+    }
 }

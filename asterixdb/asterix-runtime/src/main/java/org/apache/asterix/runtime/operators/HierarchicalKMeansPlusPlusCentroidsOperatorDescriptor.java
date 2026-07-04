@@ -77,6 +77,7 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNod
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
+import org.apache.hyracks.util.annotations.AiProvenance;
 import org.apache.hyracks.util.string.UTF8StringUtil;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -564,6 +565,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private IVTreeDistanceFunction distanceFunction;
     private RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
     private int vectorDimension;
+    private final long trainSeed; // Base seed for the training RNG; per-partition offset keeps partitions decorrelated
 
     private static IVTreeDistanceFunction getDistanceFunctionDouble(String distanceType) {
         if (distanceType == null || distanceType.trim().isEmpty()) {
@@ -690,10 +692,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         return new RecordDescriptor(fieldSerdes);
     }
 
+    @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED, notes = "Added trainSeed parameter so tests can pin the training RNG (compiler.vector.trainseed)")
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
-            IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter, String distanceMetric,
-            int vectorDimension) {
+            IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter, String distanceMetric, int vectorDimension,
+            long trainSeed) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -705,6 +708,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.K = K;
         this.maxScalableKmeansIter = maxScalableKmeansIter;
         this.vectorDimension = vectorDimension;
+        this.trainSeed = trainSeed;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
         this.distanceFunction = getDistanceFunctionDouble(distanceMetric);
@@ -855,6 +859,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         throw new RuntimeException(e);
                     } finally {
                         in.close();
+                        // Last consumer of the materialized sample: delete the run file or it leaks.
+                        sampleState.deleteFile();
                         writer.close();
                     }
                 }
@@ -1547,8 +1553,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     HierarchicalClusterStructure structure = new HierarchicalClusterStructure();
 
-                    // Perform initial K-means++ on all data to generate initial centroids
-                    Random rand = new Random();
+                    // Perform initial K-means++ on all data to generate initial centroids.
+                    // Seeded from the descriptor's trainSeed with a per-partition offset: same seed + same
+                    // input order => identical centroids (regression tests), while partitions stay decorrelated.
+                    Random rand = new Random(trainSeed * 31 + partition);
                     int maxKMeansIterations = 20;
                     ClusteringResult initialResult =
                             performInitialKMeansPlusPlus(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant,

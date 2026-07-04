@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.asterix.common.cluster.PartitioningProperties;
+import org.apache.asterix.common.config.CompilerProperties;
 import org.apache.asterix.common.config.DatasetConfig.DatasetType;
 import org.apache.asterix.common.config.OptimizationConfUtil;
 import org.apache.asterix.common.context.ITransactionSubsystemProvider;
@@ -106,9 +107,12 @@ import org.apache.hyracks.storage.am.lsm.vector.dataflow.QuantizedIndexCreateOpe
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
 
+    private static final Logger LOGGER = LogManager.getLogger();
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
     /**
@@ -308,10 +312,23 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION ======
 
+        // Training RNG seed: overridable per request (SET `compiler.vector.trainseed` "42") so CI /
+        // regression tests get reproducible centroids; defaults to a fresh nanoTime seed otherwise.
+        long trainSeed = System.nanoTime();
+        Object trainSeedCfg = metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TRAINSEED_KEY);
+        if (trainSeedCfg != null) {
+            try {
+                trainSeed = Long.parseLong(String.valueOf(trainSeedCfg).trim());
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using a random seed", CompilerProperties.COMPILER_VECTOR_TRAINSEED_KEY,
+                        trainSeedCfg);
+            }
+        }
+
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter,
-                        distanceMetric, vectorDimension);
+                        distanceMetric, vectorDimension, trainSeed);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
