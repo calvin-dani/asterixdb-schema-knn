@@ -9,7 +9,7 @@ This report describes the current SPANN-oriented VTREE implementation in this br
 - Query-time ANN top-k execution path
 - Configuration knobs and how they influence tree shape
 - Lambda-balanced k-means and the scratch BKT used for head selection
-- Modal branch-height cutoff before operator handoff
+- Global modal branch flatten before operator handoff
 
 ---
 
@@ -56,7 +56,7 @@ sample/full scan
   → HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
        [SelectHead: scratch BKT → head walk → head run file]
        [BuildHead / TopDown: level-wise lambda-balanced splits]
-       [Mode cutoff: prune deeper-than-modal levels]
+       [Global mode flatten: promote deeper pivots into level M]
        [Emit: outputBottomUpForStaticStructure]
   → VTreeStaticStructureCreatorOperatorDescriptor
   → VTreeStaticStructureBuilder (disk pages)
@@ -315,15 +315,16 @@ If `SET compiler.vector.topdown.lambdaFactor "100"` (any positive value), auto-t
 
 ---
 
-## Modal Branch-Height Cutoff — Where and How
+## Global Modal Branch Flatten — Where and How
 
 ### Where it is calculated
 
 **Class:** `HierarchicalClusterStructure` (inner class of `HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor`)
 
 **Methods:**
-- `computeModalLeafDepth()` — builds leaf-depth histogram, returns modal depth
-- `pruneLevelsDeeperThan(int maxRetainedLevel)` — removes deeper levels from in-memory structure
+- `computeModalLeafDepth()` — builds global leaf-depth histogram, returns modal depth `M`
+- `flattenLevelsDeeperThanModal(int M)` — promotes routing pivots from levels `> M` into level `M`
+- `validateNthCentroidClusterMapping(int M)` — logs warnings when Nth-centroid → Nth-cluster mapping may break
 
 **Call site:** `FindCandidatesActivity.initialize()`, immediately before tuple emission:
 
@@ -331,7 +332,7 @@ If `SET compiler.vector.topdown.lambdaFactor "100"` (any positive value), auto-t
 if (emitTopDown) {
     int modalDepth = clusterStructure.computeModalLeafDepth();
     if (modalDepth >= 0) {
-        clusterStructure.pruneLevelsDeeperThan(modalDepth);
+        clusterStructure.flattenLevelsDeeperThanModal(modalDepth);
     }
     clusterStructure.outputBottomUpForStaticStructure(appender, writer, ctx);
 }
@@ -339,11 +340,12 @@ if (emitTopDown) {
 
 This is the **operator boundary** between the hierarchical clustering operator and `VTreeStaticStructureCreatorOperatorDescriptor`.
 
-### What "branch height" means here
+### What "branch height" and global mode mean
 
 In the top-down in-memory layout:
 - **Level 0 = root**, larger level numbers = deeper toward leaves.
 - A **leaf** at level L is a centroid at L that is **not referenced** as `parentClusterId` by any centroid at level L+1.
+- **Global mode** = one depth `M` for the entire tree (most common leaf depth across all branches).
 
 ### Mode computation algorithm
 
@@ -351,22 +353,181 @@ In the top-down in-memory layout:
    - Count centroids at L with no children at L+1 → leaf count at depth L.
 2. Build histogram: `{depth → leafCount}`.
 3. Select depth with **maximum leaf count**.
-4. **Tie-break:** prefer the **deeper** level (keeps more of the built structure).
+4. **Tie-break:** prefer the **deeper** level.
 
-Example: if most branches terminate at depth 3 but some reach depth 4, mode=3 and level 4 is pruned.
+### What flattening does (vs prior cut)
 
-### What pruning does
+**Previous behavior (cut):** delete all levels `> M` — routing pivots below modal depth were discarded.
 
-- Removes all entries in `levelCentroids` for levels `> modalDepth`.
-- Does **not** re-run k-means or change parent indices of retained nodes.
-- Downstream emission uses existing `outputBottomUpForStaticStructure(...)` unchanged.
-- `VTreeStaticStructureCreatorOperatorDescriptor` infers `maxLevel` from the pruned tuple stream.
+**Current behavior (flatten):** keep routing pivots by promoting them into level `M` under their branch cut root, then remove deeper levels.
+
+Fat clusters at level `M` may span multiple pages via existing overflow chains in `VTreeStaticStructureBuilder`.
+
+---
+
+### How flatten works (step-by-step)
+
+Method: `flattenLevelsDeeperThanModal(int M)` in `HierarchicalClusterStructure`.
+
+```mermaid
+flowchart TD
+  start[Built tree in levelCentroids] --> mode[computeModalLeafDepth returns M]
+  mode --> early{M >= maxLevel?}
+  early -->|yes| noop[Return 0 no-op]
+  early -->|no| bucket[Build buckets keyed by cut parent index]
+  bucket --> existing[Seed buckets from existing level-M centroids]
+  existing --> promote[For each centroid at level greater than M walk ancestor to M-1 and add to bucket]
+  promote --> rebuild[Rebuild level M in parent-index order]
+  rebuild --> remove[Remove levelCentroids keys greater than M]
+  remove --> validate[validateNthCentroidClusterMapping]
+  validate --> emit[outputBottomUpForStaticStructure]
+```
+
+#### Step 0 — Early exit
+
+If `M < 0` or `M >= maxLevel`, return `0` immediately (tree is already at or shallower than modal depth).
+
+#### Step 1 — Compute global mode (unchanged)
+
+`computeModalLeafDepth()` runs **before** flatten:
+
+1. For each level `L`, count **leaf nodes** (centroids at `L` with no child at `L+1`).
+2. Build histogram `{depth → leafCount}`.
+3. Pick depth `M` with maximum count; tie-break toward **deeper** depth.
+
+This is **global**: one `M` for the entire partition, not per-branch.
+
+#### Step 2 — Bucket by branch cut root
+
+A **bucket** is `Map<Integer, List<CentroidInfo>>` keyed by **cut parent index** at level `M-1`.
+
+The **branch cut root** for a deep centroid is its ancestor at level `M-1`, found by `resolveAncestorLocalIndex(fromLevel, fromLocalIdx, M-1)`:
+
+```
+currentLevel = fromLevel, currentIdx = fromLocalIdx
+while currentLevel > M-1:
+    currentIdx = levelCentroids[currentLevel][currentIdx].parentClusterId
+    currentLevel--
+return currentIdx   // local index at level M-1
+```
+
+Returns `-2` if the parent chain is broken (centroid skipped with a warning).
+
+**Special case `M == 0`:** all promoted centroids use cut parent key `-1` (root cluster). Every pivot from levels `1..maxLevel` merges into level `0` with `parentClusterId = -1`.
+
+#### Step 3 — Seed buckets from existing level M
+
+For `M > 0`, copy all existing centroids at level `M` into buckets grouped by their current `parentClusterId`. Order within each bucket is preserved.
+
+This implements **merge with existing** level-`M` nodes: flattened pivots are appended later, not substituted.
+
+#### Step 4 — Promote deeper pivots
+
+For each centroid `C` at level `L` where `M < L <= maxLevel`:
+
+1. Skip if `C.embedding` is null.
+2. Resolve `cutParentIdx` at level `M-1` (or `-1` when `M == 0`).
+3. `addToBucket(buckets, cutParentIdx, new CentroidInfo(..., cutParentIdx, C.embedding, M))`.
+4. Increment `flattenedPivots` counter.
+
+**Dedup:** `addToBucket` skips a pivot if an identical embedding array is already in the same bucket (`Arrays.equals`).
+
+Centroids already at level `M` are **not** processed in this pass (they were seeded in Step 3).
+
+#### Step 5 — Rebuild level M (Nth-centroid invariant)
+
+For `M > 0`, rebuild `levelCentroids[M]`:
+
+```
+newLevelM = []
+for parentIdx in 0 .. levelCentroids[M-1].size()-1:
+    for c in buckets[parentIdx] (if non-empty):
+        newLevelM.add(CentroidInfo(localId++, parentIdx, c.embedding, M))
+levelCentroids[M] = newLevelM
+```
+
+**Why parent-index order matters:** `VTreeStaticStructureBuilder` assumes the **Nth centroid emitted at level M-1 points to the Nth cluster at level M**. Iterating `parentIdx` from `0` to `n-1` keeps cluster index aligned with parent position.
+
+Each `parentClusterId` group at level `M` becomes one **cluster** (possibly many centroids → overflow pages).
+
+For `M == 0`, `rebuildLevelFromBuckets(buckets, -1, 0)` produces the new root level list.
+
+Levels `0 .. M-1` are **never modified** (same centroids, same local indices, same order).
+
+#### Step 6 — Remove deeper levels
+
+Delete `levelCentroids` entries for levels `M+1 .. maxLevel` after promotion.
+
+#### Step 7 — Validate and log
+
+`validateNthCentroidClusterMapping(M)` warns if any parent at level `M-1` has **no** centroids at level `M` with matching `parentClusterId` (Nth-centroid contract risk).
+
+At the call site, logs:
+
+```
+[FindCandidates] partition={}: topDown modalDepth={} flattenedPivots={} level{M}Size={} levelsAfter={}
+```
+
+---
+
+### Worked example (M = 2)
+
+Before flatten (one deep branch):
+
+```
+Level 0:  [A]                          parentClusterId: -1
+Level 1:  [B, C]                       parentClusterId: 0, 0
+Level 2:  [d1, d2, e1]                 parentClusterId: 0, 0, 1   ← modal depth M=2 (most leaves here)
+Level 3:  [f1, f2]                     parentClusterId: 0, 1       ← deeper than M
+```
+
+Global mode `M = 2`. Levels `0` and `1` unchanged.
+
+Promotion:
+
+| Centroid | From level | Ancestor at M-1=1 | Bucket key |
+|----------|------------|-------------------|------------|
+| f1 | 3 | B (index 0 at L1) | 0 |
+| f2 | 3 | d2 (index 1 at L2) → C (index 1 at L1) | 1 |
+
+After merge into level 2 buckets:
+
+- Bucket `0` (parent B): `[d1, d2, f1]` — existing d1,d2 plus promoted f1
+- Bucket `1` (parent C): `[e1, f2]`
+
+Level 3 removed. Final max level = 2. Search at level 2 scans wider clusters (overflow OK) but retains pivots f1,f2 that cut would have deleted.
+
+Shallow branches (no nodes below `M`) are unchanged — only paths with `L > M` contribute promotions.
+
+---
+
+### Edge cases
+
+| Case | Behavior |
+|------|----------|
+| `M >= maxLevel` | No-op, return 0 |
+| `M == 0` | All levels `> 0` promoted into level `0`, `parentClusterId = -1` |
+| Shallow branch (leaves at `L < M`) | Unchanged; no promotions from that path |
+| Null embedding | Skipped |
+| Invalid ancestor chain | Warning logged, centroid skipped |
+| Duplicate embedding in bucket | Skipped (dedup) |
+| Interior at M with deep children | Kept; deeper pivots merged into same `parentClusterId` cluster |
+
+---
+
+### Tradeoffs
+
+| Flatten | Cut (removed) |
+|---------|----------------|
+| Retains routing pivots from deep branches | Drops deep pivots entirely |
+| Wider clusters at level M (more scan work per probe step) | Smaller level M, potentially lower recall |
+| Better vector-space coverage | Cheaper static structure |
 
 ### Why at handoff time
 
 - Zero impact on split logic, SelectHead, or λ tuning internals.
 - Preserves tuple contract `[treeLevel, centroidId, parentClusterId, embedding]`.
-- Static builder already derives shape from emitted tuples; no builder changes required.
+- Static builder already supports multi-centroid clusters and overflow; no builder changes required.
 
 ---
 
@@ -376,7 +537,7 @@ Emitted from hierarchical operator:
 
 | Field | Name | Meaning |
 |-------|------|---------|
-| 0 | `treeLevel` | 0 = root, max = deepest retained level after mode prune |
+| 0 | `treeLevel` | 0 = root, max = global modal depth M after flatten |
 | 1 | `centroidId` | Global id assigned in top-down scan order |
 | 2 | `parentClusterId` | Parent's local index at previous level (-1 for root) |
 | 3 | `embedding` | Real sample vector (pivot record) |
@@ -454,8 +615,8 @@ This is the data/posting placement phase: records land in the cluster (leaf rout
          └─────────────────────────┬─────────────────────────┘
                                    │
          ┌─────────────────────────▼─────────────────────────┐
-         │  Mode cutoff: computeModalLeafDepth()             │
-         │    • prune levels deeper than modal depth         │
+         │  Global mode flatten: computeModalLeafDepth()     │
+         │    • promote deeper pivots into level M           │
          │    • emit via outputBottomUpForStaticStructure    │
          └─────────────────────────┬─────────────────────────┘
                                    │
@@ -469,7 +630,7 @@ This is the data/posting placement phase: records land in the cluster (leaf rout
          │  Full-sample TopDown                              │
          │    • dynamicK splits                              │
          │    • stop: num_clusters OR maxLevel               │
-         │    • mode cutoff + emit                           │
+         │    • global mode flatten + emit                   │
          └───────────────────────────────────────────────────┘
 ```
 
@@ -481,7 +642,7 @@ This is the data/posting placement phase: records land in the cluster (leaf rout
 - **Degenerate k-means splits** (≤1 non-empty bucket) become leaf-lists in both scratch BKT and BuildHead.
 - **Empty routing buckets** after full assign are dropped to preserve Nth-centroid→Nth-cluster mapping.
 - **BuildHead ignores `num_clusters`** for stop; full-sample path respects it.
-- **Mode cutoff** only applies to top-down emission path (`emitTopDown=true`); legacy bottom-up uses `outputHierarchicalStructure` without mode pruning.
+- **Global mode flatten** only applies to top-down emission path (`emitTopDown=true`); legacy bottom-up uses `outputHierarchicalStructure` without flattening.
 - **Quantization metadata read** in static-structure creator is best-effort; defaults used if unavailable.
 - **Two separate λ tunings** when auto: one for SelectHead scratch BKT (on full sample), one for BuildHead (on heads).
 
@@ -493,7 +654,7 @@ Current SPANN behavior in AsterixDB is a three-stage build:
 
 1. **SelectHead** — iterative scratch BKT over the training sample with lambda-balanced splits and a threshold-tuned head walk (~15% of sample by default).
 2. **BuildHead** — routing tree built only from selected heads, using fixed fan-out (≤32), lambda-balanced k-means with real-record pivots, and leaf-page-capacity-driven stopping.
-3. **Mode cutoff** — before handing tuples to the static-structure operator, branch leaf depths are histogrammed, the modal depth is chosen, and deeper levels are pruned while preserving parent-child consistency for retained nodes.
+3. **Global mode flatten** — before handing tuples to the static-structure operator, branch leaf depths are histogrammed, global modal depth `M` is chosen, and all routing pivots from levels `> M` are promoted into level `M` under their level-(M-1) branch cut root (merged with existing level-M centroids). Deeper levels are then removed.
 
 Lambda auto-tuning selects the balance factor that minimizes cluster-count variance across powers-of-ten candidates. Query-time search uses the existing LSM VTREE top-k cursor with nprobe cluster selection over the built routing tree.
 

@@ -501,6 +501,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             return levelCentroids.size();
         }
 
+        public int getCentroidCountAtLevel(int level) {
+            List<CentroidInfo> infos = levelCentroids.get(level);
+            return infos == null ? 0 : infos.size();
+        }
+
         /**
          * Calculate estimated tuple size for hierarchical output format (DOUBLE type).
          * Formula: 38 + 13 × dimension bytes
@@ -703,17 +708,175 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         }
 
         /**
-         * Prunes all levels deeper than {@code maxRetainedLevel}. This is used immediately before
-         * top-down structure emission to keep the downstream tuple contract unchanged while trimming
-         * extra depth.
+         * Promotes all routing centroids from levels deeper than global modal depth {@code M} into
+         * level {@code M}, grouped under their branch cut root (ancestor at level {@code M - 1}).
+         * Existing level-{@code M} centroids are preserved; deeper pivots are merged into the same
+         * {@code parentClusterId} cluster. Returns the number of pivots promoted from levels {@code > M}.
          */
-        public void pruneLevelsDeeperThan(int maxRetainedLevel) {
+        public int flattenLevelsDeeperThanModal(int modalDepth) {
             int maxLevel = getMaxLevel();
-            if (maxLevel < 0 || maxRetainedLevel >= maxLevel) {
+            if (modalDepth < 0 || maxLevel < 0 || modalDepth >= maxLevel) {
+                return 0;
+            }
+
+            int flattenedPivots = 0;
+            Map<Integer, List<CentroidInfo>> buckets = new HashMap<>();
+
+            if (modalDepth == 0) {
+                List<CentroidInfo> existingRoot = levelCentroids.get(0);
+                if (existingRoot != null) {
+                    for (CentroidInfo c : existingRoot) {
+                        if (c.embedding != null) {
+                            addToBucket(buckets, -1, c);
+                        }
+                    }
+                }
+                for (int level = 1; level <= maxLevel; level++) {
+                    List<CentroidInfo> levelInfo = levelCentroids.get(level);
+                    if (levelInfo == null) {
+                        continue;
+                    }
+                    for (int localIdx = 0; localIdx < levelInfo.size(); localIdx++) {
+                        CentroidInfo c = levelInfo.get(localIdx);
+                        if (c.embedding == null) {
+                            continue;
+                        }
+                        addToBucket(buckets, -1, new CentroidInfo(localIdx, -1, c.embedding, 0));
+                        flattenedPivots++;
+                    }
+                }
+                levelCentroids.put(0, rebuildLevelFromBuckets(buckets, -1, 0));
+            } else {
+                List<CentroidInfo> existingAtModal = levelCentroids.get(modalDepth);
+                if (existingAtModal != null) {
+                    for (CentroidInfo c : existingAtModal) {
+                        if (c.embedding != null) {
+                            addToBucket(buckets, c.parentClusterId, c);
+                        }
+                    }
+                }
+                for (int level = modalDepth + 1; level <= maxLevel; level++) {
+                    List<CentroidInfo> levelInfo = levelCentroids.get(level);
+                    if (levelInfo == null) {
+                        continue;
+                    }
+                    for (int localIdx = 0; localIdx < levelInfo.size(); localIdx++) {
+                        CentroidInfo c = levelInfo.get(localIdx);
+                        if (c.embedding == null) {
+                            continue;
+                        }
+                        int cutParentIdx = resolveAncestorLocalIndex(level, localIdx, modalDepth - 1);
+                        if (cutParentIdx < -1) {
+                            LOGGER.warn("flattenLevelsDeeperThanModal: skip centroid at level={} localIdx={} "
+                                    + "(invalid ancestor at level={})", level, localIdx, modalDepth - 1);
+                            continue;
+                        }
+                        addToBucket(buckets, cutParentIdx,
+                                new CentroidInfo(localIdx, cutParentIdx, c.embedding, modalDepth));
+                        flattenedPivots++;
+                    }
+                }
+
+                List<CentroidInfo> parentsAtCut = levelCentroids.get(modalDepth - 1);
+                List<CentroidInfo> newLevelM = new ArrayList<>();
+                if (parentsAtCut != null) {
+                    for (int parentIdx = 0; parentIdx < parentsAtCut.size(); parentIdx++) {
+                        List<CentroidInfo> bucket = buckets.get(parentIdx);
+                        if (bucket == null || bucket.isEmpty()) {
+                            continue;
+                        }
+                        int localId = newLevelM.size();
+                        for (CentroidInfo c : bucket) {
+                            newLevelM.add(new CentroidInfo(localId++, parentIdx, c.embedding, modalDepth));
+                        }
+                    }
+                }
+                levelCentroids.put(modalDepth, newLevelM);
+            }
+
+            for (int level = modalDepth + 1; level <= maxLevel; level++) {
+                levelCentroids.remove(level);
+            }
+
+            validateNthCentroidClusterMapping(modalDepth);
+            return flattenedPivots;
+        }
+
+        private void addToBucket(Map<Integer, List<CentroidInfo>> buckets, int parentIdx, CentroidInfo centroid) {
+            List<CentroidInfo> bucket = buckets.computeIfAbsent(parentIdx, k -> new ArrayList<>());
+            for (CentroidInfo existing : bucket) {
+                if (embeddingsEqual(existing.embedding, centroid.embedding)) {
+                    return;
+                }
+            }
+            bucket.add(centroid);
+        }
+
+        private static boolean embeddingsEqual(double[] a, double[] b) {
+            return a != null && b != null && Arrays.equals(a, b);
+        }
+
+        private List<CentroidInfo> rebuildLevelFromBuckets(Map<Integer, List<CentroidInfo>> buckets, int parentIdx,
+                int level) {
+            List<CentroidInfo> result = new ArrayList<>();
+            List<CentroidInfo> bucket = buckets.get(parentIdx);
+            if (bucket == null) {
+                return result;
+            }
+            int localId = 0;
+            for (CentroidInfo c : bucket) {
+                result.add(new CentroidInfo(localId++, parentIdx, c.embedding, level));
+            }
+            return result;
+        }
+
+        /**
+         * Walk {@code parentClusterId} links upward to the local index at {@code targetLevel}.
+         * Returns {@code -2} when the chain is invalid.
+         */
+        private int resolveAncestorLocalIndex(int fromLevel, int fromLocalIdx, int targetLevel) {
+            int currentLevel = fromLevel;
+            int currentIdx = fromLocalIdx;
+            while (currentLevel > targetLevel) {
+                List<CentroidInfo> levelInfo = levelCentroids.get(currentLevel);
+                if (levelInfo == null || currentIdx < 0 || currentIdx >= levelInfo.size()) {
+                    return -2;
+                }
+                currentIdx = levelInfo.get(currentIdx).parentClusterId;
+                currentLevel--;
+            }
+            return currentLevel == targetLevel ? currentIdx : -2;
+        }
+
+        /**
+         * Logs warnings when level {@code M-1} parents have no corresponding cluster at level {@code M}
+         * (Nth-centroid → Nth-cluster contract for {@code VTreeStaticStructureBuilder}).
+         */
+        private void validateNthCentroidClusterMapping(int modalDepth) {
+            if (modalDepth <= 0) {
                 return;
             }
-            for (int level = maxRetainedLevel + 1; level <= maxLevel; level++) {
-                levelCentroids.remove(level);
+            List<CentroidInfo> parentsAtCut = levelCentroids.get(modalDepth - 1);
+            List<CentroidInfo> atModal = levelCentroids.get(modalDepth);
+            if (parentsAtCut == null || atModal == null) {
+                return;
+            }
+            boolean[] parentHasChild = new boolean[parentsAtCut.size()];
+            for (CentroidInfo c : atModal) {
+                int p = c.parentClusterId;
+                if (p >= 0 && p < parentHasChild.length) {
+                    parentHasChild[p] = true;
+                } else if (p >= 0) {
+                    LOGGER.warn("validateNthCentroidClusterMapping: level={} centroid has out-of-range parent={}",
+                            modalDepth, p);
+                }
+            }
+            for (int p = 0; p < parentHasChild.length; p++) {
+                if (!parentHasChild[p]) {
+                    LOGGER.warn(
+                            "validateNthCentroidClusterMapping: parent index={} at level={} has no cluster at level={}",
+                            p, modalDepth - 1, modalDepth);
+                }
             }
         }
 
@@ -1414,13 +1577,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // the root at level 0 internally; emit leaf-first for VTreeStaticStructureBuilder.
                         // Legacy bottom-up k-means uses outputHierarchicalStructure (BFS id offsets).
                         if (emitTopDown) {
-                            // Apply mode-based depth cutoff right before handoff to the static-structure operator.
+                            // Flatten branches deeper than global modal depth before static-structure handoff.
                             int modalDepth = clusterStructure.computeModalLeafDepth();
+                            int flattenedPivots = 0;
                             if (modalDepth >= 0) {
-                                clusterStructure.pruneLevelsDeeperThan(modalDepth);
+                                flattenedPivots = clusterStructure.flattenLevelsDeeperThanModal(modalDepth);
                                 LOGGER.info(
-                                        "[FindCandidates] partition={}: topDown modal branch depth={} (post-prune levels={})",
-                                        partition, modalDepth, clusterStructure.getNumLevels());
+                                        "[FindCandidates] partition={}: topDown modalDepth={} flattenedPivots={} "
+                                                + "level{}Size={} levelsAfter={}",
+                                        partition, modalDepth, flattenedPivots, modalDepth,
+                                        clusterStructure.getCentroidCountAtLevel(modalDepth),
+                                        clusterStructure.getNumLevels());
                             }
                             clusterStructure.outputBottomUpForStaticStructure(appender, writer, ctx);
                         } else {
