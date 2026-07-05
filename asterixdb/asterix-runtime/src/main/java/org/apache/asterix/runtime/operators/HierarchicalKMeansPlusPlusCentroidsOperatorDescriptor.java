@@ -953,7 +953,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private static final int TOPDOWN_MAX_LEVEL = 4;
 
     // ===== SPANN SelectHead (scratch BKT + head walk) =====
-    public static final double DEFAULT_HEAD_RATIO = 0.15;
+    public static final double DEFAULT_HEAD_RATIO = 0.12;
     public static final String DEFAULT_SELECT_HEAD_TYPE = "bkt";
 
     private final UUID sampleUUID;
@@ -979,6 +979,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
     private double headRatio;
     private int headCount;
     private String selectHeadType;
+    /** Unset (0) means use page-derived leafPageCapacity for scratch BKT leaf stop. */
+    private int bktLeafSizeOverride;
 
     /**
      * Partition-scoped result of SPANN SelectHead, consumed by BuildHead in the static-structure
@@ -1340,7 +1342,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
             UUID materializedDataUUID, UUID scalarValuesUUID, IScalarEvaluatorFactory args, int K,
             int maxScalableKmeansIter, String distanceMetric, int vectorDimension, boolean topDown,
             int quantizationBits, double lambdaFactor, int maxLevel, UUID headSelectionUUID, boolean selectHeadEnabled,
-            double headRatio, int headCount, String selectHeadType) {
+            double headRatio, int headCount, String selectHeadType, int bktLeafSizeOverride) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -1363,6 +1365,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.headRatio = headRatio;
         this.headCount = headCount;
         this.selectHeadType = selectHeadType != null ? selectHeadType : DEFAULT_SELECT_HEAD_TYPE;
+        this.bktLeafSizeOverride = bktLeafSizeOverride;
 
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|"cosine similarity"|etc.); default euclidean squared
         this.distanceFunction = getDistanceFunctionDouble(distanceMetric);
@@ -2453,7 +2456,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 private ScratchBktTree buildScratchBkt(IHyracksTaskContext ctx, MaterializerTaskState sampleState,
-                        RunFileSource sampleSource, int recordCount, int leafPageCapacity, float tunedLambdaFactor,
+                        RunFileSource sampleSource, int recordCount, int scratchLeafSize, float tunedLambdaFactor,
                         FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAcc, KMeansUtils kmu, Random rand) throws HyracksDataException, IOException {
                     int[] localIndices = new int[recordCount];
@@ -2467,8 +2470,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     int splitCount = 0;
                     int leafListCount = 0;
 
-                    LOGGER.info("[SelectHead] buildScratchBkt: begin records={} leafPageCap={} lambdaFactor={}",
-                            recordCount, leafPageCapacity, tunedLambdaFactor);
+                    LOGGER.info("[SelectHead] buildScratchBkt: begin records={} scratchLeafSize={} lambdaFactor={}",
+                            recordCount, scratchLeafSize, tunedLambdaFactor);
 
                     while (!stack.isEmpty()) {
                         ScratchBktStackItem item = stack.pop();
@@ -2478,7 +2481,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         int size = last - first;
                         nodes.get(nodeIndex).childStart = nodes.size();
 
-                        if (size <= leafPageCapacity) {
+                        if (size <= scratchLeafSize) {
                             int leafNodes = last - first;
                             leafListCount++;
                             LOGGER.debug(
@@ -2488,7 +2491,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 nodes.add(new ScratchBktNode(localIndices[j], -1, -1));
                             }
                         } else {
-                            int k = dynamicK(size, leafPageCapacity);
+                            int k = dynamicK(size, scratchLeafSize);
                             splitCount++;
                             LOGGER.info(
                                     "[SelectHead] scratch split #{} node={} range=[{},{}] size={} k={} stackRemaining={}",
@@ -2838,21 +2841,23 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         headIndices = selectHeadsRandom(totalTupleCount, opts.targetHeadCount, rand);
                     } else {
                         int leafPageCapacity = computeLeafPageCapacity(ctx, dim);
+                        int scratchLeafSize = bktLeafSizeOverride > 0 ? bktLeafSizeOverride : leafPageCapacity;
                         float tunedLambdaFactor;
                         if (lambdaFactor > 0) {
                             tunedLambdaFactor = (float) lambdaFactor;
                         } else {
-                            int probeK = dynamicK(totalTupleCount, leafPageCapacity);
+                            int probeK = dynamicK(totalTupleCount, scratchLeafSize);
                             tunedLambdaFactor = dynamicFactorSelect(ctx, sampleSource, totalTupleCount, probeK, dim,
                                     fta, tuple, eval, inputVal, listAcc, kmu, rand);
                         }
-                        LOGGER.info("[SelectHead] partition={}: building scratch BKT (leafPageCap={} lambdaFactor={})",
-                                partition, leafPageCapacity, tunedLambdaFactor);
+                        LOGGER.info(
+                                "[SelectHead] partition={}: building scratch BKT (scratchLeafSize={} leafPageCapacity={} overridden={} lambdaFactor={})",
+                                partition, scratchLeafSize, leafPageCapacity, bktLeafSizeOverride > 0,
+                                tunedLambdaFactor);
                         ScratchBktTree scratchTree;
                         try {
-                            scratchTree =
-                                    buildScratchBkt(ctx, sampleState, sampleSource, totalTupleCount, leafPageCapacity,
-                                            tunedLambdaFactor, fta, tuple, eval, inputVal, listAcc, kmu, rand);
+                            scratchTree = buildScratchBkt(ctx, sampleState, sampleSource, totalTupleCount,
+                                    scratchLeafSize, tunedLambdaFactor, fta, tuple, eval, inputVal, listAcc, kmu, rand);
                         } catch (Throwable t) {
                             LOGGER.error("[SelectHead] partition={}: buildScratchBkt failed", partition, t);
                             throw t;

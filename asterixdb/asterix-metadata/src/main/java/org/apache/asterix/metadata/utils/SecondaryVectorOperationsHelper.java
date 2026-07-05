@@ -137,12 +137,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         final double headRatio;
         final int headCount;
         final String selectType;
+        /** 0 = unset; use page-derived leaf capacity for scratch BKT. */
+        final int bktLeafSizeOverride;
 
-        SelectHeadTuning(boolean enabled, double headRatio, int headCount, String selectType) {
+        SelectHeadTuning(boolean enabled, double headRatio, int headCount, String selectType, int bktLeafSizeOverride) {
             this.enabled = enabled;
             this.headRatio = headRatio;
             this.headCount = headCount;
             this.selectType = selectType;
+            this.bktLeafSizeOverride = bktLeafSizeOverride;
         }
     }
 
@@ -276,6 +279,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         double headRatio = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_HEAD_RATIO;
         int headCount = -1;
         String selectType = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_SELECT_HEAD_TYPE;
+        int bktLeafSizeOverride = 0;
 
         String enabledStr =
                 (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_ENABLED_KEY);
@@ -329,11 +333,29 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             }
         }
 
-        if (enabled) {
-            LOGGER.info("SelectHead + BuildHead from SET: enabled=true headRatio={} headCount={} selectType={}",
-                    headRatio, headCount, selectType);
+        String bktLeafSizeStr = (String) metadataProvider.getConfig()
+                .get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY);
+        if (bktLeafSizeStr != null && !bktLeafSizeStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(bktLeafSizeStr.trim());
+                if (parsed > 0) {
+                    bktLeafSizeOverride = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using page-derived leaf capacity",
+                            CompilerProperties.COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY, bktLeafSizeStr);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using page-derived leaf capacity",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY, bktLeafSizeStr);
+            }
         }
-        return new SelectHeadTuning(enabled, headRatio, headCount, selectType);
+
+        if (enabled) {
+            LOGGER.info(
+                    "SelectHead + BuildHead from SET: enabled=true headRatio={} headCount={} selectType={} bktLeafSizeOverride={}",
+                    headRatio, headCount, selectType, bktLeafSizeOverride > 0 ? bktLeafSizeOverride : "unset");
+        }
+        return new SelectHeadTuning(enabled, headRatio, headCount, selectType, bktLeafSizeOverride);
     }
 
     @Override
@@ -417,7 +439,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID sampleUUID = UUID.randomUUID();
         UUID tupleCountUUID = UUID.randomUUID();
 
-        // Extract K value from WITH clause
+        // Extract K value from WITH clause (num_clusters). Used only when SelectHead is disabled
+        // (full-sample top-down stop); when SelectHead is enabled, structure build ignores K.
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
         int K = (int) Math.sqrt((double) datasetCardinality / numPartitions); // default value
         if (withObjectNode != null) {
@@ -471,13 +494,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         int quantizationBits = bitsForQuantizationLabel(qLabel);
         TopDownTuning topDownTuning = resolveTopDownTuning(quantizationBits);
         SelectHeadTuning selectHeadTuning = resolveSelectHeadTuning();
+        if (selectHeadTuning.enabled) {
+            LOGGER.info(
+                    "SelectHead enabled: WITH num_clusters={} is ignored for static-structure stop (BuildHead uses leaf-page fit)",
+                    K);
+        }
         HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
                 new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
                         sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
                         new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, distanceMetric, vectorDimension,
                         topDown, topDownTuning.quantizationBits, topDownTuning.lambdaFactor, topDownTuning.maxLevel,
                         headSelectionUUID, selectHeadTuning.enabled, selectHeadTuning.headRatio,
-                        selectHeadTuning.headCount, selectHeadTuning.selectType);
+                        selectHeadTuning.headCount, selectHeadTuning.selectType, selectHeadTuning.bktLeafSizeOverride);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;

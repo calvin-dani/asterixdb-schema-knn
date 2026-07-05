@@ -128,9 +128,10 @@ Use `SET` **before** `CREATE INDEX` in the same request (see `appendix_2_paramet
 | SET key | Default | Meaning |
 |---------|---------|---------|
 | `compiler.vector.selecthead.enabled` | `true` | Run SelectHead + BuildHead (BKT routing from heads) |
-| `compiler.vector.selecthead.headRatio` | `0.15` | Target \|H\| ≈ ratio × sampleCount |
+| `compiler.vector.selecthead.headRatio` | `0.12` | Target \|H\| ≈ ratio × sampleCount |
 | `compiler.vector.selecthead.headCount` | unset | If set, overrides ratio |
 | `compiler.vector.selecthead.selectType` | `bkt` | `bkt` or `random` |
+| `compiler.vector.selecthead.bktLeafSize` | unset | Scratch BKT leaf stop threshold; when unset, page-derived leaf capacity is used |
 
 Example:
 

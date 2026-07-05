@@ -296,6 +296,8 @@ public class CompilerProperties extends AbstractProperties {
     public static final String COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY = "compiler.vector.selecthead.headRatio";
     public static final String COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY = "compiler.vector.selecthead.headCount";
     public static final String COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY = "compiler.vector.selecthead.selectType";
+    /** Optional scratch BKT leaf stop threshold for SelectHead; when unset, page-derived leaf capacity is used. */
+    public static final String COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY = "compiler.vector.selecthead.bktLeafSize";
 
     public CompilerProperties(PropertiesAccessor accessor) {
         super(accessor);

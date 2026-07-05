@@ -110,9 +110,10 @@ Resolved in `SecondaryVectorOperationsHelper.resolveSelectHeadTuning()`.
 | SET key | Default | Role |
 |---------|---------|------|
 | `compiler.vector.selecthead.enabled` | `true` | When true, run SelectHead then BuildHead on head vectors only. When false, skip head selection and build from the full training sample. |
-| `compiler.vector.selecthead.headRatio` | `0.15` | Target fraction of sample records to keep as heads: \|H\| ≈ ratio × sampleCount. Drives `selectThreshold`, `splitThreshold`, and `splitFactor` in the head walk. |
+| `compiler.vector.selecthead.headRatio` | `0.12` | Target fraction of sample records to keep as heads: \|H\| ≈ ratio × sampleCount. Drives `selectThreshold`, `splitThreshold`, and `splitFactor` in the head walk. |
 | `compiler.vector.selecthead.headCount` | unset | If set (>0), overrides ratio: effective ratio = headCount / sampleCount. |
 | `compiler.vector.selecthead.selectType` | `"bkt"` | `"bkt"` = scratch BKT + dynamic head walk (SPANN-style). `"random"` = uniform random sample of `targetHeadCount` indices. |
+| `compiler.vector.selecthead.bktLeafSize` | unset | Optional scratch BKT leaf stop threshold for SelectHead; when unset, page-derived leaf capacity is used. |
 
 **Important interaction:** BuildHead **re-tunes λ independently** on the head subset when `lambdaFactor` is auto. SelectHead scratch BKT and BuildHead therefore may use different tuned λ values on the same partition.
 
@@ -126,7 +127,7 @@ Resolved in `SecondaryVectorOperationsHelper.resolveSelectHeadTuning()`.
 | `BKT_MAX_ITERS` | 100 | Maximum k-means refinement iterations per split. |
 | `BKT_CONV_EPS` | 1e-3 | Center movement convergence threshold. |
 | `BKT_NO_IMPROVE` | 5 | Early stop when total assignment cost stops improving. |
-| `DEFAULT_HEAD_RATIO` | 0.15 | Default head fraction when SET not provided. |
+| `DEFAULT_HEAD_RATIO` | 0.12 | Default head fraction when SET not provided. |
 | `DEFAULT_TOPDOWN_LAMBDA_FACTOR` | -1.0 | Sentinel for auto-tune. |
 | `DEFAULT_TOPDOWN_MAX_LEVEL` | 5 | Default max level passed from metadata helper. |
 | `TRAIN_LIST_MIN_SAMPLE_SIZE` | 10000 | Below this sample size → full dataset scan for structure build. |
@@ -216,7 +217,7 @@ After the scratch tree is built, a **post-order walk** selects head indices:
 
 5. `materializeHeadRunFile(...)` copies head tuples into a compact run file with local indices `0..|H|-1`.
 
-**Default target:** ~15% of sample (`headRatio=0.15`), e.g. 1500 heads from a 10k sample.
+**Default target:** ~12% of sample (`headRatio=0.12`), e.g. 1200 heads from a 10k sample.
 
 ---
 

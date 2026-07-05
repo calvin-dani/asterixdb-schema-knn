@@ -126,11 +126,13 @@ By default, SelectHead is **enabled** with BKT head selection; the routing tree 
 
 * **`compiler.vector.selecthead.enabled`**: `true` (default) to run SelectHead + BuildHead; `false` for full-sample top-down.
 
-* **`compiler.vector.selecthead.headRatio`**: target fraction of sample records to select as heads (default `0.15`).
+* **`compiler.vector.selecthead.headRatio`**: target fraction of sample records to select as heads (default `0.12`).
 
 * **`compiler.vector.selecthead.headCount`**: optional explicit head count; when set, overrides `headRatio`.
 
 * **`compiler.vector.selecthead.selectType`**: `bkt` (default) or `random`.
+
+* **`compiler.vector.selecthead.bktLeafSize`**: optional scratch BKT leaf stop threshold for SelectHead; when unset, page-derived leaf capacity is used.
 
 * **Lambda**: BuildHead re-tunes `compiler.vector.topdown.lambdaFactor` on the head subset when that SET value is omitted.
 
