@@ -37,6 +37,7 @@ import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.transactions.IRecoveryManager;
 import org.apache.asterix.dataflow.data.common.AOrderedListVectorBinaryAccessorFactory;
+import org.apache.asterix.dataflow.data.nontagged.serde.AOrderedListSerializerDeserializer;
 import org.apache.asterix.external.indexing.IndexingConstants;
 import org.apache.asterix.formats.base.IDataFormat;
 import org.apache.asterix.metadata.declared.MetadataProvider;
@@ -52,6 +53,7 @@ import org.apache.asterix.runtime.aggregates.std.QuantizationConstantsAggregateD
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
+import org.apache.asterix.runtime.operators.SpannTopDownCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VTreeBulkLoaderAndGroupingOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VectorComponentExtractorOperatorDescriptor;
@@ -228,8 +230,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
     }
 
     private TopDownTuning resolveTopDownTuning(int quantizationBits) {
-        double lambdaFactor = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR;
-        int maxLevel = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL;
+        double lambdaFactor = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR;
+        int maxLevel = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL;
 
         String lambdaStr =
                 (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY);
@@ -265,8 +267,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             }
         }
 
-        if (lambdaFactor != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR
-                || maxLevel != HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL) {
+        if (lambdaFactor != SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR
+                || maxLevel != SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL) {
             LOGGER.info("Top-down BKT tuning from SET: lambdaFactor={} maxLevel={} quantizationBits={}", lambdaFactor,
                     maxLevel, quantizationBits);
         }
@@ -276,9 +278,9 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
     private SelectHeadTuning resolveSelectHeadTuning() {
         boolean enabled = true;
-        double headRatio = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_HEAD_RATIO;
+        double headRatio = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_HEAD_RATIO;
         int headCount = -1;
-        String selectType = HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.DEFAULT_SELECT_HEAD_TYPE;
+        String selectType = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_SELECT_HEAD_TYPE;
         int bktLeafSizeOverride = 0;
 
         String enabledStr =
@@ -454,34 +456,15 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         int vectorDimension = (withObjectNode != null) ? withObjectNode.getOptionalInt("dimension", -1) : -1;
 
-        // Clustering strategy: top-down (default) builds the tree root-first, splitting per-cluster run files
-        // level-by-level; set WITH {"top_down":"false"} to use the legacy bottom-up algorithm.
-        boolean topDown = withObjectNode == null
-                || !"false".equalsIgnoreCase(withObjectNode.getOptionalString("top_down", "true"));
+        // Clustering strategy: default bottom-up; set WITH {"structure_build":"spann"} for SPANN SelectHead + top-down.
+        String structureBuild =
+                withObjectNode == null ? "bottom_up" : withObjectNode.getOptionalString("structure_build", "bottom_up");
+        boolean useSpann = "spann".equalsIgnoreCase(structureBuild);
 
         int maxScalableKmeansIter = 2;
 
         // Create record descriptor for hierarchical k-means output (level, clusterId, centroidId, embedding)
-        ISerializerDeserializer[] hierarchicalSerde = new ISerializerDeserializer[4];
-        ITypeTraits[] hierarchicalTraits = new ITypeTraits[4];
-
-        // Level (int)
-        hierarchicalSerde[0] = serdeProvider.getSerializerDeserializer(AINT32);
-        hierarchicalTraits[0] = typeTraitProvider.getTypeTrait(AINT32);
-
-        // ClusterId (int)
-        hierarchicalSerde[1] = serdeProvider.getSerializerDeserializer(AINT32);
-        hierarchicalTraits[1] = typeTraitProvider.getTypeTrait(AINT32);
-
-        // CentroidId (int)
-        hierarchicalSerde[2] = serdeProvider.getSerializerDeserializer(AINT32);
-        hierarchicalTraits[2] = typeTraitProvider.getTypeTrait(AINT32);
-
-        // Embedding (float array)
-        hierarchicalSerde[3] = serdeProvider.getSerializerDeserializer(new AOrderedListType(ADOUBLE, "embedding"));
-        hierarchicalTraits[3] = typeTraitProvider.getTypeTrait(new AOrderedListType(ADOUBLE, "embedding"));
-
-        RecordDescriptor hierarchicalRecDesc = new RecordDescriptor(hierarchicalSerde, hierarchicalTraits);
+        RecordDescriptor hierarchicalRecDesc = createHierarchicalOutputRecordDescriptor();
 
         // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION → SINK ======
 
@@ -492,20 +475,26 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         String qLabel = resolveEffectiveQuantizationLabel(
                 withObjectNode != null ? withObjectNode.getOptionalString("quantization", null) : null);
         int quantizationBits = bitsForQuantizationLabel(qLabel);
-        TopDownTuning topDownTuning = resolveTopDownTuning(quantizationBits);
-        SelectHeadTuning selectHeadTuning = resolveSelectHeadTuning();
-        if (selectHeadTuning.enabled) {
-            LOGGER.info(
-                    "SelectHead enabled: WITH num_clusters={} is ignored for static-structure stop (BuildHead uses leaf-page fit)",
-                    K);
+        IOperatorDescriptor candidates;
+        if (useSpann) {
+            TopDownTuning topDownTuning = resolveTopDownTuning(quantizationBits);
+            SelectHeadTuning selectHeadTuning = resolveSelectHeadTuning();
+            if (selectHeadTuning.enabled) {
+                LOGGER.info(
+                        "SelectHead enabled: WITH num_clusters={} is ignored for static-structure stop (BuildHead uses leaf-page fit)",
+                        K);
+            }
+            candidates = new SpannTopDownCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
+                    sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID, new ColumnAccessEvalFactory(0),
+                    K, maxScalableKmeansIter, distanceMetric, vectorDimension, topDownTuning.quantizationBits,
+                    topDownTuning.lambdaFactor, topDownTuning.maxLevel, headSelectionUUID, selectHeadTuning.enabled,
+                    selectHeadTuning.headRatio, selectHeadTuning.headCount, selectHeadTuning.selectType,
+                    selectHeadTuning.bktLeafSizeOverride);
+        } else {
+            candidates = new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc,
+                    secondaryRecDesc, sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
+                    new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, distanceMetric, vectorDimension);
         }
-        HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID,
-                        new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter, distanceMetric, vectorDimension,
-                        topDown, topDownTuning.quantizationBits, topDownTuning.lambdaFactor, topDownTuning.maxLevel,
-                        headSelectionUUID, selectHeadTuning.enabled, selectHeadTuning.headRatio,
-                        selectHeadTuning.headCount, selectHeadTuning.selectType, selectHeadTuning.bktLeafSizeOverride);
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
@@ -1151,5 +1140,19 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             pkFields[i] = fieldPermutation[numSecondaryKeys + i];
         }
         return pkFields;
+    }
+
+    /**
+     * Record descriptor for hierarchical clustering output tuples.
+     * Format: {@code <treeLevel, centroidId, parentClusterId, embedding>}
+     */
+    private static RecordDescriptor createHierarchicalOutputRecordDescriptor() {
+        @SuppressWarnings("rawtypes")
+        ISerializerDeserializer[] fieldSerdes = new ISerializerDeserializer[4];
+        fieldSerdes[0] = IntegerSerializerDeserializer.INSTANCE;
+        fieldSerdes[1] = IntegerSerializerDeserializer.INSTANCE;
+        fieldSerdes[2] = IntegerSerializerDeserializer.INSTANCE;
+        fieldSerdes[3] = new AOrderedListSerializerDeserializer(new AOrderedListType(ADOUBLE, "embedding"));
+        return new RecordDescriptor(fieldSerdes);
     }
 }

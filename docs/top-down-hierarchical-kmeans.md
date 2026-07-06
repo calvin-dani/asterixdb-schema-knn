@@ -1,6 +1,13 @@
 # BKT-Style Top-Down Hierarchical Clustering (VTree Index Build)
 
-This document explains the **top-down** hierarchical clustering path in the VTree static-structure build pipeline. The legacy **bottom-up** path remains available via `WITH {"top_down":"false"}`.
+This document explains the **SPANN / top-down** hierarchical clustering path in the VTree static-structure build pipeline. The default **bottom-up** path is selected when `structure_build` is omitted or `"bottom_up"`.
+
+## Structure build selection
+
+| `structure_build` | Operator | Algorithm |
+|-------------------|----------|-----------|
+| `"bottom_up"` (default) | `HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor` | Memory-efficient bottom-up k-means++ |
+| `"spann"` | `SpannTopDownCentroidsOperatorDescriptor` | SPANN SelectHead + BKT-style top-down |
 
 ## Top-Down Approach (BKT-style, SPANN-inspired)
 
@@ -16,8 +23,9 @@ This document explains the **top-down** hierarchical clustering path in the VTre
 
 | File | Role |
 |------|------|
-| `asterixdb/asterix-runtime/.../HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.java` | BKT top-down algorithm |
-| `asterixdb/asterix-metadata/.../SecondaryVectorOperationsHelper.java` | Passes quantization bits + lambda tuning |
+| `asterixdb/asterix-runtime/.../SpannTopDownCentroidsOperatorDescriptor.java` | SPANN SelectHead + BKT top-down algorithm |
+| `asterixdb/asterix-runtime/.../HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.java` | Bottom-up k-means (default `structure_build`) |
+| `asterixdb/asterix-metadata/.../SecondaryVectorOperationsHelper.java` | Reads `structure_build` from WITH; wires operator |
 | `asterixdb/asterix-runtime/.../VTreeStaticStructureCreatorOperatorDescriptor.java` | **Unchanged** — consumes same 4-field output |
 
 ## Configuration (DDL / WITH clause)
@@ -29,7 +37,7 @@ WITH {
   "dimension": 384,
   "similarity": "euclidean",
   "quantization": "SQ8",
-  "top_down": "true"
+  "structure_build": "spann"
 };
 ```
 
@@ -37,9 +45,9 @@ WITH {
 
 | Parameter | Meaning |
 |-----------|---------|
-| `num_clusters` | Stop at first level whose centroid count ≥ target |
+| `structure_build` | `"bottom_up"` (default) = legacy bottom-up; `"spann"` = SelectHead + BKT top-down |
+| `num_clusters` | Stop at first level whose centroid count ≥ target (full-sample top-down only; ignored when SelectHead enabled) |
 | `quantization` | `SQ8` or `SQ4` — used to size leaf page capacity |
-| `top_down` | `"true"` (default) = BKT top-down; `"false"` = legacy bottom-up |
 
 ### Build constants (operator)
 

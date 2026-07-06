@@ -42,6 +42,8 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION = "train_list_fraction";
     public static final String VECTOR_INDEX_PARAMETER_SIMILARITY = "similarity";
     public static final String VECTOR_INDEX_PARAMETER_NUM_K = "num_clusters";
+    public static final String VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD = "structure_build";
+    public static final String VECTOR_INDEX_DEFAULT_STRUCTURE_BUILD = "bottom_up";
     public static final String VECTOR_INDEX_PARAMETER_EPSILON = "epsilon";
     public static final String VECTOR_INDEX_DEFAULT_QUANTIZATION = "SQ8";
     /** Default for level-wise centroid search and ANN search predicate (matches VectorSearchPredicate). */
@@ -62,7 +64,10 @@ public class VectorIndexDeclUtil {
      */
     private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS = Set.of(VECTOR_INDEX_PARAMETER_DIMENSION,
             VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION,
-            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K);
+            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K,
+            VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD);
+
+    private static final Set<String> ALLOWED_STRUCTURE_BUILD_VALUES = Set.of("bottom_up", "spann");
 
     private VectorIndexDeclUtil() {
     }
@@ -87,6 +92,7 @@ public class VectorIndexDeclUtil {
         validateSimilarity(node);
         validateQuantization(node);
         validateEpsilon(node);
+        validateStructureBuild(node);
 
         return node;
     }
@@ -95,7 +101,7 @@ public class VectorIndexDeclUtil {
         for (String name : node.getFieldNames()) {
             if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
                 throw new CompilationException("Failed to create vector index. Unknown field `" + name
-                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon, num_clusters");
+                        + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, epsilon, num_clusters, structure_build");
             }
         }
     }
@@ -208,6 +214,34 @@ public class VectorIndexDeclUtil {
         if (epsNode.getType() == ATypeTag.BIGINT) {
             node.remove(VECTOR_INDEX_PARAMETER_EPSILON);
             node.set(VECTOR_INDEX_PARAMETER_EPSILON, new AdmDoubleNode(v));
+        }
+    }
+
+    private static void validateStructureBuild(AdmObjectNode node) throws CompilationException {
+        IAdmNode sbNode = node.get(VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD);
+        if (sbNode == null) {
+            node.set(VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD, new AdmStringNode(VECTOR_INDEX_DEFAULT_STRUCTURE_BUILD));
+            return;
+        }
+        switch (sbNode.getType()) {
+            case STRING:
+                String structureBuild = ((AdmStringNode) sbNode).get();
+                if (structureBuild == null || structureBuild.trim().isEmpty()) {
+                    node.set(VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD,
+                            new AdmStringNode(VECTOR_INDEX_DEFAULT_STRUCTURE_BUILD));
+                    return;
+                }
+                String normalized = structureBuild.trim().toLowerCase(Locale.ROOT);
+                if (!ALLOWED_STRUCTURE_BUILD_VALUES.contains(normalized)) {
+                    throw new CompilationException(
+                            "Failed to create vector index. Invalid `structure_build` parameter value. Allowed values: bottom_up and spann");
+                }
+                node.remove(VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD);
+                node.set(VECTOR_INDEX_PARAMETER_STRUCTURE_BUILD, new AdmStringNode(normalized));
+                break;
+            default:
+                throw new CompilationException(
+                        "Failed to create vector index. Invalid `structure_build` parameter value. Allowed values: bottom_up and spann");
         }
     }
 

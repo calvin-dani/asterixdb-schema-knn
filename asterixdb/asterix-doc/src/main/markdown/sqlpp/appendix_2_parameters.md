@@ -116,13 +116,14 @@ build**. They apply only when `SET` appears **before** `CREATE INDEX` in the sam
     SET `compiler.vector.topdown.maxlevel` "4";
 
     CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
-    WITH {"dimension": 384, "similarity": "cosine", "num_clusters": 157, "quantization": "SQ8"};
+    WITH {"dimension": 384, "similarity": "cosine", "num_clusters": 157, "quantization": "SQ8", "structure_build": "spann"};
 
 ## <a id="Vector_selecthead_parameters">Vector index SelectHead / BuildHead parameters</a>
 
 These session parameters control SPANN-style **SelectHead** + **BuildHead** during VTREE static-structure build.
-By default, SelectHead is **enabled** with BKT head selection; the routing tree is built from head vectors only
-(`num_clusters` is ignored for structure stop). Use `SET` **before** `CREATE INDEX` in the same request.
+SelectHead applies only when `structure_build` is `"spann"` in the index WITH clause; the routing tree is built from
+head vectors when SelectHead is enabled (`num_clusters` is ignored for structure stop). Use `SET` **before**
+`CREATE INDEX` in the same request.
 
 * **`compiler.vector.selecthead.enabled`**: `true` (default) to run SelectHead + BuildHead; `false` for full-sample top-down.
 
@@ -143,5 +144,5 @@ By default, SelectHead is **enabled** with BKT head selection; the routing tree 
     SET `compiler.vector.selecthead.headRatio` "0.2";
 
     CREATE INDEX vecIdx ON myDataset(embedding) TYPE vctree
-    WITH {"dimension": 384, "similarity": "euclidean", "num_clusters": 1000, "quantization": "SQ8"};
+    WITH {"dimension": 384, "similarity": "euclidean", "num_clusters": 1000, "quantization": "SQ8", "structure_build": "spann"};
 

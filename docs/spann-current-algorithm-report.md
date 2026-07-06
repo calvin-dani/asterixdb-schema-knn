@@ -20,19 +20,26 @@ This report describes the current SPANN-oriented VTREE implementation in this br
 - `asterixdb/asterix-metadata/src/main/java/org/apache/asterix/metadata/utils/SecondaryVectorOperationsHelper.java`
   - Creates job specs for index creation, static-structure build, and data loading.
   - Resolves top-down and SelectHead tuning via `resolveTopDownTuning()` and `resolveSelectHeadTuning()`.
-  - Wires: sample scan → `HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor` → `VTreeStaticStructureCreatorOperatorDescriptor`.
+  - Wires: sample scan → (`SpannTopDownCentroidsOperatorDescriptor` when `structure_build` is `spann`, else `HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor`) → `VTreeStaticStructureCreatorOperatorDescriptor`.
 
 ### Top-down hierarchical clustering and SPANN head selection
 
-- `asterixdb/asterix-runtime/src/main/java/org/apache/asterix/runtime/operators/HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.java`
+- `asterixdb/asterix-runtime/src/main/java/org/apache/asterix/runtime/operators/SpannTopDownCentroidsOperatorDescriptor.java`
+  - Used when DDL `structure_build` is `"spann"` (default is `"bottom_up"` → bottom-up operator).
   - Main phases:
     - `runSelectHeadPhase(...)` — scratch BKT + head walk
     - `materializeHeadRunFile(...)` — compact head-only run file
     - `buildTopDownHierarchicalKMeans(...)` — routing tree from heads or full sample
     - `outputBottomUpForStaticStructure(...)` — leaf-first emission for static builder
   - Internal representation:
-    - `HierarchicalClusterStructure` with `levelCentroids` (level `0` = root in top-down flow)
+    - `TopDownClusterStructure` (inner class of `SpannTopDownCentroidsOperatorDescriptor`) with `levelCentroids` (level `0` = root in top-down flow)
     - `CentroidInfo` per routing node
+
+### Bottom-up hierarchical clustering (default)
+
+- `asterixdb/asterix-runtime/src/main/java/org/apache/asterix/runtime/operators/HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor.java`
+  - Used when `structure_build` is omitted or `"bottom_up"`.
+  - Memory-efficient bottom-up k-means++; emits via `outputHierarchicalStructure`.
 
 ### Static structure consumer and builder handoff
 
@@ -53,7 +60,7 @@ This report describes the current SPANN-oriented VTREE implementation in this br
 
 ```
 sample/full scan
-  → HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor
+  → SpannTopDownCentroidsOperatorDescriptor (when structure_build=spann)
        [SelectHead: scratch BKT → head walk → head run file]
        [BuildHead / TopDown: level-wise lambda-balanced splits]
        [Global mode flatten: promote deeper pivots into level M]
@@ -73,8 +80,8 @@ Knobs fall into three layers: **DDL WITH clause**, **session SET parameters**, a
 
 | Parameter | Default / typical | Role in SPANN tree build |
 |-----------|-------------------|--------------------------|
-| `top_down` | `"true"` | When true (default), use BKT-style top-down build. `"false"` selects legacy bottom-up k-means. |
-| `num_clusters` | user-defined (e.g. 1000) | **Full-sample top-down only:** stop when a level's centroid count ≥ target. **Ignored for BuildHead** when SelectHead is enabled (default). |
+| `structure_build` | `"bottom_up"` | `"spann"` selects SPANN SelectHead + BKT top-down; default uses bottom-up k-means. |
+| `num_clusters` | user-defined (e.g. 1000) | **Full-sample top-down only:** stop when a level's centroid count ≥ target. **Ignored for BuildHead** when SelectHead is enabled (default under `structure_build=spann`). |
 | `quantization` | `"SQ8"` | Determines bit width (SQ4=4, SQ8=8) used to compute **leaf page capacity** — the primary physical stop condition for splits. |
 | `dimension` | required | Vector dimension; used for frame sizing and distance computation. |
 | `similarity` | e.g. `"euclidean"` | Distance metric for k-means assignment and pivot selection. |
@@ -88,7 +95,7 @@ WITH {
   "dimension": 384,
   "similarity": "euclidean",
   "quantization": "SQ8",
-  "top_down": "true"
+  "structure_build": "spann"
 };
 ```
 
@@ -320,7 +327,7 @@ If `SET compiler.vector.topdown.lambdaFactor "100"` (any positive value), auto-t
 
 ### Where it is calculated
 
-**Class:** `HierarchicalClusterStructure` (inner class of `HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor`)
+**Class:** `TopDownClusterStructure` (inner class of `SpannTopDownCentroidsOperatorDescriptor`)
 
 **Methods:**
 - `computeModalLeafDepth()` — builds global leaf-depth histogram, returns modal depth `M`
@@ -330,13 +337,11 @@ If `SET compiler.vector.topdown.lambdaFactor "100"` (any positive value), auto-t
 **Call site:** `FindCandidatesActivity.initialize()`, immediately before tuple emission:
 
 ```java
-if (emitTopDown) {
-    int modalDepth = clusterStructure.computeModalLeafDepth();
-    if (modalDepth >= 0) {
-        clusterStructure.flattenLevelsDeeperThanModal(modalDepth);
-    }
-    clusterStructure.outputBottomUpForStaticStructure(appender, writer, ctx);
+int modalDepth = clusterStructure.computeModalLeafDepth();
+if (modalDepth >= 0) {
+    clusterStructure.flattenLevelsDeeperThanModal(modalDepth);
 }
+clusterStructure.outputBottomUpForStaticStructure(appender, writer, ctx);
 ```
 
 This is the **operator boundary** between the hierarchical clustering operator and `VTreeStaticStructureCreatorOperatorDescriptor`.
@@ -368,7 +373,7 @@ Fat clusters at level `M` may span multiple pages via existing overflow chains i
 
 ### How flatten works (step-by-step)
 
-Method: `flattenLevelsDeeperThanModal(int M)` in `HierarchicalClusterStructure`.
+Method: `flattenLevelsDeeperThanModal(int M)` in `TopDownClusterStructure` (`SpannTopDownCentroidsOperatorDescriptor`).
 
 ```mermaid
 flowchart TD
@@ -590,7 +595,7 @@ This is the data/posting placement phase: records land in the cluster (leaf rout
                     ┌─────────────────────────────────────┐
                     │  DDL: quantization, dimension,      │
                     │       similarity, num_clusters,     │
-                    │       top_down                      │
+                    │       structure_build               │
                     └──────────────┬──────────────────────┘
                                    │
                     ┌──────────────▼──────────────────────┐
@@ -643,7 +648,7 @@ This is the data/posting placement phase: records land in the cluster (leaf rout
 - **Degenerate k-means splits** (≤1 non-empty bucket) become leaf-lists in both scratch BKT and BuildHead.
 - **Empty routing buckets** after full assign are dropped to preserve Nth-centroid→Nth-cluster mapping.
 - **BuildHead ignores `num_clusters`** for stop; full-sample path respects it.
-- **Global mode flatten** only applies to top-down emission path (`emitTopDown=true`); legacy bottom-up uses `outputHierarchicalStructure` without flattening.
+- **Global mode flatten** runs in `SpannTopDownCentroidsOperatorDescriptor` before static-structure handoff; bottom-up k-means uses `BottomUpClusterStructure.outputHierarchicalStructure` without flattening.
 - **Quantization metadata read** in static-structure creator is best-effort; defaults used if unavailable.
 - **Two separate λ tunings** when auto: one for SelectHead scratch BKT (on full sample), one for BuildHead (on heads).
 
