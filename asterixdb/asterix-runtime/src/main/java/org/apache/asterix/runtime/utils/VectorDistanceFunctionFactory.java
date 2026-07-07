@@ -44,7 +44,7 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
 
     // Distance function constants (must stay consistent with ANNDistanceDescriptor.DISTANCE_MAP —
     // every alias accepted by the runtime evaluator MUST also resolve here, otherwise the index
-    // search path will trip an NPE in wrapDistanceFunction(null)).
+    // search path will trip an NPE if the metric is missing from DISTANCE_MAP).
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE_L2 = UTF8StringPointable.generateUTF8Pointable("l2");
     private static final UTF8StringPointable EUCLIDEAN_DISTANCE =
             UTF8StringPointable.generateUTF8Pointable("euclidean");
@@ -120,19 +120,10 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
         if (func == null) {
             LOGGER.warn("Unsupported distance metric '{}', defaulting to euclidean. Ensure DISTANCE_MAP "
                     + "stays in sync with ANNDistanceDescriptor.DISTANCE_MAP.", distanceMetric);
-            return wrapDistanceFunction(new EuclideanDistanceFunction());
+            return new EuclideanDistanceFunction();
         }
 
-        return wrapDistanceFunction(func);
-    }
-
-    /**
-     * Convert IVTreeDistanceFunction to IVectorDistanceFunction for use in Hyracks modules.
-     * @param distanceFunction AsterixDB IVTreeDistanceFunction
-     * @return IVectorDistanceFunction wrapper
-     */
-    private static IVTreeDistanceFunction wrapDistanceFunction(IVTreeDistanceFunction distanceFunction) {
-        return distanceFunction::apply;
+        return func;
     }
 
     // Stateless factory: the persisted form is just the class identifier.

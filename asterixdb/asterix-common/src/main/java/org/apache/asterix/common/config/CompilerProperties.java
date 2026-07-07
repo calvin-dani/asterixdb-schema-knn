@@ -287,6 +287,19 @@ public class CompilerProperties extends AbstractProperties {
     public static final String COMPILER_VECTOR_KMULTIPLIER_KEY = "compiler.vector.kmultiplier";
     // Seeds the k-means training RNG of vector index creation; set per request for deterministic tests.
     public static final String COMPILER_VECTOR_TRAINSEED_KEY = "compiler.vector.trainseed";
+    /** @deprecated FSCL path removed; no effect on BKT-style top-down build */
+    public static final String COMPILER_VECTOR_TOPDOWN_V_KEY = "compiler.vector.topdown.v";
+    /** @deprecated FSCL path removed; use {@link #COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY} */
+    public static final String COMPILER_VECTOR_TOPDOWN_GAMMA_KEY = "compiler.vector.topdown.gamma";
+    public static final String COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY = "compiler.vector.topdown.lambdaFactor";
+    public static final String COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY = "compiler.vector.topdown.maxlevel";
+    /** When true (default), run SPANN SelectHead + BuildHead (BKT routing tree from head vectors). */
+    public static final String COMPILER_VECTOR_SELECTHEAD_ENABLED_KEY = "compiler.vector.selecthead.enabled";
+    public static final String COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY = "compiler.vector.selecthead.headRatio";
+    public static final String COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY = "compiler.vector.selecthead.headCount";
+    public static final String COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY = "compiler.vector.selecthead.selectType";
+    /** Optional scratch BKT leaf stop threshold for SelectHead; when unset, page-derived leaf capacity is used. */
+    public static final String COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY = "compiler.vector.selecthead.bktLeafSize";
 
     public CompilerProperties(PropertiesAccessor accessor) {
         super(accessor);

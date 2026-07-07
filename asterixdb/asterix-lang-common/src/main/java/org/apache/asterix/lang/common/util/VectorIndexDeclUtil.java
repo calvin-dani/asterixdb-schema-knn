@@ -30,6 +30,7 @@ import org.apache.asterix.object.base.AdmStringNode;
 import org.apache.asterix.object.base.IAdmNode;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.hyracks.api.exceptions.SourceLocation;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Validates the {@code WITH} clause of a {@code CREATE INDEX ... TYPE VTREE} statement and
@@ -42,6 +43,18 @@ public class VectorIndexDeclUtil {
     public static final String VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION = "train_list_fraction";
     public static final String VECTOR_INDEX_PARAMETER_SIMILARITY = "similarity";
     public static final String VECTOR_INDEX_PARAMETER_NUM_K = "num_clusters";
+    /**
+     * Clustering/TRAINING process used to build the static structure (Job 2): {@code "bottom-up"}
+     * (default, hierarchical k-means++ trained leaves-first) or {@code "top-down"} (SPANN-style
+     * SelectHead/BKT recursive splitting). This selects the <em>training</em> algorithm only — both
+     * modes must still emit {@code (treeLevel, centroidId, parentClusterId, embedding)} tuples
+     * bottom-up (leaves first, root last, BFS-from-root centroid ids) as required by the storage
+     * layer's {@code VTreeStaticStructureBuilder}, whose page emission is always bottom-up.
+     */
+    public static final String VECTOR_INDEX_PARAMETER_CREATION_MODE = "creation_mode";
+    public static final String VECTOR_INDEX_CREATION_MODE_BOTTOM_UP = "bottom-up";
+    public static final String VECTOR_INDEX_CREATION_MODE_TOP_DOWN = "top-down";
+    public static final String VECTOR_INDEX_DEFAULT_CREATION_MODE = VECTOR_INDEX_CREATION_MODE_BOTTOM_UP;
     public static final String VECTOR_INDEX_PARAMETER_EPSILON = "epsilon";
     /**
      * Cross-pollination factor: each record is written into the M closest leaf centroids at bulk-load,
@@ -78,10 +91,14 @@ public class VectorIndexDeclUtil {
     /**
      * Only these keys may appear in the vector index {@code WITH} clause (unknown keys are a compile error).
      */
-    private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS = Set.of(VECTOR_INDEX_PARAMETER_DIMENSION,
-            VECTOR_INDEX_PARAMETER_SIMILARITY, VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION,
-            VECTOR_INDEX_PARAMETER_QUANTIZATION, VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K,
-            VECTOR_INDEX_PARAMETER_CROSS_POLLINATION_M, VECTOR_INDEX_PARAMETER_RNG_FACTOR);
+    private static final Set<String> ALLOWED_VECTOR_INDEX_WITH_FIELDS =
+            Set.of(VECTOR_INDEX_PARAMETER_DIMENSION, VECTOR_INDEX_PARAMETER_SIMILARITY,
+                    VECTOR_INDEX_PARAMETER_TRAIN_LIST_FRACTION, VECTOR_INDEX_PARAMETER_QUANTIZATION,
+                    VECTOR_INDEX_PARAMETER_EPSILON, VECTOR_INDEX_PARAMETER_NUM_K, VECTOR_INDEX_PARAMETER_CREATION_MODE,
+                    VECTOR_INDEX_PARAMETER_CROSS_POLLINATION_M, VECTOR_INDEX_PARAMETER_RNG_FACTOR);
+
+    private static final Set<String> ALLOWED_CREATION_MODE_VALUES =
+            Set.of(VECTOR_INDEX_CREATION_MODE_BOTTOM_UP, VECTOR_INDEX_CREATION_MODE_TOP_DOWN);
 
     private VectorIndexDeclUtil() {
     }
@@ -106,6 +123,7 @@ public class VectorIndexDeclUtil {
         validateSimilarity(node);
         validateQuantization(node);
         validateEpsilon(node);
+        validateCreationMode(node);
         validateCrossPollinationM(node);
         validateRngFactor(node);
 
@@ -117,7 +135,7 @@ public class VectorIndexDeclUtil {
             if (!ALLOWED_VECTOR_INDEX_WITH_FIELDS.contains(name)) {
                 throw new CompilationException("Failed to create vector index. Unknown field `" + name
                         + "` in WITH clause. Allowed fields: dimension, similarity, train_list_fraction, quantization, "
-                        + "epsilon, num_clusters, cross_pollination_m, rng_factor");
+                        + "epsilon, num_clusters, creation_mode, cross_pollination_m, rng_factor");
             }
         }
     }
@@ -230,6 +248,41 @@ public class VectorIndexDeclUtil {
         if (epsNode.getType() == ATypeTag.BIGINT) {
             node.remove(VECTOR_INDEX_PARAMETER_EPSILON);
             node.set(VECTOR_INDEX_PARAMETER_EPSILON, new AdmDoubleNode(v));
+        }
+    }
+
+    /**
+     * Validates {@code creation_mode}: which clustering/training process builds the static structure
+     * (Job 2). Not to be confused with the storage layer's page emission, which is always bottom-up
+     * (leaves at low page ids, root highest) regardless of this setting. Missing or blank defaults to
+     * {@code "bottom-up"}; the stored value is normalized to lowercase.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Renamed from structure_build (bottom_up/spann) to creation_mode (bottom-up/top-down)")
+    private static void validateCreationMode(AdmObjectNode node) throws CompilationException {
+        IAdmNode cmNode = node.get(VECTOR_INDEX_PARAMETER_CREATION_MODE);
+        if (cmNode == null) {
+            node.set(VECTOR_INDEX_PARAMETER_CREATION_MODE, new AdmStringNode(VECTOR_INDEX_DEFAULT_CREATION_MODE));
+            return;
+        }
+        switch (cmNode.getType()) {
+            case STRING:
+                String creationMode = ((AdmStringNode) cmNode).get();
+                if (creationMode == null || creationMode.trim().isEmpty()) {
+                    node.set(VECTOR_INDEX_PARAMETER_CREATION_MODE,
+                            new AdmStringNode(VECTOR_INDEX_DEFAULT_CREATION_MODE));
+                    return;
+                }
+                String normalized = creationMode.trim().toLowerCase(Locale.ROOT);
+                if (!ALLOWED_CREATION_MODE_VALUES.contains(normalized)) {
+                    throw new CompilationException("Failed to create vector index. Invalid `creation_mode` parameter "
+                            + "value. Allowed values: bottom-up and top-down");
+                }
+                node.remove(VECTOR_INDEX_PARAMETER_CREATION_MODE);
+                node.set(VECTOR_INDEX_PARAMETER_CREATION_MODE, new AdmStringNode(normalized));
+                break;
+            default:
+                throw new CompilationException("Failed to create vector index. Invalid `creation_mode` parameter "
+                        + "value. Allowed values: bottom-up and top-down");
         }
     }
 
