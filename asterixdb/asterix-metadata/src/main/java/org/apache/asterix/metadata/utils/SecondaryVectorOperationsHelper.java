@@ -52,6 +52,7 @@ import org.apache.asterix.runtime.aggregates.std.QuantizationConstantsAggregateD
 import org.apache.asterix.runtime.operators.HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor;
 import org.apache.asterix.runtime.operators.LSMIndexBulkLoadOperatorDescriptor.BulkLoadUsage;
+import org.apache.asterix.runtime.operators.SpannTopDownCentroidsOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VTreeBulkLoaderAndGroupingOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VTreeStaticStructureCreatorOperatorDescriptor;
 import org.apache.asterix.runtime.operators.VectorComponentExtractorOperatorDescriptor;
@@ -108,12 +109,49 @@ import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
 import org.apache.hyracks.storage.common.IResourceFactory;
 import org.apache.hyracks.storage.common.IStorageManager;
 import org.apache.hyracks.storage.common.projection.ITupleProjectorFactory;
+import org.apache.hyracks.util.annotations.AiProvenance;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperationsHelper {
 
     private static final Logger LOGGER = LogManager.getLogger();
+
+    /**
+     * BKT-style top-down tuning resolved from session {@code SET} parameters (see {@link CompilerProperties}).
+     */
+    private static final class TopDownTuning {
+        final int quantizationBits;
+        final double lambdaFactor;
+        final int maxLevel;
+
+        TopDownTuning(int quantizationBits, double lambdaFactor, int maxLevel) {
+            this.quantizationBits = quantizationBits;
+            this.lambdaFactor = lambdaFactor;
+            this.maxLevel = maxLevel;
+        }
+    }
+
+    /**
+     * SPANN SelectHead + BuildHead tuning from session {@code SET} parameters (see {@link CompilerProperties}).
+     */
+    private static final class SelectHeadTuning {
+        final boolean enabled;
+        final double headRatio;
+        final int headCount;
+        final String selectType;
+        /** 0 = unset; use page-derived leaf capacity for scratch BKT. */
+        final int bktLeafSizeOverride;
+
+        SelectHeadTuning(boolean enabled, double headRatio, int headCount, String selectType, int bktLeafSizeOverride) {
+            this.enabled = enabled;
+            this.headRatio = headRatio;
+            this.headCount = headCount;
+            this.selectType = selectType;
+            this.bktLeafSizeOverride = bktLeafSizeOverride;
+        }
+    }
+
     private RecordDescriptor recordDesc;
     private static final float DEFAULT_CONFIDENCE_INTERVAL = 0.99f;
     // Must match VectorIndexDeclUtil.VECTOR_INDEX_DEFAULT_EPSILON (injected into the WITH node at DDL validation).
@@ -206,7 +244,139 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         return sampleSize < TRAIN_LIST_MIN_SAMPLE_SIZE;
     }
 
+    private TopDownTuning resolveTopDownTuning(int quantizationBits) {
+        double lambdaFactor = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR;
+        int maxLevel = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL;
+
+        String lambdaStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY);
+        if (lambdaStr != null && !lambdaStr.trim().isEmpty()) {
+            try {
+                double parsed = Double.parseDouble(lambdaStr.trim());
+                if (parsed > 0) {
+                    lambdaFactor = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using auto-tune (default)",
+                            CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY, lambdaStr);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using auto-tune (default)",
+                        CompilerProperties.COMPILER_VECTOR_TOPDOWN_LAMBDA_FACTOR_KEY, lambdaStr);
+            }
+        }
+
+        String maxLevelStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY);
+        if (maxLevelStr != null && !maxLevelStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(maxLevelStr.trim());
+                if (parsed >= 0) {
+                    maxLevel = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}",
+                            CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY, maxLevelStr, maxLevel);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_TOPDOWN_MAXLEVEL_KEY, maxLevelStr, maxLevel);
+            }
+        }
+
+        if (lambdaFactor != SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_LAMBDA_FACTOR
+                || maxLevel != SpannTopDownCentroidsOperatorDescriptor.DEFAULT_TOPDOWN_MAX_LEVEL) {
+            LOGGER.info("Top-down BKT tuning from SET: lambdaFactor={} maxLevel={} quantizationBits={}", lambdaFactor,
+                    maxLevel, quantizationBits);
+        }
+
+        return new TopDownTuning(quantizationBits, lambdaFactor, maxLevel);
+    }
+
+    private SelectHeadTuning resolveSelectHeadTuning() {
+        boolean enabled = true;
+        double headRatio = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_HEAD_RATIO;
+        int headCount = -1;
+        String selectType = SpannTopDownCentroidsOperatorDescriptor.DEFAULT_SELECT_HEAD_TYPE;
+        int bktLeafSizeOverride = 0;
+
+        String enabledStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_ENABLED_KEY);
+        if (enabledStr != null && !enabledStr.trim().isEmpty()) {
+            enabled = Boolean.parseBoolean(enabledStr.trim());
+        }
+
+        String headRatioStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY);
+        if (headRatioStr != null && !headRatioStr.trim().isEmpty()) {
+            try {
+                double parsed = Double.parseDouble(headRatioStr.trim());
+                if (parsed > 0 && parsed <= 1) {
+                    headRatio = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using default {}",
+                            CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY, headRatioStr, headRatio);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_RATIO_KEY, headRatioStr, headRatio);
+            }
+        }
+
+        String headCountStr =
+                (String) metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY);
+        if (headCountStr != null && !headCountStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(headCountStr.trim());
+                if (parsed > 0) {
+                    headCount = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using unset (ratio only)",
+                            CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY, headCountStr);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using unset (ratio only)",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_HEAD_COUNT_KEY, headCountStr);
+            }
+        }
+
+        String selectTypeStr = (String) metadataProvider.getConfig()
+                .get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY);
+        if (selectTypeStr != null && !selectTypeStr.trim().isEmpty()) {
+            String normalized = selectTypeStr.trim().toLowerCase(Locale.ROOT);
+            if ("bkt".equals(normalized) || "random".equals(normalized)) {
+                selectType = normalized;
+            } else {
+                LOGGER.warn("Invalid {} '{}', using default {}",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_SELECT_TYPE_KEY, selectTypeStr, selectType);
+            }
+        }
+
+        String bktLeafSizeStr = (String) metadataProvider.getConfig()
+                .get(CompilerProperties.COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY);
+        if (bktLeafSizeStr != null && !bktLeafSizeStr.trim().isEmpty()) {
+            try {
+                int parsed = Integer.parseInt(bktLeafSizeStr.trim());
+                if (parsed > 0) {
+                    bktLeafSizeOverride = parsed;
+                } else {
+                    LOGGER.warn("Invalid {} '{}', using page-derived leaf capacity",
+                            CompilerProperties.COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY, bktLeafSizeStr);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid {} '{}', using page-derived leaf capacity",
+                        CompilerProperties.COMPILER_VECTOR_SELECTHEAD_BKT_LEAF_SIZE_KEY, bktLeafSizeStr);
+            }
+        }
+
+        if (enabled) {
+            LOGGER.info(
+                    "SelectHead + BuildHead from SET: enabled=true headRatio={} headCount={} selectType={} bktLeafSizeOverride={}",
+                    headRatio, headCount, selectType, bktLeafSizeOverride > 0 ? bktLeafSizeOverride : "unset");
+        }
+        return new SelectHeadTuning(enabled, headRatio, headCount, selectType, bktLeafSizeOverride);
+    }
+
     @Override
+    @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED, notes = "creation_mode dispatch: bottom-up (k-means) vs top-down (SPANN); both seeded by compiler.vector.trainseed")
     public JobSpecification buildStaticStructureJobSpec() throws AlgebricksException {
         IDataFormat format = metadataProvider.getDataFormat();
         int nFields = recordDesc.getFieldCount();
@@ -287,7 +457,8 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         UUID sampleUUID = UUID.randomUUID();
         UUID tupleCountUUID = UUID.randomUUID();
 
-        // Extract K value from WITH clause
+        // Extract K value from WITH clause (num_clusters). Used only when SelectHead is disabled
+        // (full-sample top-down stop); when SelectHead is enabled, structure build ignores K.
         AdmObjectNode withObjectNode = indexDetails.getWithObjectNode();
         int K = (int) Math.sqrt((double) datasetCardinality / numPartitions); // default value
         if (withObjectNode != null) {
@@ -300,6 +471,18 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
         String distanceMetric = (withObjectNode != null) ? withObjectNode.getOptionalString("similarity", "") : "";
 
         int vectorDimension = requireDimension(withObjectNode);
+
+        // Creation mode selects the clustering/TRAINING process for the static structure (Job 2):
+        //   "bottom-up" (default) — hierarchical k-means++ (HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor)
+        //   "top-down"            — SPANN SelectHead + BKT recursive splitting (SpannTopDownCentroidsOperatorDescriptor)
+        // NOTE: this is the training algorithm only. Both modes must emit the same
+        // (treeLevel, centroidId, parentClusterId, embedding) stream bottom-up — leaves first, root last,
+        // BFS-from-root centroid ids — because the downstream VTreeStaticStructureCreator/Builder always
+        // writes pages bottom-up (leaves at low page ids, root highest). Value names must match
+        // VectorIndexDeclUtil.VECTOR_INDEX_PARAMETER_CREATION_MODE in asterix-lang-common.
+        String creationMode =
+                withObjectNode == null ? "bottom-up" : withObjectNode.getOptionalString("creation_mode", "bottom-up");
+        boolean useSpann = "top-down".equalsIgnoreCase(creationMode);
 
         int maxScalableKmeansIter = 2;
 
@@ -329,6 +512,7 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // Training RNG seed: overridable per request (SET `compiler.vector.trainseed` "42") so CI /
         // regression tests get reproducible centroids; defaults to a fresh nanoTime seed otherwise.
+        // Consumed by both training paths: bottom-up k-means and top-down SPANN (SelectHead + BKT).
         long trainSeed = System.nanoTime();
         Object trainSeedCfg = metadataProvider.getConfig().get(CompilerProperties.COMPILER_VECTOR_TRAINSEED_KEY);
         if (trainSeedCfg != null) {
@@ -340,10 +524,33 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
             }
         }
 
-        HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter,
-                        distanceMetric, vectorDimension, trainSeed);
+        IOperatorDescriptor candidates;
+        if (useSpann) {
+            UUID materializedDataUUID = UUID.randomUUID();
+            UUID scalarValuesUUID = UUID.randomUUID();
+            UUID headSelectionUUID = UUID.randomUUID();
+            String qLabel = resolveEffectiveQuantizationLabel(
+                    withObjectNode != null ? withObjectNode.getOptionalString("quantization", null) : null);
+            int quantizationBits = bitsForQuantizationLabel(qLabel);
+            TopDownTuning topDownTuning = resolveTopDownTuning(quantizationBits);
+            SelectHeadTuning selectHeadTuning = resolveSelectHeadTuning();
+            if (selectHeadTuning.enabled) {
+                LOGGER.info(
+                        "SelectHead enabled: WITH num_clusters={} is ignored for static-structure stop (BuildHead uses leaf-page fit)",
+                        K);
+            }
+            candidates = new SpannTopDownCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
+                    sampleUUID, tupleCountUUID, materializedDataUUID, scalarValuesUUID, new ColumnAccessEvalFactory(0),
+                    K, maxScalableKmeansIter, distanceMetric, vectorDimension, topDownTuning.quantizationBits,
+                    topDownTuning.lambdaFactor, topDownTuning.maxLevel, headSelectionUUID, selectHeadTuning.enabled,
+                    selectHeadTuning.headRatio, selectHeadTuning.headCount, selectHeadTuning.selectType,
+                    selectHeadTuning.bktLeafSizeOverride, trainSeed);
+        } else {
+            candidates = new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc,
+                    secondaryRecDesc, sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K,
+                    maxScalableKmeansIter, distanceMetric, vectorDimension, trainSeed);
+        }
+
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;
