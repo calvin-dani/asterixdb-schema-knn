@@ -28,6 +28,11 @@
         </compilation-unit>
     </test-case>
     <test-case FilePath="vector">
+        <compilation-unit name="create-index-vtree-spann">
+            <output-dir compare="Clean-JSON">create-index-vtree-spann</output-dir>
+        </compilation-unit>
+    </test-case>
+    <test-case FilePath="vector">
         <compilation-unit name="create-index-vtree-composite-pk">
             <output-dir compare="Clean-JSON">create-index-vtree-composite-pk</output-dir>
         </compilation-unit>

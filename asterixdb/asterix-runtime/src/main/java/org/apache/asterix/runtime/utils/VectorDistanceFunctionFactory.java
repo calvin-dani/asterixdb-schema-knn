@@ -128,19 +128,10 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
         if (func == null) {
             LOGGER.warn("Unsupported distance metric '{}', defaulting to euclidean. Ensure DISTANCE_MAP "
                     + "stays in sync with ANNDistanceDescriptor.DISTANCE_MAP.", distanceMetric);
-            return wrapDistanceFunction(new EuclideanDistanceFunction());
+            return new EuclideanDistanceFunction();
         }
 
-        return wrapDistanceFunction(func);
-    }
-
-    /**
-     * Convert IVTreeDistanceFunction to IVectorDistanceFunction for use in Hyracks modules.
-     * @param distanceFunction AsterixDB IVTreeDistanceFunction
-     * @return IVectorDistanceFunction wrapper
-     */
-    private static IVTreeDistanceFunction wrapDistanceFunction(IVTreeDistanceFunction distanceFunction) {
-        return distanceFunction::apply;
+        return func;
     }
 
     // Stateless factory: the persisted form is just the class identifier.
