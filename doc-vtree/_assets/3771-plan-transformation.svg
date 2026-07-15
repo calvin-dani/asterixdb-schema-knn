@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 440" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<style>
+.bp{fill:#EEEDFE;stroke:#534AB7}.bg{fill:#F1EFE8;stroke:#5F5E5A}.bc{fill:#FAECE7;stroke:#D85A30}
+.tp{fill:#3C3489;font-size:12px;font-weight:600}.sp{fill:#534AB7;font-size:11px}
+.tg{fill:#444441;font-size:12px;font-weight:600}.sg{fill:#5F5E5A;font-size:11px}
+.tc{fill:#712B13;font-size:12px;font-weight:600}.sc{fill:#993C1D;font-size:11px}
+.lane{fill:#2C2C2A;font-size:13px;font-weight:600}
+.note{fill:#5F5E5A;font-size:11px}
+</style>
+<rect width="700" height="440" fill="#FFFFFF"/>
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0L8,4L0,8z" fill="#888780"/></marker></defs>
+
+<text x="145" y="34" class="lane" text-anchor="middle">Before</text>
+<text x="555" y="34" class="lane" text-anchor="middle">After (index-only case)</text>
+
+<rect x="20" y="48" width="250" height="40" rx="4" class="bg"/><text x="145" y="72" class="tg" text-anchor="middle">LIMIT 2</text>
+<rect x="20" y="106" width="250" height="40" rx="4" class="bg"/><text x="145" y="124" class="tg" text-anchor="middle">ORDER BY ann_distance</text><text x="145" y="139" class="sg" text-anchor="middle">($rec.emb, qvec, "euclidean")</text>
+<rect x="20" y="164" width="250" height="40" rx="4" class="bg"/><text x="145" y="188" class="tg" text-anchor="middle">ASSIGN  $id = field-access($rec, id)</text>
+<rect x="20" y="222" width="250" height="40" rx="4" class="bc"/><text x="145" y="240" class="tc" text-anchor="middle">DATASOURCE_SCAN movie</text><text x="145" y="255" class="sc" text-anchor="middle">produces $pk, $rec</text>
+<line x1="145" y1="88" x2="145" y2="104" stroke="#888780" stroke-width="1.5"/>
+<line x1="145" y1="146" x2="145" y2="162" stroke="#888780" stroke-width="1.5"/>
+<line x1="145" y1="204" x2="145" y2="220" stroke="#888780" stroke-width="1.5"/>
+
+<line x1="285" y1="180" x2="415" y2="180" stroke="#888780" stroke-width="1.8" marker-end="url(#ar)"/>
+<text x="350" y="164" class="note" text-anchor="middle">IntroduceTopKAccessMethodRule</text>
+<text x="350" y="200" class="note" text-anchor="middle">+ VectorIndexAccessMethod</text>
+
+<rect x="430" y="48" width="250" height="40" rx="4" class="bg"/><text x="555" y="72" class="tg" text-anchor="middle">LIMIT 2</text>
+<rect x="430" y="106" width="250" height="40" rx="4" class="bp"/><text x="555" y="124" class="tp" text-anchor="middle">ORDER BY $dist</text><text x="555" y="139" class="sp" text-anchor="middle">rewritten sort key</text>
+<rect x="430" y="164" width="250" height="40" rx="4" class="bp" stroke-dasharray="5 3"/><text x="555" y="182" class="tp" text-anchor="middle">DISTINCT $pk</text><text x="555" y="197" class="sp" text-anchor="middle">only if cross_pollination_m &gt; 1</text>
+<rect x="430" y="222" width="250" height="40" rx="4" class="bp"/><text x="555" y="240" class="tp" text-anchor="middle">VECTOR_INDEX_UNNEST movie.ix</text><text x="555" y="255" class="sp" text-anchor="middle">produces $pk, $dist (candidates)</text>
+<rect x="430" y="280" width="250" height="40" rx="4" class="bp"/><text x="555" y="298" class="tp" text-anchor="middle">ASSIGN query params</text><text x="555" y="313" class="sp" text-anchor="middle">qvec, k, metric, min_probe, k_mult</text>
+<line x1="555" y1="88" x2="555" y2="104" stroke="#888780" stroke-width="1.5"/>
+<line x1="555" y1="146" x2="555" y2="162" stroke="#888780" stroke-width="1.5"/>
+<line x1="555" y1="204" x2="555" y2="220" stroke="#888780" stroke-width="1.5"/>
+<line x1="555" y1="262" x2="555" y2="278" stroke="#888780" stroke-width="1.5"/>
+
+<rect x="20" y="352" width="13" height="13" rx="3" class="bg"/>
+<text x="39" y="363" class="note">unchanged</text>
+<rect x="130" y="352" width="13" height="13" rx="3" class="bc"/>
+<text x="149" y="363" class="note">replaced</text>
+<rect x="235" y="352" width="13" height="13" rx="3" class="bp"/>
+<text x="254" y="363" class="note">new / rewritten</text>
+<rect x="370" y="352" width="13" height="13" rx="3" class="bp" stroke-dasharray="5 3"/>
+<text x="389" y="363" class="note">conditional</text>
+
+<text x="20" y="396" class="note">ORDER BY and LIMIT are kept: the index yields candidates ranked by quantized distance; exact reranking stays in the plan.</text>
+<text x="20" y="414" class="note">Non-PK projections instead get a primary-index unnest between the vector unnest and ORDER BY (lookup-and-rerank shape).</text>
+</svg>
