@@ -1,0 +1,155 @@
+# Integration test config with TestGist removed (buffer-cache exhaustion + column-storage
+# recovery interaction are tracked separately; not relevant to this run).
+# =====================================
+
+asterixdb:
+  url: "http://localhost:19002/query/service"
+  health_url: "http://localhost:19002/admin/cluster/summary"
+  startup_timeout: 120
+  shutdown_timeout: 30
+  main_class: "org.apache.asterix.api.common.AsterixHyracksIntegrationUtil"
+  project_root: "../.."
+  conf_file: "asterixdb/asterix-app/src/test/resources/cc-main.conf"
+  jvm_args: '-Xmx6144m -Dnode.Resolver="org.apache.asterix.external.util.IdentitiyResolverFactory"'
+
+datasets_dir: "../datasets"
+
+datasets:
+  movie:
+    file: "movie_embeddings_384d.json"
+    format: "json"
+    dimension: 384
+    pk_field: "idx"
+    vector_field: "embedding"
+    record_limit: null
+    type_schema: "idx: int"
+    similarity: "euclidean_squared"
+
+  glove:
+    file: "glove-100-angular_train.jsonl"
+    format: "json"
+    dimension: 100
+    pk_field: "idx"
+    vector_field: "embedding"
+    record_limit: 50000
+    type_schema: "idx: int"
+    similarity: "cosine"
+
+# Part 1: Index Creation — Gist dataverse group dropped
+part1_index_creation:
+  dataverse_groups:
+    - dataverse: "TestMovie"
+      source_dataset: "movie"
+      train_list_fraction: 0.1
+      epsilon: 0.3
+      targets:
+        - dataset: "Movie"
+          include_fields: ["title", "year"]
+        - dataset: "MovieNoInclude"
+          include_fields: null
+
+    - dataverse: "TestGlove"
+      source_dataset: "glove"
+      train_list_fraction: 0.1
+      epsilon: 0.3
+      targets:
+        - dataset: "Glove"
+          include_fields: null
+
+# Part 2: ANN Query Recall — gist_euclidean test case dropped
+part2_ann_query:
+  k: 50
+  num_query_vectors: 5
+  query_start_idx: 100
+
+  test_cases:
+    - name: "movie_esq"
+      dataverse: "TestMovie"
+      dataset: "Movie"
+      source_dataset: "movie"
+      min_probe_fraction: 0.4
+      k_multiplier: 1
+      where_clause: null
+      recall_warn_threshold: 0.70
+      recall_fail_threshold: 0.50
+
+    - name: "movie_esq_filter"
+      dataverse: "TestMovie"
+      dataset: "Movie"
+      source_dataset: "movie"
+      min_probe_fraction: 0.4
+      k_multiplier: 1
+      where_clause: "m.year > 2000"
+      recall_warn_threshold: 0.70
+      recall_fail_threshold: 0.50
+
+    - name: "glove_cosine"
+      dataverse: "TestGlove"
+      dataset: "Glove"
+      source_dataset: "glove"
+      min_probe_fraction: 0.4
+      k_multiplier: 1
+      where_clause: null
+      recall_warn_threshold: 0.70
+      recall_fail_threshold: 0.50
+
+    - name: "movie_esq_no_include"
+      dataverse: "TestMovie"
+      dataset: "MovieNoInclude"
+      source_dataset: "movie"
+      min_probe_fraction: 0.4
+      k_multiplier: 1
+      where_clause: null
+      recall_warn_threshold: 0.70
+      recall_fail_threshold: 0.50
+
+# Part 3: Insert/Delete Correctness (unchanged)
+part3_insert_delete:
+  dataverse: "InsertDeleteTest"
+  source_dataset: "movie"
+  staging_dataset: "Staging"
+  train_list_fraction: 0.1
+  epsilon: 0.3
+  initial_load_limit: 5000
+  insert_range: [5000, 7999]
+  delete_ranges:
+    - [2000, 2999]
+    - [6000, 6499]
+  verify_expected_ranges:
+    - [0, 1999]
+    - [3000, 4999]
+    - [5000, 5999]
+    - [6500, 7999]
+  verify_deleted_ranges:
+    - [2000, 2999]
+    - [6000, 6499]
+  ann_verify:
+    query_pk: 0
+    vector_field: "embedding"
+    similarity: "euclidean_squared"
+    min_probe_fraction: 0.4
+    k_multiplier: 1
+    limit: 10000
+  targets:
+    - dataset: "Movie"
+
+# Part 4: Flush + Compact (unchanged)
+part4_flush_compact:
+  dataverse: "InsertDeleteTest"
+  ann_verify:
+    query_pk: 0
+    vector_field: "embedding"
+    similarity: "euclidean_squared"
+    min_probe_fraction: 0.4
+    k_multiplier: 1
+    limit: 10000
+  targets:
+    - dataset: "Movie"
+  verify_expected_ranges:
+    - [0, 1999]
+    - [3000, 4999]
+    - [5000, 5999]
+    - [6500, 7999]
+  verify_deleted_ranges:
+    - [2000, 2999]
+    - [6000, 6499]
