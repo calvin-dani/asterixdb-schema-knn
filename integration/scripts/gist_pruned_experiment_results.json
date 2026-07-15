@@ -1,0 +1,696 @@
+{
+  "config": {
+    "dataset": "GIST_EXPERIMENT.Gist",
+    "dimension": 960,
+    "similarity": "euclidean",
+    "train_list": 10000,
+    "K": 10,
+    "epsilon": 0.3,
+    "num_query_vectors": 10,
+    "query_ids": [
+      0,
+      1000,
+      5000,
+      10000,
+      20000,
+      30000,
+      50000,
+      70000,
+      90000,
+      99000
+    ],
+    "cluster_configs": [
+      50,
+      100,
+      200
+    ]
+  },
+  "results": {
+    "50": [
+      {
+        "query_idx": 0,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 186.24401092529297,
+          "elapsed_ms": 179.712833,
+          "execution_ms": 169.559125,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 74.6757984161377,
+          "elapsed_ms": 70.647166,
+          "execution_ms": 61.96425,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 747.689833,
+          "execution_ms": 741.985833,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 1000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 112.47682571411133,
+          "elapsed_ms": 108.902834,
+          "execution_ms": 106.634291,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 59.44967269897461,
+          "elapsed_ms": 55.318333,
+          "execution_ms": 53.099792,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 605.227083,
+          "execution_ms": 603.163167,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 5000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 76.93910598754883,
+          "elapsed_ms": 72.61425,
+          "execution_ms": 70.488,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 52.430152893066406,
+          "elapsed_ms": 46.591209,
+          "execution_ms": 44.29725,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 546.884167,
+          "execution_ms": 544.939875,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 10000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 78.78828048706055,
+          "elapsed_ms": 71.765,
+          "execution_ms": 69.877458,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.5,
+          "wall_ms": 57.20376968383789,
+          "elapsed_ms": 51.077041,
+          "execution_ms": 49.29075,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 583.462625,
+          "execution_ms": 581.548667,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 20000,
+        "ann": {
+          "recall": 0.9,
+          "wall_ms": 68.51315498352051,
+          "elapsed_ms": 64.820959,
+          "execution_ms": 63.060167,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 40.44175148010254,
+          "elapsed_ms": 36.487583,
+          "execution_ms": 34.934834,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 578.09475,
+          "execution_ms": 576.616792,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 30000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 73.18663597106934,
+          "elapsed_ms": 69.539584,
+          "execution_ms": 67.984583,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.2,
+          "wall_ms": 30.4110050201416,
+          "elapsed_ms": 27.127209,
+          "execution_ms": 25.597375,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 583.274209,
+          "execution_ms": 581.826917,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 50000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 119.60601806640625,
+          "elapsed_ms": 115.481166,
+          "execution_ms": 113.694541,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 1.0,
+          "wall_ms": 46.94223403930664,
+          "elapsed_ms": 43.195708,
+          "execution_ms": 41.604583,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 585.587209,
+          "execution_ms": 584.167417,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 70000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 73.88591766357422,
+          "elapsed_ms": 69.865958,
+          "execution_ms": 68.012792,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 37.29104995727539,
+          "elapsed_ms": 33.473625,
+          "execution_ms": 32.0,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 597.117417,
+          "execution_ms": 595.696084,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 90000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 65.5050277709961,
+          "elapsed_ms": 62.410334,
+          "execution_ms": 60.919542,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.7,
+          "wall_ms": 58.38608741760254,
+          "elapsed_ms": 54.856709,
+          "execution_ms": 53.294916,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 706.574667,
+          "execution_ms": 704.43325,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 99000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 75.53386688232422,
+          "elapsed_ms": 70.561334,
+          "execution_ms": 68.940375,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 1.0,
+          "wall_ms": 40.022850036621094,
+          "elapsed_ms": 36.411417,
+          "execution_ms": 34.811416,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 687.8875,
+          "execution_ms": 686.330583,
+          "num_results": 10
+        }
+      }
+    ],
+    "100": [
+      {
+        "query_idx": 0,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 68.9239501953125,
+          "elapsed_ms": 65.302833,
+          "execution_ms": 59.1535,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.6,
+          "wall_ms": 33.76007080078125,
+          "elapsed_ms": 30.296584,
+          "execution_ms": 25.458458,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 568.41175,
+          "execution_ms": 563.701667,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 1000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 74.84269142150879,
+          "elapsed_ms": 71.171542,
+          "execution_ms": 69.517584,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 43.480873107910156,
+          "elapsed_ms": 39.286541,
+          "execution_ms": 37.837667,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 560.003167,
+          "execution_ms": 558.440042,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 5000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 52.74701118469238,
+          "elapsed_ms": 49.606875,
+          "execution_ms": 48.039875,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 1.0,
+          "wall_ms": 32.05394744873047,
+          "elapsed_ms": 28.599834,
+          "execution_ms": 27.110625,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 573.657625,
+          "execution_ms": 572.130541,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 10000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 96.1458683013916,
+          "elapsed_ms": 92.640375,
+          "execution_ms": 91.2605,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.6,
+          "wall_ms": 32.02104568481445,
+          "elapsed_ms": 28.69625,
+          "execution_ms": 27.277583,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 569.656625,
+          "execution_ms": 568.261458,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 20000,
+        "ann": {
+          "recall": 0.8,
+          "wall_ms": 53.758859634399414,
+          "elapsed_ms": 49.025916,
+          "execution_ms": 47.641125,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.7,
+          "wall_ms": 36.40580177307129,
+          "elapsed_ms": 32.033917,
+          "execution_ms": 30.565042,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 587.2965,
+          "execution_ms": 585.412375,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 30000,
+        "ann": {
+          "recall": 0.9,
+          "wall_ms": 44.8298454284668,
+          "elapsed_ms": 41.532292,
+          "execution_ms": 40.088916,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.8,
+          "wall_ms": 24.158239364624023,
+          "elapsed_ms": 19.946792,
+          "execution_ms": 18.534291,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 573.222458,
+          "execution_ms": 571.852125,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 50000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 50.84991455078125,
+          "elapsed_ms": 46.066208,
+          "execution_ms": 44.730542,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 47.1949577331543,
+          "elapsed_ms": 41.958,
+          "execution_ms": 40.575584,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 623.084167,
+          "execution_ms": 621.188917,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 70000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 68.8786506652832,
+          "elapsed_ms": 64.892292,
+          "execution_ms": 63.44525,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.8,
+          "wall_ms": 27.746915817260742,
+          "elapsed_ms": 24.075083,
+          "execution_ms": 22.705125,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 608.817791,
+          "execution_ms": 607.424709,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 90000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 71.19488716125488,
+          "elapsed_ms": 67.4495,
+          "execution_ms": 65.422875,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 35.782814025878906,
+          "elapsed_ms": 32.203,
+          "execution_ms": 30.814292,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 582.720583,
+          "execution_ms": 581.276792,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 99000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 73.87900352478027,
+          "elapsed_ms": 69.939583,
+          "execution_ms": 68.422125,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 41.7790412902832,
+          "elapsed_ms": 33.60425,
+          "execution_ms": 32.120708,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 584.393042,
+          "execution_ms": 574.018083,
+          "num_results": 10
+        }
+      }
+    ],
+    "200": [
+      {
+        "query_idx": 0,
+        "ann": {
+          "recall": 0.6,
+          "wall_ms": 149.14512634277344,
+          "elapsed_ms": 139.378833,
+          "execution_ms": 114.945459,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.6,
+          "wall_ms": 77.11291313171387,
+          "elapsed_ms": 68.869583,
+          "execution_ms": 64.729125,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 887.035125,
+          "execution_ms": 882.948917,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 1000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 94.41208839416504,
+          "elapsed_ms": 86.760958,
+          "execution_ms": 83.420167,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.7,
+          "wall_ms": 75.48117637634277,
+          "elapsed_ms": 68.470125,
+          "execution_ms": 65.969458,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 741.912167,
+          "execution_ms": 739.86625,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 5000,
+        "ann": {
+          "recall": 0.8,
+          "wall_ms": 76.97081565856934,
+          "elapsed_ms": 72.159333,
+          "execution_ms": 63.511625,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.8,
+          "wall_ms": 51.554203033447266,
+          "elapsed_ms": 46.212959,
+          "execution_ms": 43.940375,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 841.205583,
+          "execution_ms": 839.119958,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 10000,
+        "ann": {
+          "recall": 0.6,
+          "wall_ms": 79.01120185852051,
+          "elapsed_ms": 72.384916,
+          "execution_ms": 70.124625,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.5,
+          "wall_ms": 45.55702209472656,
+          "elapsed_ms": 41.140208,
+          "execution_ms": 39.464792,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 672.355125,
+          "execution_ms": 670.19225,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 20000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 125.58507919311523,
+          "elapsed_ms": 120.296417,
+          "execution_ms": 118.649209,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 49.35479164123535,
+          "elapsed_ms": 44.791125,
+          "execution_ms": 43.089792,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 664.744792,
+          "execution_ms": 662.707,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 30000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 61.39397621154785,
+          "elapsed_ms": 57.549583,
+          "execution_ms": 55.739208,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 33.12373161315918,
+          "elapsed_ms": 28.418542,
+          "execution_ms": 26.888084,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 752.561375,
+          "execution_ms": 751.149292,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 50000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 90.84796905517578,
+          "elapsed_ms": 85.697375,
+          "execution_ms": 84.186917,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 1.0,
+          "wall_ms": 85.94393730163574,
+          "elapsed_ms": 79.983458,
+          "execution_ms": 78.212792,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 703.192875,
+          "execution_ms": 700.99,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 70000,
+        "ann": {
+          "recall": 0.8,
+          "wall_ms": 92.5140380859375,
+          "elapsed_ms": 87.437666,
+          "execution_ms": 85.793666,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.4,
+          "wall_ms": 39.70026969909668,
+          "elapsed_ms": 35.840167,
+          "execution_ms": 33.556666,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 675.4025,
+          "execution_ms": 673.959458,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 90000,
+        "ann": {
+          "recall": 1.0,
+          "wall_ms": 85.86382865905762,
+          "elapsed_ms": 80.881875,
+          "execution_ms": 79.425916,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.9,
+          "wall_ms": 49.343109130859375,
+          "elapsed_ms": 44.264416,
+          "execution_ms": 40.668084,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 641.692416,
+          "execution_ms": 640.302583,
+          "num_results": 10
+        }
+      },
+      {
+        "query_idx": 99000,
+        "ann": {
+          "recall": 0.9,
+          "wall_ms": 71.15888595581055,
+          "elapsed_ms": 66.198667,
+          "execution_ms": 63.923125,
+          "num_results": 10
+        },
+        "pruned": {
+          "recall": 0.7,
+          "wall_ms": 36.509037017822266,
+          "elapsed_ms": 32.157666,
+          "execution_ms": 30.662792,
+          "num_results": 10
+        },
+        "knn": {
+          "elapsed_ms": 678.137084,
+          "execution_ms": 676.369209,
+          "num_results": 10
+        }
+      }
+    ]
+  }
+}

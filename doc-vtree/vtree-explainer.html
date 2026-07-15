@@ -1,0 +1,994 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
+<title>VTree — A Reviewer's Walkthrough</title>
+<style>
+  :root {
+    /* neutrals — cool slate, deliberately blue-biased, not pure grey */
+    --bg: #eef1f6;
+    --surface: #ffffff;
+    --surface-2: #f7f9fc;
+    --ink: #131a29;
+    --ink-2: #3d4966;
+    --ink-3: #6d788d;
+    --line: #d9e0ea;
+    --line-2: #c5cede;
+    --accent: #3450d4;
+    --accent-soft: #e6e9fb;
+    /* subsystem tints */
+    --c-create: #b45309;
+    --c-query: #3450d4;
+    --c-dml: #0f766e;
+    --c-storage: #7c3aed;
+    --c-mech: #be185d;
+    --c-create-soft: #f6ecdd;
+    --c-query-soft: #e6e9fb;
+    --c-dml-soft: #d9efec;
+    --c-storage-soft: #efe7fc;
+    --c-mech-soft: #fbe4ee;
+    /* semantic */
+    --good: #15803d;
+    --warn: #b45309;
+    --crit: #c02626;
+    --good-soft: #e0f0e5;
+    --warn-soft: #f8ecd9;
+    --crit-soft: #f9e3e3;
+
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, Roboto, sans-serif;
+    --maxw: 74ch;
+    --radius: 7px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0e17;
+      --surface: #121826;
+      --surface-2: #0f1522;
+      --ink: #e7ecf5;
+      --ink-2: #a7b1c6;
+      --ink-3: #6f7b93;
+      --line: #232d40;
+      --line-2: #313d55;
+      --accent: #8098f7;
+      --accent-soft: #1b2440;
+      --c-create: #dd9646;
+      --c-query: #8098f7;
+      --c-dml: #40bcaf;
+      --c-storage: #ac8bf2;
+      --c-mech: #f06a97;
+      --c-create-soft: #2a2113;
+      --c-query-soft: #17203c;
+      --c-dml-soft: #10241f;
+      --c-storage-soft: #1f1830;
+      --c-mech-soft: #2a1420;
+      --good: #4ea96f;
+      --warn: #dd9646;
+      --crit: #e56a6a;
+      --good-soft: #12241a;
+      --warn-soft: #2a2113;
+      --crit-soft: #2a1518;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f6; --surface: #ffffff; --surface-2: #f7f9fc; --ink: #131a29; --ink-2: #3d4966;
+    --ink-3: #6d788d; --line: #d9e0ea; --line-2: #c5cede; --accent: #3450d4; --accent-soft: #e6e9fb;
+    --c-create: #b45309; --c-query: #3450d4; --c-dml: #0f766e; --c-storage: #7c3aed; --c-mech: #be185d;
+    --c-create-soft: #f6ecdd; --c-query-soft: #e6e9fb; --c-dml-soft: #d9efec; --c-storage-soft: #efe7fc; --c-mech-soft: #fbe4ee;
+    --good: #15803d; --warn: #b45309; --crit: #c02626; --good-soft: #e0f0e5; --warn-soft: #f8ecd9; --crit-soft: #f9e3e3;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a0e17; --surface: #121826; --surface-2: #0f1522; --ink: #e7ecf5; --ink-2: #a7b1c6;
+    --ink-3: #6f7b93; --line: #232d40; --line-2: #313d55; --accent: #8098f7; --accent-soft: #1b2440;
+    --c-create: #dd9646; --c-query: #8098f7; --c-dml: #40bcaf; --c-storage: #ac8bf2; --c-mech: #f06a97;
+    --c-create-soft: #2a2113; --c-query-soft: #17203c; --c-dml-soft: #10241f; --c-storage-soft: #1f1830; --c-mech-soft: #2a1420;
+    --good: #4ea96f; --warn: #dd9646; --crit: #e56a6a; --good-soft: #12241a; --warn-soft: #2a2113; --crit-soft: #2a1518;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+    line-height: 1.62; font-size: 16px; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--accent); color: #fff; }
+
+  /* ---------- shell ---------- */
+  .shell { display: grid; grid-template-columns: 268px minmax(0, 1fr); gap: 0; max-width: 1320px; margin: 0 auto; }
+  nav.toc {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 30px 22px 60px 26px; border-right: 1px solid var(--line);
+    font-family: var(--mono); font-size: 12.5px;
+  }
+  nav.toc .brand { font-family: var(--sans); font-weight: 800; font-size: 15px; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 2px; }
+  nav.toc .brand span { color: var(--accent); }
+  nav.toc .sub { font-family: var(--sans); font-size: 11.5px; color: var(--ink-3); margin-bottom: 22px; line-height: 1.4; }
+  nav.toc a { display: block; color: var(--ink-2); text-decoration: none; padding: 3px 0; border-radius: 4px; }
+  nav.toc a:hover { color: var(--accent); }
+  nav.toc a .n { color: var(--ink-3); margin-right: 8px; }
+  nav.toc .grp { margin-top: 15px; }
+  nav.toc a.sec { color: var(--ink); font-weight: 600; }
+  nav.toc a.sub2 { padding-left: 30px; font-size: 12px; color: var(--ink-3); }
+  nav.toc a.sub2:hover { color: var(--accent); }
+
+  main { padding: 0 clamp(20px, 4vw, 64px) 120px; min-width: 0; }
+
+  /* ---------- hero ---------- */
+  header.hero { padding: 70px 0 40px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1.title { font-size: clamp(2.2rem, 5vw, 3.4rem); line-height: 1.03; letter-spacing: -0.03em; font-weight: 820;
+    margin: 16px 0 0; text-wrap: balance; max-width: 16ch; }
+  .lede { font-size: 1.18rem; color: var(--ink-2); max-width: 60ch; margin: 22px 0 0; text-wrap: pretty; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; font-family: var(--mono); font-size: 12px; }
+  .meta-row .chip { padding: 5px 11px; border: 1px solid var(--line-2); border-radius: 100px; color: var(--ink-2); background: var(--surface); }
+
+  /* ---------- legend ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 26px 0 0; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+  .legend .k { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+
+  /* ---------- section scaffolding ---------- */
+  section.chapter { padding-top: 54px; scroll-margin-top: 12px; }
+  .chapter > .head { display: flex; align-items: baseline; gap: 14px; border-top: 2px solid var(--accent); padding-top: 14px; margin-bottom: 6px; }
+  .chapter > .head .num { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--accent); }
+  h2 { font-size: clamp(1.5rem, 3.2vw, 2.05rem); letter-spacing: -0.02em; font-weight: 780; margin: 0; text-wrap: balance; }
+  h3 { font-size: 1.16rem; letter-spacing: -0.01em; font-weight: 700; margin: 40px 0 4px; color: var(--ink); }
+  h3 .tag { font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 5px; vertical-align: middle; margin-left: 9px; }
+  p { max-width: var(--maxw); margin: 14px 0; }
+  p.wide, ul.wide { max-width: 88ch; }
+  a.link { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--line-2); }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; color: var(--ink); white-space: nowrap; }
+  strong { font-weight: 680; }
+  ul, ol { max-width: var(--maxw); padding-left: 22px; }
+  li { margin: 7px 0; }
+  .subsystem-band { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; padding: 3px 9px; border-radius: 5px; display: inline-block; }
+
+  /* ---------- flow diagram (dataflow columns) ---------- */
+  .figure { margin: 26px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+  .figure .cap { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .figure .cap b { color: var(--ink-2); font-weight: 600; }
+  .figure .body { padding: 22px 18px; overflow-x: auto; }
+
+  .flow-cols { display: flex; gap: 14px; min-width: min-content; }
+  .flow-col { flex: 1; min-width: 210px; }
+  .flow-col > .job { font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 10px; border-radius: 6px 6px 0 0; color: #fff; }
+  .flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 12px 8px 8px; border: 1px solid var(--line); border-top: none; border-radius: 0 0 6px 6px; }
+  .node { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 6px; padding: 9px 11px; text-align: center; }
+  .node .nt { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+  .node .ns { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+  .node.op { border-color: var(--accent); }
+  .node.term { background: var(--surface); border-style: dashed; }
+  .edge { align-self: center; display: flex; flex-direction: column; align-items: center; padding: 3px 0; }
+  .edge .lbl { font-family: var(--mono); font-size: 10px; color: var(--ink-3); background: var(--bg); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .edge .arr { width: 1px; height: 12px; background: var(--line-2); position: relative; }
+  .edge .arr::after { content: ""; position: absolute; bottom: 0; left: -3px; border: 3.5px solid transparent; border-top-color: var(--line-2); }
+
+  /* single-column flow */
+  .flow-single { max-width: 560px; }
+
+  /* ---------- plan tree (monospace) ---------- */
+  .plan { margin: 18px 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .plan .ph { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 700; padding: 8px 14px; color: #fff; }
+  .plan pre { margin: 0; padding: 16px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; overflow-x: auto; background: var(--surface); color: var(--ink-2); }
+  .plan pre .hl { color: var(--accent); font-weight: 600; }
+  .plan pre .rm { color: var(--crit); }
+  .plan pre .add { color: var(--good); }
+  .plan pre .cm { color: var(--ink-3); }
+
+  /* ---------- byte layout ---------- */
+  .bytes { margin: 16px 0; overflow-x: auto; }
+  .bytes-row { display: flex; min-width: min-content; border-radius: 6px; overflow: hidden; border: 1px solid var(--line-2); font-family: var(--mono); }
+  .bytes-row .cell { padding: 7px 10px; border-right: 1px solid var(--line-2); background: var(--surface); min-width: 84px; }
+  .bytes-row .cell:last-child { border-right: none; }
+  .bytes-row .cell .fn { font-size: 11px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .bytes-row .cell .ft { font-size: 10px; color: var(--ink-3); white-space: nowrap; margin-top: 2px; }
+  .bytes-row .cell.k { background: var(--accent-soft); }
+  .bytes-row .cell.anti { background: var(--c-mech-soft); }
+  .flabel { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin: 2px 0 4px; }
+
+  /* ---------- callouts ---------- */
+  .call { border: 1px solid var(--line); border-left: 3px solid var(--ink-3); border-radius: 6px; padding: 13px 16px; margin: 18px 0; background: var(--surface); max-width: 88ch; }
+  .call .ct { font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+  .call p { margin: 4px 0; max-width: none; font-size: 0.95rem; }
+  .call.inv { border-left-color: var(--good); } .call.inv .ct { color: var(--good); }
+  .call.gotcha { border-left-color: var(--warn); } .call.gotcha .ct { color: var(--warn); }
+  .call.bug { border-left-color: var(--crit); background: var(--crit-soft); } .call.bug .ct { color: var(--crit); }
+  .call.key { border-left-color: var(--accent); } .call.key .ct { color: var(--accent); }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap { overflow-x: auto; margin: 18px 0; border: 1px solid var(--line); border-radius: var(--radius); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 520px; }
+  th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); font-weight: 600; background: var(--surface-2); position: sticky; top: 0; }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: normal; }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+
+  /* ---------- svg figures ---------- */
+  .svgfig svg { width: 100%; height: auto; display: block; }
+  .svgfig .box { fill: var(--surface-2); stroke: var(--line-2); stroke-width: 1.2; }
+  .svgfig .box-a { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+  .svgfig .lbl { fill: var(--ink); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .svgfig .lbl-s { fill: var(--ink-3); font-family: var(--mono); font-size: 10.5px; }
+  .svgfig .lbl-w { fill: #fff; font-family: var(--mono); font-size: 11px; font-weight: 600; }
+  .svgfig .lbl-b { fill: var(--accent); font-family: var(--mono); font-size: 10.5px; font-weight: 600; }
+  .svgfig .conn { stroke: var(--line-2); stroke-width: 1.4; fill: none; }
+  .svgfig .conn-a { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+  .svgfig .ptr-lbl { fill: var(--ink-3); font-family: var(--mono); font-size: 10px; }
+
+  /* ---------- misc ---------- */
+  .kgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; margin: 22px 0; max-width: 92ch; }
+  .kcard { border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 16px; background: var(--surface); }
+  .kcard .kt { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--ink); }
+  .kcard .kd { font-size: 13px; color: var(--ink-2); margin-top: 6px; line-height: 1.5; }
+  .kcard .kbadge { font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 4px; float: right; }
+  hr.soft { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
+  .footnote { font-size: 13px; color: var(--ink-3); border-top: 1px solid var(--line); margin-top: 70px; padding-top: 22px; }
+  .footnote code { font-size: 0.9em; }
+
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    nav.toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line);
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 18px; padding: 22px; }
+    nav.toc .brand, nav.toc .sub { grid-column: 1 / -1; }
+    nav.toc .grp { margin-top: 4px; }
+    nav.toc a.sub2 { display: none; }
+    header.hero { padding: 44px 0 30px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    a, .node, .kcard { transition: color .15s ease, border-color .15s ease; }
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">V<span>Tree</span> internals</div>
+  <div class="sub">LSM hierarchical cluster-based vector index for AsterixDB — a reviewer's walkthrough</div>
+
+  <a class="sec" href="#orient"><span class="n">00</span>Orientation</a>
+  <div class="grp">
+    <a class="sec" href="#create"><span class="n">01</span>Index creation</a>
+    <a class="sub2" href="#create-plan">Three-job runtime plan</a>
+    <a class="sub2" href="#create-ddl">DDL surface</a>
+    <a class="sub2" href="#create-knobs">Creation-time SET knobs</a>
+  </div>
+  <div class="grp">
+    <a class="sec" href="#query"><span class="n">02</span>ANN query</a>
+    <a class="sub2" href="#query-rule">The optimizer rule</a>
+    <a class="sub2" href="#query-plans">Optimized plans</a>
+    <a class="sub2" href="#query-cursor">The cursor stack</a>
+    <a class="sub2" href="#query-spill">Spillable top-K buffer</a>
+    <a class="sub2" href="#query-knobs">Query-time knobs</a>
+  </div>
+  <div class="grp">
+    <a class="sec" href="#dml"><span class="n">03</span>DML &amp; antimatter</a>
+  </div>
+  <div class="grp">
+    <a class="sec" href="#storage"><span class="n">04</span>Storage layer</a>
+    <a class="sub2" href="#storage-anatomy">Index anatomy</a>
+    <a class="sub2" href="#storage-tiers">Three-tier structure</a>
+    <a class="sub2" href="#storage-pages">Page formats</a>
+    <a class="sub2" href="#storage-lifecycle">Flush &amp; merge</a>
+  </div>
+  <div class="grp">
+    <a class="sec" href="#xpoll"><span class="n">05</span>Cross-pollination</a>
+    <a class="sec" href="#include"><span class="n">06</span>INCLUDE fields</a>
+    <a class="sec" href="#indexonly"><span class="n">07</span>Index-only ANN</a>
+    <a class="sec" href="#map"><span class="n">08</span>Reviewer's map</a>
+  </div>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">Storage · Runtime · Optimizer</div>
+  <h1 class="title">VTree, explained for the reviewer</h1>
+  <p class="lede">An LSM-backed hierarchical cluster-based vector index for approximate nearest-neighbour search in Apache AsterixDB — from <code>CREATE&nbsp;INDEX</code> to the byte layout of a data page, and every dataflow in between.</p>
+  <div class="meta-row">
+    <span class="chip">SQL++ · Algebricks · Hyracks</span>
+    <span class="chip">patches 3754 a/b/c · 3760 · 3771</span>
+    <span class="chip">quantized-only (SQ8/SQ4)</span>
+    <span class="chip">cross-pollinated clusters</span>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span class="k"><span class="dot" style="background:var(--c-create)"></span>creation</span>
+    <span class="k"><span class="dot" style="background:var(--c-query)"></span>query</span>
+    <span class="k"><span class="dot" style="background:var(--c-dml)"></span>DML</span>
+    <span class="k"><span class="dot" style="background:var(--c-storage)"></span>storage</span>
+    <span class="k"><span class="dot" style="background:var(--c-mech)"></span>mechanism</span>
+  </div>
+</header>
+
+<!-- ================= 00 ORIENTATION ================= -->
+<section class="chapter" id="orient">
+  <div class="head"><span class="num">00</span><h2>Orientation</h2></div>
+  <p class="wide">VTree answers one query — <em>“the K vectors nearest to <code>q</code>”</em> — over billions of embeddings, approximately but fast. It is a <strong>hierarchical cluster-based vector index</strong>: vectors are clustered into a trained centroid tree, and a query probes only the clusters nearest to it. Three ideas make VTree its own thing:</p>
+
+  <div class="kgrid">
+    <div class="kcard"><div class="kt">Hierarchical clustering</div><div class="kd">A trained tree of centroids (root → interior → leaf) routes a vector to its cluster in log time, instead of scanning a flat centroid list.</div></div>
+    <div class="kcard"><div class="kt">LSM, shared static tree</div><div class="kd">Writes land in memory components and flush to immutable disk components. The <em>trained tree</em> lives once in a shared <code>.staticstructure</code>; every disk component embeds its own copy so it is self-contained.</div></div>
+    <div class="kcard"><div class="kt">Quantized &amp; cross-pollinated</div><div class="kd">Every vector is scalar-quantized (SQ8/SQ4) for compact storage, and replicated into up to <em>M</em> diverse nearby clusters so recall survives cluster boundaries.</div></div>
+  </div>
+
+  <h3>Two layers, one dependency inversion</h3>
+  <p class="wide">The code splits across the two roots of the tree. The <strong>Hyracks storage engine</strong> knows nothing about AsterixDB types; everything ADM-specific — how to read a vector, how to compute a distance, how to quantize — is injected through <code>~18</code> <code>IVTree*</code> interfaces and persisted on the resource so a restarted node can rebuild them.</p>
+
+  <div class="figure svgfig">
+    <div class="cap"><b>Fig 00.</b> Two-layer architecture &amp; the injected contracts</div>
+    <div class="body">
+      <svg viewBox="0 0 860 300" role="img" aria-label="AsterixDB layer supplies implementations; Hyracks storage layer defines interfaces">
+        <rect class="box" x="12" y="14" width="836" height="120" rx="8"/>
+        <text class="lbl" x="30" y="38">AsterixDB layer — asterix-algebra / -metadata / -runtime / -om / -common</text>
+        <rect class="box-a" x="28" y="54" width="258" height="30" rx="5"/><text class="lbl-b" x="157" y="73" text-anchor="middle">IntroduceTopKAccessMethodRule</text>
+        <rect class="box-a" x="300" y="54" width="258" height="30" rx="5"/><text class="lbl-b" x="429" y="73" text-anchor="middle">SecondaryVectorOperationsHelper</text>
+        <rect class="box-a" x="572" y="54" width="258" height="30" rx="5"/><text class="lbl-b" x="701" y="73" text-anchor="middle">VTreeResourceFactoryProvider</text>
+        <rect class="box-a" x="28" y="92" width="258" height="30" rx="5"/><text class="lbl-b" x="157" y="111" text-anchor="middle">VectorDistanceFunctionFactory</text>
+        <rect class="box-a" x="300" y="92" width="258" height="30" rx="5"/><text class="lbl-b" x="429" y="111" text-anchor="middle">OptimizedScalarQuantizerFactory</text>
+        <rect class="box-a" x="572" y="92" width="258" height="30" rx="5"/><text class="lbl-b" x="701" y="111" text-anchor="middle">AOrderedListVectorBinaryAccessor</text>
+
+        <path class="conn-a" d="M430 134 L430 166"/><text class="ptr-lbl" x="440" y="154">injected + JSON-persisted on the resource</text>
+        <polygon points="430,168 426,160 434,160" fill="var(--accent)"/>
+
+        <rect class="box" x="12" y="170" width="836" height="118" rx="8"/>
+        <text class="lbl" x="30" y="194">Hyracks storage engine — hyracks-storage-am-vtree / -lsm-vtree</text>
+        <rect class="box" x="30" y="208" width="150" height="30" rx="5"/><text class="lbl-s" x="42" y="227">VTree (single tree)</text>
+        <rect class="box" x="192" y="208" width="150" height="30" rx="5"/><text class="lbl-s" x="204" y="227">LSMVTree (harness)</text>
+        <rect class="box" x="354" y="208" width="150" height="30" rx="5"/><text class="lbl-s" x="366" y="227">4 page frames</text>
+        <rect class="box" x="516" y="208" width="150" height="30" rx="5"/><text class="lbl-s" x="528" y="227">TopK / merge cursors</text>
+        <rect class="box" x="678" y="208" width="148" height="30" rx="5"/><text class="lbl-s" x="690" y="227">VTreeNavigationUtils</text>
+        <text class="lbl-s" x="30" y="262">interfaces: IVTreeBinaryAccessor · IVTreeDistanceFunction · IVTreeQuantizer · IVTreeDataTupleCreator (+ factories)</text>
+        <text class="lbl-s" x="30" y="278">storage cannot import asterix types — dependency inversion is a hard module boundary, not a style choice</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="call key"><div class="ct">The one mental model to keep</div>
+  <p>A <strong>memory component navigates the shared trained tree but writes into its own buffer cache</strong>; a <strong>disk component is self-contained</strong> (its own embedded tree copy). That split — <code>staticBufferCache != null</code> inside <code>VTree</code> — explains most of the storage code you'll read: routing reads one place, payload pages live another.</p></div>
+</section>
+
+<!-- ================= 01 INDEX CREATION ================= -->
+<section class="chapter" id="create">
+  <div class="head"><span class="num">01</span><h2>Vector index creation</h2></div>
+  <span class="subsystem-band" style="background:var(--c-create-soft); color:var(--c-create)">creation pipeline · patch 3760 (+ storage 3754)</span>
+  <p class="wide" style="margin-top:16px"><code>CREATE INDEX … TYPE VTREE</code> compiles to <strong>three sequential Hyracks jobs</strong>, orchestrated by <code>QueryTranslator#doCreateIndexImpl</code> with a metadata transaction committed between each. The index enters the catalog <code>PENDING_ADD_OP</code> (invisible to queries) and is only re-added <code>PENDING_NO_OP</code> after Job 3 succeeds. All three job specs are built by <code>SecondaryVectorOperationsHelper</code>.</p>
+
+  <div class="call gotcha"><div class="ct">Precondition</div>
+  <p>The dataset must have a <strong>sample index</strong> from <code>ANALYZE DATASET</code> — Job 1 scans it; Job 2 needs its cardinality. Missing it fails with <em>“Vector Index requires ANALYZE statement prior to CREATE INDEX DDL.”</em></p></div>
+
+  <h3 id="create-plan">The three-job runtime plan</h3>
+  <p class="wide">Each job is an operator DAG. Read the edge labels — the tuple format changes shape at every hop, and those shapes are what the storage layer's sort keys and bulk-loader depend on.</p>
+
+  <div class="figure">
+    <div class="cap"><b>Fig 01.</b> Index-creation runtime plan — three jobs, per-edge tuple formats</div>
+    <div class="body">
+      <div class="flow-cols">
+        <!-- JOB 1 -->
+        <div class="flow-col">
+          <div class="job" style="background:var(--c-create)">Job 1 · quantization training</div>
+          <div class="flow">
+            <div class="node term"><div class="nt">sample-index scan</div></div>
+            <div class="edge"><div class="lbl">full ADM records</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">VectorComponentExtractor</div><div class="ns">flatten → 1 scalar/tuple</div></div>
+            <div class="edge"><div class="lbl">(ADouble) per component</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">QuantizationConstants<br>Aggregate — local</div><div class="ns">ships RAW values</div></div>
+            <div class="edge"><div class="lbl">[count:int][doubles…]</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">…Aggregate — global</div><div class="ns">CI quantiles → α</div></div>
+            <div class="edge"><div class="lbl">float[6]</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">QuantizedIndexCreate</div><div class="ns">writes resource JSON + empty LSM</div></div>
+          </div>
+        </div>
+        <!-- JOB 2 -->
+        <div class="flow-col">
+          <div class="job" style="background:var(--c-create)">Job 2 · static structure (training)</div>
+          <div class="flow">
+            <div class="node term"><div class="nt">sample scan<br><span style="font-weight:400">(full scan if card &lt; 10k)</span></div></div>
+            <div class="edge"><div class="lbl">full ADM records</div><div class="arr"></div></div>
+            <div class="node"><div class="nt">assign</div></div>
+            <div class="edge"><div class="lbl">[embedding, includes…, pk…]</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">HierarchicalKMeans<br>PlusPlusCentroids</div><div class="ns">k-means‖ + Lloyd's, bottom-up</div></div>
+            <div class="edge"><div class="lbl">(level, cid, parentCid, embedding)</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">VTreeStaticStructure<br>Creator</div><div class="ns">→ .staticstructure pages</div></div>
+          </div>
+        </div>
+        <!-- JOB 3 -->
+        <div class="flow-col">
+          <div class="job" style="background:var(--c-create)">Job 3 · route + sort + bulk load</div>
+          <div class="flow">
+            <div class="node term"><div class="nt">full primary scan</div></div>
+            <div class="edge"><div class="lbl">full ADM records</div><div class="arr"></div></div>
+            <div class="node"><div class="nt">assign</div></div>
+            <div class="edge"><div class="lbl">[embedding, includes…, pk…]</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">VTreeBulkLoaderAnd<br>Grouping</div><div class="ns">quantize · route · thin (×M)</div></div>
+            <div class="edge"><div class="lbl">[dist, cid, qDist, qEmbed, pk…]</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">external sort {1,0}</div><div class="ns">cid ASC, dist ASC (raw cmp)</div></div>
+            <div class="edge"><div class="lbl">contiguous cluster runs</div><div class="arr"></div></div>
+            <div class="node op"><div class="nt">VTreeBulkLoader</div><div class="ns">→ first disk component</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="wide"><strong>Cross-job handoffs.</strong> Job 1 persists a <code>float[6]</code> quantization constant block — <code>[minQ, maxQ, alpha, confidenceInterval, bits, sampleCount]</code> — onto the resource JSON (quantiles don't compose, so the local aggregate ships <em>raw</em> values, not partials). Job 2 emits its centroid hierarchy <strong>leaves-first, root-last</strong>, ids assigned BFS-from-root; the storage builder relies on exactly that order to place leaves at the lowest page ids and the root at the highest. Job 3 re-reads both and produces the first self-contained disk component.</p>
+
+  <div class="call gotcha"><div class="ct">Training internals worth knowing</div>
+  <p><strong>Quantization (OSQ):</strong> per dim, <code>q = round((clamp(x,minQ,maxQ) − minQ)·α)</code>, one byte each; <code>α = (2^bits−1)/(maxQ−minQ)</code>. SQ4 stores codes 0–15 <em>one per byte</em> (not nibble-packed). Decode is <code>q/α + minQ</code> — a real inverse, not a cast (a historical bug that broke dot-product ranking).</p>
+  <p><strong>k-means:</strong> k-means‖ seeding (5 rounds, ≈2k oversample) then Lloyd's (convergence 1e-4; L2-normalize centroids for cosine). RNG is <code>Random(trainSeed·31 + partition)</code>. Activity 1 materializes the training stream to a run file (via <code>PartitionedUUID</code>) because Activity 2 needs multiple passes.</p></div>
+
+  <div class="call bug"><div class="ct">Open · leaf-level drop</div>
+  <p>For <code>K ≥ 4</code> the K trained leaf centroids are re-keyed to level −1 and never emitted — the tree ends up with ~√K leaves and <code>num_clusters</code> is not honored. Prime suspect behind recall WARNs.</p></div>
+
+  <h3 id="create-ddl">The DDL surface</h3>
+  <div class="plan">
+    <div class="ph" style="background:var(--c-create)">SQL++</div>
+    <pre>ANALYZE DATASET Movie WITH {<span class="hl">"sample-seed"</span>: 1000};   <span class="cm">-- reproducible sample</span>
+
+CREATE INDEX ix_emb ON Movie(embedding <span class="hl">VECTOR</span>)
+    INCLUDE (year)                       <span class="cm">-- scalar cols searchable inside the index</span>
+    TYPE <span class="hl">VTREE</span>
+    WITH { <span class="hl">"dimension"</span>: 1024, <span class="hl">"similarity"</span>: "euclidean",
+           "quantization": "SQ8", "train_list_fraction": 0.1,
+           "epsilon": 0.25, "cross_pollination_m": 3, "rng_factor": 1.0 }
+    <span class="hl">EXCLUDE UNKNOWN KEY</span>;                    <span class="cm">-- both mandatory for VTREE</span></pre>
+  </div>
+
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>WITH parameter</th><th>default</th><th>meaning · range</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">dimension</td><td>—</td><td>required; fixed vector length, int literal, &gt; 0</td></tr>
+      <tr><td class="mono">similarity</td><td>—</td><td>required; <code>euclidean/l2</code>, <code>euclidean_squared/l2_squared</code>, <code>cosine</code>, <code>dot</code>. Baked into training + storage order + search; a query's metric must match or the index is silently skipped.</td></tr>
+      <tr><td class="mono">quantization</td><td>SQ8</td><td>SQ4 / SQ8 — no unquantized option exists</td></tr>
+      <tr><td class="mono">train_list_fraction</td><td>0.1</td><td>(0,1]; <code>card × fraction</code> clamped to [10k, 1M]. Under 10k → deterministic full scan</td></tr>
+      <tr><td class="mono">epsilon</td><td>0.25</td><td>[0,1]; cluster-candidate window <code>d ≤ closest + |closest|·ε</code> (a query-time recall knob set at creation)</td></tr>
+      <tr><td class="mono">cross_pollination_m</td><td>1</td><td>[1,1024]; replicate each vector into M diverse clusters (§05)</td></tr>
+      <tr><td class="mono">rng_factor</td><td>1.0</td><td>SPTAG relative-neighbourhood diversity factor for the M replicas</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="call bug"><div class="ct">Traps in the surface</div>
+  <p>The <code>similarity</code> whitelist now <strong>rejects unknown metrics at <code>CREATE INDEX</code></strong> — the 3771 review pass closed the <code>manhattan_distance</code> ghost-metric hole (formerly DDL-accepted yet implemented by nothing, so it passed <code>CREATE INDEX</code> then died in Job 2's k-means). <code>cosine</code> still requires <strong>pre-normalized embeddings</strong>: the engine never L2-normalizes record vectors. The creation-time <code>SET compiler.vector.*</code> knobs also aren't in the SET-allowlist, so a request that mixes them with a query fails — keep <code>SET</code> + <code>CREATE INDEX</code> in their own request.</p></div>
+
+  <h3 id="create-knobs">Creation-time compiler hints <span class="tag" style="background:var(--c-create-soft);color:var(--c-create)">SET</span></h3>
+  <p class="wide">Beyond the <code>WITH</code> clause, a family of <code>SET compiler.vector.*</code> session knobs tunes the <em>training</em> pass (Job 2). Set them in the same request, immediately before <code>CREATE INDEX</code>; an invalid value warns and falls back to its default rather than failing the statement.</p>
+  <div class="plan">
+    <div class="ph" style="background:var(--c-create)">SET before CREATE INDEX</div>
+    <pre>SET `compiler.vector.trainseed` "42";               <span class="cm">-- reproducible clustering</span>
+SET `compiler.vector.selecthead.headRatio` "0.15";  <span class="cm">-- top-down (SPANN) head fraction</span>
+CREATE INDEX ix_emb ON Movie(embedding VECTOR) TYPE VTREE WITH { … } EXCLUDE UNKNOWN KEY;</pre>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>SET compiler.vector.*</th><th>default</th><th>effect</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">trainseed</td><td>fresh nanoTime</td><td>seeds the training RNG for <strong>both</strong> modes (k-means and top-down SelectHead+BKT), with per-partition/phase offsets — the pipeline's one determinism lever</td></tr>
+      <tr><td class="mono">selecthead.enabled</td><td>true</td><td>top-down only: run SPANN SelectHead + BuildHead (a BKT routing tree). While true, <code>num_clusters</code> is ignored</td></tr>
+      <tr><td class="mono">selecthead.headRatio</td><td>0.12</td><td>fraction of the training sample chosen as heads, per partition</td></tr>
+      <tr><td class="mono">selecthead.headCount</td><td>unset</td><td>absolute head count; overrides <code>headRatio</code> when set</td></tr>
+      <tr><td class="mono">selecthead.selectType</td><td>bkt</td><td>head-selection strategy: <code>bkt</code> or <code>random</code></td></tr>
+      <tr><td class="mono">selecthead.bktLeafSize</td><td>unset</td><td>scratch-BKT leaf stop threshold; unset → page-derived capacity</td></tr>
+      <tr><td class="mono">topdown.lambdaFactor</td><td>-1 (auto)</td><td>BKT split balance factor; ≤ 0 → auto-tuned per partition</td></tr>
+      <tr><td class="mono">topdown.maxlevel</td><td>5</td><td>max BKT recursion depth</td></tr>
+      <tr><td class="mono">topdown.v · topdown.gamma</td><td>—</td><td><span style="color:var(--crit)">deprecated · never read (dead)</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="call gotcha"><div class="ct">The SET-allowlist quirk</div>
+  <p>None of these creation knobs is registered in the SET-allowlist — only the two <em>query</em> knobs (<code>compiler.vector.kmultiplier</code>, <code>compiler.vector.prunedsearch</code>) are. They work with <code>CREATE INDEX</code> because DDL bypasses <code>APIFramework#validateConfig</code>; a request that <em>also</em> compiles a query rejects them with <em>“unsupported query parameter.”</em> Keep <code>SET</code> + <code>CREATE INDEX</code> in a request of their own.</p></div>
+  <div class="call gotcha"><div class="ct">…and trainseed doesn't cover the sample</div>
+  <p><code>trainseed</code> seeds the clustering RNG but not sample <em>selection</em> when Job 2 uses a sample scan (that seed is <code>System.currentTimeMillis()</code>). A fully reproducible build needs the full-scan training regime (a small dataset, or the &lt; 10k clamp) + <code>trainseed</code> + a seeded <code>ANALYZE</code>.</p></div>
+</section>
+
+<!-- ================= 02 ANN QUERY ================= -->
+<section class="chapter" id="query">
+  <div class="head"><span class="num">02</span><h2>The ANN query path</h2></div>
+  <span class="subsystem-band" style="background:var(--c-query-soft); color:var(--c-query)">optimizer + cursors · patch 3771</span>
+  <p class="wide" style="margin-top:16px">The query is an ordinary <code>ORDER BY … LIMIT k</code>; the optimizer recognizes it and swaps a full scan for an index probe. The governing design thesis: <strong>the index proposes, the plan disposes</strong> — the original <code>ORDER BY ann_distance</code> and <code>LIMIT</code> survive, so final ordering is always exact over the returned candidates. Approximation affects <em>recall</em>, never <em>ranking correctness</em>.</p>
+
+  <div class="plan">
+    <div class="ph" style="background:var(--c-query)">the query</div>
+    <pre>SELECT VALUE m.idx FROM Movie m
+ORDER BY <span class="hl">ann_distance</span>(m.embedding, [0.1, 0.2, 0.9, 0.8], "euclidean")
+LIMIT 10;</pre>
+  </div>
+
+  <h3 id="query-rule">The rule — <code>IntroduceTopKAccessMethodRule</code></h3>
+  <p class="wide">It fires only at a plan root and recurses, pushing every ancestor onto <code>aboveLimitOps</code> so that when a <code>LIMIT</code> matches it holds the whole root→LIMIT chain — that chain is what lets it prove the projection is PK-only. Eight steps: init the subtree (ORDER's child down to <code>DATASOURCESCAN</code>), extract filter fields, analyze the <code>ann_distance</code> args, match field vs. index, choose the index (first exact metric match wins — no cost model), then transform. The pivotal decision is <code>isProjectionPkOnly</code>: it traces every live-out variable above the LIMIT — if all resolve to PK columns, the query never needs the record, and the <strong>index-only</strong> shape applies; otherwise <strong>lookup-and-rerank</strong>.</p>
+
+  <h3 id="query-plans">The two optimized plans</h3>
+  <div class="plan">
+    <div class="ph" style="background:var(--c-query)">shape A · index-only — <code>SELECT m.idx</code> (PK-derivable projection)</div>
+    <pre><span class="cm">BEFORE (logical)                               AFTER (physical)</span>
+DISTRIBUTE_RESULT [$$26]                        DISTRIBUTE_RESULT [$$26]
+└ ASSIGN $$26 ← field($$m,"idx")               └ ASSIGN $$26 ← <span class="add">$$27</span>   <span class="cm">// PK var</span>
+  └ LIMIT 10                                     └ LIMIT 10
+    └ ORDER $$24                                   └ ORDER <span class="add">$$28</span>  <span class="cm">// = $$dist</span>
+      └ ASSIGN $$24 ← ann-distance(…)               └ ASSIGN $$24 ← <span class="rm">MISSING</span>  <span class="cm">// neutralized</span>
+        └ ASSIGN $$23 ← field($$m,"embedding")        └ ASSIGN $$23 ← <span class="rm">MISSING</span>
+          └ DATASOURCE_SCAN Movie                       └ <span class="hl">UNNEST_MAP [$$27,$$28] ← index-search</span>
+                                                            <span class="hl">("ix_emb", VTREE, indexOnly=true)</span>
+                                                          └ ASSIGN $$29…$$33 ← [qvec], k, metric, mpf, kmult</pre>
+  </div>
+  <p class="wide">The runtime emits <code>[pk, dqx]</code> already sorted by approximate distance; ORDER re-sorts (a per-partition no-op), LIMIT trims. <strong>No primary B-tree lookup, no rerank.</strong> The one semantic difference: distances are quantized approximations. (Full detail in §07.)</p>
+
+  <div class="plan">
+    <div class="ph" style="background:var(--c-query)">shape B · lookup-and-rerank — <code>SELECT m.idx, m.title WHERE m.year&gt;2000</code></div>
+    <pre>LIMIT 10
+└ ORDER <span class="hl">ann-distance(field($$m,"embedding"), […], "euclidean")</span>   <span class="cm">// EXACT rerank</span>
+  └ ASSIGN … projection …
+    └ UNNEST_MAP Movie [$$21,$$m] ← index-search(primary BTREE, key=$$21)   <span class="cm">// fetch record</span>
+      └ ORDER $$21                                                          <span class="cm">// sortPrimaryKeys</span>
+        └ <span class="hl">UNNEST_MAP [$$21] ← index-search("ix_emb", VTREE, indexOnly=false)</span>
+             selectCondition: <span class="add">gt($$34, 2000)</span>   <span class="cm">// filter pushed INTO the cursor</span></pre>
+  </div>
+  <p class="wide"><code>m.title</code> isn't PK-derivable, so the record is fetched: the vector unnest yields candidate PKs, a primary <code>UNNEST_MAP</code> fetches the rows, and the original <code>ORDER BY ann_distance</code> recomputes <strong>exact full-precision</strong> distances. The <code>WHERE year&gt;2000</code> is pushed <em>inside</em> the storage cursor by <code>PushFilterIntoVectorSearchRule</code> (physical index 5 = 4 secondary + 1 PK + INCLUDE position 0) so it filters before the top-K buffer fills — recall protection. When <code>cross_pollination_m &gt; 1</code>, a <code>DISTINCT</code> on the PK vars dedups replicas.</p>
+
+  <h3 id="query-cursor">The cursor stack</h3>
+  <div class="figure">
+    <div class="cap"><b>Fig 02.</b> From operator to sorted candidates — the blocked top-K cursor</div>
+    <div class="body">
+      <div class="flow flow-single">
+        <div class="node op"><div class="nt">VectorSearchOperatorNodePushable</div><div class="ns">one ANN search per input tuple · builds VTreeSearchPredicate · IAP keys</div></div>
+        <div class="edge"><div class="lbl">accessor.search(cursor, pred)</div><div class="arr"></div></div>
+        <div class="node op"><div class="nt">LSMVTreeTopKSearchCursor.open()</div><div class="ns">blocked design — all work in open()</div></div>
+        <div class="edge"><div class="lbl">one VTreeSearchCursor per component</div><div class="arr"></div></div>
+        <div class="node"><div class="nt">priority-queue merge · key ⟨distance, PK⟩</div><div class="ns">matter/antimatter adjacent → cancel · newest component wins</div></div>
+        <div class="edge"><div class="lbl">surviving matter tuple</div><div class="arr"></div></div>
+        <div class="node"><div class="nt">dqx = d(q̃, dequantize(field 3)) · tuple filter</div><div class="ns">dqx — not distance-to-centroid — is the ranking key</div></div>
+        <div class="edge"><div class="lbl">insert if in top candidateLimit = K·kmult</div><div class="arr"></div></div>
+        <div class="node op"><div class="nt">SpillableTopKBuffer</div><div class="ns">4-frame max-heap · spill worst-half to run files</div></div>
+        <div class="edge"><div class="lbl">drain ascending dqx</div><div class="arr"></div></div>
+        <div class="node term"><div class="nt">hasNext() / next() → [pk…] (+ dqx if index-only)</div></div>
+      </div>
+    </div>
+  </div>
+  <p class="wide">Cluster advancement is governed by <code>NprobeClusterSelectionStrategy</code>: <code>nprobe = max(1, floor(window × min_probe_fraction))</code> over the epsilon-filtered candidate list, then an iterative DFS as an overflow valve. Search stops when <code>minClustersProbed ≥ nprobe AND resultsCollected ≥ candidateLimit</code>. The merge-only <code>LSMVTreeSearchCursor</code> is reachable in exactly two ways — inside <code>doMerge</code>, and in test fixtures that don't set the top-K flag.</p>
+
+  <div class="call inv"><div class="ct">Invariant · adjacency reconciliation</div>
+  <p>Because insert and delete route the same vector through the <em>same</em> immutable static structure with the <em>same</em> injected distance function, a delete's antimatter twin gets a <strong>bit-identical <code>⟨distance, PK⟩</code> key</strong>. In the priority-queue merge the two become adjacent (antimatter first) and cancel. Sorted data pages + sorted directories are the precondition that keeps each per-component stream key-ordered.</p></div>
+
+  <h3 id="query-spill">The spillable top-K buffer <span class="tag" style="background:var(--c-query-soft);color:var(--c-query)">SpillableTopKBuffer</span></h3>
+  <p class="wide">The reconciled, filtered candidate stream feeds a bounded <strong>spillable top-K buffer</strong> — a max-heap of at most <code>candidateLimit = K × max(1, kMultiplier)</code> best-so-far candidates, keyed on the approximate query distance <code>dqx</code>, over a 4-frame memory budget (<code>DEFAULT_FRAMES_LIMIT</code>, ≈512 KiB) that spills its worst half to sorted run files when full. It is why an ANN scan over millions of candidates runs in fixed memory.</p>
+
+  <div class="figure svgfig">
+    <div class="cap"><b>Fig 02b.</b> SpillableTopKBuffer — bounded max-heap · spill-worst-half · k-way merge on drain</div>
+    <div class="body">
+      <svg viewBox="0 0 880 250" role="img" aria-label="Insert chooses early-reject, replaceMax or grow; the max-heap spills its worst half to sorted run files; drain merges them ascending by dqx capped at candidateLimit">
+        <text class="lbl-s" x="14" y="22">insert(t, dqx)</text>
+        <text class="lbl-s" x="230" y="22">buffer · ≤ 4 frames ≈ 512 KiB</text>
+        <text class="lbl-s" x="562" y="22">drain()</text>
+        <!-- insert -->
+        <rect class="box" x="14" y="92" width="150" height="52" rx="6"/>
+        <text class="lbl-s" x="30" y="114">incoming candidate</text>
+        <text class="ptr-lbl" x="30" y="132">⟨ tuple, dqx ⟩</text>
+        <text class="ptr-lbl" x="14" y="170">outcome: early-reject ·</text>
+        <text class="ptr-lbl" x="14" y="184">replaceMax · grow</text>
+        <path class="conn-a" d="M166 116 L206 90"/><polygon points="208,89 199,89 204,96" fill="var(--accent)"/>
+        <!-- heap + spill -->
+        <rect class="box-a" x="208" y="52" width="276" height="50" rx="6"/>
+        <text class="lbl-s" x="222" y="74">in-memory MaxHeap · best half</text>
+        <text class="ptr-lbl" x="222" y="90">pointers into the frame pool</text>
+        <rect class="box" x="228" y="150" width="236" height="20" rx="3"/><text class="ptr-lbl" x="238" y="164">run r0 · dqx-prefixed, sorted</text>
+        <rect class="box" x="228" y="174" width="236" height="20" rx="3"/><text class="ptr-lbl" x="238" y="188">run r1 · dqx-prefixed, sorted</text>
+        <path class="conn" d="M346 102 L346 148"/><polygon points="346,150 342,142 350,142" fill="var(--line-2)"/>
+        <text class="ptr-lbl" x="356" y="122">spillWorstHalf() when budget-full</text>
+        <text class="ptr-lbl" x="356" y="136">→ maxSpilledDqx = worst spilled</text>
+        <!-- drain -->
+        <rect class="box" x="530" y="48" width="336" height="46" rx="6"/>
+        <text class="ptr-lbl" x="544" y="68">no spills → zero-copy walk</text>
+        <text class="ptr-lbl" x="544" y="84">outputLimit = length</text>
+        <rect class="box-a" x="530" y="132" width="336" height="52" rx="6"/>
+        <text class="ptr-lbl" x="544" y="152">spilled → k-way merge · min-PQ on dqx</text>
+        <text class="ptr-lbl" x="544" y="170">outputLimit = candidateLimit (K·kMult cap)</text>
+        <path class="conn-a" d="M484 74 L528 71"/><polygon points="530,71 521,67 521,75" fill="var(--accent)"/>
+        <path class="conn-a" d="M464 178 L528 160"/><polygon points="530,159 521,158 524,166" fill="var(--accent)"/>
+        <text class="ptr-lbl" x="600" y="212">→ top-K candidates, ascending dqx  →  ORDER + LIMIT</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>insert(t, dqx)</th><th>when</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">early-reject</td><td>entries ≥ candidateLimit, heap non-empty, and <code>dqx &gt; max(inMemoryPeekMax, maxSpilledDqx)</code> — strict <code>&gt;</code>, so K-boundary ties are admitted. The floor must include <code>maxSpilledDqx</code>: spilled tuples are immutable, so a dqx worse than every in-memory entry can still beat a spilled one</td></tr>
+      <tr><td class="mono">replaceMax</td><td>heap at candidateLimit and <code>dqx ≤ inMemoryPeekMax</code> → evict the worst in-memory tuple, then insert</td></tr>
+      <tr><td class="mono">grow</td><td>otherwise (room, or dqx between in-memory-worst and spilled-worst) → plain insert; the heap <em>grows past candidateLimit</em> in this in-between case rather than evicting a better candidate</td></tr>
+      <tr><td class="mono">spill + retry</td><td>on any path, if the frame budget is exceeded → <code>spillWorstHalf()</code> then retry once</td></tr>
+    </tbody>
+  </table></div>
+
+  <p class="wide"><code>spillWorstHalf()</code> sorts the backing array ascending by <code>dqx</code>, keeps the best <code>n/2</code> in memory, and writes the worst half to a fresh run file as <strong>dqx-prefixed tuples</strong> — updating <code>maxSpilledDqx</code> and rebuilding the heap. Each spill is one sorted run.</p>
+
+  <div class="flabel">spill-run tuple</div>
+  <div class="bytes"><div class="bytes-row">
+    <div class="cell k"><div class="fn">dqx</div><div class="ft">8-byte double · merge key</div></div>
+    <div class="cell"><div class="fn">original fields…</div><div class="ft">[distance, cid, q…, pk…, include…]</div></div>
+  </div></div>
+
+  <p class="wide"><code>drain()</code> array-sorts the surviving heap ascending by <code>dqx</code>, then takes one of two paths: <strong>no spills</strong> → <code>inMemoryOnly</code>, a zero-copy walk (<code>outputLimit = length</code>); <strong>spilled</strong> → <code>withMerge</code>, a k-way merge over one in-memory source + one run-file source per spill, a min-PQ on each source's current <code>dqx</code>, with <code>outputLimit = candidateLimit</code> — this is where the <code>K × kMultiplier</code> cap is actually enforced when collection over-grew. The iterator's <code>getCurrentDqx()</code> is exactly what <code>getCurrentDistance()</code> surfaces to the index-only plan as <code>$$dist</code>.</p>
+
+  <div class="call gotcha"><div class="ct">Two things to keep straight</div>
+  <p>The ranking key is <strong><code>dqx</code></strong> — the approximate query distance <code>d(q̃, dequantize(field 3))</code>, both operands in quantize→dequantize space — <em>not</em> the stored field-0 distance-to-centroid. And the cap is enforced strictly only on the <em>merge</em> path: the no-spill fast path can leave slightly more than <code>candidateLimit</code> in memory (the “grow” case), which is harmless — the downstream ORDER + LIMIT trim exactly K.</p></div>
+
+  <h3 id="query-knobs">Query-time knobs <span class="tag" style="background:var(--c-query-soft);color:var(--c-query)">ann_distance args + SET</span></h3>
+  <p class="wide">The query's own recall/latency dials ride in <code>ann_distance</code>'s optional 4th and 5th arguments; two session <code>SET</code> flags can override or augment them.</p>
+  <div class="plan">
+    <div class="ph" style="background:var(--c-query)">the 5-argument form</div>
+    <pre>ann_distance( m.embedding,       <span class="cm">-- 1  vector field (must be the indexed field)</span>
+              [0.1, 0.2, …],     <span class="cm">-- 2  query vector (same dimension)</span>
+              "euclidean",       <span class="cm">-- 3  metric — must match index, else silent full scan</span>
+              0.15,              <span class="cm">-- 4  min_probe_fraction   (default 0.1)</span>
+              4 )                <span class="cm">-- 5  k_multiplier         (default 1)</span></pre>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>knob</th><th>where</th><th>default</th><th>effect</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">min_probe_fraction</td><td>arg 4</td><td>0.1</td><td>[0,1]; <code>nprobe = max(1, floor(epsilon-window × fraction))</code>. <code>0</code> → default; <code>1.0</code> → probe the whole epsilon window. Base is the epsilon-filtered candidate count, <em>not</em> the total leaf count</td></tr>
+      <tr><td class="mono">k_multiplier</td><td>arg 5</td><td>1</td><td>per-partition candidate budget = <code>K × k_multiplier</code>; size with ×M headroom under cross-pollination (§05)</td></tr>
+      <tr><td class="mono">compiler.vector.kmultiplier</td><td>SET</td><td>1</td><td>when <code>&gt; 1</code>, <strong>overrides</strong> the query's arg 5</td></tr>
+      <tr><td class="mono">compiler.vector.prunedsearch</td><td>SET</td><td>—</td><td>whitelisted but read by nothing — a no-op</td></tr>
+      <tr><td class="mono">epsilon</td><td>index WITH</td><td>0.3*</td><td>cluster-candidate window <code>d + |d|·ε</code>; fixed at CREATE INDEX, <em>not</em> query-settable  (*query-IAP default 0.3; DDL default 0.25)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="call gotcha"><div class="ct">Precedence &amp; dead flags</div>
+  <p><code>compiler.vector.kmultiplier</code> and <code>compiler.vector.prunedsearch</code> are the only two vector knobs in the SET-allowlist — the mirror image of the creation knobs. <code>kmultiplier &gt; 1</code> silently overrides arg 5; <code>prunedsearch</code> is accepted but wired to nothing. And if arg 3's metric doesn't match the index, the index is skipped entirely — the query full-scans with an exact <code>ann_distance</code> sort, so args 4/5 have no effect.</p></div>
+</section>
+
+<!-- ================= 03 DML ================= -->
+<section class="chapter" id="dml">
+  <div class="head"><span class="num">03</span><h2>DML &amp; the antimatter mechanism</h2></div>
+  <span class="subsystem-band" style="background:var(--c-dml-soft); color:var(--c-dml)">insert · delete · upsert</span>
+  <p class="wide" style="margin-top:16px">DML maintenance is spliced in by <code>IntroduceSecondaryIndexInsertDeleteRule</code> (the <code>case VTREE:</code> branches), which projects each record to <code>[vector, include…, pk…]</code> and threads it to an <code>IndexInsertDeleteUpsertOperator</code>. There is no vector-specific machinery at the algebra layer beyond field selection — the accessor, distance function and quantizer all come from the <em>persisted resource</em>, not the DML plan.</p>
+
+  <div class="figure">
+    <div class="cap"><b>Fig 03.</b> DML dataflow — compile-time splice → runtime split → single-tree write → three cancellation points</div>
+    <div class="body">
+      <div class="flow flow-single">
+        <div class="node op"><div class="nt">IntroduceSecondaryIndexInsertDeleteRule</div><div class="ns">projects [vector, include…, pk…] · upsert adds before-op projection</div></div>
+        <div class="edge"><div class="lbl">runtime split by DML kind</div><div class="arr"></div></div>
+        <div class="node"><div class="nt">INSERT/DELETE → LSMInsertDelete&nbsp;&nbsp;·&nbsp;&nbsp;UPSERT → LSMSecondaryUpsert</div><div class="ns">upsert decomposes: EXISTING &amp; different → forceDelete(prev) + forceInsert(new); byte-equal → no-op</div></div>
+        <div class="edge"><div class="lbl">lsmAccessor.modify</div><div class="arr"></div></div>
+        <div class="node op"><div class="nt">LSMVTree#modify → LSMVTreeOpContext</div><div class="ns">frame-polarity flip: INSERT → matter frame · DELETE → antimatter frame</div></div>
+        <div class="edge"><div class="lbl">the flip is the ONLY byte difference</div><div class="arr"></div></div>
+        <div class="node op"><div class="nt">VTree.insertVector / deleteVector</div><div class="ns">extract vector → findReplicaClusters → per replica: sorted insert / physical-delete-or-antimatter</div></div>
+        <div class="edge"><div class="lbl">where do deletes actually vanish?</div><div class="arr"></div></div>
+        <div class="node term"><div class="nt">QUERY (adjacency) · FLUSH (preserved verbatim) · MERGE/COMPACT (physical drop)</div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="wide"><strong>Insert</strong> builds a data tuple via <code>VTreeDataTupleCreator</code> — <code>[distance, centroid_id, quantized_distance, quantized_embedding, pk…, include…]</code> — and inserts it distance-sorted into the cluster's data-page chain (a right-boundary binary search keeps equal distances FIFO). <strong>Delete</strong> runs the same routing, then: if the matter twin is co-resident in the unflushed memory component it is physically removed in place; otherwise a byte-identical <strong>antimatter</strong> tuple is written (same distance, cid, PK — only bit 7 of null-flag byte 0 set) and sorted in like any insert. <strong>Upsert never reaches storage as an upsert</strong> — it's decomposed into delete+insert at the operator layer; the storage <code>upsert</code> path throws, kept as a tripwire.</p>
+
+  <div class="call inv"><div class="ct">Invariant · a delete must reconcile every replica</div>
+  <p>Because a cross-pollinated record was written into all <em>M</em> accepted clusters, <code>deleteVector</code> iterates the <strong>same</strong> <code>findReplicaClusters(vector)</code> set and reconciles in every one. Miss a replica and its surviving copy resurfaces in ANN results — which is why routing config-identity across insert / delete / bulk-load is load-bearing, not an optimization.</p></div>
+</section>
+
+<!-- ================= 04 STORAGE ================= -->
+<section class="chapter" id="storage">
+  <div class="head"><span class="num">04</span><h2>Storage-layer specification</h2></div>
+  <span class="subsystem-band" style="background:var(--c-storage-soft); color:var(--c-storage)">storage engine · patches 3754 a/b</span>
+
+  <h3 id="storage-anatomy">Index instance anatomy</h3>
+  <p class="wide">One index instance is one directory per partition, managed by <code>LSMVTreeFileManager</code>. Data components are named <code>&lt;seqStart&gt;_&lt;seqEnd&gt;_vct</code> (flush: start == end; merge: a span). There is exactly <strong>one shared <code>.staticstructure</code></strong> file and one <code>.metadata</code> resource JSON.</p>
+
+  <div class="plan">
+    <div class="ph" style="background:var(--c-storage)">on disk — after CREATE INDEX + two flushes + one merge</div>
+    <pre>storage/partition_0/…/ix_embedding/
+├─ <span class="hl">.metadata</span>          LSMVTreeLocalResource JSON (factories, metric, float[6], x-poll cfg)
+├─ <span class="hl">.staticstructure</span>  the ONE shared trained centroid tree
+├─ 0_0_vct           first data component (Job-3 bulk load)
+├─ 1_1_vct           flushed component
+└─ 0_1_vct           merged component covering sequences 0..1</pre>
+  </div>
+
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>component</th><th>class</th><th>pages live in</th><th>navigates</th></tr></thead>
+    <tbody>
+      <tr><td>memory (×2)</td><td class="mono">LSMVTreeMemoryComponent → VTree</td><td>virtual buffer cache</td><td>shared <code>.staticstructure</code></td></tr>
+      <tr><td>disk (data)</td><td class="mono">LSMVTreeDiskComponent → VTree</td><td>its own <code>_vct</code> file</td><td>its own embedded static copy</td></tr>
+      <tr><td>static structure</td><td class="mono">LSMVTreeDiskComponent (isStaticStructure)</td><td><code>.staticstructure</code></td><td>— (it <em>is</em> the tree)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="wide">The static component is held in a dedicated field, <strong>not</strong> in <code>diskComponents</code>; on registration <code>addBulkLoadedDiskComponent</code> dispatches on the <code>isStaticStructure</code> flag to <code>setStaticStructure()</code>, which re-wires every memory component. A memory component has <strong>no interior/leaf pages at all</strong> — that is the entire point of the shared tree: it pre-creates one empty directory page per leaf centroid in its buffer cache and records <code>centroidDirPageMap[cid − first] = vbcPageId</code>.</p>
+
+  <h3 id="storage-tiers">The three-tier structure</h3>
+  <p class="wide">Navigation resolves a query in three hops: the static structure finds the closest leaf centroid; the leaf tuple's <code>metadata_page_ptr</code> points at a chain of directory pages keyed by <code>max_distance</code>; a binary search there points at the data page whose distance range covers the record.</p>
+
+  <div class="figure svgfig">
+    <div class="cap"><b>Fig 04.</b> Three-tier resolution — interior level fans out to leaf clusters (c0–c9); one leaf tuple's <b>metaPtr</b> traced to its directory + data chains</div>
+    <div class="body">
+      <svg viewBox="0 0 900 468" role="img" aria-label="An interior page fans out to three leaf pages holding ten leaf tuples; one tuple's metaPtr is traced through a directory-page chain to a data-page chain">
+        <!-- ===== TIER 1a · INTERIOR LEVEL ===== -->
+        <text class="lbl-s" x="14" y="22">TIER 1 · STATIC STRUCTURE — interior level (level 1)</text>
+        <text class="ptr-lbl" x="560" y="22">deeper trees stack more interior levels; leaves are always level 0</text>
+        <rect class="box-a" x="318" y="36" width="264" height="46" rx="6"/>
+        <line x1="406" y1="36" x2="406" y2="82" class="conn"/><line x1="494" y1="36" x2="494" y2="82" class="conn"/>
+        <text class="lbl-b" x="362" y="64" text-anchor="middle">ci₀</text>
+        <text class="lbl-b" x="450" y="64" text-anchor="middle">ci₁</text>
+        <text class="lbl-b" x="538" y="64" text-anchor="middle">ci₂</text>
+        <text class="ptr-lbl" x="318" y="32" style="fill:var(--accent)">root interior page — [cid, centroid, child_page_ptr]</text>
+        <!-- child_page_ptr fan-out -->
+        <path class="conn" d="M362 82 L172 146"/><polygon points="170,148 166,139 175,141" fill="var(--line-2)"/>
+        <path class="conn" d="M450 82 L450 146"/><polygon points="450,148 446,140 454,140" fill="var(--line-2)"/>
+        <path class="conn" d="M538 82 L728 146"/><polygon points="730,148 725,141 734,139" fill="var(--line-2)"/>
+        <text class="ptr-lbl" x="456" y="116">child_page_ptr</text>
+
+        <!-- ===== TIER 1b · LEAF LEVEL ===== -->
+        <text class="lbl-s" x="14" y="138">TIER 1 · STATIC STRUCTURE — leaf level (level 0) · leaf tuple = [cid, centroid, qCentroid, neighbors, <tspan style="fill:var(--accent);font-weight:700">metaPtr</tspan>]</text>
+        <rect class="box" x="60" y="152" width="220" height="78" rx="6"/>
+        <text class="lbl-s" x="70" y="169">leaf page A · cluster c0–c2</text>
+        <rect class="box" x="68" y="178" width="66" height="44" rx="4"/><text class="lbl-s" x="101" y="204" text-anchor="middle">c0</text>
+        <rect class="box" x="138" y="178" width="66" height="44" rx="4"/><text class="lbl-s" x="171" y="204" text-anchor="middle">c1</text>
+        <rect class="box" x="208" y="178" width="66" height="44" rx="4"/><text class="lbl-s" x="241" y="204" text-anchor="middle">c2</text>
+        <rect class="box" x="340" y="152" width="220" height="78" rx="6"/>
+        <text class="lbl-s" x="350" y="169">leaf page B · cluster c3–c6</text>
+        <rect class="box" x="346" y="178" width="50" height="44" rx="4"/><text class="lbl-s" x="371" y="204" text-anchor="middle">c3</text>
+        <rect class="box-a" x="400" y="178" width="50" height="44" rx="4"/><text class="lbl-b" x="425" y="203" text-anchor="middle">c4</text>
+        <rect class="box" x="454" y="178" width="50" height="44" rx="4"/><text class="lbl-s" x="479" y="204" text-anchor="middle">c5</text>
+        <rect class="box" x="508" y="178" width="50" height="44" rx="4"/><text class="lbl-s" x="533" y="204" text-anchor="middle">c6</text>
+        <rect class="box" x="620" y="152" width="220" height="78" rx="6"/>
+        <text class="lbl-s" x="630" y="169">leaf page C · cluster c7–c9</text>
+        <rect class="box" x="628" y="178" width="66" height="44" rx="4"/><text class="lbl-s" x="661" y="204" text-anchor="middle">c7</text>
+        <rect class="box" x="698" y="178" width="66" height="44" rx="4"/><text class="lbl-s" x="731" y="204" text-anchor="middle">c8</text>
+        <rect class="box" x="768" y="178" width="66" height="44" rx="4"/><text class="lbl-s" x="801" y="204" text-anchor="middle">c9</text>
+        <!-- next_leaf sibling chain -->
+        <path class="conn" d="M280 202 L338 202" stroke-dasharray="4 4"/><polygon points="340,202 332,198 332,206" fill="var(--line-2)"/>
+        <path class="conn" d="M560 202 L618 202" stroke-dasharray="4 4"/><polygon points="620,202 612,198 612,206" fill="var(--line-2)"/>
+        <text class="ptr-lbl" x="286" y="194">next_leaf</text><text class="ptr-lbl" x="566" y="194">next_leaf</text>
+        <text class="ptr-lbl" x="614" y="244">↳ sibling chain makes the leaf level scannable</text>
+        <!-- traced metaPtr from c4 -->
+        <path class="conn-a" d="M424 222 L400 286"/><polygon points="399,290 396,281 405,283" fill="var(--accent)"/>
+        <text class="ptr-lbl" x="300" y="264" style="fill:var(--accent)">c4.metadata_page_ptr</text>
+
+        <!-- ===== TIER 2 · DIRECTORY ===== -->
+        <text class="lbl-s" x="14" y="286">TIER 2 · DIRECTORY PAGES  (VTreeMetadataFrame · max_distance ASC · chained)</text>
+        <rect class="box" x="360" y="294" width="74" height="42" rx="5"/><text class="lbl-s" x="397" y="312" text-anchor="middle">d0</text><text class="ptr-lbl" x="397" y="326" text-anchor="middle">≤ 2.5</text>
+        <rect class="box" x="442" y="294" width="74" height="42" rx="5"/><text class="lbl-s" x="479" y="312" text-anchor="middle">d1</text><text class="ptr-lbl" x="479" y="326" text-anchor="middle">≤ 5.0</text>
+        <rect class="box" x="524" y="294" width="74" height="42" rx="5"/><text class="lbl-s" x="561" y="312" text-anchor="middle">d2</text><text class="ptr-lbl" x="561" y="326" text-anchor="middle">≤ 10</text>
+        <path class="conn" d="M434 315 L442 315"/><path class="conn" d="M516 315 L524 315"/>
+        <text class="ptr-lbl" x="606" y="318">next_page → -1</text>
+        <text class="ptr-lbl" x="620" y="302">every other leaf tuple → its own directory chain</text>
+        <!-- data_page_ptr -->
+        <path class="conn-a" d="M380 336 L234 378"/><polygon points="232,380 235,371 240,378" fill="var(--accent)"/>
+        <text class="ptr-lbl" x="242" y="358" style="fill:var(--accent)">data_page_ptr — binary search; last entry = catch-all</text>
+
+        <!-- ===== TIER 3 · DATA ===== -->
+        <text class="lbl-s" x="14" y="378">TIER 3 · DATA PAGES  (VTreeDataFrame · distance ASC · antimatter-aware · chained)</text>
+        <rect class="box" x="150" y="386" width="132" height="46" rx="5"/><text class="lbl-s" x="164" y="406">p0 · dist 0–2.5</text><text class="ptr-lbl" x="164" y="422">[dist, cid, q…, pk…]</text>
+        <rect class="box" x="294" y="386" width="132" height="46" rx="5"/><text class="lbl-s" x="308" y="406">p1 · 2.5–5.0</text>
+        <rect class="box" x="438" y="386" width="132" height="46" rx="5"/><text class="lbl-s" x="452" y="406">p2 · 5.0–10</text>
+        <path class="conn" d="M282 409 L292 409"/><polygon points="294,409 286,405 286,413" fill="var(--line-2)"/>
+        <path class="conn" d="M426 409 L436 409"/><polygon points="438,409 430,405 430,413" fill="var(--line-2)"/>
+        <text class="ptr-lbl" x="582" y="412">next_page → -1</text>
+      </svg>
+    </div>
+  </div>
+  <p class="wide">A memory component takes a shortcut at tier 1→2: navigation still reads the shared tree, but the directory page id comes straight from <code>centroidDirPageMap[cid − first]</code> rather than a leaf tuple's <code>metaPtr</code> — <code>prepareClusterAccess</code> splits on component kind.</p>
+
+  <h3 id="storage-pages">Page formats</h3>
+  <p class="wide">Every page is NSM: a header at offset 0, tuples growing up, a 4-byte slot array growing down from the page end. All multi-byte numbers are big-endian. Hot fields — distance, centroid id, pointers — are written as <strong>raw untagged binary</strong>; only PK and INCLUDE columns are ADM-serialized (tag + value). That is why Job 3's external sort uses raw double/int comparators on keys <code>{1,0}</code>.</p>
+
+  <div class="flabel">DATA FRAME — quantized (production), <code>pkStartField = 4</code></div>
+  <div class="bytes"><div class="bytes-row">
+    <div class="cell k"><div class="fn">distance</div><div class="ft">f64 raw · key</div></div>
+    <div class="cell"><div class="fn">centroid_id</div><div class="ft">i32 raw</div></div>
+    <div class="cell"><div class="fn">quantized_distance</div><div class="ft">f64 in var field*</div></div>
+    <div class="cell"><div class="fn">quantized_embedding</div><div class="ft">[len][bytes]</div></div>
+    <div class="cell k"><div class="fn">pk…</div><div class="ft">ADM-tagged</div></div>
+    <div class="cell"><div class="fn">include…</div><div class="ft">ADM-tagged</div></div>
+  </div></div>
+
+  <div class="flabel">LEAF FRAME — quantized, 5 fields</div>
+  <div class="bytes"><div class="bytes-row">
+    <div class="cell"><div class="fn">cid</div><div class="ft">i32 raw</div></div>
+    <div class="cell"><div class="fn">centroid</div><div class="ft">[n][n×f64]</div></div>
+    <div class="cell"><div class="fn">quantized_centroid</div><div class="ft">[len][bytes]</div></div>
+    <div class="cell"><div class="fn">neighbor_list</div><div class="ft">k×8B entries</div></div>
+    <div class="cell k"><div class="fn">metadata_page_ptr</div><div class="ft">i32 raw · last</div></div>
+  </div></div>
+
+  <div class="flabel">INTERIOR FRAME (3 fields) · DIRECTORY FRAME (2 fields)</div>
+  <div class="bytes"><div class="bytes-row">
+    <div class="cell"><div class="fn">cid</div><div class="ft">i32</div></div>
+    <div class="cell"><div class="fn">centroid</div><div class="ft">[n][n×f64]</div></div>
+    <div class="cell k"><div class="fn">child_page_ptr</div><div class="ft">i32 · last</div></div>
+    <div class="cell" style="min-width:24px;background:var(--bg);border:none"></div>
+    <div class="cell k"><div class="fn">max_distance</div><div class="ft">f64 · sort key</div></div>
+    <div class="cell"><div class="fn">data_page_ptr</div><div class="ft">i32</div></div>
+  </div></div>
+
+  <p class="wide">The antimatter bit lives in the <strong>data</strong> frame: <code>LSMVTreeDataTupleWriter</code> sets bit 7 (0x80) of null-flag byte 0 after the base write, so a matter and antimatter tuple are byte-identical except that one bit. The <strong>leaf</strong> frame's <code>next_leaf</code> is dual-purpose — with the overflow flag it means intra-cluster overflow; without it, a sibling link that makes the leaf level a scannable chain.</p>
+
+  <div class="call gotcha"><div class="ct">The <code>level</code> byte is not tree depth</div>
+  <p>Leaf, directory and data pages are all level 0; <em>every</em> interior page (any height) is level 1; the index-metadata page is −1. So <code>isLeaf()</code> is only meaningful for static-structure pages reached by navigation — page <em>kind</em> is established by pointer provenance, not self-description. A stale doc comment even transposes the data-frame field order; the authoritative source is <code>VTreeDataTupleConstants</code>: <code>[distance, centroidId, qDist, qEmbed, pk…]</code>.</p></div>
+
+  <h3 id="storage-lifecycle">Flush &amp; merge lifecycle</h3>
+  <p class="wide">VTree is always a <em>secondary</em> index, so it never self-flushes — flushes are dataset-partition-wide, scheduled by the primary index's op tracker so component boundaries stay aligned across all indexes. Both flush and merge are page-level, bounded-memory operations that produce self-contained components.</p>
+
+  <div class="figure">
+    <div class="cap"><b>Fig 05.</b> FLUSH — identity copy + static-structure append (no tuple-level work)</div>
+    <div class="body"><div class="flow flow-single">
+      <div class="node term"><div class="nt">memory component full → FLUSH log record → scheduleFlush</div></div>
+      <div class="edge"><div class="lbl">IO thread · LSMVTree#doFlush</div><div class="arr"></div></div>
+      <div class="node op"><div class="nt">VTreeFlushLoader.copyPage — VBC page N → disk page N</div><div class="ns">identity mapping: every pointer &amp; centroidDirPageMap id stays valid · antimatter travels verbatim</div></div>
+      <div class="edge"><div class="lbl">append static copy</div><div class="arr"></div></div>
+      <div class="node op"><div class="nt">copyStaticStructure — offset child/nextLeaf by staticBase</div><div class="ns">leaf metaPtr ← centroidDirPageMap · root = staticBase + staticRoot</div></div>
+      <div class="edge"><div class="lbl">addDiskComponent (newest-first) · recycle memory component</div><div class="arr"></div></div>
+      <div class="node term"><div class="nt">self-contained disk component; memory component reset to empty</div></div>
+    </div></div>
+  </div>
+
+  <div class="figure">
+    <div class="cap"><b>Fig 06.</b> MERGE / COMPACT — search everything, bulk-load survivors</div>
+    <div class="body"><div class="flow flow-single">
+      <div class="node term"><div class="nt">COMPACT DATASET → scheduleFullMerge  (or merge policy)</div></div>
+      <div class="edge"><div class="lbl">returnDeletedTuples = !(merge includes oldest component)</div><div class="arr"></div></div>
+      <div class="node op"><div class="nt">LSMVTreeSearchCursor · fullScanMode · epsilon 0</div><div class="ns">every component walks its static copy in lock-step, cluster i = same centroid</div></div>
+      <div class="edge"><div class="lbl">PQ merge ⟨distance, PK⟩ · newest-first</div><div class="arr"></div></div>
+      <div class="node"><div class="nt">antimatter reconciled (drop pairs) or preserved</div><div class="ns">preserved antimatter kept via LSMVTreeCopyTupleWriter (bit survives the rewrite)</div></div>
+      <div class="edge"><div class="lbl">add() routes by centroidId field 1</div><div class="arr"></div></div>
+      <div class="node op"><div class="nt">VTreeBulkLoader → &lt;first&gt;_&lt;last&gt;_vct</div><div class="ns">append static copy · subsume merged components in place</div></div>
+    </div></div>
+  </div>
+
+  <div class="call inv"><div class="ct">Two invariants a merge review must check</div>
+  <p><strong>Antimatter drop rule:</strong> reconcile (physically drop deletes) only when the merge includes the <em>oldest</em> disk component — else a matter twin may live in a non-participating older component; enforced solely in <code>createMergeOperation</code>. <strong>Copy-writer:</strong> a partial merge with <code>returnDeletedTuples=true</code> must re-emit preserved antimatter <em>as antimatter</em> — the fix installs <code>LSMVTreeCopyTupleWriter</code> for MERGE so the source antimatter bit survives (regression <code>LSMVTreeMergeAntimatterTest</code>).</p></div>
+</section>
+
+<!-- ================= 05 CROSS-POLLINATION ================= -->
+<section class="chapter" id="xpoll">
+  <div class="head"><span class="num">05</span><h2>Cross-pollination</h2></div>
+  <span class="subsystem-band" style="background:var(--c-mech-soft); color:var(--c-mech)">special mechanism</span>
+  <p class="wide" style="margin-top:16px">Storing a vector only in its single closest cluster fails recall when the query's true neighbours straddle a cluster boundary, or when the closest cluster is thin. Cross-pollination <strong>replicates each record into up to M nearby, <em>diverse</em> clusters</strong>, so the record is found regardless of which of those clusters the query probes.</p>
+
+  <div class="figure svgfig">
+    <div class="cap"><b>Fig 07.</b> <code>findReplicaClusters</code> — epsilon window, then the SPTAG relative-neighbourhood veto</div>
+    <div class="body">
+      <svg viewBox="0 0 820 300" role="img" aria-label="A record is accepted into two diverse clusters and a third nearby cluster is vetoed for being too close to an accepted one">
+        <!-- record -->
+        <circle cx="410" cy="150" r="7" fill="var(--c-mech)"/><text class="lbl" x="398" y="135" style="fill:var(--c-mech)">x</text>
+        <!-- clusters -->
+        <circle cx="230" cy="90" r="40" class="box-a"/><text class="lbl" x="214" y="94">cA</text><text class="lbl-s" x="206" y="110">d=0.42 ✓</text>
+        <circle cx="590" cy="120" r="40" class="box-a"/><text class="lbl" x="574" y="124">cB</text><text class="lbl-s" x="566" y="140">d=0.57 ✓</text>
+        <circle cx="600" cy="220" r="34" class="box"/><text class="lbl" x="586" y="224">cC</text><text class="lbl-s" x="560" y="245" style="fill:var(--crit)">d=0.58 ✗ vetoed</text>
+        <!-- accept lines -->
+        <path class="conn-a" d="M403 145 L266 100" stroke-dasharray="0"/><text class="ptr-lbl" x="300" y="112">replica 1</text>
+        <path class="conn-a" d="M417 148 L552 126"/><text class="ptr-lbl" x="470" y="128">replica 2</text>
+        <!-- veto -->
+        <path class="conn" d="M416 155 L568 214" stroke-dasharray="4 4" stroke="var(--crit)"/>
+        <path class="conn" d="M584 148 L596 186" stroke-dasharray="4 4" stroke="var(--crit)"/>
+        <text class="ptr-lbl" x="612" y="180" style="fill:var(--crit)">cC too close to cB</text>
+        <!-- rule -->
+        <rect class="box" x="30" y="238" width="360" height="46" rx="6"/>
+        <text class="lbl-s" x="46" y="258">veto cᵢ when:  rng_factor · dist(cᵢ, r) &lt; dist(x, cᵢ)</text>
+        <text class="lbl-s" x="46" y="274">for some already-accepted replica r  →  keep ≤ M diverse clusters</text>
+      </svg>
+    </div>
+  </div>
+
+  <p class="wide">For <code>M &gt; 1</code>, <code>findCloseCentroidsLevelWiseGlobalSort</code> gathers epsilon-windowed candidates level by level, then <code>RngAcceptanceFilter.accept</code> applies the relative-neighbourhood rule above — vetoing a candidate that sits too close to an already-accepted replica relative to its distance from the record. The RNG comparison is deliberately <strong>full-precision even on quantized indexes</strong> (“diversity should reflect geometric truth”). <code>M = 1</code> collapses to a single greedy root-to-leaf descent — byte-identical to the legacy no-replication path.</p>
+
+  <div class="call inv"><div class="ct">Invariant · lock-step routing across three call sites</div>
+  <p>Bulk load, insert, and delete must compute the <strong>identical</strong> replica set for a given vector — same navigation, same RNG filter, same config. This is a <em>correctness</em> precondition: the original DML wrote/deleted only the closest cluster while bulk load replicated into M, so deletes leaked and cancelled nothing in the other M−1 replicas. Any future routing change must move all three sites together, and only between full rebuilds.</p></div>
+
+  <div class="call gotcha"><div class="ct">The k_multiplier headroom contract (deferred by design)</div>
+  <p>M replicas of a record inflate the candidate stream and each consumes a top-K slot before dedup. The query must request <code>k_multiplier</code> with worst-case ×M headroom, or results silently fall short of K. All replicas store <em>identical</em> quantized-embedding bytes → identical <code>dqx</code>, which is exactly what makes the ⟨distance, PK⟩ adjacency reconciliation and index-only <code>DISTINCT</code> dedup lossless. Anything that makes the stored embedding replica-dependent (e.g. per-cluster residual encoding) breaks both.</p></div>
+</section>
+
+<!-- ================= 06 INCLUDE FIELDS ================= -->
+<section class="chapter" id="include">
+  <div class="head"><span class="num">06</span><h2>INCLUDE fields</h2></div>
+  <span class="subsystem-band" style="background:var(--c-mech-soft); color:var(--c-mech)">special mechanism · storage + query</span>
+  <p class="wide" style="margin-top:16px"><code>INCLUDE(year, …)</code> lets a vector index carry a few extra <strong>scalar columns inside each entry</strong>, so a <code>WHERE</code> predicate on them can be evaluated <em>during</em> the ANN search — no primary-record fetch. It is what turns <code>SELECT … WHERE year &gt; 2000 ORDER BY ann_distance(…) LIMIT k</code> into a single index probe that still returns the K best <em>matching</em> rows. Declared between the key list and <code>TYPE VTREE</code> (VTREE-only), the field names/types land in <code>Index.VectorIndexDetails.getIncludeFieldNames()</code>.</p>
+
+  <div class="figure svgfig">
+    <div class="cap"><b>Fig 08.</b> Why the filter runs <em>inside</em> the cursor — recall protection</div>
+    <div class="body">
+      <svg viewBox="0 0 880 226" role="img" aria-label="Filtering inside the cursor before the top-K buffer yields K matching results; filtering after the top-K buffer yields fewer than K and loses recall">
+        <text class="lbl-s" x="14" y="22" style="fill:var(--good)">VTree — filter inside the cursor, before the top-K buffer</text>
+        <rect class="box" x="14" y="34" width="132" height="46" rx="6"/><text class="ptr-lbl" x="26" y="55">candidate</text><text class="ptr-lbl" x="26" y="69">stream</text>
+        <rect class="box" x="188" y="34" width="176" height="46" rx="6"/><text class="ptr-lbl" x="200" y="55">filter INCLUDE — passesTupleFilter</text><text class="ptr-lbl" x="200" y="69">(inside LSMVTreeTopKSearchCursor)</text>
+        <rect class="box" x="406" y="34" width="150" height="46" rx="6"/><text class="ptr-lbl" x="418" y="55">top-K buffer</text><text class="ptr-lbl" x="418" y="69">(K best matching)</text>
+        <rect class="box-a" x="598" y="34" width="150" height="46" rx="6" style="fill:var(--good-soft);stroke:var(--good)"/><text class="ptr-lbl" x="610" y="61" style="fill:var(--good)">K results ✓</text>
+        <path class="conn" d="M146 57 L186 57"/><polygon points="188,57 180,53 180,61" fill="var(--line-2)"/>
+        <path class="conn" d="M364 57 L404 57"/><polygon points="406,57 398,53 398,61" fill="var(--line-2)"/>
+        <path class="conn" d="M556 57 L596 57"/><polygon points="598,57 590,53 590,61" fill="var(--line-2)"/>
+
+        <text class="lbl-s" x="14" y="130" style="fill:var(--crit)">naïve — filter after the ORDER (post-filter)</text>
+        <rect class="box" x="14" y="142" width="132" height="46" rx="6"/><text class="ptr-lbl" x="26" y="163">candidate</text><text class="ptr-lbl" x="26" y="177">stream</text>
+        <rect class="box" x="188" y="142" width="176" height="46" rx="6"/><text class="ptr-lbl" x="200" y="163">top-K buffer</text><text class="ptr-lbl" x="200" y="177">(K best · any year)</text>
+        <rect class="box" x="406" y="142" width="150" height="46" rx="6"/><text class="ptr-lbl" x="418" y="163">post-filter</text><text class="ptr-lbl" x="418" y="177">year &gt; 2000</text>
+        <rect class="box" x="598" y="142" width="180" height="46" rx="6" style="fill:var(--crit-soft);stroke:var(--crit)"/><text class="ptr-lbl" x="610" y="163" style="fill:var(--crit)">fewer than K ✗</text><text class="ptr-lbl" x="610" y="177" style="fill:var(--crit)">silent recall loss</text>
+        <path class="conn" d="M146 165 L186 165"/><polygon points="188,165 180,161 180,169" fill="var(--line-2)"/>
+        <path class="conn" d="M364 165 L404 165"/><polygon points="406,165 398,161 398,169" fill="var(--line-2)"/>
+        <path class="conn" d="M556 165 L596 165" stroke="var(--crit)"/><polygon points="598,165 590,161 590,169" fill="var(--crit)"/>
+      </svg>
+    </div>
+  </div>
+
+  <h3 id="include-store">In the entry — stored at DML time</h3>
+  <p class="wide">INCLUDE fields sit in the data tuple <strong>after the PK</strong>, ADM-serialized (type tag + value), copied verbatim. At DML time the maintenance branch projects <code>[vector, include…, pk…]</code> (§03) and <code>VTreeDataTupleCreator</code> writes the INCLUDE bytes into the fields following the PK. They travel through insert, antimatter delete, flush and merge <strong>byte-for-byte</strong> — an antimatter twin is identical down to its INCLUDE bytes.</p>
+
+  <div class="flabel">DATA FRAME tail — quantized, one PK, INCLUDE = year</div>
+  <div class="bytes"><div class="bytes-row">
+    <div class="cell"><div class="fn">…0–3</div><div class="ft">dist, cid, qDist, qEmbed</div></div>
+    <div class="cell k"><div class="fn">field 4 · pk</div><div class="ft">ADM-tagged</div></div>
+    <div class="cell anti"><div class="fn">field 5 · year</div><div class="ft">INCLUDE · ADM-tagged</div></div>
+  </div></div>
+  <p class="wide">A given INCLUDE field's physical index is <code>numSecondaryKeys + numPrimaryKeys + positionInIncludeList</code> — for a quantized index, <code>4 + P + pos</code>. Above: <code>4 + 1 + 0 = 5</code>.</p>
+
+  <h3 id="include-query">Pushed into the search — at query time</h3>
+  <p class="wide"><code>PushFilterIntoVectorSearchRule</code> inlines a <code>WHERE</code> over INCLUDE fields into the vector unnest's <code>selectCondition</code>, allocating a fresh variable per referenced field and recording its physical index in <code>VECTOR_FILTER_VAR_MAPPING</code> (types in <code>VECTOR_FILTER_VAR_TYPES</code>). At runtime the predicate is compiled against the storage-tuple offsets through <code>VectorIndexFilterSchema</code>, and <code>passesTupleFilter</code> runs it inside <code>LSMVTreeTopKSearchCursor</code> — after antimatter reconciliation, <strong>before</strong> the top-K buffer insert.</p>
+
+  <div class="plan">
+    <div class="ph" style="background:var(--c-mech)">the pushed filter (worked example)</div>
+    <pre>UNNEST_MAP [$$21] ← index-search("ix_emb", VTREE, indexOnly=false)
+     <span class="hl">selectCondition: gt($$34, 2000)</span>
+     annotations:  VECTOR_FILTER_VAR_MAPPING { $$34 → <span class="hl">5</span> }   <span class="cm">// 4 secondary + 1 PK + INCLUDE pos 0</span>
+                   VECTOR_FILTER_VAR_TYPES   { $$34 → AInt64 }</pre>
+  </div>
+
+  <p class="wide">That placement is the whole point (see Fig 08): a filtered-out tuple never occupies a top-K slot nor counts toward <code>nprobe</code>, so the buffer collects the K best <em>year&nbsp;&gt;&nbsp;2000</em> candidates. A post-filter above the <code>ORDER</code> would instead silently shrink recall. It also drives <strong>index selection</strong>: <code>chooseVectorIndex</code> skips any index whose <code>getIncludeFieldNames()</code> doesn't contain every filter field — an index that can serve the ANN but not the filter is passed over. The 3771 review pass hardened the rewrite: it now <strong>bails</strong> (leaving the <code>SELECT</code> in place) if the rewritten predicate would reference any variable that isn't a freshly-created INCLUDE var — an unrecognized access pattern leaking the source record, or two nested INCLUDE fields colliding on a shared leaf name — rather than emit a plan whose unnest references an out-of-scope variable.</p>
+
+  <div class="call bug"><div class="ct">Open · index-only + WHERE on an INCLUDE field</div>
+  <p>When the projection is PK-only (the index-only shape, §07) <em>and</em> there's a <code>WHERE</code> on an INCLUDE field, the record variable is dead, so <code>neutralizeDanglingExpressions</code> collapses the predicate to <code>select (missing)</code> — every row is filtered out and the query returns <strong>zero rows, no error</strong>. Workaround: project a non-indexed field (e.g. <code>SELECT m.id, m.title</code>) to force the lookup-and-rerank shape, where the pushdown fires correctly.</p></div>
+</section>
+
+<!-- ================= 07 INDEX-ONLY ================= -->
+<section class="chapter" id="indexonly">
+  <div class="head"><span class="num">07</span><h2>Index-only ANN</h2></div>
+  <span class="subsystem-band" style="background:var(--c-mech-soft); color:var(--c-mech)">special mechanism</span>
+  <p class="wide" style="margin-top:16px">When every value a query projects above the <code>LIMIT</code> is PK-derivable (<code>isProjectionPkOnly</code>), the record itself is never needed — so the whole primary B-tree lookup <em>and</em> the exact rerank <code>ASSIGN</code> can be skipped. The cursor already computed a per-candidate distance during its top-K search; the plan just needs to surface it.</p>
+
+  <div class="figure svgfig">
+    <div class="cap"><b>Fig 09.</b> The <code>[pk…, D(q,x)]</code> emission — how the distance leaves the cursor</div>
+    <div class="body">
+      <svg viewBox="0 0 820 210" role="img" aria-label="The cursor tuple carries distance-to-centroid; the operator instead reads the query distance out of band and appends it as an ADOUBLE">
+        <rect class="box" x="20" y="30" width="300" height="70" rx="7"/>
+        <text class="lbl-s" x="34" y="50">cursor tuple (on disk):</text>
+        <text class="lbl-s" x="34" y="68" style="fill:var(--crit)">field 0 = distance-to-CENTROID</text>
+        <text class="lbl-s" x="34" y="86">…not the query distance!</text>
+        <path class="conn-a" d="M320 65 L400 65"/><polygon points="402,65 394,61 394,69" fill="var(--accent)"/>
+        <rect class="box-a" x="400" y="30" width="400" height="70" rx="7"/>
+        <text class="lbl-s" x="414" y="50">VectorSearchOperatorNodePushable:</text>
+        <text class="lbl-s" x="414" y="68">PKOnlyTupleProjector copies pk bytes verbatim,</text>
+        <text class="lbl-s" x="414" y="86">then appends IVectorSearchCursor.getCurrentDistance()</text>
+        <rect class="box" x="180" y="140" width="460" height="50" rx="7"/>
+        <text class="lbl-s" x="196" y="160">emitted wire tuple:  [ pk bytes… ][ 0x0C ADOUBLE tag ][ 8-byte IEEE-754 dqx ]</text>
+        <text class="lbl-s" x="196" y="178">getFieldCount = numPrimaryKeys + 1 · algebra declared $$dist as ADOUBLE to keep the wire in sync</text>
+        <path class="conn" d="M600 100 L520 140"/>
+      </svg>
+    </div>
+  </div>
+
+  <p class="wide"><code>getCurrentDistance()</code> is a thin delegate to the drain iterator's <code>dqx</code> — the approximate distance <code>d(q̃, dequantize(field 3))</code>, both operands in quantize→dequantize space. The optimizer appends <code>$$dist</code> (ADOUBLE) to the unnest output, rewrites the ORDER key to reference it, and neutralizes the now-dead record ASSIGNs to <code>MISSING</code>. Because the emitted stream is already sorted by <code>dqx</code>, the surviving ORDER is a per-partition no-op and LIMIT just trims. The single semantic cost: <strong>ordering is by quantized approximation</strong>; exact ordering needs the lookup-and-rerank shape.</p>
+
+  <div class="call bug"><div class="ct">Open · index-only + WHERE on an INCLUDE field</div>
+  <p>The index-only rewrite neutralizes the record-based predicate to <code>select (missing)</code>, which filters every row — a silently empty result. Workaround: project a non-indexed field to force the lookup-and-rerank shape. A <code>NaN</code> distance from a non-top-K (streaming) cursor is a hard <code>IOException</code> — the optimizer should never route index-only onto that cursor.</p></div>
+</section>
+
+<!-- ================= 07 MAP ================= -->
+<section class="chapter" id="map">
+  <div class="head"><span class="num">08</span><h2>The reviewer's map</h2></div>
+  <p class="wide">A compressed index of the load-bearing invariants and the open items you'll want in your head while reading a patch.</p>
+
+  <h3>Invariants that must not drift</h3>
+  <div class="kgrid">
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">inv</span><div class="kt">Smaller = more similar</div><div class="kd">Everywhere. <code>dot</code> is negated (MIPS) in the shared metric taxonomy (<code>VectorSimilarityMetric</code> — one source for the evaluator + index maps since the 3771 review); a new metric is added there once and must sort ascending = most-similar-first.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">inv</span><div class="kt">One routing function</div><div class="kd">Bulk-load, insert, delete share <code>findReplicaClusters</code> + <code>RngAcceptanceFilter</code>. Config-identity across all three is a correctness precondition.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">inv</span><div class="kt">Multiplicative epsilon</div><div class="kd"><code>d + |d|·ε</code>, both signs. Never reintroduce additive <code>d + ε</code> (a no-op window for negative dot).</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">inv</span><div class="kt">Root arithmetic parity</div><div class="kd">Flush &amp; bulk-load both record root = <code>staticBase + staticRoot</code>. Bare <code>staticBase</code> was the leaf-as-root bug.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">inv</span><div class="kt">Identity page mapping on flush</div><div class="kd">VBC page N → disk page N; reorder/skip corrupts every <code>centroidDirPageMap</code>-written pointer.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">inv</span><div class="kt">Replicas share the embedding</div><div class="kd">Identical field-3 bytes → identical <code>dqx</code>; the precondition for reconciliation + the k_multiplier budget.</div></div>
+  </div>
+
+  <h3>Known open / deferred items</h3>
+  <div class="kgrid">
+    <div class="kcard"><span class="kbadge" style="background:var(--crit-soft);color:var(--crit)">open</span><div class="kt">K≥4 leaf-level drop</div><div class="kd">Bottom-up training re-keys true leaves to −1 → ~√K leaves; <code>num_clusters</code> not honored.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--crit-soft);color:var(--crit)">open</span><div class="kt">Index-only + WHERE on INCLUDE</div><div class="kd">Predicate neutralized to <code>select (missing)</code> → silently empty. Workaround: force lookup-and-rerank.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--crit-soft);color:var(--crit)">open</span><div class="kt">dot_product() ORDER BY hazard</div><div class="kd">Raw <code>+dot</code> descriptor vs <code>−dot</code> index → a surviving ASC rerank inverts ranking.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--good-soft);color:var(--good)">fixed</span><div class="kt">manhattan_distance</div><div class="kd">3771 review pass removed it from the DDL whitelist → now rejected at <code>CREATE INDEX</code> (was a ghost metric that passed DDL then died in Job 2).</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--warn-soft);color:var(--warn)">deferred</span><div class="kt">Top-K replica budget</div><div class="kd">Replica inflation compensated by k_multiplier (size ×M). Dedup fix parked for a later 3754-p2 adoption.</div></div>
+    <div class="kcard"><span class="kbadge" style="background:var(--warn-soft);color:var(--warn)">low</span><div class="kt">Field-2 quantized_distance</div><div class="kd">Three write semantics, zero readers. Harmless today; a trap for future data-page pruning.</div></div>
+  </div>
+
+  <div class="footnote">
+    <p><strong>Sources.</strong> Synthesized from the project documentation set on the <code>vtree-development-migration</code> branch — <code>doc-vtree/</code> sections 10-user-guide, 20-creation-pipeline, 30-storage-engine, 40-query-path, and the 80-patches walkthroughs (3754a/b, 3760, 3771). Class, method, and field names are quoted from those docs; line numbers rot fastest and are omitted here. Where the docs flag a discrepancy (data-frame field order, default epsilon 0.25 vs 0.3, nprobe base), this page follows the authoritative constants class and notes the conflict inline.</p>
+    <p><strong>Updated for the 3771 review-fix pass (batches 1–5).</strong> Reflected here: <code>manhattan_distance</code> removed from DDL validation (was a ghost metric); metric aliases unified into one <code>VectorSimilarityMetric</code> taxonomy; the INCLUDE filter-pushdown now bails on any out-of-scope / colliding-leaf variable. Not surfaced above because they sit below this walkthrough's altitude: the vector search's delivered partitioning now takes the primary keys from the <em>front</em> of the unnest output (they lead, not trail), an <code>OFFSET</code> on the top-K <code>LIMIT</code> falls back to the exact plan, <code>rng_factor</code>/<code>creation_mode</code> round-trip through index metadata, and <code>num_clusters</code> gained a DDL validator (the K≥4 leaf-drop honoring bug is still open, above).</p>
+    <p>A walkthrough for reviewers — read the code as the authority; read this to know where to look.</p>
+  </div>
+</section>
+</main>
+</div>
+</body></html>

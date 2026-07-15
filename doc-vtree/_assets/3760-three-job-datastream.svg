@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 450" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<style>
+.bp{fill:#EEEDFE;stroke:#534AB7}.bg{fill:#F1EFE8;stroke:#5F5E5A}.bt{fill:#E1F5EE;stroke:#0F6E56}
+.tp{fill:#3C3489;font-size:12px;font-weight:600}.sp{fill:#534AB7;font-size:11px}
+.tg{fill:#444441;font-size:12px;font-weight:600}.sg{fill:#5F5E5A;font-size:11px}
+.tt{fill:#085041;font-size:12px;font-weight:600}.st{fill:#0F6E56;font-size:11px}
+.lane{fill:#2C2C2A;font-size:13px;font-weight:600}
+.edge{fill:#5F5E5A;font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.note{fill:#5F5E5A;font-size:11px}
+</style>
+<rect width="700" height="450" fill="#FFFFFF"/>
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0L8,4L0,8z" fill="#888780"/></marker></defs>
+
+<rect x="10" y="10" width="13" height="13" rx="3" class="bp"/>
+<text x="29" y="21" class="note">new operator in patch 3760</text>
+<rect x="215" y="10" width="13" height="13" rx="3" class="bg"/>
+<text x="234" y="21" class="note">existing infrastructure</text>
+<rect x="400" y="10" width="13" height="13" rx="3" class="bt"/>
+<text x="419" y="21" class="note">storage-layer sink</text>
+
+<text x="12" y="64" class="lane">Job 1 — train quantization constants</text>
+<rect x="12" y="76" width="112" height="46" rx="4" class="bg"/><text x="68" y="95" class="tg" text-anchor="middle">Sample index</text><text x="68" y="111" class="sg" text-anchor="middle">scan</text>
+<rect x="148" y="76" width="112" height="46" rx="4" class="bp"/><text x="204" y="95" class="tp" text-anchor="middle">Vector component</text><text x="204" y="111" class="sp" text-anchor="middle">extractor</text>
+<rect x="284" y="76" width="112" height="46" rx="4" class="bp"/><text x="340" y="95" class="tp" text-anchor="middle">Quantization agg</text><text x="340" y="111" class="sp" text-anchor="middle">(local)</text>
+<rect x="420" y="76" width="112" height="46" rx="4" class="bp"/><text x="476" y="95" class="tp" text-anchor="middle">Quantization agg</text><text x="476" y="111" class="sp" text-anchor="middle">(global)</text>
+<rect x="556" y="76" width="112" height="46" rx="4" class="bt"/><text x="612" y="95" class="tt" text-anchor="middle">Quantized index</text><text x="612" y="111" class="st" text-anchor="middle">create</text>
+<line x1="124" y1="99" x2="146" y2="99" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="260" y1="99" x2="282" y2="99" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="396" y1="99" x2="418" y2="99" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="532" y1="99" x2="554" y2="99" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="136" y="138" class="edge" text-anchor="middle">[pk, record]</text>
+<text x="272" y="154" class="edge" text-anchor="middle">1 tuple / scalar</text>
+<text x="408" y="138" class="edge" text-anchor="middle">blob [n | doubles]</text>
+<text x="544" y="154" class="edge" text-anchor="middle">float[6] params</text>
+
+<path d="M612 122 V178 H476 V204" fill="none" stroke="#888780" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+<text x="544" y="172" class="note" text-anchor="middle">quantization params</text>
+
+<text x="12" y="198" class="lane">Job 2 — train clustering, build static tree</text>
+<rect x="12" y="210" width="112" height="46" rx="4" class="bg"/><text x="68" y="229" class="tg" text-anchor="middle">Sample scan</text><text x="68" y="245" class="sg" text-anchor="middle">(train fraction)</text>
+<rect x="148" y="210" width="112" height="46" rx="4" class="bg"/><text x="204" y="229" class="tg" text-anchor="middle">Assign</text><text x="204" y="245" class="sg" text-anchor="middle">(cast fields)</text>
+<rect x="284" y="210" width="112" height="46" rx="4" class="bp"/><text x="340" y="229" class="tp" text-anchor="middle">Hierarchical</text><text x="340" y="245" class="sp" text-anchor="middle">k-means++</text>
+<rect x="420" y="210" width="112" height="46" rx="4" class="bp"/><text x="476" y="229" class="tp" text-anchor="middle">Static structure</text><text x="476" y="245" class="sp" text-anchor="middle">creator</text>
+<rect x="556" y="210" width="112" height="46" rx="4" class="bt"/><text x="612" y="229" class="tt" text-anchor="middle">.staticstructure</text><text x="612" y="245" class="st" text-anchor="middle">pages</text>
+<line x1="124" y1="233" x2="146" y2="233" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="260" y1="233" x2="282" y2="233" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="396" y1="233" x2="418" y2="233" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="532" y1="233" x2="554" y2="233" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="136" y="272" class="edge" text-anchor="middle">[pk, record]</text>
+<text x="272" y="288" class="edge" text-anchor="middle">[emb, year, pk]</text>
+<text x="408" y="272" class="edge" text-anchor="middle">(lvl, cid, parent, emb)</text>
+<text x="544" y="288" class="edge" text-anchor="middle">leaves first, root last</text>
+
+<path d="M612 256 V316 H340 V338" fill="none" stroke="#888780" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+<text x="476" y="308" class="note" text-anchor="middle">navigate static tree</text>
+
+<text x="12" y="332" class="lane">Job 3 — route, sort, bulk load</text>
+<rect x="12" y="344" width="112" height="46" rx="4" class="bg"/><text x="68" y="363" class="tg" text-anchor="middle">Primary index</text><text x="68" y="379" class="sg" text-anchor="middle">scan (full)</text>
+<rect x="148" y="344" width="112" height="46" rx="4" class="bg"/><text x="204" y="363" class="tg" text-anchor="middle">Assign</text><text x="204" y="379" class="sg" text-anchor="middle">(cast fields)</text>
+<rect x="284" y="344" width="112" height="46" rx="4" class="bp"/><text x="340" y="363" class="tp" text-anchor="middle">Bulk loader &amp;</text><text x="340" y="379" class="sp" text-anchor="middle">grouping</text>
+<rect x="420" y="344" width="112" height="46" rx="4" class="bg"/><text x="476" y="363" class="tg" text-anchor="middle">External sort</text><text x="476" y="379" class="sg" text-anchor="middle">keys {1, 0}</text>
+<rect x="556" y="344" width="112" height="46" rx="4" class="bt"/><text x="612" y="363" class="tt" text-anchor="middle">LSM bulk load</text><text x="612" y="379" class="st" text-anchor="middle">VTreeBulkLoader</text>
+<line x1="124" y1="367" x2="146" y2="367" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="260" y1="367" x2="282" y2="367" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="396" y1="367" x2="418" y2="367" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="532" y1="367" x2="554" y2="367" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="136" y="406" class="edge" text-anchor="middle">[pk, record]</text>
+<text x="272" y="422" class="edge" text-anchor="middle">[emb, year, pk]</text>
+<text x="408" y="406" class="edge" text-anchor="middle">[d, cid, qd, qv, pk, yr]</text>
+<text x="544" y="422" class="edge" text-anchor="middle">sorted by (cid, d)</text>
+</svg>
