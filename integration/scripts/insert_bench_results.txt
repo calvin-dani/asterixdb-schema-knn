@@ -1,0 +1,41 @@
+============================================================
+STEP 5: Benchmark INSERT latency
+============================================================
+  Source    : EXPERIMENT.Movie_Insert_Bench
+  Target    : EXPERIMENT.Movie_Insert_Target
+  Total     : 10000 records
+  Batch size: 1000
+  Batches   : 10
+  Offset    : 300000
+
+  Batch   1/10: offset=300000, count=1000, latency=178.729s
+  Batch   2/10: offset=301000, count=1000, latency=178.728s
+  Batch   3/10: offset=302000, count=1000, latency=179.206s
+  Batch   4/10: offset=303000, count=1000, latency=179.178s
+  Batch   5/10: offset=304000, count=1000, latency=179.822s
+  Batch   6/10: offset=305000, count=1000, latency=180.412s
+  Batch   7/10: offset=306000, count=1000, latency=181.955s
+  Batch   8/10: offset=307000, count=1000, latency=181.788s
+  Batch   9/10: offset=308000, count=1000, latency=182.161s
+  Batch  10/10: offset=309000, count=1000, latency=182.104s
+
+  Target count after inserts: 1030999
+
+============================================================
+INSERT LATENCY SUMMARY
+============================================================
+  Batches completed : 10
+  Batch size        : 1000 records
+  Total records     : 10000
+  Total time        : 1804.08s
+  Throughput        : 5.5 records/s
+
+  Per-batch latency (seconds):
+    min  : 178.728
+    p50  : 180.117
+    p95  : 182.135
+    p99  : 182.156
+    max  : 182.161
+    mean : 180.408
+    stdev: 1.460
+============================================================
