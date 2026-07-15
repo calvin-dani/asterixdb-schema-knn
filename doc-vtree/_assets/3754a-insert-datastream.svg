@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 330" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<style>
+.bp{fill:#EEEDFE;stroke:#534AB7}.bg{fill:#F1EFE8;stroke:#5F5E5A}.bt{fill:#E1F5EE;stroke:#0F6E56}
+.tp{fill:#3C3489;font-size:12px;font-weight:600}.sp{fill:#534AB7;font-size:11px}
+.tg{fill:#444441;font-size:12px;font-weight:600}.sg{fill:#5F5E5A;font-size:11px}
+.tt{fill:#085041;font-size:12px;font-weight:600}.st{fill:#0F6E56;font-size:11px}
+.lane{fill:#2C2C2A;font-size:13px;font-weight:600}
+.edge{fill:#5F5E5A;font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.note{fill:#5F5E5A;font-size:11px}
+</style>
+<rect width="700" height="330" fill="#FFFFFF"/>
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0L8,4L0,8z" fill="#888780"/></marker></defs>
+
+<text x="12" y="26" class="lane">Write path — one insert (delete retraces the same route)</text>
+<rect x="12" y="38" width="112" height="46" rx="4" class="bg"/><text x="68" y="57" class="tg" text-anchor="middle">Insert tuple</text><text x="68" y="73" class="sg" text-anchor="middle">[vector, pk]</text>
+<rect x="148" y="38" width="112" height="46" rx="4" class="bp"/><text x="204" y="57" class="tp" text-anchor="middle">Binary accessor</text><text x="204" y="73" class="sp" text-anchor="middle">bytes to double[]</text>
+<rect x="284" y="38" width="112" height="46" rx="4" class="bp"/><text x="340" y="57" class="tp" text-anchor="middle">Level-wise route</text><text x="340" y="73" class="sp" text-anchor="middle">epsilon window</text>
+<rect x="420" y="38" width="112" height="46" rx="4" class="bp"/><text x="476" y="57" class="tp" text-anchor="middle">RNG filter</text><text x="476" y="73" class="sp" text-anchor="middle">accept up to M</text>
+<rect x="556" y="38" width="112" height="46" rx="4" class="bt"/><text x="612" y="57" class="tt" text-anchor="middle">Data page write</text><text x="612" y="73" class="st" text-anchor="middle">insertSorted</text>
+<line x1="124" y1="61" x2="146" y2="61" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="260" y1="61" x2="282" y2="61" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="396" y1="61" x2="418" y2="61" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="532" y1="61" x2="554" y2="61" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="136" y="100" class="edge" text-anchor="middle">field 0 bytes</text>
+<text x="272" y="116" class="edge" text-anchor="middle">double[dim]</text>
+<text x="408" y="100" class="edge" text-anchor="middle">candidates asc dist</text>
+<text x="544" y="116" class="edge" text-anchor="middle">[d,cid,qd,qv,pk] x M</text>
+
+<text x="12" y="158" class="lane">Page hierarchy inside one component</text>
+<rect x="12" y="170" width="112" height="46" rx="4" class="bp"/><text x="68" y="189" class="tp" text-anchor="middle">Root interior</text><text x="68" y="205" class="sp" text-anchor="middle">highest page id</text>
+<rect x="148" y="170" width="112" height="46" rx="4" class="bp"/><text x="204" y="189" class="tp" text-anchor="middle">Interior pages</text><text x="204" y="205" class="sp" text-anchor="middle">[cid, ctr, child]</text>
+<rect x="284" y="170" width="112" height="46" rx="4" class="bp"/><text x="340" y="189" class="tp" text-anchor="middle">Leaf pages</text><text x="340" y="205" class="sp" text-anchor="middle">[cid, ctr, qv, meta]</text>
+<rect x="420" y="170" width="112" height="46" rx="4" class="bt"/><text x="476" y="189" class="tt" text-anchor="middle">Directory pages</text><text x="476" y="205" class="st" text-anchor="middle">[maxDist, dataPg]</text>
+<rect x="556" y="170" width="112" height="46" rx="4" class="bt"/><text x="612" y="189" class="tt" text-anchor="middle">Data page chain</text><text x="612" y="205" class="st" text-anchor="middle">sorted by distance</text>
+<line x1="124" y1="193" x2="146" y2="193" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="260" y1="193" x2="282" y2="193" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="396" y1="193" x2="418" y2="193" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="532" y1="193" x2="554" y2="193" stroke="#888780" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="136" y="232" class="edge" text-anchor="middle">child ptr</text>
+<text x="272" y="248" class="edge" text-anchor="middle">child ptr</text>
+<text x="408" y="232" class="edge" text-anchor="middle">metaPtr</text>
+<text x="544" y="248" class="edge" text-anchor="middle">dataPagePtr</text>
+
+<text x="12" y="286" class="note">Static structure (purple) is built bottom-up: leaves at low page ids, root highest. Leaf metaPtr = -1 sentinel until the bulk loader patches it.</text>
+<text x="12" y="304" class="note">Directory and data pages (teal) chain via next_page; each written data page adds a [maxDist, pageId] directory entry.</text>
+</svg>
