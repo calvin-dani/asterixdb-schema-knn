@@ -129,6 +129,10 @@ public class LSMColumnBTree extends LSMBTree {
         return columnMetadata.getNumberOfColumns();
     }
 
+    public IColumnMetadata getPublicColumnMetadata() {
+        return columnMetadata;
+    }
+
     @Override
     protected LSMBTreeRangeSearchCursor createCursor(AbstractLSMIndexOperationContext opCtx,
             boolean returnDeletedTuples, IIndexCursorStats stats) {

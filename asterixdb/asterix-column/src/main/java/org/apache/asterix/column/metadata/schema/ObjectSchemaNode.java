@@ -50,6 +50,10 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
     private final List<AbstractSchemaNode> children;
     private IntUnaryOperator nextIndex;
 
+    public int getNumberOfChildren() {
+        return children.size();
+    }
+
     public ObjectSchemaNode() {
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
         children = new ArrayList<>();
@@ -121,6 +125,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         return children.size() == 1 && fieldNameIndexToChildIndexMap.containsKey(DUMMY_FIELD_NAME_INDEX);
     }
 
+    @Override
     public AbstractSchemaNode getChild(int fieldNameIndex) {
         if (fieldNameIndexToChildIndexMap.containsKey(fieldNameIndex)) {
             return children.get(fieldNameIndexToChildIndexMap.get(fieldNameIndex));
@@ -153,6 +158,15 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
     @Override
     public boolean isCollection() {
         return false;
+    }
+
+    @Override
+    public IValueReference getFieldName() {
+        return null;
+    }
+
+    @Override
+    public void setFieldName(IValueReference newFieldName) {
     }
 
     @Override
@@ -221,5 +235,9 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         fieldNameIndexToChildIndexMap.remove(DUMMY_FIELD_NAME_INDEX);
         fieldNameIndexToChildIndexMap.put(fieldNameIndex, 0);
         return 0;
+    }
+
+    public <R, T> R accept(IObjectSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return visitor.visit(this, arg);
     }
 }

@@ -30,22 +30,22 @@ extending JSON with object database ideas
 An expressive and declarative query language ([SQL++](http://asterixdb.apache.org/docs/0.9.9/sqlpp/manual.html) that supports a broad range of queries and analysis over semistructured data
 
 - __Scalability__<br/>
-A parallel runtime query execution engine, Apache Hyracks, that has been scale-tested on up to 1000+ cores and 500+ disks
+  A parallel runtime query execution engine, Apache Hyracks, that has been scale-tested on up to 1000+ cores and 500+ disks
 
 - __Native storage__<br/>
 Partitioned, flexible LSM-based row and column storage, with indexing to support efficient ingestion and management of semistructured data
 
 - __External storage__<br/>
-Support for query access to externally stored data (e.g., data in HDFS) as well as to data stored natively by AsterixDB
+  Support for query access to externally stored data (e.g., data in HDFS) as well as to data stored natively by AsterixDB
 
 - __Data types__<br/>
-A rich set of primitive data types, including spatial and temporal data in addition to integer, floating point, and textual data
+  A rich set of primitive data types, including spatial and temporal data in addition to integer, floating point, and textual data
 
 - __Indexing__<br/>
-Secondary indexing options that include B+ trees, R trees, and inverted keyword (exact and fuzzy) index types
+  Secondary indexing options that include B+ trees, R trees, and inverted keyword (exact and fuzzy) index types
 
 - __Transactions__<br/>
-Basic transactional (concurrency and recovery) capabilities akin to those of a NoSQL store
+  Basic transactional (concurrency and recovery) capabilities akin to those of a NoSQL store
 
 Learn more about AsterixDB at its [website](http://asterixdb.apache.org).
 
@@ -100,9 +100,8 @@ are used in the documentation that are generated directly from the grammar.
 ## Community support
 
 - __Users__</br>
-maling list: [users@asterixdb.apache.org](mailto:users@asterixdb.apache.org)</br>
-Join the list by sending an email to [users-subscribe@asterixdb.apache.org](mailto:users-subscribe@asterixdb.apache.org)</br>
+  maling list: [users@asterixdb.apache.org](mailto:users@asterixdb.apache.org)</br>
+  Join the list by sending an email to [users-subscribe@asterixdb.apache.org](mailto:users-subscribe@asterixdb.apache.org)</br>
 - __Developers and contributors__</br>
-mailing list:[dev@asterixdb.apache.org](mailto:dev@asterixdb.apache.org)</br>
-Join the list by sending an email to [dev-subscribe@asterixdb.apache.org](mailto:dev-subscribe@asterixdb.apache.org)
-
+  mailing list:[dev@asterixdb.apache.org](mailto:dev@asterixdb.apache.org)</br>
+  Join the list by sending an email to [dev-subscribe@asterixdb.apache.org](mailto:dev-subscribe@asterixdb.apache.org)

@@ -44,6 +44,8 @@ public class FunctionMapUtil {
     private final static String ALT_CORE_AGGREGATE_PREFIX = "coll_";
     private final static String CORE_SQL_AGGREGATE_PREFIX = "array_";
     private final static String INTERNAL_SQL_AGGREGATE_PREFIX = "sql-";
+    // This is an aggregate specific prefix for SQL++ schema function for better user experience.
+    private final static String CORE_SQL_SCHEMA_AGGREGATE_PREFIX = "query_";
 
     /**
      * SQL-92 aggregate functions for which {@link #CORE_AGGREGATE_PREFIX} should be used instead of
@@ -164,7 +166,7 @@ public class FunctionMapUtil {
             return name.substring(CORE_AGGREGATE_PREFIX.length());
         } else if (name.startsWith(ALT_CORE_AGGREGATE_PREFIX)) {
             return name.substring(ALT_CORE_AGGREGATE_PREFIX.length());
-        } else if (name.startsWith(CORE_SQL_AGGREGATE_PREFIX)) {
+        } else if (name.startsWith(CORE_SQL_AGGREGATE_PREFIX) || name.startsWith(CORE_SQL_SCHEMA_AGGREGATE_PREFIX)) {
             return INTERNAL_SQL_AGGREGATE_PREFIX + name.substring(CORE_SQL_AGGREGATE_PREFIX.length());
         } else {
             return null;
