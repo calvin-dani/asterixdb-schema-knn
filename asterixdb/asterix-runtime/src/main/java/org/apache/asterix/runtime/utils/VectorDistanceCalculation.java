@@ -135,6 +135,34 @@ public class VectorDistanceCalculation {
         return Math.sqrt(sum);
     }
 
+    /**
+     * Divides {@code v} by its L2 norm in place. Returns false (and leaves {@code v} unchanged) when the
+     * vector is null, empty, zero-length, or contains a non-finite component — there is no unit vector to
+     * return in those cases.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "NORMALIZE_VECTOR L2 helper")
+    public static boolean normalizeInPlace(double[] v) {
+        if (v == null || v.length == 0) {
+            return false;
+        }
+        double sum = 0.0;
+        for (int i = 0; i < v.length; i++) {
+            double x = v[i];
+            if (!Double.isFinite(x)) {
+                return false;
+            }
+            sum += x * x;
+        }
+        if (sum == 0.0 || !Double.isFinite(sum)) {
+            return false;
+        }
+        double inv = 1.0 / Math.sqrt(sum);
+        for (int i = 0; i < v.length; i++) {
+            v[i] *= inv;
+        }
+        return true;
+    }
+
     public static double euclideanSquared(double[] a, double[] b) {
         double sum = 0.0;
         for (int i = 0; i < a.length; i++) {

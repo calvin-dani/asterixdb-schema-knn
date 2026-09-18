@@ -258,6 +258,7 @@ public @interface AiProvenance {
         // xAI
         // =========================
         GROK_CODE_FAST_1(XAI, "grok-code-fast-1", "Grok Code Fast 1"),
+        GROK_4_6(XAI, "grok-4.6", "Grok 4.6"),
 
         // =========================
         // OSS / local
