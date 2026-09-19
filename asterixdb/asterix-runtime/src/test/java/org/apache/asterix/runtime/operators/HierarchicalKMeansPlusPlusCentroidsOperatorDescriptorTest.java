@@ -326,6 +326,69 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
         Assert.assertTrue("One centroid must land near the second group mean", nearB);
     }
 
+    /**
+     * DOT uses -dot as tree distance. After shifting D(x) by min D, k-means++ can seed two MIPS
+     * clusters instead of aborting when the summed tickets are non-positive.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT k-means++ signed-distance seeding")
+    @Test
+    public void testDotProductRecoversSeparatedClusters() throws Exception {
+        List<double[]> vectors = twoMipsClusterVectors(20);
+        List<CentroidTuple> tuples = parseAll(runOperator(42L, 2, 32768, vectors, VectorSimilarityMetric.DOT));
+        Assert.assertEquals("K=2 over one partition must emit exactly two centroids", 2, tuples.size());
+
+        double[] meanA = mipsGroupMean(vectors, true);
+        double[] meanB = mipsGroupMean(vectors, false);
+        boolean nearA = false;
+        boolean nearB = false;
+        for (CentroidTuple t : tuples) {
+            if (euclidean(t.embedding, meanA) < euclidean(t.embedding, meanB)) {
+                nearA = true;
+            } else {
+                nearB = true;
+            }
+        }
+        Assert.assertTrue("One centroid must land nearer the first MIPS group", nearA);
+        Assert.assertTrue("One centroid must land nearer the second MIPS group", nearB);
+        Assert.assertTrue("DOT centroids must be distinct directions, not two copies of the global mean",
+                euclidean(tuples.get(0).embedding, tuples.get(1).embedding) > 1.0);
+    }
+
+    /**
+     * DOT L2-normalizes centroids after Lloyd (same spherical k-means path as cosine) so ||c||
+     * cannot steal min -dot partitions.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT spherical k-means unit centroids")
+    @Test
+    public void testDotProductNormalizesCentroids() throws Exception {
+        List<CentroidTuple> tuples =
+                parseAll(runOperator(42L, 2, 32768, twoMipsClusterVectors(20), VectorSimilarityMetric.DOT));
+        Assert.assertFalse(tuples.isEmpty());
+        for (CentroidTuple t : tuples) {
+            double norm = 0.0;
+            for (double v : t.embedding) {
+                norm += v * v;
+            }
+            norm = Math.sqrt(norm);
+            Assert.assertEquals("DOT centroids must be unit L2 after Lloyd", 1.0, norm, 1e-6);
+        }
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT k-means++ signed-distance seeding")
+    @Test
+    public void testDotProductDeterministicOutputWithSameSeed() throws Exception {
+        List<double[]> vectors = twoMipsClusterVectors(20);
+        List<ITupleReference> run1 = runOperator(42L, 2, 32768, vectors, VectorSimilarityMetric.DOT);
+        List<ITupleReference> run2 = runOperator(42L, 2, 32768, vectors, VectorSimilarityMetric.DOT);
+
+        Assert.assertFalse("Operator must emit centroids", run1.isEmpty());
+        Assert.assertEquals("Same seed must produce the same tuple count", run1.size(), run2.size());
+        for (int i = 0; i < run1.size(); i++) {
+            assertTuplesByteIdentical("DOT tuple " + i + " differs between identically seeded runs", run1.get(i),
+                    run2.get(i));
+        }
+    }
+
     @Test
     public void testLeafLevelEmittedWithFullClusterCount() throws Exception {
         // Regression for the leaf-level drop (ASTERIXDB-3760): for K >= 4 the hierarchy loop must keep the
@@ -362,11 +425,21 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
      */
     private List<ITupleReference> runOperator(long seed, int k, int frameSize, List<double[]> vectors)
             throws Exception {
-        return runOperator(seed, k, frameSize, vectors, DIM);
+        return runOperator(seed, k, frameSize, vectors, DIM, VectorSimilarityMetric.EUCLIDEAN);
+    }
+
+    private List<ITupleReference> runOperator(long seed, int k, int frameSize, List<double[]> vectors,
+            VectorSimilarityMetric metric) throws Exception {
+        return runOperator(seed, k, frameSize, vectors, DIM, metric);
     }
 
     private List<ITupleReference> runOperator(long seed, int k, int frameSize, List<double[]> vectors,
             int declaredDimension) throws Exception {
+        return runOperator(seed, k, frameSize, vectors, declaredDimension, VectorSimilarityMetric.EUCLIDEAN);
+    }
+
+    private List<ITupleReference> runOperator(long seed, int k, int frameSize, List<double[]> vectors,
+            int declaredDimension, VectorSimilarityMetric metric) throws Exception {
         IOManager ioManager = createIoManager();
         try {
             IHyracksTaskContext ctx = mockTaskContext(frameSize, ioManager);
@@ -378,8 +451,8 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
             JobSpecification spec = new JobSpecification();
             HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor desc =
                     new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, outRecDesc, inRecDesc,
-                            UUID.randomUUID(), UUID.randomUUID(), new ColumnAccessEvalFactory(0), k, 5,
-                            VectorSimilarityMetric.EUCLIDEAN, declaredDimension, seed);
+                            UUID.randomUUID(), UUID.randomUUID(), new ColumnAccessEvalFactory(0), k, 5, metric,
+                            declaredDimension, seed);
 
             List<IActivity> activities = new ArrayList<>();
             IActivityGraphBuilder graphBuilder = Mockito.mock(IActivityGraphBuilder.class);
@@ -492,6 +565,38 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
             vectors.add(new double[] { 10.0 + o, 10.0 + p, 10.0 - o, 10.0 + p });
         }
         return vectors;
+    }
+
+    /**
+     * Two equal-norm MIPS clusters around (10,0,0,0) and (0,10,0,0). Magnitudes stay far from 1 so a
+     * spherical (unit-norm) path would be visible, and inner products within a group dominate.
+     */
+    private static List<double[]> twoMipsClusterVectors(int perGroup) {
+        List<double[]> vectors = new ArrayList<>();
+        for (int i = 0; i < perGroup; i++) {
+            double j = (i % 5) * 0.1;
+            vectors.add(new double[] { 10.0 + j, j, -j, j });
+            vectors.add(new double[] { j, 10.0 + j, j, -j });
+        }
+        return vectors;
+    }
+
+    private static double[] mipsGroupMean(List<double[]> vectors, boolean firstAxis) {
+        double[] sum = new double[DIM];
+        int count = 0;
+        for (double[] v : vectors) {
+            boolean inFirst = v[0] > v[1];
+            if (inFirst == firstAxis) {
+                for (int d = 0; d < DIM; d++) {
+                    sum[d] += v[d];
+                }
+                count++;
+            }
+        }
+        for (int d = 0; d < DIM; d++) {
+            sum[d] /= count;
+        }
+        return sum;
     }
 
     /** {@code numGroups} widely separated clusters (100 apart) so k-means recovers exactly that many. */

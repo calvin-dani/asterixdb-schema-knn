@@ -41,6 +41,7 @@ import org.apache.asterix.om.base.AMutableDouble;
 import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.evaluators.common.ListAccessor;
+import org.apache.asterix.runtime.utils.VectorDistanceCalculation;
 import org.apache.asterix.runtime.utils.VectorDistanceFunctionFactory;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
@@ -149,7 +150,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private final int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
 
-    private final VectorSimilarityMetric similarityMetric; // resolved from distanceMetric; drives cosine normalization
+    private final VectorSimilarityMetric similarityMetric; // resolved from distanceMetric; drives cosine/DOT spherical k-means
 
     private final RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
 
@@ -388,6 +389,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Implements   k-means|| algorithm with configurable parameters.
                  */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means|| sampling uses D(x)-min D so signed -dot can seed")
                 private ClusteringResult performKMeansParallel(IHyracksTaskContext ctx, GeneratedRunFileReader in,
                         FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int k, Random rand,
@@ -423,8 +425,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     // Step 2: Multiple rounds of probabilistic sampling (k-means||)
                     for (int round = 0; round < numRounds; round++) {
-                        // PASS 1: Compute S = Σ_x D(x) by streaming (NO DISTANCE STORAGE)
+                        // PASS 1: Compute S = Σ_x D(x) by streaming (NO DISTANCE STORAGE). For DOT,
+                        // also track min D so pass 2 can shift tickets to D(x)-min D (>= 0).
                         double totalDistance = 0.0;
+                        double minD = Double.POSITIVE_INFINITY;
+                        int sampledPointCount = 0;
 
                         in = resetRunFileReader(ctx, sampleUUID, partition);
                         VSizeFrame frame = new VSizeFrame(ctx);
@@ -449,13 +454,18 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                                     // Accumulate sum (NO STORAGE)
                                     totalDistance += minDist;
+                                    if (usesSignedDistance() && minDist < minD) {
+                                        minD = minDist;
+                                    }
+                                    sampledPointCount++;
                                 } catch (IOException e) {
                                     throw HyracksDataException.create(e);
                                 }
                             }
                         }
 
-                        if (totalDistance <= 0) {
+                        double samplingSum = samplingTotal(totalDistance, minD, sampledPointCount);
+                        if (samplingSum <= 0) {
                             break;
                         }
 
@@ -482,8 +492,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                         minDist = Math.min(minDist, dist);
                                     }
 
-                                    //   probabilistic sampling: p(x) = l * D(x) / S
-                                    double probability = oversamplingFactor * minDist / totalDistance;
+                                    //   probabilistic sampling: p(x) = l * D'(x) / S'
+                                    double probability =
+                                            oversamplingFactor * samplingWeight(minDist, minD) / samplingSum;
 
                                     // Independent Bernoulli trial for each point
                                     if (rand.nextDouble() < probability) {
@@ -555,8 +566,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Check if this candidate is a duplicate of an existing weighted candidate
                         boolean foundDuplicate = false;
                         for (int j = 0; j < weightedCandidates.size(); j++) {
-                            double dist = distanceFunction.apply(candidates.get(i), weightedCandidates.get(j));
-                            if (dist < 1e-10) { // Consider identical if very close
+                            if (centroidsNearDuplicate(candidates.get(i), weightedCandidates.get(j))) {
                                 // Merge near-duplicate candidates by adding their weights
                                 weightedCandidateWeights.set(j, weightedCandidateWeights.get(j) + candidateWeights[i]);
                                 foundDuplicate = true;
@@ -612,14 +622,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 // Non-indexable vectors must not become centroids either.
                                 if (additionalPoint != null && hasIndexDimension(additionalPoint)) {
                                     // Avoid duplicates - only add if not too close to existing centroids
-                                    boolean isDuplicate = false;
-                                    for (double[] existingCentroid : centroids) {
-                                        double dist = distanceFunction.apply(additionalPoint, existingCentroid);
-                                        if (dist < 1e-10) { // Consider it a duplicate if very close
-                                            isDuplicate = true;
-                                            break;
-                                        }
-                                    }
+                                    boolean isDuplicate = alreadySelectedCentroid(centroids, additionalPoint);
                                     if (!isDuplicate) {
                                         centroids.add(additionalPoint);
                                     }
@@ -727,8 +730,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     newCentroids[i][d] /= counts[i];
                                 }
                                 // Check if centroid moved significantly
-                                double dist = distanceFunction.apply(centroids.get(i), newCentroids[i]);
-                                if (dist > 1e-4) {
+                                if (centroidMoved(centroids.get(i), newCentroids[i])) {
                                     converged = false;
                                 }
                                 maybeNormalizeCentroid(newCentroids[i]);
@@ -749,6 +751,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                  * Perform weighted K-means++ on candidates to select exactly k centroids.
                  * Uses weights when computing probabilities and weighted averages.
                  */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means++ sampling uses D(x)-min D so signed -dot can seed")
                 private List<double[]> performWeightedKMeansPlusPlusOnCandidates(List<double[]> candidates,
                         int[] weights, int k, Random rand, int maxIterations) throws HyracksDataException {
                     if (candidates.isEmpty() || k <= 0) {
@@ -809,10 +812,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                     for (int i = 1; i < k && i < candidates.size(); i++) {
                         double totalWeightedDistance = 0.0;
+                        double minD = Double.POSITIVE_INFINITY;
+                        if (usesSignedDistance()) {
+                            for (int j = 0; j < candidates.size(); j++) {
+                                minD = Math.min(minD, minDistToCentroid[j]);
+                            }
+                        }
 
-                        // Weighted distance: weight[j] * D(c_j), from the running nearest-centroid distance
+                        // Weighted distance: weight[j] * D'(c_j). D' is D for Euclidean/cosine and
+                        // D-min D for DOT so tickets stay non-negative.
                         for (int j = 0; j < candidates.size(); j++) {
-                            weightedDistances[j] = weights[j] * minDistToCentroid[j];
+                            weightedDistances[j] = weights[j] * samplingWeight(minDistToCentroid[j], minD);
                             totalWeightedDistance += weightedDistances[j];
                         }
 
@@ -888,8 +898,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     newCentroids[i][d] /= totalWeights[i];
                                 }
                                 // Check if centroid moved significantly
-                                double dist = distanceFunction.apply(resultCentroids.get(i), newCentroids[i]);
-                                if (dist > 1e-4) {
+                                if (centroidMoved(resultCentroids.get(i), newCentroids[i])) {
                                     converged = false;
                                 }
                                 maybeNormalizeCentroid(newCentroids[i]);
@@ -907,33 +916,29 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         // Fill gap by selecting additional candidates that are farthest from existing centroids
                         int remaining = k - resultCentroids.size();
                         for (int gap = 0; gap < remaining; gap++) {
-                            double maxMinDist = -1.0;
+                            double minD = Double.POSITIVE_INFINITY;
+                            if (usesSignedDistance()) {
+                                for (int i = 0; i < candidates.size(); i++) {
+                                    if (alreadySelectedCentroid(resultCentroids, candidates.get(i))) {
+                                        continue;
+                                    }
+                                    minD = Math.min(minD, minDistanceToCentroids(candidates.get(i), resultCentroids));
+                                }
+                            }
+
+                            double maxMinDist = Double.NEGATIVE_INFINITY;
                             int bestCandidateIdx = -1;
 
                             // Find candidate with maximum minimum distance to existing centroids
                             for (int i = 0; i < candidates.size(); i++) {
-                                // Check if this candidate is already a centroid
-                                boolean isAlreadyCentroid = false;
-                                for (double[] centroid : resultCentroids) {
-                                    double dist = distanceFunction.apply(candidates.get(i), centroid);
-                                    if (dist < 1e-10) {
-                                        isAlreadyCentroid = true;
-                                        break;
-                                    }
-                                }
-                                if (isAlreadyCentroid) {
+                                if (alreadySelectedCentroid(resultCentroids, candidates.get(i))) {
                                     continue;
                                 }
 
-                                // Find minimum distance to existing centroids
-                                double minDist = Double.POSITIVE_INFINITY;
-                                for (double[] centroid : resultCentroids) {
-                                    double dist = distanceFunction.apply(candidates.get(i), centroid);
-                                    minDist = Math.min(minDist, dist);
-                                }
+                                double minDist = minDistanceToCentroids(candidates.get(i), resultCentroids);
 
-                                // Weight by candidate weight and distance
-                                double weightedScore = weights[i] * minDist;
+                                // Weight by candidate weight and (shifted, for DOT) distance
+                                double weightedScore = weights[i] * samplingWeight(minDist, minD);
                                 if (weightedScore > maxMinDist) {
                                     maxMinDist = weightedScore;
                                     bestCandidateIdx = i;
@@ -1209,6 +1214,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Perform scalable K-means++ on centroids (not raw data).
                  */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT hierarchical k-means++ sampling uses D(x)-min D so signed -dot can seed")
                 private ClusteringResult performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids, int k,
                         Random rand, int maxIterations) throws HyracksDataException {
                     if (centroids.isEmpty() || k <= 0) {
@@ -1236,14 +1242,26 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                     for (int i = 1; i < k && i < centroids.size(); i++) {
                         double totalDistance = 0.0;
+                        double minD = Double.POSITIVE_INFINITY;
 
                         for (int j = 0; j < centroids.size(); j++) {
                             distances[j] = minDistToCentroid[j];
                             totalDistance += distances[j];
+                            if (usesSignedDistance() && distances[j] < minD) {
+                                minD = distances[j];
+                            }
+                        }
+
+                        double samplingSum = samplingTotal(totalDistance, minD, centroids.size());
+                        if (samplingSum <= 0) {
+                            break;
+                        }
+                        for (int j = 0; j < centroids.size(); j++) {
+                            distances[j] = samplingWeight(minDistToCentroid[j], minD);
                         }
 
                         // Weighted random selection
-                        double r = rand.nextDouble() * totalDistance;
+                        double r = rand.nextDouble() * samplingSum;
                         double cumulativeDistance = 0.0;
                         int selectedIdx = 0;
                         for (int j = 0; j < centroids.size(); j++) {
@@ -1272,33 +1290,29 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         int remaining = k - resultCentroids.size();
 
                         for (int gap = 0; gap < remaining; gap++) {
-                            double maxMinDist = -1.0;
+                            double minD = Double.POSITIVE_INFINITY;
+                            if (usesSignedDistance()) {
+                                for (int j = 0; j < centroids.size(); j++) {
+                                    if (alreadySelectedCentroid(resultCentroids, centroids.get(j))) {
+                                        continue;
+                                    }
+                                    minD = Math.min(minD, minDistanceToCentroids(centroids.get(j), resultCentroids));
+                                }
+                            }
+
+                            double maxMinDist = Double.NEGATIVE_INFINITY;
                             int bestIdx = -1;
 
                             // Find centroid farthest from all existing centroids
                             for (int j = 0; j < centroids.size(); j++) {
-                                // Check if this centroid is already selected
-                                boolean alreadySelected = false;
-                                for (double[] existing : resultCentroids) {
-                                    double dist = distanceFunction.apply(centroids.get(j), existing);
-                                    if (dist < 1e-10) {
-                                        alreadySelected = true;
-                                        break;
-                                    }
-                                }
-                                if (alreadySelected) {
+                                if (alreadySelectedCentroid(resultCentroids, centroids.get(j))) {
                                     continue;
                                 }
 
-                                // Find minimum distance to existing centroids
-                                double minDist = Double.POSITIVE_INFINITY;
-                                for (double[] existing : resultCentroids) {
-                                    double dist = distanceFunction.apply(centroids.get(j), existing);
-                                    minDist = Math.min(minDist, dist);
-                                }
-
-                                if (minDist > maxMinDist) {
-                                    maxMinDist = minDist;
+                                double minDist = minDistanceToCentroids(centroids.get(j), resultCentroids);
+                                double score = samplingWeight(minDist, minD);
+                                if (score > maxMinDist) {
+                                    maxMinDist = score;
                                     bestIdx = j;
                                 }
                             }
@@ -1352,8 +1366,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                     newCentroids[i][d] /= counts[i];
                                 }
                                 // Check if centroid moved significantly
-                                double dist = distanceFunction.apply(resultCentroids.get(i), newCentroids[i]);
-                                if (dist > 1e-4) {
+                                if (centroidMoved(resultCentroids.get(i), newCentroids[i])) {
                                     converged = false;
                                 }
                                 maybeNormalizeCentroid(newCentroids[i]);
@@ -1381,9 +1394,84 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Normalizes centroid in place to unit L2 norm when using cosine similarity (spherical
-                 * k-means), so that centroid semantics match FAISS/Spark. Dot product is not normalized.
-                 * No-op for other metrics.
+                 * DOT tree-distance is -dot, which is typically negative. k-means++ / k-means|| treat D(x)
+                 * as a sampling weight, so it must be >= 0. Euclidean and cosine distance already are.
+                 */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private boolean usesSignedDistance() {
+                    return similarityMetric == VectorSimilarityMetric.DOT;
+                }
+
+                /**
+                 * Lottery-ticket weight for k-means++: larger means farther from existing centers.
+                 * For DOT, shift by the round's min D so closest stays 0 and tickets stay non-negative.
+                 */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private double samplingWeight(double dist, double minDist) {
+                    return usesSignedDistance() ? dist - minDist : dist;
+                }
+
+                /**
+                 * Sum of sampling tickets D'(x) for a round. For DOT, D'(x) = D(x) - min D, so
+                 * S' = S - n * min D.
+                 */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private double samplingTotal(double sumDist, double minDist, int n) {
+                    if (!usesSignedDistance() || n <= 0 || minDist == Double.POSITIVE_INFINITY) {
+                        return sumDist;
+                    }
+                    return sumDist - n * minDist;
+                }
+
+                /**
+                 * Identity for Euclidean/cosine (metric distance ~ 0). For DOT, -dot ~ 0 is not identity
+                 * — almost any pair with a positive inner product would look like a duplicate — so use L2.
+                 */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private boolean centroidsNearDuplicate(double[] a, double[] b) throws HyracksDataException {
+                    if (usesSignedDistance()) {
+                        return VectorDistanceCalculation.euclideanSquared(a, b) < 1e-10;
+                    }
+                    return distanceFunction.apply(a, b) < 1e-10;
+                }
+
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private boolean alreadySelectedCentroid(List<double[]> centroids, double[] point)
+                        throws HyracksDataException {
+                    for (double[] centroid : centroids) {
+                        if (centroidsNearDuplicate(point, centroid)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private double minDistanceToCentroids(double[] point, List<double[]> centroids)
+                        throws HyracksDataException {
+                    double minDist = Double.POSITIVE_INFINITY;
+                    for (double[] centroid : centroids) {
+                        minDist = Math.min(minDist, distanceFunction.apply(point, centroid));
+                    }
+                    return minDist;
+                }
+
+                /**
+                 * Lloyd stop. -dot of two similar centroids is a large negative, so dist > 1e-4 would
+                 * declare convergence even when the mean jumped; use L2 of the centroid delta for DOT.
+                 */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                private boolean centroidMoved(double[] previous, double[] updated) throws HyracksDataException {
+                    if (usesSignedDistance()) {
+                        return VectorDistanceCalculation.euclidean(previous, updated) > 1e-4;
+                    }
+                    return distanceFunction.apply(previous, updated) > 1e-4;
+                }
+
+                /**
+                 * Normalizes centroid in place to unit L2 norm for cosine and DOT (spherical k-means).
+                 * Without this, a mean of unit vectors has ||c|| &lt; 1 and min -dot prefers high-norm
+                 * centroids over nearer directions. No-op for Euclidean.
                  */
                 private void maybeNormalizeCentroid(double[] centroid) {
                     if (centroid != null && requiresNormalizedCentroids()) {
@@ -1392,13 +1480,14 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Whether the current distance function requires centroids to be L2-normalized after each
-                 * Lloyd update. Normalization is required only for cosine (spherical k-means); aligns with
-                 * FAISS spherical k-means and Spark's CosineDistanceMeasure. Dot product (MIPS) uses raw
-                 * centroids and does not require normalization.
+                 * Cosine and DOT both assign by inner product against the stored mean. Re-unit the mean
+                 * after Lloyd so ||c|| cannot steal partitions; then min -dot and cosine distance rank
+                 * leaves the same way on unit data. Euclidean keeps the unnormalized Bregman mean.
                  */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT spherical k-means: L2-normalize centroids after Lloyd")
                 private boolean requiresNormalizedCentroids() {
-                    return similarityMetric == VectorSimilarityMetric.COSINE;
+                    return similarityMetric == VectorSimilarityMetric.COSINE
+                            || similarityMetric == VectorSimilarityMetric.DOT;
                 }
 
                 private static IVTreeDistanceFunction distanceFunctionFor(VectorSimilarityMetric metric) {
