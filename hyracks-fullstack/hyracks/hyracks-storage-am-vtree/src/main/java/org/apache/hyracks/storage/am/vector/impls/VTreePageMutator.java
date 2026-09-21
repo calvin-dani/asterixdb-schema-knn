@@ -87,7 +87,8 @@ class VTreePageMutator {
      * find the appropriate data page.
      */
     void insertIntoDataPages(long metadataPageId, double[] vector, double distance, int centroidId,
-            ITupleReference originalTuple, VTreeOpContext ctx, int fileId) throws HyracksDataException {
+            ITupleReference originalTuple, double[] centroid, VTreeOpContext ctx, int fileId)
+            throws HyracksDataException {
 
         // Traverse through all linked directory (metadata) pages to find the appropriate data page.
         // Guard against a corrupted next-page chain that loops back on itself by tracking the page
@@ -134,15 +135,16 @@ class VTreePageMutator {
                 if (targetDataPageId != -1) {
                     // Found appropriate data page - insert into it. insertIntoDataPage() either inserts
                     // directly, compacts and inserts, or splits the page; it never reports "no room".
-                    insertIntoDataPage(targetDataPageId, vector, distance, centroidId, originalTuple, ctx, fileId);
+                    insertIntoDataPage(targetDataPageId, vector, distance, centroidId, originalTuple, centroid, ctx,
+                            fileId);
                     return;
                 }
 
                 // No match on this directory page
                 if (isLastInChain) {
                     // Last page in chain - create new data page
-                    handleDataPageOverflow(currentMetadataPageId, vector, distance, centroidId, originalTuple, ctx,
-                            fileId);
+                    handleDataPageOverflow(currentMetadataPageId, vector, distance, centroidId, originalTuple, centroid,
+                            ctx, fileId);
                     return;
                 }
 
@@ -215,7 +217,8 @@ class VTreePageMutator {
      * frame-level invariant violation and is reported as {@code ILLEGAL_STATE}.
      */
     private void insertIntoDataPage(long dataPageId, double[] vector, double distance, int centroidId,
-            ITupleReference originalTuple, VTreeOpContext ctx, int fileId) throws HyracksDataException {
+            ITupleReference originalTuple, double[] centroid, VTreeOpContext ctx, int fileId)
+            throws HyracksDataException {
 
         ICachedPage dataPage = bufferCache.pin(BufferedFileHandle.getDiskPageId(fileId, (int) dataPageId));
 
@@ -229,7 +232,7 @@ class VTreePageMutator {
             // Pass context so buildDataTuple can check operation type and encode a delete-polarity tuple
             // if DELETE (the encoding is decided by the caller-supplied frame's tuple writer)
             ITupleReference dataTuple =
-                    ctx.getDataTupleBuilder().buildDataTuple(vector, distance, centroidId, originalTuple);
+                    ctx.getDataTupleBuilder().buildDataTuple(vector, distance, centroidId, originalTuple, centroid);
 
             // Check if there's space for the tuple
             FrameOpSpaceStatus spaceStatus = ctx.getDataFrame().hasSpaceInsert(dataTuple);
@@ -454,7 +457,8 @@ class VTreePageMutator {
     }
 
     private void handleDataPageOverflow(long metadataPageId, double[] vector, double distance, int centroidId,
-            ITupleReference originalTuple, VTreeOpContext ctx, int fileId) throws HyracksDataException {
+            ITupleReference originalTuple, double[] centroid, VTreeOpContext ctx, int fileId)
+            throws HyracksDataException {
         // This method creates the FIRST data page of a directory page and therefore leaves the data-page
         // chain's next-page pointers alone: with no existing entry there is no predecessor to link from, and
         // the search cursor reaches data pages only by starting at directory entry 0 and following the chain.
@@ -488,7 +492,7 @@ class VTreePageMutator {
 
             // Create data tuple for the new vector
             ITupleReference dataTuple =
-                    ctx.getDataTupleBuilder().buildDataTuple(vector, distance, centroidId, originalTuple);
+                    ctx.getDataTupleBuilder().buildDataTuple(vector, distance, centroidId, originalTuple, centroid);
 
             // Insert the tuple into the new page
             dataFrame.insert(dataTuple, 0);

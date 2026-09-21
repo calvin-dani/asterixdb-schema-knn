@@ -44,6 +44,10 @@ public class LSMVTreeDiskComponentFactory implements ILSMDiskComponentFactory {
         this.filterHelper = filterHelper;
     }
 
+    public TreeIndexFactory<VTree> getVTreeFactory() {
+        return vTreeFactory;
+    }
+
     @Override
     public LSMVTreeDiskComponent createComponent(AbstractLSMIndex lsmIndex, LSMComponentFileReferences cfr)
             throws HyracksDataException {

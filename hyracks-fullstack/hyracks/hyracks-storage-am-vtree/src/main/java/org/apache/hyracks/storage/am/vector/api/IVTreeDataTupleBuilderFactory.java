@@ -28,7 +28,8 @@ import org.apache.hyracks.util.annotations.AiProvenance;
  * <p>
  * {@link Serializable} so it can travel on {@code LSMVTreeLocalResourceFactory} in the Java-serialized
  * index-creation job. Not {@code IJsonSerializable}: {@code LSMVTreeLocalResource.fromJson} rebuilds it
- * from primitives ({@code numIncludeFields}, {@code isQuantized}) rather than serializing it as JSON.
+ * from primitives ({@code numIncludeFields}, {@code isQuantized}, {@code dataEmbeddingIsResidual})
+ * rather than serializing it as JSON.
  */
 public interface IVTreeDataTupleBuilderFactory extends Serializable {
 
@@ -49,4 +50,13 @@ public interface IVTreeDataTupleBuilderFactory extends Serializable {
      */
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED)
     boolean isQuantized();
+
+    /**
+     * Whether quantized field 3 stores SQ(x − c) (DOT residual) rather than SQ(x). Default false so
+     * pre-change factories and cosine/L2 indexes keep the old encode.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual SQ flag on data-tuple factory")
+    default boolean isDataEmbeddingResidual() {
+        return false;
+    }
 }

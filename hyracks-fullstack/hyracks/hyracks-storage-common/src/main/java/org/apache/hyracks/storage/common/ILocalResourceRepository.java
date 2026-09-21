@@ -37,4 +37,13 @@ public interface ILocalResourceRepository {
             throws HyracksDataException;
 
     long maxId() throws HyracksDataException;
+
+    /**
+     * Rewrite the JSON for an already-inserted resource after in-place mutation (e.g. residual
+     * quantization params). Does not re-init checkpoints. Default is a no-op for in-memory repos
+     * that already hold the mutated instance.
+     */
+    default void persist(LocalResource resource) throws HyracksDataException {
+        // In-memory repositories already expose the mutated object via get().
+    }
 }

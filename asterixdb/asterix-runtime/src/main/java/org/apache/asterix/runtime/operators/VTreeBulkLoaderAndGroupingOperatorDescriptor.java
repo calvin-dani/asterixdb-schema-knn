@@ -535,24 +535,25 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
         }
 
         /**
-         * Quantizes a vector using optimized scalar quantization with similarity-function awareness.
-         * Only {@code quantizedBytes} from the result are stored; corrective multiplier is not persisted.
-         *
-         * @param embedding      The input embedding vector (double array)
-         * @param params         Quantization parameters
-         * @param distanceMetric Distance metric string to determine similarity function
-         * @return QuantizedVector containing per-dimension quantized bytes (and metadata)
+         * Field-3 codes: DOT residual indexes store SQ(x − c); cosine/L2 store SQ(x).
          */
-        private OptimizedScalarQuantizationCodec.QuantizedVector quantizeVector(double[] embedding,
-                OptimizedScalarQuantizationCodec.Params params, String distanceMetric) throws HyracksDataException {
-            if (embedding == null || params == null) {
+        @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Bulk-load DOT residual SQ into field 3")
+        private OptimizedScalarQuantizationCodec.QuantizedVector quantizeForDataPage(double[] embedding,
+                double[] centroid) throws HyracksDataException {
+            if (embedding == null || quantizationParams == null) {
                 return null;
             }
-
             OptimizedScalarQuantizationCodec.SimilarityFunction similarityFunction =
                     OptimizedScalarQuantizationCodec.fromDistanceMetric(distanceMetric);
+            if (isDotResidual() && centroid != null) {
+                return OptimizedScalarQuantizationCodec.quantizeResidual(embedding, centroid, quantizationParams,
+                        similarityFunction);
+            }
+            return OptimizedScalarQuantizationCodec.quantizeVector(embedding, quantizationParams, similarityFunction);
+        }
 
-            return OptimizedScalarQuantizationCodec.quantizeVector(embedding, params, similarityFunction);
+        private boolean isDotResidual() {
+            return LSMVTree != null && LSMVTree.isDataEmbeddingResidual();
         }
 
         private List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSort(double[] queryVector, double epi)
@@ -627,7 +628,7 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
                             for (ClusterSearchResult result : acceptedResults) {
                                 OptimizedScalarQuantizationCodec.QuantizedVector quantizedVector = null;
                                 if (isQuantized) {
-                                    quantizedVector = quantizeVector(embedding, quantizationParams, distanceMetric);
+                                    quantizedVector = quantizeForDataPage(embedding, result.centroid);
 
                                     if (quantizer != null && result.centroid != null
                                             && !result.hasQuantizedDistance()) {

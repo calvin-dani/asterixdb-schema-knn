@@ -18,9 +18,14 @@
  */
 package org.apache.asterix.common.vector;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.exceptions.RuntimeDataException;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Optimized scalar quantization (OSQ) utilities for vector indexes.
@@ -178,6 +183,71 @@ public final class OptimizedScalarQuantizationCodec {
         }
 
         return new QuantizedVector(quantizedBytes, similarityFunction);
+    }
+
+    /**
+     * SQ-encodes the residual {@code x − c} with the same clamp/alpha as {@link #quantizeVector}.
+     * Used for DOT quantized indexes so field 3 stores residual codes rather than globally clamped
+     * raw coordinates (which collapse magnitude). {@code centroid == null} falls back to encoding
+     * {@code x} unchanged.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual SQ8: encode x-c with existing clamp/alpha")
+    public static QuantizedVector quantizeResidual(double[] vector, double[] centroid, Params params,
+            SimilarityFunction similarityFunction) throws HyracksDataException {
+        if (centroid == null) {
+            return quantizeVector(vector, params, similarityFunction);
+        }
+        if (vector == null) {
+            throw new RuntimeDataException(ErrorCode.ILLEGAL_STATE, "A null vector reached the residual quantizer");
+        }
+        if (vector.length != centroid.length) {
+            throw new RuntimeDataException(ErrorCode.VECTOR_DIMENSION_MISMATCH, centroid.length, vector.length);
+        }
+        return quantizeVector(subtract(vector, centroid), params, similarityFunction);
+    }
+
+    /** Per-dimension {@code r[i] = x[i] − c[i]}. */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual subtract")
+    public static double[] subtract(double[] vector, double[] centroid) {
+        double[] residual = new double[vector.length];
+        for (int i = 0; i < vector.length; i++) {
+            residual[i] = vector[i] - centroid[i];
+        }
+        return residual;
+    }
+
+    /**
+     * Quantile clip bounds and OSQ {@code alpha} from a list of scalar samples, matching
+     * {@code QuantizationConstantsAggregate} (confidence-interval tails, then
+     * {@code alpha = (2^bits − 1) / (maxQ − minQ)}). Used to retrain minQ/maxQ on DOT residuals
+     * {@code x − c} after k-means assignment.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Residual quantile params from train-list x-c scalars")
+    public static Params computeParamsFromScalars(List<Double> values, int bits, int vectorDimensions,
+            float confidenceInterval) throws HyracksDataException {
+        if (values == null || values.isEmpty()) {
+            throw new RuntimeDataException(ErrorCode.ILLEGAL_STATE,
+                    "Cannot compute quantization params from an empty scalar sample");
+        }
+        List<Double> sorted = new ArrayList<>(values);
+        Collections.sort(sorted);
+
+        float half = (1.0f - confidenceInterval) / 2.0f;
+        int totalCount = sorted.size();
+        int lowerIdx = (int) Math.floor(half * (totalCount - 1));
+        int upperIdx = (int) Math.ceil((1.0f - half) * (totalCount - 1));
+        lowerIdx = Math.max(0, Math.min(lowerIdx, totalCount - 1));
+        upperIdx = Math.max(0, Math.min(upperIdx, totalCount - 1));
+
+        float minQ = sorted.get(lowerIdx).floatValue();
+        float maxQ = sorted.get(upperIdx).floatValue();
+        double eps = 1e-12;
+        if (maxQ <= minQ + eps) {
+            maxQ = minQ + 1e-6f;
+        }
+        int levels = 1 << bits;
+        float alpha = (levels - 1) / (maxQ - minQ);
+        return new Params(bits, vectorDimensions, totalCount, confidenceInterval, minQ, maxQ, alpha);
     }
 
     /*

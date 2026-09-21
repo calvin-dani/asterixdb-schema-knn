@@ -277,10 +277,17 @@ public class SecondaryVectorOperationsHelper extends SecondaryTreeIndexOperation
 
         // ====== STATIC STRUCTURE JOB: K-MEANS → STATIC STRUCTURE CREATION ======
 
-        HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates =
-                new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc, secondaryRecDesc,
-                        sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K, maxScalableKmeansIter,
-                        distanceMetric, vectorDimension, seed);
+        HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor candidates;
+        if (distanceMetric == VectorSimilarityMetric.DOT && vectorParameters.isQuantized()) {
+            candidates = new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc,
+                    secondaryRecDesc, sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K,
+                    maxScalableKmeansIter, distanceMetric, vectorDimension, seed, dataflowHelperFactory,
+                    partitioningProperties.getComputeStorageMap());
+        } else {
+            candidates = new HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(spec, hierarchicalRecDesc,
+                    secondaryRecDesc, sampleUUID, tupleCountUUID, new ColumnAccessEvalFactory(0), K,
+                    maxScalableKmeansIter, distanceMetric, vectorDimension, seed);
+        }
         AlgebricksPartitionConstraintHelper.setPartitionConstraintInJobSpec(spec, candidates,
                 primaryPartitionConstraint);
         targetOp = candidates;

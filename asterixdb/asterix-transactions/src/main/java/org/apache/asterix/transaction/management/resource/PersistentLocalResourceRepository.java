@@ -203,6 +203,25 @@ public class PersistentLocalResourceRepository implements ILocalResourceReposito
         }
     }
 
+    /**
+     * Overwrite the metadata JSON for an already-registered resource after in-place mutation.
+     * Unlike {@link #insert}, this does not initialize checkpoints.
+     */
+    @Override
+    public void persist(LocalResource resource) throws HyracksDataException {
+        beforeWriteAccess();
+        try {
+            FileReference resourceFile = getLocalResourceFileByName(ioManager, resource.getPath());
+            byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(resource.toJson(persistedResourceRegistry));
+            ioManager.overwrite(resourceFile, bytes);
+            resourceCache.put(resource.getPath(), resource);
+        } catch (Exception e) {
+            throw HyracksDataException.create(e);
+        } finally {
+            afterWriteAccess();
+        }
+    }
+
     @SuppressWarnings("squid:S1181")
     private void cleanup(FileReference resourceFile) {
         if (resourceFile.getFile().exists()) {
