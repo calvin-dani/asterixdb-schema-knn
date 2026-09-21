@@ -24,13 +24,13 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * DOT residual TopK heap key is {@code -(q·c + q·r̂)} with raw q, not {@code −q̂·x̂}.
+ * DOT residual TopK heap key is {@code 1 - (q·c + q·r̂)} with raw q, not {@code −q̂·x̂}.
  */
-@AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT residual TopK score equals -(q·c + q·r̂)")
+@AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT residual TopK score equals 1-(q·c + q·r̂)")
 public class LSMVTreeResidualDotScoreTest {
 
     @Test
-    public void residualScoreIsNegatedExactPlusResidualInnerProduct() {
+    public void residualScoreIsOneMinusExactPlusResidualInnerProduct() {
         double[] q = { 1.0, 0.5, -0.25, 2.0 };
         double[] c = { 4.0, 4.0, 4.0, 4.0 };
         double[] rHat = { 0.2, -0.2, 0.1, 0.0 };
@@ -40,7 +40,7 @@ public class LSMVTreeResidualDotScoreTest {
             qDotC += q[i] * c[i];
             qDotR += q[i] * rHat[i];
         }
-        double expected = -(qDotC + qDotR);
+        double expected = 1.0 - (qDotC + qDotR);
         Assert.assertEquals(expected, LSMVTreeTopKSearchCursor.residualDotScore(q, rHat, qDotC), 0.0);
 
         double[] qHat = { 1.0, 0.5, -0.25, 1.0 };

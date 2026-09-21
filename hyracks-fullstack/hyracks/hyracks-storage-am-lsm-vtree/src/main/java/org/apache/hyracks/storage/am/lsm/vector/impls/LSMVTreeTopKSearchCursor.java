@@ -159,7 +159,7 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
     private int antimatterCancellations;
     private int tuplesFilteredOut;
     private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
-    // DOT residual scoring: field 3 is SQ(x-c); heap key is -(q·c + q·r̂) with raw q.
+    // DOT residual scoring: field 3 is SQ(x-c); heap key is 1-(q·c + q·r̂) with raw q.
     private boolean residualScoring;
     private double qDotC;
 
@@ -700,7 +700,7 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
      * float query. That is asymmetric SQ: {@code y · x̂} with {@code x̂_i = q_i/alpha + minQ},
      * which is the same linear map {@code (1/alpha) Σ(y_i q_i) + minQ Σ y_i}. The query is
      * not re-quantized (symmetric {@code ŷ · x̂} was extra error on tight inner-product gaps).
-     * DOT residual indexes score {@code -(q·c + q·r̂)} with raw {@code q} instead.
+     * DOT residual indexes score {@code 1 - (q·c + q·r̂)} with raw {@code q} instead.
      */
     @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Asymmetric SQ: float query vs dequantized codes")
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
@@ -731,16 +731,17 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
     }
 
     /**
-     * DOT residual heap score: {@code -(q·c + q·r̂)} using raw {@code q} (asymmetric).
+     * DOT residual heap score: {@code 1 - (q·c + q·r̂)} using raw {@code q} (asymmetric).
      */
     @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual TopK score -(q·c + q·r̂)")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT residual TopK score 1-(q·c + q·r̂)")
     public static double residualDotScore(double[] query, double[] residualHat, double queryDotCentroid) {
         double qDotR = 0.0;
         int n = Math.min(query.length, residualHat.length);
         for (int i = 0; i < n; i++) {
             qDotR += query[i] * residualHat[i];
         }
-        return -(queryDotCentroid + qDotR);
+        return 1.0 - (queryDotCentroid + qDotR);
     }
 
     // ==================== IIndexCursor Interface (EnforcedIndexCursor template methods) ====================
