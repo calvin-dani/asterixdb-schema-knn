@@ -150,7 +150,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private final int maxScalableKmeansIter; // Maximum iterations for scalable K-means++ candidate selection
 
-    private final VectorSimilarityMetric similarityMetric; // resolved from distanceMetric; drives cosine/DOT spherical k-means
+    private final VectorSimilarityMetric similarityMetric; // resolved from distanceMetric; drives cosine spherical k-means
 
     private final RecordDescriptor secondaryRecDesc; // Input record descriptor (2-field format)
 
@@ -1469,9 +1469,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Normalizes centroid in place to unit L2 norm for cosine and DOT (spherical k-means).
-                 * Without this, a mean of unit vectors has ||c|| &lt; 1 and min -dot prefers high-norm
-                 * centroids over nearer directions. No-op for Euclidean.
+                 * Normalizes centroid in place to unit L2 norm when using cosine similarity (spherical
+                 * k-means), so that centroid semantics match FAISS/Spark. Dot product is not normalized.
+                 * No-op for other metrics.
                  */
                 private void maybeNormalizeCentroid(double[] centroid) {
                     if (centroid != null && requiresNormalizedCentroids()) {
@@ -1480,14 +1480,15 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Cosine and DOT both assign by inner product against the stored mean. Re-unit the mean
-                 * after Lloyd so ||c|| cannot steal partitions; then min -dot and cosine distance rank
-                 * leaves the same way on unit data. Euclidean keeps the unnormalized Bregman mean.
+                 * Whether the current distance function requires centroids to be L2-normalized after each
+                 * Lloyd update. Normalization is required only for cosine (spherical k-means); aligns with
+                 * FAISS spherical k-means and Spark's CosineDistanceMeasure. Dot product (MIPS) uses raw
+                 * centroids and does not require normalization.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT spherical k-means: L2-normalize centroids after Lloyd")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Ablation: DOT stores the arithmetic mean, cosine still unit-normalizes")
                 private boolean requiresNormalizedCentroids() {
-                    return similarityMetric == VectorSimilarityMetric.COSINE
-                            || similarityMetric == VectorSimilarityMetric.DOT;
+                    return similarityMetric == VectorSimilarityMetric.COSINE;
                 }
 
                 private static IVTreeDistanceFunction distanceFunctionFor(VectorSimilarityMetric metric) {

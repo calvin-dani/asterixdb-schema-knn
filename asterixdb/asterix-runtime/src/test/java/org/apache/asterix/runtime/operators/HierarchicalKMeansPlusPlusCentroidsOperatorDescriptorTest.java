@@ -355,22 +355,28 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
     }
 
     /**
-     * DOT L2-normalizes centroids after Lloyd (same spherical k-means path as cosine) so ||c||
-     * cannot steal min -dot partitions.
+     * DOT stores the Lloyd mean, not a unit vector. twoMipsClusterVectors sit near ||x||≈10, so a
+     * spherical path would force ||c||=1 and miss the group mean.
      */
     @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT spherical k-means unit centroids")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "Ablation: DOT centroids are unnormalized means")
     @Test
-    public void testDotProductNormalizesCentroids() throws Exception {
-        List<CentroidTuple> tuples =
-                parseAll(runOperator(42L, 2, 32768, twoMipsClusterVectors(20), VectorSimilarityMetric.DOT));
-        Assert.assertFalse(tuples.isEmpty());
+    public void testDotProductDoesNotNormalizeCentroids() throws Exception {
+        List<double[]> vectors = twoMipsClusterVectors(20);
+        List<CentroidTuple> tuples = parseAll(runOperator(42L, 2, 32768, vectors, VectorSimilarityMetric.DOT));
+        Assert.assertEquals(2, tuples.size());
+        double[] meanA = mipsGroupMean(vectors, true);
+        double[] meanB = mipsGroupMean(vectors, false);
         for (CentroidTuple t : tuples) {
             double norm = 0.0;
             for (double v : t.embedding) {
                 norm += v * v;
             }
-            norm = Math.sqrt(norm);
-            Assert.assertEquals("DOT centroids must be unit L2 after Lloyd", 1.0, norm, 1e-6);
+            Assert.assertTrue("DOT must store the mean, not a unit centroid", Math.sqrt(norm) > 2.0);
+            double distA = euclidean(t.embedding, meanA);
+            double distB = euclidean(t.embedding, meanB);
+            Assert.assertTrue("DOT centroid must land on a group mean, not a unit direction",
+                    Math.min(distA, distB) < 1.0);
         }
     }
 
