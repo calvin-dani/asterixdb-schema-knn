@@ -58,4 +58,11 @@ public interface IIndexDataflowHelper extends Closeable {
      * @throws HyracksDataException
      */
     LocalResource getResource() throws HyracksDataException;
+
+    /**
+     * Persist the current {@link LocalResource} after in-place mutation of its wrapped resource.
+     */
+    default void persistResource() throws HyracksDataException {
+        // Optional: operators that mutate resource metadata (e.g. residual quantiles) override this.
+    }
 }

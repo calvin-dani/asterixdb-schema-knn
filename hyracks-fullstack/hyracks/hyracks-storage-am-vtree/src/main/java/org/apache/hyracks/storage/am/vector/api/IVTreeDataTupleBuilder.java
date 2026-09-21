@@ -21,6 +21,7 @@ package org.apache.hyracks.storage.am.vector.api;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Transforms input tuples from the operator format into the storage format
@@ -44,5 +45,16 @@ public interface IVTreeDataTupleBuilder {
      */
     ITupleReference buildDataTuple(double[] vector, double distance, int centroidId, ITupleReference originalTuple)
             throws HyracksDataException;
+
+    /**
+     * As {@link #buildDataTuple(double[], double, int, ITupleReference)} with the assigned cluster
+     * centroid. DOT residual indexes SQ-encode {@code vector − centroid} into field 3; other metrics
+     * ignore {@code centroid}. Default delegates to the 4-arg form.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Pass cluster centroid for DOT residual SQ")
+    default ITupleReference buildDataTuple(double[] vector, double distance, int centroidId,
+            ITupleReference originalTuple, double[] centroid) throws HyracksDataException {
+        return buildDataTuple(vector, distance, centroidId, originalTuple);
+    }
 
 }

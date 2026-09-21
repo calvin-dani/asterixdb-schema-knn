@@ -35,6 +35,8 @@ import java.util.Random;
 import java.util.UUID;
 
 import org.apache.asterix.builders.OrderedListBuilder;
+import org.apache.asterix.common.dataflow.DatasetLocalResource;
+import org.apache.asterix.common.vector.OptimizedScalarQuantizationCodec;
 import org.apache.asterix.common.vector.VectorSimilarityMetric;
 import org.apache.asterix.dataflow.data.nontagged.serde.ADoubleSerializerDeserializer;
 import org.apache.asterix.om.base.AMutableDouble;
@@ -74,7 +76,15 @@ import org.apache.hyracks.dataflow.std.base.AbstractUnaryInputSinkOperatorNodePu
 import org.apache.hyracks.dataflow.std.base.AbstractUnaryOutputSourceOperatorNodePushable;
 import org.apache.hyracks.dataflow.std.misc.MaterializerTaskState;
 import org.apache.hyracks.dataflow.std.misc.PartitionedUUID;
+import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
+import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVTreeLocalResource;
+import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTree;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
+import org.apache.hyracks.storage.common.IIndex;
+import org.apache.hyracks.storage.common.IResource;
+import org.apache.hyracks.storage.common.LocalResource;
 import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
@@ -158,11 +168,26 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
     private final long trainSeed; // Base seed for the training RNG; per-partition offset keeps partitions decorrelated
 
+    // When non-null, DOT residual quantiles are computed from train-list assignments and written to the
+    // index resource before Job 3 bulk load.
+    private final IIndexDataflowHelperFactory indexHelperFactory;
+    private final int[][] partitionsMap;
+
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED)
     public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
             RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
             IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter, VectorSimilarityMetric similarityMetric,
             int vectorDimension, long trainSeed) {
+        this(spec, outputRecDesc, secondaryRecDesc, sampleUUID, tupleCountUUID, args, K, maxScalableKmeansIter,
+                similarityMetric, vectorDimension, trainSeed, null, null);
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual quantile Job 2 wiring")
+    public HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor(IOperatorDescriptorRegistry spec,
+            RecordDescriptor outputRecDesc, RecordDescriptor secondaryRecDesc, UUID sampleUUID, UUID tupleCountUUID,
+            IScalarEvaluatorFactory args, int K, int maxScalableKmeansIter, VectorSimilarityMetric similarityMetric,
+            int vectorDimension, long trainSeed, IIndexDataflowHelperFactory indexHelperFactory,
+            int[][] partitionsMap) {
         super(spec, 1, 1);
         // Output record descriptor defines the format of output tuples (treeLevel, centroidId, parentClusterId, embedding)
         // Input record descriptor is the 2-field format with vector embeddings
@@ -177,6 +202,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
         this.trainSeed = trainSeed;
         // Distance function from index DDL (WITH similarity "euclidean"|"cosine"|etc.); default euclidean squared
         this.similarityMetric = similarityMetric;
+        this.indexHelperFactory = indexHelperFactory;
+        this.partitionsMap = partitionsMap;
     }
 
     /**
@@ -1124,6 +1151,113 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
+                 * DOT residual SQ needs minQ/maxQ on {@code x − c}, not the Job 1 raw-x quantiles.
+                 */
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual quantile retrain after leaf k-means")
+                private boolean shouldComputeResidualQuantiles() {
+                    return similarityMetric == VectorSimilarityMetric.DOT && indexHelperFactory != null;
+                }
+
+                private int resolveStoragePartition(int taskPartition) {
+                    if (partitionsMap != null && taskPartition < partitionsMap.length
+                            && partitionsMap[taskPartition] != null && partitionsMap[taskPartition].length > 0) {
+                        return partitionsMap[taskPartition][0];
+                    }
+                    return taskPartition;
+                }
+
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Train-list residual quantiles written to LSMVTreeLocalResource before Job 3")
+                private void writeResidualQuantiles(IHyracksTaskContext ctx, GeneratedRunFileReader in,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int partition,
+                        ClusteringResult leafResult) throws HyracksDataException, IOException {
+                    if (leafResult.centroids.isEmpty() || leafResult.assignments.length == 0) {
+                        return;
+                    }
+                    int storagePartition = resolveStoragePartition(partition);
+                    IIndexDataflowHelper helper =
+                            indexHelperFactory.create(ctx.getJobletContext().getServiceContext(), storagePartition);
+                    helper.open();
+                    try {
+                        LSMVTreeLocalResource vcResource = unwrapVTreeResource(helper.getResource());
+                        if (vcResource == null || !vcResource.hasQuantizationParams()) {
+                            return;
+                        }
+                        List<Double> residualScalars = collectResidualScalars(ctx, in, fta, tuple, eval, inputVal,
+                                listAccessorConstant, kMeansUtils, partition, leafResult);
+                        if (residualScalars.isEmpty()) {
+                            return;
+                        }
+                        OptimizedScalarQuantizationCodec.Params residualParams =
+                                OptimizedScalarQuantizationCodec.computeParamsFromScalars(residualScalars,
+                                        vcResource.getBits(), vectorDimension, vcResource.getConfidenceInterval());
+                        VTreeQuantizationParams vtreeParams = new VTreeQuantizationParams(residualParams.minQuantile,
+                                residualParams.maxQuantile, residualParams.alpha, residualParams.confidenceInterval,
+                                residualParams.bits, residualParams.sampleCount);
+                        vcResource.setQuantizationParameters(vtreeParams);
+                        helper.persistResource();
+                        IIndex index = helper.getIndexInstance();
+                        if (index instanceof LSMVTree) {
+                            ((LSMVTree) index).replaceQuantizationParameters(vtreeParams);
+                        }
+                    } finally {
+                        helper.close();
+                    }
+                }
+
+                private List<Double> collectResidualScalars(IHyracksTaskContext ctx, GeneratedRunFileReader unused,
+                        FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
+                        ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int partition,
+                        ClusteringResult leafResult) throws HyracksDataException, IOException {
+                    List<Double> residualScalars = new ArrayList<>();
+                    GeneratedRunFileReader reader = resetRunFileReader(ctx, sampleUUID, partition);
+                    VSizeFrame frame = new VSizeFrame(ctx);
+                    int currentIdx = 0;
+                    int[] assignments = leafResult.assignments;
+                    List<double[]> centroids = leafResult.centroids;
+                    while (reader.nextFrame(frame)) {
+                        ByteBuffer buffer = frame.getBuffer();
+                        fta.reset(buffer);
+                        int tupleCount = fta.getTupleCount();
+                        for (int j = 0; j < tupleCount; j++) {
+                            if (currentIdx >= assignments.length) {
+                                return residualScalars;
+                            }
+                            tuple.reset(fta, j);
+                            eval.evaluate(tuple, inputVal);
+                            listAccessorConstant.reset(inputVal.getByteArray(), inputVal.getStartOffset());
+                            double[] point = kMeansUtils.createPrimitiveList(listAccessorConstant);
+                            int centroidIdx = assignments[currentIdx++];
+                            if (point == null || centroidIdx < 0 || centroidIdx >= centroids.size()) {
+                                continue;
+                            }
+                            double[] centroid = centroids.get(centroidIdx);
+                            int dims = Math.min(point.length, centroid.length);
+                            for (int d = 0; d < dims; d++) {
+                                residualScalars.add(point[d] - centroid[d]);
+                            }
+                        }
+                    }
+                    return residualScalars;
+                }
+
+                private LSMVTreeLocalResource unwrapVTreeResource(LocalResource localResource) {
+                    if (localResource == null) {
+                        return null;
+                    }
+                    IResource resource = localResource.getResource();
+                    if (resource instanceof DatasetLocalResource) {
+                        IResource wrapped = ((DatasetLocalResource) resource).getResource();
+                        if (wrapped instanceof LSMVTreeLocalResource) {
+                            return (LSMVTreeLocalResource) wrapped;
+                        }
+                    } else if (resource instanceof LSMVTreeLocalResource) {
+                        return (LSMVTreeLocalResource) resource;
+                    }
+                    return null;
+                }
+
+                /**
                  * Perform memory-efficient hierarchical K-means clustering using run files.
                  */
                 private HierarchicalClusterStructure performMemoryEfficientHierarchicalKMeans(IHyracksTaskContext ctx,
@@ -1145,6 +1279,11 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     if (initialResult.centroids.isEmpty()) {
                         return structure;
+                    }
+
+                    if (shouldComputeResidualQuantiles()) {
+                        writeResidualQuantiles(ctx, in, fta, tuple, eval, inputVal, listAccessorConstant, kMeansUtils,
+                                partition, initialResult);
                     }
 
                     // Extract embedding dimension and frame size for frame fit calculations
