@@ -99,6 +99,7 @@ public class VTreeSearchCursor extends EnforcedIndexCursor {
     private int tupleCount;
     private IIndexAccessor accessor;
     private IVTreeDistanceFunction distanceFunction;
+    private IVTreeDistanceFunction centroidDistanceFunction;
 
     // Multi-cluster support fields
     /* Total records iterated (before any LSM-layer filtering) */
@@ -250,6 +251,10 @@ public class VTreeSearchCursor extends EnforcedIndexCursor {
         return this.distanceFunction;
     }
 
+    public IVTreeDistanceFunction getCentroidDistanceFunction() {
+        return this.centroidDistanceFunction != null ? this.centroidDistanceFunction : this.distanceFunction;
+    }
+
     /**
      * Get the quantized query vector, or null if quantization is not configured.
      */
@@ -297,6 +302,7 @@ public class VTreeSearchCursor extends EnforcedIndexCursor {
             throw new IllegalStateException(
                     "VTreeSearchCursor opened without a distance function on the initial state");
         }
+        this.centroidDistanceFunction = vectorState.getCentroidDistanceFunction();
 
         // Extract quantized state from initial state (null = non-quantized path)
         this.quantizedQueryVector = vectorState.getQuantizedQueryVector();
@@ -323,7 +329,8 @@ public class VTreeSearchCursor extends EnforcedIndexCursor {
             }
 
             // Initialize DFS iterator and get first (closest) cluster
-            this.currentClusterResult = VTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
+            this.currentClusterResult =
+                    VTreeNavigationUtils.initializeClusterIterator(iteratorState, centroidDistanceFunction);
 
             if (this.currentClusterResult == null) {
                 // Empty tree
@@ -621,7 +628,7 @@ public class VTreeSearchCursor extends EnforcedIndexCursor {
             // Open next cluster and return immediately (even if empty)
             // Let LSMVTreeSearchCursor handle cluster synchronization
             ClusterSearchResult nextCluster =
-                    VTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
+                    VTreeNavigationUtils.findNextClosestCluster(iteratorState, centroidDistanceFunction);
 
             if (nextCluster == null) {
                 exhaustedAllClusters = true;
@@ -685,14 +692,15 @@ public class VTreeSearchCursor extends EnforcedIndexCursor {
 
         // Initialize if needed
         if (!iteratorState.initialized) {
-            ClusterSearchResult first = VTreeNavigationUtils.initializeClusterIterator(iteratorState, distanceFunction);
+            ClusterSearchResult first =
+                    VTreeNavigationUtils.initializeClusterIterator(iteratorState, centroidDistanceFunction);
             if (first != null) {
                 return first;
             }
         }
 
         // Get next from DFS (automatically skips visited via NavigationState)
-        return VTreeNavigationUtils.findNextClosestCluster(iteratorState, distanceFunction);
+        return VTreeNavigationUtils.findNextClosestCluster(iteratorState, centroidDistanceFunction);
     }
 
     /**

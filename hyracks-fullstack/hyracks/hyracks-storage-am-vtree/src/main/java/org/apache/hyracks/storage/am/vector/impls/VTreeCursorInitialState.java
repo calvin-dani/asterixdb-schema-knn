@@ -40,6 +40,7 @@ public class VTreeCursorInitialState implements ICursorInitialState {
     private MultiComparator originalKeyCmp;
     private final IIndexAccessor accessor;
     private IVTreeDistanceFunction distanceFunction;
+    private IVTreeDistanceFunction centroidDistanceFunction;
     private double[] quantizedQueryVector;
     private IVTreeQuantizer quantizer;
 
@@ -131,10 +132,22 @@ public class VTreeCursorInitialState implements ICursorInitialState {
     }
 
     /**
-     * Get the distance function for vector distance calculations.
+     * Get the distance function for vector distance calculations (leaf / tuple scoring).
      */
     public IVTreeDistanceFunction getDistanceFunction() {
         return distanceFunction;
+    }
+
+    /**
+     * Distance for comparing a query to a stored centroid. Falls back to {@link #getDistanceFunction()}
+     * when unset so existing tests that only set the leaf function keep working.
+     */
+    public void setCentroidDistanceFunction(IVTreeDistanceFunction centroidDistanceFunction) {
+        this.centroidDistanceFunction = centroidDistanceFunction;
+    }
+
+    public IVTreeDistanceFunction getCentroidDistanceFunction() {
+        return centroidDistanceFunction != null ? centroidDistanceFunction : distanceFunction;
     }
 
     /**

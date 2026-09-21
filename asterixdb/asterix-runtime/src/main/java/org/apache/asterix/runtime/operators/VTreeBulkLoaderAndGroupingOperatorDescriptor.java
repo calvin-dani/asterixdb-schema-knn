@@ -135,6 +135,15 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
         return new VectorDistanceFunctionFactory(metric).createDistanceFunction();
     }
 
+    private static IVTreeDistanceFunction getCentroidDistanceFunction(String distanceType) throws HyracksDataException {
+        VectorSimilarityMetric metric = (distanceType == null) ? null : VectorSimilarityMetric.fromAlias(distanceType);
+        if (metric == null) {
+            throw HyracksDataException.create(ILLEGAL_STATE,
+                    "The index has a missing or unsupported 'similarity' metric: " + distanceType);
+        }
+        return new VectorDistanceFunctionFactory(metric).createCentroidDistanceFunction();
+    }
+
     /**
      * Convert IVTreeDistanceFunction to IVTreeDistanceFunction for use in Hyracks modules.
      *
@@ -316,6 +325,7 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
         private RecordDescriptor outputRecDesc;
         private IVTreeDistanceFunction distanceFunction;
         private IVTreeDistanceFunction hyracksDistanceFunction;
+        private IVTreeDistanceFunction centroidDistanceFunction;
         private OptimizedScalarQuantizationCodec.Params quantizationParams;
         private OptimizedScalarQuantizer quantizer; // nullable — created only for quantized indexes
 
@@ -395,8 +405,10 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
 
                 // Convert distance metric string to IVTreeDistanceFunction
                 distanceFunction = getDistanceFunction(distanceMetric);
-                // Wrap for use in Hyracks modules
+                // Wrap for RNG pairwise centroid distances (leaf metric). Navigation uses the centroid
+                // function so DOT can route by angle while stored tuple scores stay -dot.
                 hyracksDistanceFunction = wrapDistanceFunction(distanceFunction);
+                centroidDistanceFunction = getCentroidDistanceFunction(distanceMetric);
 
                 // Evaluator for extracting the embedding from each input tuple (reused per record).
                 embeddingEval = args.createScalarEvaluator(new EvaluatorContext(ctx));
@@ -561,12 +573,12 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
                     throw new IllegalStateException("VTreeAccessor not initialized");
                 }
 
-                if (distanceFunction == null) {
+                if (centroidDistanceFunction == null) {
                     // TODO(vector-errors): uncoded IllegalStateException -> reaches the user as "Internal error".
-                    throw new IllegalStateException("DistanceFunction not initialized");
+                    throw new IllegalStateException("CentroidDistanceFunction not initialized");
                 }
 
-                return vcTreeAccessor.findCloseCentroidsLevelWiseGlobalSort(queryVector, hyracksDistanceFunction, epi);
+                return vcTreeAccessor.findCloseCentroidsLevelWiseGlobalSort(queryVector, centroidDistanceFunction, epi);
 
             } catch (IllegalArgumentException | IllegalStateException e) {
                 throw e;
@@ -623,7 +635,7 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
                                             double[] qEmb = quantizedEmbedding != null ? quantizedEmbedding
                                                     : quantizer.quantize(embedding);
                                             double[] qCen = quantizer.quantize(result.centroid);
-                                            double qDist = hyracksDistanceFunction.apply(qEmb, qCen);
+                                            double qDist = centroidDistanceFunction.apply(qEmb, qCen);
                                             result = ClusterSearchResult.create(result.leafPageId, result.clusterIndex,
                                                     result.centroid, result.distance, result.centroidId,
                                                     result.directoryPageId, qDist);

@@ -1491,8 +1491,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     return similarityMetric == VectorSimilarityMetric.COSINE;
                 }
 
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means assignment uses spherical centroid distance")
                 private static IVTreeDistanceFunction distanceFunctionFor(VectorSimilarityMetric metric) {
-                    return new VectorDistanceFunctionFactory(metric).createDistanceFunction();
+                    // DOT assign/seed uses spherical -(v·c)/||c||; cosine/L2 keep the leaf metric.
+                    return new VectorDistanceFunctionFactory(metric).createCentroidDistanceFunction();
                 }
             };
         }

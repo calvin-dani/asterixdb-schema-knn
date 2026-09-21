@@ -60,6 +60,14 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
         }
     }
 
+    @Override
+    public IVTreeDistanceFunction createCentroidDistanceFunction() {
+        if ("dot".equals(metric)) {
+            return TestVTreeDistanceFunctionFactory::negSphericalDot;
+        }
+        return createDistanceFunction();
+    }
+
     private static double euclideanSquared(double[] a, double[] b) {
         double sum = 0.0;
         for (int i = 0; i < a.length; i++) {
@@ -92,6 +100,20 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
             dot += a[i] * b[i];
         }
         return -dot;
+    }
+
+    /** -(a · b) / ||b||, matching asterix-runtime DOT spherical centroid routing. */
+    private static double negSphericalDot(double[] a, double[] b) {
+        double dot = 0.0;
+        double normB = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normB += b[i] * b[i];
+        }
+        if (normB == 0.0) {
+            return 0.0;
+        }
+        return -dot / Math.sqrt(normB);
     }
 
     @Override

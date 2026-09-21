@@ -53,6 +53,11 @@ public class VectorDistanceCalculation {
     /** Negated dot product as an {@link IVTreeDistanceFunction}, so that smaller still means nearer. */
     public static final IVTreeDistanceFunction DOT_DISTANCE_FN = new DotDistanceFunction();
 
+    /**
+     * DOT centroid routing: {@code -(v · c) / ||c||}. Leaf scoring stays {@link #DOT_DISTANCE_FN}.
+     */
+    public static final IVTreeDistanceFunction DOT_SPHERICAL_CENTROID_FN = new DotSphericalCentroidFunction();
+
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_OPUS_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Fused decode+measure")
     private static final class EuclideanSquaredFunction implements IVTreeDistanceFunction {
         @Override
@@ -127,6 +132,25 @@ public class VectorDistanceCalculation {
         @Override
         public double decodeAndApply(double[] query, byte[] bytes, int offset, int length) throws HyracksDataException {
             return fusedDotDistance(query, bytes, offset, length, null);
+        }
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT spherical centroid distance for VTree routing")
+    private static final class DotSphericalCentroidFunction implements IVTreeDistanceFunction {
+        @Override
+        public double apply(double[] a, double[] b) {
+            return dotSphericalCentroidDistance(a, b);
+        }
+
+        @Override
+        public double decodeAndApply(double[] query, byte[] bytes, int offset, int length, double[] dst)
+                throws HyracksDataException {
+            return fusedDotSphericalCentroidDistance(query, bytes, offset, length, dst);
+        }
+
+        @Override
+        public double decodeAndApply(double[] query, byte[] bytes, int offset, int length) throws HyracksDataException {
+            return fusedDotSphericalCentroidDistance(query, bytes, offset, length, null);
         }
     }
 
@@ -209,6 +233,26 @@ public class VectorDistanceCalculation {
     }
 
     /**
+     * C-SPANN-style IP assign/route: angle to the stored mean, {@code -(q · c) / ||c||}.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT spherical centroid distance for VTree routing")
+    public static double dotSphericalCentroidDistance(double[] query, double[] centroid) {
+        double dot = 0.0;
+        double normCentroid = 0.0;
+        for (int i = 0; i < query.length; i++) {
+            dot += query[i] * centroid[i];
+            normCentroid += centroid[i] * centroid[i];
+        }
+        if (Double.isNaN(dot) || Double.isNaN(normCentroid)) {
+            return Double.NaN;
+        }
+        if (normCentroid == 0.0) {
+            return 0.0;
+        }
+        return -dot / Math.sqrt(normCentroid);
+    }
+
+    /**
      * Sum of squared differences between {@code query} and the vector encoded at {@code bytes[offset..]},
      * decoding as it goes. {@code dst} receives the decoded vector, or may be {@code null} when the caller
      * only wants the distance — the check is loop-invariant, so the JIT hoists it out and the store
@@ -243,6 +287,30 @@ public class VectorDistanceCalculation {
             sum += query[i] * x;
         }
         return Double.isNaN(sum) ? Double.NaN : -sum;
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT spherical centroid distance for VTree routing")
+    private static double fusedDotSphericalCentroidDistance(double[] query, byte[] bytes, int offset, int length,
+            double[] dst) throws HyracksDataException {
+        int len = checkedLength(bytes, offset, length, dst);
+        double dot = 0.0;
+        double normCentroid = 0.0;
+        int pos = offset + Integer.BYTES;
+        for (int i = 0; i < len; i++, pos += Double.BYTES) {
+            double x = DoublePointable.getDouble(bytes, pos);
+            if (dst != null) {
+                dst[i] = x;
+            }
+            dot += query[i] * x;
+            normCentroid += x * x;
+        }
+        if (Double.isNaN(dot) || Double.isNaN(normCentroid)) {
+            return Double.NaN;
+        }
+        if (normCentroid == 0.0) {
+            return 0.0;
+        }
+        return -dot / Math.sqrt(normCentroid);
     }
 
     private static double fusedCosineDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)

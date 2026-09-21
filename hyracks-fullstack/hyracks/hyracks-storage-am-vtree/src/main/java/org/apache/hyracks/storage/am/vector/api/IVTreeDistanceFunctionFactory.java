@@ -21,6 +21,7 @@ package org.apache.hyracks.storage.am.vector.api;
 import java.io.Serializable;
 
 import org.apache.hyracks.api.io.IJsonSerializable;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Factory for {@link IVTreeDistanceFunction} instances. Supplied to the storage layer at
@@ -42,4 +43,15 @@ public interface IVTreeDistanceFunctionFactory extends Serializable, IJsonSerial
      * Hyracks never passes or is aware of a metric string. Must not return {@code null}.
      */
     IVTreeDistanceFunction createDistanceFunction();
+
+    /**
+     * Distance used to compare a vector against a stored centroid (tree walk, k-means assignment,
+     * insert grouping). Defaults to {@link #createDistanceFunction()}. DOT overrides this with
+     * {@code -(v · c) / ||c||} so high-norm means do not steal partitions; leaf scoring stays on
+     * {@link #createDistanceFunction()} ({@code -dot}).
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Centroid vs leaf distance split for DOT spherical routing")
+    default IVTreeDistanceFunction createCentroidDistanceFunction() {
+        return createDistanceFunction();
+    }
 }

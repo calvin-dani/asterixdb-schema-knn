@@ -89,9 +89,12 @@ public class VTree extends AbstractTreeIndex {
     // null = non-quantized index.
     private final VTreeQuantizationParams quantizationParams;
     private final IVTreeDistanceFunctionFactory distanceFunctionFactory;
-    // Distance function for this index's metric, used by the write/clustering path; search builds
-    // per-query functions from the factory.
+    // Leaf/tuple distance for this index's metric (DOT = -dot). Search builds per-query functions
+    // from the factory; write path uses the instances below.
     private final IVTreeDistanceFunction distanceFunction;
+    // Compare a vector against a stored mean centroid. Same as distanceFunction except DOT, which
+    // uses -(v · c) / ||c|| so high-norm means do not steal partitions.
+    private final IVTreeDistanceFunction centroidDistanceFunction;
     // Cross-pollination placement parameters (M=1 = legacy single-closest). Threaded from the index
     // WITH clause so incremental insert/delete replicate into the same leaf clusters as bulk-load.
     private final CrossPollinationConfig crossPollination;
@@ -139,6 +142,7 @@ public class VTree extends AbstractTreeIndex {
         this.quantizationParams = quantizationParams;
         this.distanceFunctionFactory = distanceFunctionFactory;
         this.distanceFunction = distanceFunctionFactory.createDistanceFunction();
+        this.centroidDistanceFunction = distanceFunctionFactory.createCentroidDistanceFunction();
         this.crossPollination = Objects.requireNonNull(crossPollination, "crossPollination");
         this.pageMutator =
                 new VTreePageMutator(bufferCache, freePageManager, metadataFrameFactory, quantizationParams != null);
@@ -224,7 +228,7 @@ public class VTree extends AbstractTreeIndex {
         for (ClusterSearchResult clusterResult : findReplicaClusters(vector)) {
             try (ClusterAccessResult accessResult = prepareClusterAccess(clusterResult, ctx)) {
                 // Distance is to THIS cluster's centroid so each replica's stored key is self-consistent.
-                double distance = distanceFunction.apply(vector, clusterResult.centroid);
+                double distance = centroidDistanceFunction.apply(vector, clusterResult.centroid);
                 pageMutator.insertIntoDataPages(accessResult.metadataPageId(), vector, distance,
                         clusterResult.centroidId, tuple, ctx, getFileId());
             }
@@ -253,7 +257,7 @@ public class VTree extends AbstractTreeIndex {
         // eps/M/rng on the immutable static structure), so each replica is matched in its own cluster.
         for (ClusterSearchResult clusterResult : findReplicaClusters(vector)) {
             try (ClusterAccessResult accessResult = prepareClusterAccess(clusterResult, ctx)) {
-                double distance = distanceFunction.apply(vector, clusterResult.centroid);
+                double distance = centroidDistanceFunction.apply(vector, clusterResult.centroid);
 
                 // Try to find and physically delete tuple from data pages (Scenarios 2 & 3)
                 boolean foundAndDeleted = pageMutator.tryPhysicalDelete(accessResult.metadataPageId(), distance,
@@ -552,14 +556,15 @@ public class VTree extends AbstractTreeIndex {
         // matter, so search-time reconciliation could never cancel it and the deleted record leaked in ANN
         // results (~66% of bulk-loaded deletes at some k-means seeds). One routing function across bulk-load,
         // insert and delete guarantees matter and antimatter always agree on cluster and distance-to-centroid.
-        List<ClusterSearchResult> candidates =
-                findCloseCentroidsLevelWiseGlobalSortFromRoot(vector, distanceFunction, crossPollination.epsilon());
+        List<ClusterSearchResult> candidates = findCloseCentroidsLevelWiseGlobalSortFromRoot(vector,
+                centroidDistanceFunction, crossPollination.epsilon());
         List<ClusterSearchResult> accepted = RngAcceptanceFilter.accept(candidates, distanceFunction,
                 crossPollination.rngFactor(), crossPollination.m(), null);
         if (accepted.isEmpty()) {
             // Defensive: navigation found nothing within eps — never silently drop the record; fall back to
             // the single closest cluster.
-            return Collections.singletonList(requireCluster(findClosestClusterFromRoot(vector, distanceFunction)));
+            return Collections
+                    .singletonList(requireCluster(findClosestClusterFromRoot(vector, centroidDistanceFunction)));
         }
         return accepted;
     }
@@ -708,9 +713,12 @@ public class VTree extends AbstractTreeIndex {
             // Extract query vector and distance metric from predicate using the accessor factory
             // The predicate holds the tuple reference (updated per-tuple in resetSearchPredicate)
             double[] queryVector = extractQueryVector(searchPred);
-            IVTreeDistanceFunction distanceFunction = resolveDistanceFunctionFactory().createDistanceFunction();
+            IVTreeDistanceFunctionFactory factory = resolveDistanceFunctionFactory();
+            IVTreeDistanceFunction distanceFunction = factory.createDistanceFunction();
+            IVTreeDistanceFunction centroidDistanceFunction = factory.createCentroidDistanceFunction();
 
-            VTreeCursorInitialState initialState = buildInitialState(queryVector, distanceFunction);
+            VTreeCursorInitialState initialState =
+                    buildInitialState(queryVector, distanceFunction, centroidDistanceFunction);
             resolveAndSetQuantizer(initialState, queryVector);
 
             // Open the cursor - it will perform centroid finding and position on data pages
@@ -737,9 +745,9 @@ public class VTree extends AbstractTreeIndex {
             return queryDistanceFunctionFactory != null ? queryDistanceFunctionFactory : tree.distanceFunctionFactory;
         }
 
-        /** Build the cursor initial state: root page (static for memory components), query vector, metric fn. */
-        private VTreeCursorInitialState buildInitialState(double[] queryVector,
-                IVTreeDistanceFunction distanceFunction) {
+        /** Build the cursor initial state: root page (static for memory components), query vector, metric fns. */
+        private VTreeCursorInitialState buildInitialState(double[] queryVector, IVTreeDistanceFunction distanceFunction,
+                IVTreeDistanceFunction centroidDistanceFunction) {
             VTreeCursorInitialState initialState = new VTreeCursorInitialState(ctx.getAccessor());
             // For memory components, use staticRootPage (the static structure's root);
             // for disk components, use the tree's own rootPage
@@ -748,6 +756,7 @@ public class VTree extends AbstractTreeIndex {
                 initialState.setQueryVector(queryVector);
             }
             initialState.setDistanceFunction(distanceFunction);
+            initialState.setCentroidDistanceFunction(centroidDistanceFunction);
             return initialState;
         }
 

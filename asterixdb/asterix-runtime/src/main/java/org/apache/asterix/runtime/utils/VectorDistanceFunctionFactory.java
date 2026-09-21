@@ -25,6 +25,7 @@ import org.apache.hyracks.api.io.IJsonSerializable;
 import org.apache.hyracks.api.io.IPersistedResourceRegistry;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -65,6 +66,13 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
     @Override
     public IVTreeDistanceFunction createDistanceFunction() {
         return functionFor(metric);
+    }
+
+    @Override
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT centroid routing uses spherical -dot/||c||")
+    public IVTreeDistanceFunction createCentroidDistanceFunction() {
+        return metric == VectorSimilarityMetric.DOT ? VectorDistanceCalculation.DOT_SPHERICAL_CENTROID_FN
+                : functionFor(metric);
     }
 
     // Persisted form: the class identifier plus the metric this factory was created with, so the metric

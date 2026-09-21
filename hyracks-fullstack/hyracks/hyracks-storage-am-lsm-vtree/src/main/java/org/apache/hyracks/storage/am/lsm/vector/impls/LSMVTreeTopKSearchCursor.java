@@ -296,7 +296,8 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
             // Initialize strategy with first component's tree (candidateLimit so we collect 2*K for reranking)
             ILSMComponent firstComponent = operationalComponents.get(0);
             VTree vTree = (VTree) firstComponent.getIndex();
-            clusterStrategy.initialize(vTree, queryVector, distanceFunction, candidateLimit);
+            clusterStrategy.initialize(vTree, queryVector, firstSearchCursor.getCentroidDistanceFunction(),
+                    candidateLimit);
 
             // Set first cursor for DFS fallback
             clusterStrategy.setFirstCursorForDFS(firstSearchCursor);

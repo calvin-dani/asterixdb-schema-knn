@@ -118,6 +118,28 @@ public class VectorDistanceFunctionFactoryTest {
         Assert.assertEquals(VectorSimilarityMetric.values().length * 400, comparisons);
     }
 
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT centroid routing is spherical; leaf stays -dot")
+    @Test
+    public void dotCentroidFunctionIsSphericalNotNegDot() throws Exception {
+        VectorDistanceFunctionFactory factory = new VectorDistanceFunctionFactory(VectorSimilarityMetric.DOT);
+        IVTreeDistanceFunction leaf = factory.createDistanceFunction();
+        IVTreeDistanceFunction centroid = factory.createCentroidDistanceFunction();
+        double[] q = { 3.0, 0.0 };
+        double[] c = { 6.0, 0.0 };
+        Assert.assertEquals(-18.0, leaf.apply(q, c), 0.0);
+        Assert.assertEquals(-3.0, centroid.apply(q, c), 1e-12);
+        for (VectorSimilarityMetric metric : VectorSimilarityMetric.values()) {
+            if (metric == VectorSimilarityMetric.DOT) {
+                continue;
+            }
+            VectorDistanceFunctionFactory f = new VectorDistanceFunctionFactory(metric);
+            Assert.assertSame(metric.name(), f.createDistanceFunction(), f.createCentroidDistanceFunction());
+        }
+        byte[] enc = encode(c);
+        double[] dst = new double[2];
+        Assert.assertEquals(centroid.apply(q, c), centroid.decodeAndApply(q, enc, 0, enc.length, dst), 0.0);
+    }
+
     /** A wrong-sized destination is a programming error and must be rejected, not silently truncated. */
     @Test
     public void wrongSizedDestinationIsRejected() throws Exception {

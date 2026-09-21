@@ -268,7 +268,7 @@ public class LSMVTreeSearchCursor extends LSMIndexSearchCursor {
             // Initialize strategy with first component's tree
             ILSMComponent firstComponent = operationalComponents.get(0);
             VTree vTree = (VTree) firstComponent.getIndex();
-            clusterStrategy.initialize(vTree, queryVector, firstCursor.getDistanceFunction(), K);
+            clusterStrategy.initialize(vTree, queryVector, firstCursor.getCentroidDistanceFunction(), K);
 
             // Set first cursor for DFS fallback
             clusterStrategy.setFirstCursorForDFS(firstCursor);
