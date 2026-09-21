@@ -54,7 +54,7 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
             case "cosine":
                 return TestVTreeDistanceFunctionFactory::cosineDistance;
             case "dot":
-                return TestVTreeDistanceFunctionFactory::negDotProduct;
+                return TestVTreeDistanceFunctionFactory::oneMinusDot;
             default: // euclidean / l2
                 return (a, b) -> Math.sqrt(euclideanSquared(a, b));
         }
@@ -85,13 +85,13 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
         return 1.0 - dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    /** -dot(a, b), so smaller = more similar (MIPS convention). */
-    private static double negDotProduct(double[] a, double[] b) {
+    /** 1 - dot(a, b), so smaller = more similar (MIPS convention, cosine-shaped epsilon window). */
+    private static double oneMinusDot(double[] a, double[] b) {
         double dot = 0.0;
         for (int i = 0; i < a.length; i++) {
             dot += a[i] * b[i];
         }
-        return -dot;
+        return 1.0 - dot;
     }
 
     @Override

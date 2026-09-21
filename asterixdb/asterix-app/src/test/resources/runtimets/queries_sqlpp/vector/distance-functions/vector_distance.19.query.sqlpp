@@ -17,7 +17,7 @@
  * under the License.
  */
 
-// vector_distance DOT returns dot distance (-dot product). Name order must match vector_distance.8 (dot_product DESC).
+// vector_distance DOT returns 1 - inner product. Name order must match vector_distance.8 (dot_product DESC).
 USE VectorVerse;
 SELECT row.name AS name, vector_distance(row.embedding, [0.1, 0.2], "DOT") AS distance
 FROM vectorDataset row
