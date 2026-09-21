@@ -66,6 +66,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.LSMIndexDiskComponentBulkL
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMTreeIndexAccessor.ICursorFactory;
 import org.apache.hyracks.storage.am.lsm.common.impls.LSMVTreeComponentFileReferences;
 import org.apache.hyracks.storage.am.lsm.common.impls.LoadOperation;
+import org.apache.hyracks.storage.am.lsm.common.impls.TreeIndexFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeBinaryAccessorFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDataTupleBuilderFactory;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunctionFactory;
@@ -121,7 +122,7 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
     protected final IVTreeDataTupleBuilderFactory dataTupleBuilderFactory;
 
     // Raw quantization params for lazy quantizer creation at query time (null = non-quantized path)
-    protected final VTreeQuantizationParams quantizationParams;
+    protected VTreeQuantizationParams quantizationParams;
     protected final IVTreeDistanceFunctionFactory distanceFunctionFactory;
     protected final CrossPollinationConfig crossPollination;
 
@@ -329,6 +330,54 @@ public class LSMVTree extends AbstractLSMIndex implements ITreeIndex {
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_FABLE_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED)
     public boolean isQuantized() {
         return quantizationParams != null || dataTupleBuilderFactory.isQuantized();
+    }
+
+    /**
+     * Whether quantized field 3 stores SQ(x − c) (DOT residual) rather than SQ(x).
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual SQ search/write flag")
+    public boolean isDataEmbeddingResidual() {
+        return dataTupleBuilderFactory.isDataEmbeddingResidual();
+    }
+
+    public VTreeQuantizationParams getQuantizationParams() {
+        return quantizationParams;
+    }
+
+    /**
+     * After DOT k-means, replace Job 1 raw-x quantiles with residual minQ/maxQ/alpha so Job 3 bulk
+     * load, later disk components, memory inserts, and TopK dequant all agree.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Propagate residual quantiles to factory and live VTrees")
+    public void replaceQuantizationParameters(VTreeQuantizationParams params) {
+        this.quantizationParams = params;
+        replaceFactoryQuantization(componentFactory, params);
+        replaceFactoryQuantization(bulkLoadComponentFactory, params);
+        if (memoryComponents != null) {
+            for (ILSMMemoryComponent memoryComponent : memoryComponents) {
+                if (memoryComponent.getIndex() instanceof VTree) {
+                    ((VTree) memoryComponent.getIndex()).replaceQuantizationParameters(params);
+                }
+            }
+        }
+        if (staticStructure != null) {
+            staticStructure.getIndex().replaceQuantizationParameters(params);
+        }
+        for (ILSMDiskComponent diskComponent : diskComponents) {
+            if (diskComponent instanceof LSMVTreeDiskComponent) {
+                ((LSMVTreeDiskComponent) diskComponent).getIndex().replaceQuantizationParameters(params);
+            }
+        }
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Propagate residual quantiles to a VTree disk-component factory")
+    private static void replaceFactoryQuantization(ILSMDiskComponentFactory factory, VTreeQuantizationParams params) {
+        if (factory instanceof LSMVTreeDiskComponentFactory) {
+            TreeIndexFactory<VTree> vTreeFactory = ((LSMVTreeDiskComponentFactory) factory).getVTreeFactory();
+            if (vTreeFactory instanceof VTreeFactory) {
+                ((VTreeFactory) vTreeFactory).replaceQuantizationParameters(params);
+            }
+        }
     }
 
     public int getNumPrimaryKeyFields() {

@@ -159,6 +159,9 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
     private int antimatterCancellations;
     private int tuplesFilteredOut;
     private int validTuplesFromCurrentCluster; // Valid tuples from current cluster (for empty-cluster nprobe)
+    // DOT residual scoring: field 3 is SQ(x-c); heap key is -(q·c + q·r̂) with raw q.
+    private boolean residualScoring;
+    private double qDotC;
 
     public LSMVTreeTopKSearchCursor(ILSMIndexOperationContext opCtx) {
         this.opCtx = opCtx;
@@ -199,6 +202,7 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
                     "LSMVTreeTopKSearchCursor requires a quantized VTree index (USE_TOPK_SEARCH was requested for a "
                             + "non-quantized index)");
         }
+        this.residualScoring = ((LSMVTree) opCtx.getIndex()).isDataEmbeddingResidual();
         LSMVTreeUtils.validateKeyComparators(cmp, pkStartField, numPrimaryKeyFields);
 
         // Extract tuple filter from search predicate for INCLUDE field predicates
@@ -373,6 +377,11 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
         }
 
         clustersExplored = 1; // First cluster opened
+        ClusterSearchResult firstOpened = clusterStrategy != null ? clusterStrategy.getFirstCluster() : null;
+        if (firstOpened == null && firstSearchCursor != null) {
+            firstOpened = firstSearchCursor.getCurrentClusterResult();
+        }
+        cacheQueryDotCentroid(firstOpened);
 
         // If all components started empty, advance to next cluster
         if (allComponentsExhausted()) {
@@ -579,6 +588,7 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
 
             LOGGER.trace("Advancing to cluster cid={}, distance={}, dirPage={}", nextCluster.centroidId,
                     nextCluster.distance, nextCluster.directoryPageId);
+            cacheQueryDotCentroid(nextCluster);
 
             // Open all components to this cluster
             for (int i = 0; i < numComponents; i++) {
@@ -690,13 +700,47 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
      * float query. That is asymmetric SQ: {@code y · x̂} with {@code x̂_i = q_i/alpha + minQ},
      * which is the same linear map {@code (1/alpha) Σ(y_i q_i) + minQ Σ y_i}. The query is
      * not re-quantized (symmetric {@code ŷ · x̂} was extra error on tight inner-product gaps).
+     * DOT residual indexes score {@code -(q·c + q·r̂)} with raw {@code q} instead.
      */
     @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Asymmetric SQ: float query vs dequantized codes")
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
         // Quantized embedding content bytes (field 3, ByteArrayPointable prefix stripped) → dequantize.
         byte[] qBytes = dataAccessor.getQuantizedEmbedding(tuple);
         double[] dequantized = quantizer.dequantize(qBytes);
+        if (residualScoring) {
+            return residualDotScore(queryVector, dequantized, qDotC);
+        }
         return distanceFunction.apply(queryVector, dequantized);
+    }
+
+    /**
+     * Cache {@code q · c} from the leaf centroid on cluster open. DOT residual scoring adds
+     * {@code q · r̂} per tuple; the centroid inner product is exact and shared by the leaf.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Cache q·c on leaf open for DOT residual ANN")
+    private void cacheQueryDotCentroid(ClusterSearchResult cluster) {
+        qDotC = 0.0;
+        if (!residualScoring || cluster == null || cluster.centroid == null || queryVector == null) {
+            return;
+        }
+        double[] centroid = cluster.centroid;
+        int n = Math.min(queryVector.length, centroid.length);
+        for (int i = 0; i < n; i++) {
+            qDotC += queryVector[i] * centroid[i];
+        }
+    }
+
+    /**
+     * DOT residual heap score: {@code -(q·c + q·r̂)} using raw {@code q} (asymmetric).
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual TopK score -(q·c + q·r̂)")
+    public static double residualDotScore(double[] query, double[] residualHat, double queryDotCentroid) {
+        double qDotR = 0.0;
+        int n = Math.min(query.length, residualHat.length);
+        for (int i = 0; i < n; i++) {
+            qDotR += query[i] * residualHat[i];
+        }
+        return -(queryDotCentroid + qDotR);
     }
 
     // ==================== IIndexCursor Interface (EnforcedIndexCursor template methods) ====================

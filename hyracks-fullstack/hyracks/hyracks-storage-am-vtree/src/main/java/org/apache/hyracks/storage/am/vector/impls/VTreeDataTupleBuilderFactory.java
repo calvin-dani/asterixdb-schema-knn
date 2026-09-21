@@ -22,6 +22,7 @@ package org.apache.hyracks.storage.am.vector.impls;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDataTupleBuilder;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDataTupleBuilderFactory;
 import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Factory for creating {@link VTreeDataTupleBuilder} instances.
@@ -33,23 +34,35 @@ import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
  */
 public class VTreeDataTupleBuilderFactory implements IVTreeDataTupleBuilderFactory {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
     private final int numIncludeFields;
     private final boolean isQuantized;
+    private final boolean dataEmbeddingIsResidual;
 
     public VTreeDataTupleBuilderFactory(int numIncludeFields, boolean isQuantized) {
+        this(numIncludeFields, isQuantized, false);
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual SQ flag on data-tuple factory")
+    public VTreeDataTupleBuilderFactory(int numIncludeFields, boolean isQuantized, boolean dataEmbeddingIsResidual) {
         this.numIncludeFields = numIncludeFields;
         this.isQuantized = isQuantized;
+        this.dataEmbeddingIsResidual = dataEmbeddingIsResidual;
     }
 
     @Override
     public IVTreeDataTupleBuilder createDataTupleBuilder(VTreeQuantizationParams quantizationParams) {
-        return new VTreeDataTupleBuilder(numIncludeFields, isQuantized, quantizationParams);
+        return new VTreeDataTupleBuilder(numIncludeFields, isQuantized, quantizationParams, dataEmbeddingIsResidual);
     }
 
     @Override
     public boolean isQuantized() {
         return isQuantized;
+    }
+
+    @Override
+    public boolean isDataEmbeddingResidual() {
+        return dataEmbeddingIsResidual;
     }
 }

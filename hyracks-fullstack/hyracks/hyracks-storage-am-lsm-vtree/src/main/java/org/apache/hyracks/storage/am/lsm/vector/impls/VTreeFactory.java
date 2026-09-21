@@ -33,6 +33,7 @@ import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
 import org.apache.hyracks.storage.am.vector.impls.VTree;
 import org.apache.hyracks.storage.am.vector.utils.CrossPollinationConfig;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
+import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Factory for creating VTree instances used as disk components in LSM Vector Clustering Trees.
@@ -44,7 +45,7 @@ public class VTreeFactory extends TreeIndexFactory<VTree> {
     private final int vectorDimensions;
     private final IVTreeBinaryAccessorFactory vectorAccessorFactory;
     private final IVTreeDataTupleBuilderFactory dataTupleBuilderFactory;
-    private final VTreeQuantizationParams quantizationParams;
+    private VTreeQuantizationParams quantizationParams;
     private final IVTreeDistanceFunctionFactory distanceFunctionFactory;
     private final CrossPollinationConfig crossPollination;
 
@@ -65,6 +66,11 @@ public class VTreeFactory extends TreeIndexFactory<VTree> {
         this.quantizationParams = quantizationParams;
         this.distanceFunctionFactory = distanceFunctionFactory;
         this.crossPollination = crossPollination;
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Swap in residual quantiles after Job 2 so Job 3 disk VTrees encode/search with them")
+    public void replaceQuantizationParameters(VTreeQuantizationParams params) {
+        this.quantizationParams = params;
     }
 
     @Override

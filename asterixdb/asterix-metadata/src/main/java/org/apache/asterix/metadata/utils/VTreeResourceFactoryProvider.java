@@ -94,20 +94,13 @@ public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
         List<List<String>> includeFieldNames = vectorIndexDetails.getIncludeFieldNames();
         int numIncludeFields = (includeFieldNames != null) ? includeFieldNames.size() : 0;
 
-        // Determine data tuple creator factory based on whether the index is quantized
-        boolean isQuantized = vectorParameters.isQuantized();
-        IVTreeDataTupleBuilderFactory dataTupleBuilderFactory;
-        if (isQuantized) {
-            dataTupleBuilderFactory = new VTreeDataTupleBuilderFactory(numIncludeFields, true);
-        } else {
-            dataTupleBuilderFactory = new VTreeDataTupleBuilderFactory(numIncludeFields, false);
-        }
-
         List<List<String>> primaryKeyFields = dataset.getPrimaryKeys();
         int numPrimaryKeys = primaryKeyFields.size();
 
         IStorageComponentProvider storageComponentProvider = mdProvider.getStorageComponentProvider();
         ITypeTraitProvider typeTraitProvider = mdProvider.getDataFormat().getTypeTraitProvider();
+
+        boolean isQuantized = vectorParameters.isQuantized();
 
         // Get type traits and comparator factories (conditional on quantization)
         ITypeTraits[] typeTraits = getTypeTraits(mdProvider, dataset, index, recordType, metaType, isQuantized);
@@ -148,6 +141,10 @@ public class VTreeResourceFactoryProvider implements IResourceFactoryProvider {
             // Threaded onto the resource so insert/delete/bulkload routing uses the user's metric even
             // after the resource is reconstituted from JSON (e.g., after NC restart).
             VectorSimilarityMetric distanceMetric = vectorParameters.getSimilarity();
+
+            // DOT quantized indexes store SQ(x − c) in field 3; cosine/L2 and non-quantized stay SQ(x).
+            IVTreeDataTupleBuilderFactory dataTupleBuilderFactory = new VTreeDataTupleBuilderFactory(numIncludeFields,
+                    isQuantized, isQuantized && distanceMetric == VectorSimilarityMetric.DOT);
 
             // Cross-pollination placement: read the SAME WITH-clause params (with the SAME defaults) that
             // the bulk-load job uses in SecondaryVectorOperationsHelper#buildLoadingJobSpec, so incremental

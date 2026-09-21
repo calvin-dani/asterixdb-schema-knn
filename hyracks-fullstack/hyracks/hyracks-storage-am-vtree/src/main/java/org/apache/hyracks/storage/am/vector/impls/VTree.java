@@ -86,8 +86,9 @@ public class VTree extends AbstractTreeIndex {
     private final IVTreeBinaryAccessorFactory vectorAccessorFactory;
     private final IVTreeDataTupleBuilderFactory dataTupleBuilderFactory;
     // Raw quantization params: {minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount}
-    // null = non-quantized index.
-    private final VTreeQuantizationParams quantizationParams;
+    // null = non-quantized index. Mutable so DOT residual quantiles computed after k-means can replace
+    // Job 1 raw-x params before bulk-load and incremental insert.
+    private VTreeQuantizationParams quantizationParams;
     private final IVTreeDistanceFunctionFactory distanceFunctionFactory;
     // Distance function for this index's metric, used by the write/clustering path; search builds
     // per-query functions from the factory.
@@ -226,7 +227,7 @@ public class VTree extends AbstractTreeIndex {
                 // Distance is to THIS cluster's centroid so each replica's stored key is self-consistent.
                 double distance = distanceFunction.apply(vector, clusterResult.centroid);
                 pageMutator.insertIntoDataPages(accessResult.metadataPageId(), vector, distance,
-                        clusterResult.centroidId, tuple, ctx, getFileId());
+                        clusterResult.centroidId, tuple, clusterResult.centroid, ctx, getFileId());
             }
         }
     }
@@ -264,7 +265,7 @@ public class VTree extends AbstractTreeIndex {
                     // insertIntoDataPages, which handles empty metadata pages, page splits, and metadata
                     // max-distance updates.
                     pageMutator.insertIntoDataPages(accessResult.metadataPageId(), vector, distance,
-                            clusterResult.centroidId, tuple, ctx, getFileId());
+                            clusterResult.centroidId, tuple, clusterResult.centroid, ctx, getFileId());
                 }
             }
         }
@@ -394,6 +395,14 @@ public class VTree extends AbstractTreeIndex {
      */
     public VTreeQuantizationParams getQuantizationParams() {
         return quantizationParams;
+    }
+
+    /**
+     * Replace Job 1 raw-x quantiles with residual minQ/maxQ/alpha after DOT k-means assignment.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Swap in residual quantiles after Job 2")
+    public void replaceQuantizationParameters(VTreeQuantizationParams params) {
+        this.quantizationParams = params;
     }
 
     public boolean isInitialized() {

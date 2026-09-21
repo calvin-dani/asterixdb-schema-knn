@@ -114,4 +114,9 @@ public class IndexDataflowHelper implements IIndexDataflowHelper {
     public LocalResource getResource() throws HyracksDataException {
         return localResourceRepository.get(resourceRef.getRelativePath());
     }
+
+    @Override
+    public void persistResource() throws HyracksDataException {
+        localResourceRepository.persist(getResource());
+    }
 }

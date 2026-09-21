@@ -29,6 +29,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.ITupleReference;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDataTupleBuilder;
 import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
 import org.apache.hyracks.storage.am.vector.utils.VTreeDataTupleAccessor;
+import org.apache.hyracks.util.annotations.AiProvenance;
 import org.apache.hyracks.util.encoding.VarLenIntEncoderDecoder;
 
 /**
@@ -46,6 +47,7 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
     private final int numIncludeFields;
 
     private final boolean isQuantized;
+    private final boolean dataEmbeddingIsResidual;
     private final VTreeQuantizationParams quantizationParams;
     private final ArrayTupleBuilder tupleBuilder;
     private final ArrayTupleReference tupleRef;
@@ -54,12 +56,20 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
     // Each produced value is copied into the tuple before the next call, so the buffers are safe to reuse.
     private final byte[] varlenMeta = new byte[5];
     private byte[] quantizeScratch;
+    private double[] residualScratch;
     private ByteBuffer fallbackBuf;
 
     public VTreeDataTupleBuilder(int numIncludeFields, boolean isQuantized,
             VTreeQuantizationParams quantizationParams) {
+        this(numIncludeFields, isQuantized, quantizationParams, false);
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual SQ into field 3")
+    public VTreeDataTupleBuilder(int numIncludeFields, boolean isQuantized, VTreeQuantizationParams quantizationParams,
+            boolean dataEmbeddingIsResidual) {
         this.numIncludeFields = numIncludeFields;
         this.isQuantized = isQuantized;
+        this.dataEmbeddingIsResidual = dataEmbeddingIsResidual;
         this.quantizationParams = quantizationParams;
         // Field order and count are owned by VTreeDataTupleAccessor: [secondary fields][1 PK][includes].
         int fieldCount = new VTreeDataTupleAccessor(isQuantized).numSecondaryFields() + 1 + numIncludeFields;
@@ -71,6 +81,12 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
     @Override
     public ITupleReference buildDataTuple(double[] vector, double distance, int centroidId,
             ITupleReference originalTuple) throws HyracksDataException {
+        return buildDataTuple(vector, distance, centroidId, originalTuple, null);
+    }
+
+    @Override
+    public ITupleReference buildDataTuple(double[] vector, double distance, int centroidId,
+            ITupleReference originalTuple, double[] centroid) throws HyracksDataException {
         try {
             tupleBuilder.reset();
             DataOutput dos = tupleBuilder.getDataOutput();
@@ -84,7 +100,7 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
             tupleBuilder.addFieldEndOffset();
 
             if (isQuantized) {
-                writeQuantizedFields(dos, vector, distance);
+                writeQuantizedFields(dos, vector, distance, centroid);
             }
 
             // PK field (at position 1 + numIncludeFields in input)
@@ -107,21 +123,33 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
         }
     }
 
-    private void writeQuantizedFields(DataOutput dos, double[] vector, double distance) throws Exception {
+    private void writeQuantizedFields(DataOutput dos, double[] vector, double distance, double[] centroid)
+            throws Exception {
         // Field 2: quantized distance (raw double)
         dos.writeDouble(distance);
         tupleBuilder.addFieldEndOffset();
 
         // Field 3: quantized embedding (VarLen length prefix + content bytes). Encode the prefix into the
         // reused varlenMeta buffer and write it straight to the output instead of allocating a byte[] per call.
-        byte[] quantizedEmbedding = quantizeVector(vector);
+        byte[] quantizedEmbedding = quantizeVector(vector, centroid);
         int metaLength = VarLenIntEncoderDecoder.encode(quantizedEmbedding.length, varlenMeta, 0);
         dos.write(varlenMeta, 0, metaLength);
         dos.write(quantizedEmbedding);
         tupleBuilder.addFieldEndOffset();
     }
 
-    private byte[] quantizeVector(double[] vector) {
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual: SQ(x-c) when flag and centroid are set")
+    private byte[] quantizeVector(double[] vector, double[] centroid) {
+        double[] toQuantize = vector;
+        if (dataEmbeddingIsResidual && centroid != null && centroid.length == vector.length) {
+            if (residualScratch == null || residualScratch.length != vector.length) {
+                residualScratch = new double[vector.length];
+            }
+            for (int i = 0; i < vector.length; i++) {
+                residualScratch[i] = vector[i] - centroid[i];
+            }
+            toQuantize = residualScratch;
+        }
         if (quantizationParams != null) {
             float minQ = quantizationParams.minQuantile();
             float maxQ = quantizationParams.maxQuantile();
@@ -129,12 +157,12 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
             int bits = quantizationParams.bits();
 
             int levels = 1 << bits;
-            if (quantizeScratch == null || quantizeScratch.length != vector.length) {
-                quantizeScratch = new byte[vector.length];
+            if (quantizeScratch == null || quantizeScratch.length != toQuantize.length) {
+                quantizeScratch = new byte[toQuantize.length];
             }
             byte[] result = quantizeScratch;
-            for (int i = 0; i < vector.length; i++) {
-                double value = Math.max(minQ, Math.min(maxQ, vector[i]));
+            for (int i = 0; i < toQuantize.length; i++) {
+                double value = Math.max(minQ, Math.min(maxQ, toQuantize[i]));
                 int quantizedValue = Math.toIntExact(Math.round((value - minQ) * alpha));
                 quantizedValue = Math.max(0, Math.min(levels - 1, quantizedValue));
                 result[i] = (byte) quantizedValue;
@@ -142,12 +170,12 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
             return result;
         }
         // Fallback: serialize full-precision vector as raw big-endian doubles (tests), reusing the buffer.
-        int byteLen = vector.length * Double.BYTES;
+        int byteLen = toQuantize.length * Double.BYTES;
         if (fallbackBuf == null || fallbackBuf.capacity() != byteLen) {
             fallbackBuf = ByteBuffer.allocate(byteLen);
         }
         fallbackBuf.clear();
-        for (double d : vector) {
+        for (double d : toQuantize) {
             fallbackBuf.putDouble(d);
         }
         return fallbackBuf.array();

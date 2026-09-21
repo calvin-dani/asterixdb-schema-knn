@@ -80,6 +80,11 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
     private static final String KEY_CROSS_POLLINATION_M = "crossPollinationM";
     private static final String KEY_RNG_FACTOR = "rngFactor";
     private static final String KEY_EPSILON = "epsilon";
+    /**
+     * When true, data-page field 3 stores SQ(x − c) rather than SQ(x). Set only for new DOT quantized
+     * indexes; missing on read means a pre-change DOT index that still scores SQ(x).
+     */
+    private static final String KEY_DATA_EMBEDDING_IS_RESIDUAL = "dataEmbeddingIsResidual";
 
     protected final int vectorDimensions;
     protected final int[] vectorFields;
@@ -262,6 +267,7 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         putIfNotNull(json, KEY_SAMPLE_COUNT, sampleCount);
         json.put("numPrimaryKeyFields", numPrimaryKeyFields);
         json.put("numIncludeFields", numIncludeFields);
+        json.put(KEY_DATA_EMBEDDING_IS_RESIDUAL, dataTupleBuilderFactory.isDataEmbeddingResidual());
     }
 
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_OPUS_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.ASSISTED, notes = "Fall back to CrossPollinationConfig's shared placement defaults rather than local "
@@ -304,8 +310,11 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         Integer sampleCount = readOptionalInt(json, KEY_SAMPLE_COUNT);
         // Determine quantized vs non-quantized based on presence of quantization parameters
         boolean isQuantized = (minQuantile != null);
+        // Missing key → pre-change index: field 3 is SQ(x) even for DOT, so search must not residual-score.
+        boolean dataEmbeddingIsResidual =
+                json.has(KEY_DATA_EMBEDDING_IS_RESIDUAL) && json.get(KEY_DATA_EMBEDDING_IS_RESIDUAL).asBoolean();
         IVTreeDataTupleBuilderFactory dataTupleBuilderFactory =
-                new VTreeDataTupleBuilderFactory(numIncludeFields, isQuantized);
+                new VTreeDataTupleBuilderFactory(numIncludeFields, isQuantized, dataEmbeddingIsResidual);
 
         // Cross-pollination params. appendToJson writes all three unconditionally, so their absence means
         // the resource is corrupt or foreign — fail fast, exactly as vectorDimensions and the two factories
