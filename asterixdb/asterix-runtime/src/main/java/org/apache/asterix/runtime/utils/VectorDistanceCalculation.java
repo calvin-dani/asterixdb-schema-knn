@@ -50,7 +50,7 @@ public class VectorDistanceCalculation {
     /** Cosine distance (1 - cosine similarity) as an {@link IVTreeDistanceFunction}. */
     public static final IVTreeDistanceFunction COSINE_DISTANCE_FN = new CosineDistanceFunction();
 
-    /** Negated dot product as an {@link IVTreeDistanceFunction}, so that smaller still means nearer. */
+    /** {@code 1 - dot} as an {@link IVTreeDistanceFunction}, so that smaller still means nearer. */
     public static final IVTreeDistanceFunction DOT_DISTANCE_FN = new DotDistanceFunction();
 
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_OPUS_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Fused decode+measure")
@@ -203,9 +203,10 @@ public class VectorDistanceCalculation {
     }
 
     // USED BY VECTOR INDEX WILL BE USED FOR DOT DISTANCE
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT tree distance is 1-dot so epsilon uses the cosine-shaped window")
     public static double dotDistance(double[] a, double[] b) {
         double dot = dotProduct(a, b);
-        return Double.isNaN(dot) ? Double.NaN : -dot;
+        return Double.isNaN(dot) ? Double.NaN : 1.0 - dot;
     }
 
     /**
@@ -230,6 +231,7 @@ public class VectorDistanceCalculation {
         return sum;
     }
 
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Fused DOT distance is 1-dot")
     private static double fusedDotDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)
             throws HyracksDataException {
         int len = checkedLength(bytes, offset, length, dst);
@@ -242,7 +244,7 @@ public class VectorDistanceCalculation {
             }
             sum += query[i] * x;
         }
-        return Double.isNaN(sum) ? Double.NaN : -sum;
+        return Double.isNaN(sum) ? Double.NaN : 1.0 - sum;
     }
 
     private static double fusedCosineDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)

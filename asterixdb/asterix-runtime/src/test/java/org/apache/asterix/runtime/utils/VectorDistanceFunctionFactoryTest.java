@@ -118,6 +118,15 @@ public class VectorDistanceFunctionFactoryTest {
         Assert.assertEquals(VectorSimilarityMetric.values().length * 400, comparisons);
     }
 
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT distance is 1-inner-product")
+    @Test
+    public void dotDistanceIsOneMinusInnerProduct() {
+        double[] a = { 0.1, 0.2 };
+        double[] b = { 1.0, 1.0 };
+        Assert.assertEquals(0.7, VectorDistanceCalculation.dotDistance(a, b), 0.0);
+        Assert.assertEquals(1.0, VectorDistanceCalculation.dotDistance(new double[] { 0.0, 0.0 }, b), 0.0);
+    }
+
     /** A wrong-sized destination is a programming error and must be rejected, not silently truncated. */
     @Test
     public void wrongSizedDestinationIsRejected() throws Exception {
