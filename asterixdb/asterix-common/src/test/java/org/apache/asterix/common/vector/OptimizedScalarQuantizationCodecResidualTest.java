@@ -145,7 +145,7 @@ public class OptimizedScalarQuantizationCodecResidualTest {
     private static double residualScore(double[] q, double[] c, double[] x, OptimizedScalarQuantizationCodec.Params p)
             throws Exception {
         double[] rHat = dequantResidual(x, c, p);
-        return 1.0 - (dot(q, c) + dot(q, rHat));
+        return -(dot(q, c) + dot(q, rHat));
     }
 
     private static double[] dequantResidual(double[] x, double[] c, OptimizedScalarQuantizationCodec.Params p)
