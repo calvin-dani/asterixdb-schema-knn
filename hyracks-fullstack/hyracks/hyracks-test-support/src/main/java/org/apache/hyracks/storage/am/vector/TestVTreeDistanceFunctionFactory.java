@@ -54,7 +54,7 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
             case "cosine":
                 return TestVTreeDistanceFunctionFactory::cosineDistance;
             case "dot":
-                return TestVTreeDistanceFunctionFactory::oneMinusDot;
+                return TestVTreeDistanceFunctionFactory::negativeCosine;
             default: // euclidean / l2
                 return (a, b) -> Math.sqrt(euclideanSquared(a, b));
         }
@@ -85,8 +85,8 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
         return 1.0 - dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    /** 1 - cos(θ)‖a‖‖b‖, so smaller = more similar (MIPS convention, cosine-shaped epsilon window). */
-    private static double oneMinusDot(double[] a, double[] b) {
+    /** -dot / (|a||b|), so smaller = more similar (cosine ranking, |closest|~1 epsilon window on unit data). */
+    private static double negativeCosine(double[] a, double[] b) {
         double dot = 0.0;
         double normA = 0.0;
         double normB = 0.0;
@@ -98,9 +98,7 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
         if (normA == 0.0 || normB == 0.0 || Double.isNaN(normA) || Double.isNaN(normB) || Double.isNaN(dot)) {
             return Double.NaN;
         }
-        double sqrtA = Math.sqrt(normA);
-        double sqrtB = Math.sqrt(normB);
-        return 1.0 - (dot / (sqrtA * sqrtB)) * sqrtA * sqrtB;
+        return -dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     @Override

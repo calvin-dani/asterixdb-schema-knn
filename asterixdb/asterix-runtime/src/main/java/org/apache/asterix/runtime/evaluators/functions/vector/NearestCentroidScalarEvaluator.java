@@ -127,7 +127,7 @@ public class NearestCentroidScalarEvaluator implements IScalarEvaluator {
             return false;
         }
         if (metric == VectorSimilarityMetric.DOT) {
-            // 1-cos(θ)‖a‖‖b‖ is still unbounded below when inner products exceed 1, so no centroid minimizes it.
+            // DOT stays off for nearest_centroid; clustering should use cosine.
             warn("nearest_centroid: metric 'dot' is not usable for clustering");
             return false;
         }

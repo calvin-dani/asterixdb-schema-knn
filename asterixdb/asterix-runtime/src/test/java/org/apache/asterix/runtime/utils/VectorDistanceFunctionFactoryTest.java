@@ -118,12 +118,12 @@ public class VectorDistanceFunctionFactoryTest {
         Assert.assertEquals(VectorSimilarityMetric.values().length * 400, comparisons);
     }
 
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT distance is 1-cos(θ)‖a‖‖b‖")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT distance is -dot/(|a||b|)")
     @Test
-    public void dotDistanceIsOneMinusInnerProduct() {
+    public void dotDistanceIsNegativeCosine() {
         double[] a = { 0.1, 0.2 };
         double[] b = { 1.0, 1.0 };
-        Assert.assertEquals(0.7, VectorDistanceCalculation.dotDistance(a, b), 1e-15);
+        Assert.assertEquals(-0.3 / Math.sqrt(0.1), VectorDistanceCalculation.dotDistance(a, b), 1e-15);
         Assert.assertTrue(Double.isNaN(VectorDistanceCalculation.dotDistance(new double[] { 0.0, 0.0 }, b)));
     }
 

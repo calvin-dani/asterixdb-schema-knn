@@ -50,7 +50,7 @@ public class VectorDistanceCalculation {
     /** Cosine distance (1 - cosine similarity) as an {@link IVTreeDistanceFunction}. */
     public static final IVTreeDistanceFunction COSINE_DISTANCE_FN = new CosineDistanceFunction();
 
-    /** {@code 1 - cos(θ)‖a‖‖b‖} as an {@link IVTreeDistanceFunction}, so that smaller still means nearer. */
+    /** {@code -dot / (|a||b|)} ({@code -cos θ}) as an {@link IVTreeDistanceFunction}, so smaller still means nearer. */
     public static final IVTreeDistanceFunction DOT_DISTANCE_FN = new DotDistanceFunction();
 
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_OPUS_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Fused decode+measure")
@@ -203,7 +203,7 @@ public class VectorDistanceCalculation {
     }
 
     // USED BY VECTOR INDEX WILL BE USED FOR DOT DISTANCE
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT tree distance is 1-cos(θ)‖a‖‖b‖ so epsilon uses the cosine-shaped window")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT tree distance is -dot/(|a||b|) so epsilon uses |closest|~1 on unit data")
     public static double dotDistance(double[] a, double[] b) {
         double dot = 0.0;
         double normA = 0.0;
@@ -213,21 +213,19 @@ public class VectorDistanceCalculation {
             normA += a[i] * a[i];
             normB += b[i] * b[i];
         }
-        return oneMinusCosTimesNorms(dot, normA, normB);
+        return negativeCosine(dot, normA, normB);
     }
 
     /**
-     * {@code 1 - cos(θ)‖a‖‖b‖} from the same three accumulators as {@link #cosineSimilarity}.
-     * Zero-norm is NaN, matching cosine, rather than {@code 1 - 0}.
+     * {@code -dot / (|a||b|)} ({@code -cos θ}) from the same three accumulators as {@link #cosineSimilarity}.
+     * Zero-norm is NaN, matching cosine, rather than {@code -0}.
      */
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Shared 1-cosθ‖a‖‖b‖ finish for array and fused DOT")
-    private static double oneMinusCosTimesNorms(double dot, double normA, double normB) {
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Shared -dot/(|a||b|) finish for array and fused DOT")
+    private static double negativeCosine(double dot, double normA, double normB) {
         if (normA == 0.0 || normB == 0.0 || Double.isNaN(normA) || Double.isNaN(normB) || Double.isNaN(dot)) {
             return Double.NaN;
         }
-        double sqrtA = Math.sqrt(normA);
-        double sqrtB = Math.sqrt(normB);
-        return 1.0 - (dot / (sqrtA * sqrtB)) * sqrtA * sqrtB;
+        return -dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     /**
@@ -252,7 +250,7 @@ public class VectorDistanceCalculation {
         return sum;
     }
 
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Fused DOT distance is 1-cos(θ)‖a‖‖b‖")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Fused DOT distance is -dot/(|a||b|)")
     private static double fusedDotDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)
             throws HyracksDataException {
         int len = checkedLength(bytes, offset, length, dst);
@@ -269,7 +267,7 @@ public class VectorDistanceCalculation {
             normQuery += query[i] * query[i];
             normCentroid += x * x;
         }
-        return oneMinusCosTimesNorms(dot, normQuery, normCentroid);
+        return negativeCosine(dot, normQuery, normCentroid);
     }
 
     private static double fusedCosineDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)
