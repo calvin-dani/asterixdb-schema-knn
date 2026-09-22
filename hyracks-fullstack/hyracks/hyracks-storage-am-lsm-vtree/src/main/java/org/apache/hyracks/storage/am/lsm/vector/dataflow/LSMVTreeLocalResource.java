@@ -60,7 +60,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class LSMVTreeLocalResource extends LsmResource implements IQuantizedResource {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
     // Persisted/wire key names for quantization parameters. Shared with QuantizedIndexCreate so
     // the producer and the persisted resource agree on the vocabulary.
@@ -70,6 +70,8 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
     public static final String KEY_BITS = "bits";
     public static final String KEY_CONFIDENCE_INTERVAL = "confidenceInterval";
     public static final String KEY_SAMPLE_COUNT = "sampleCount";
+    public static final String KEY_MIN_PER_DIM = "minPerDim";
+    public static final String KEY_MAX_PER_DIM = "maxPerDim";
 
     private static final double BLOOM_FILTER_FALSE_POSITIVE_RATE = 0.01;
     /** JSON key under which the vector accessor factory is persisted. */
@@ -115,6 +117,8 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
     protected Float alpha;
     protected Integer bits;
     protected Integer sampleCount;
+    protected float[] minPerDim;
+    protected float[] maxPerDim;
 
     public LSMVTreeLocalResource(String path, IStorageManager storageManager, ITypeTraits[] typeTraits,
             IBinaryComparatorFactory[] cmpFactories, ITypeTraits[] filterTypeTraits,
@@ -206,8 +210,8 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         // Quantization params for lazy quantizer creation at query time
         VTreeQuantizationParams quantizationParams = null;
         if (hasQuantizationParams()) {
-            quantizationParams =
-                    new VTreeQuantizationParams(minQuantile, maxQuantile, alpha, confidenceInterval, bits, sampleCount);
+            quantizationParams = new VTreeQuantizationParams(minQuantile, maxQuantile, alpha, confidenceInterval, bits,
+                    sampleCount != null ? sampleCount : 0, minPerDim, maxPerDim);
         }
 
         return LSMVTreeUtils.createLSMTree(storageConfig, ioManager, virtualBufferCaches, fileRef,
@@ -265,6 +269,12 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         putIfNotNull(json, KEY_ALPHA, alpha);
         putIfNotNull(json, KEY_BITS, bits);
         putIfNotNull(json, KEY_SAMPLE_COUNT, sampleCount);
+        if (minPerDim != null) {
+            json.putPOJO(KEY_MIN_PER_DIM, minPerDim);
+        }
+        if (maxPerDim != null) {
+            json.putPOJO(KEY_MAX_PER_DIM, maxPerDim);
+        }
         json.put("numPrimaryKeyFields", numPrimaryKeyFields);
         json.put("numIncludeFields", numIncludeFields);
         json.put(KEY_DATA_EMBEDDING_IS_RESIDUAL, dataTupleBuilderFactory.isDataEmbeddingResidual());
@@ -330,10 +340,13 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         CrossPollinationConfig crossPollination = new CrossPollinationConfig(json.get(KEY_CROSS_POLLINATION_M).asInt(),
                 json.get(KEY_RNG_FACTOR).asDouble(), json.get(KEY_EPSILON).asDouble());
 
-        return new LSMVTreeLocalResource(registry, json, vectorDimensions, vectorFields, filterFields, atomic,
-                confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount, vectorAccessorFactory,
-                numPrimaryKeyFields, numIncludeFields, dataTupleBuilderFactory, distanceFunctionFactory,
-                crossPollination);
+        LSMVTreeLocalResource resource = new LSMVTreeLocalResource(registry, json, vectorDimensions, vectorFields,
+                filterFields, atomic, confidenceInterval, minQuantile, maxQuantile, alpha, bits, sampleCount,
+                vectorAccessorFactory, numPrimaryKeyFields, numIncludeFields, dataTupleBuilderFactory,
+                distanceFunctionFactory, crossPollination);
+        resource.minPerDim = readOptionalFloatArray(json, KEY_MIN_PER_DIM);
+        resource.maxPerDim = readOptionalFloatArray(json, KEY_MAX_PER_DIM);
+        return resource;
     }
 
     /** Read an optional float field from JSON; returns {@code null} if the field is missing or null. */
@@ -352,6 +365,13 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         }
         JsonNode node = json.get(fieldName);
         return node.isNull() ? null : node.asInt();
+    }
+
+    private static float[] readOptionalFloatArray(JsonNode json, String fieldName) {
+        if (!json.has(fieldName) || json.get(fieldName).isNull()) {
+            return null;
+        }
+        return OBJECT_MAPPER.convertValue(json.get(fieldName), float[].class);
     }
 
     private static void putIfNotNull(ObjectNode json, String fieldName, Float value) {
@@ -390,6 +410,14 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         return sampleCount;
     }
 
+    public float[] getMinPerDim() {
+        return minPerDim;
+    }
+
+    public float[] getMaxPerDim() {
+        return maxPerDim;
+    }
+
     public int getVectorDimensions() {
         return vectorDimensions;
     }
@@ -423,5 +451,7 @@ public class LSMVTreeLocalResource extends LsmResource implements IQuantizedReso
         this.bits = parameters.bits();
         this.confidenceInterval = parameters.confidenceInterval();
         this.sampleCount = parameters.sampleCount();
+        this.minPerDim = parameters.minPerDim();
+        this.maxPerDim = parameters.maxPerDim();
     }
 }

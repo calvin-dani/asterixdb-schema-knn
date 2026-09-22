@@ -65,6 +65,7 @@ import org.apache.hyracks.storage.am.lsm.vector.dataflow.LSMVTreeLocalResource;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTree;
 import org.apache.hyracks.storage.am.lsm.vector.impls.LSMVTreeDiskComponent;
 import org.apache.hyracks.storage.am.vector.api.IVTreeDistanceFunction;
+import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
 import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.am.vector.impls.VTree;
 import org.apache.hyracks.storage.am.vector.utils.RngAcceptanceFilter;
@@ -504,8 +505,11 @@ public class VTreeBulkLoaderAndGroupingOperatorDescriptor extends AbstractSingle
             Integer sampleCount = vcResource.getSampleCount();
             int finalSampleCount = (sampleCount != null) ? sampleCount : 20000;
 
-            return new OptimizedScalarQuantizationCodec.Params(bits, vectorDimension, finalSampleCount,
-                    confidenceInterval, minQuantile, maxQuantile, alpha);
+            return OptimizedScalarQuantizationCodec
+                    .fromVTreeParams(
+                            new VTreeQuantizationParams(minQuantile, maxQuantile, alpha, confidenceInterval, bits,
+                                    finalSampleCount, vcResource.getMinPerDim(), vcResource.getMaxPerDim()),
+                            vectorDimension);
         }
 
         /**

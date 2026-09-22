@@ -25,6 +25,7 @@ import java.util.List;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.exceptions.RuntimeDataException;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.storage.am.vector.api.VTreeQuantizationParams;
 import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
@@ -122,9 +123,19 @@ public final class OptimizedScalarQuantizationCodec {
         public final float maxQuantile;
         /** Scale factor: {@code (2^bits - 1) / (maxQuantile - minQuantile)}. */
         public final float alpha;
+        /** Per-dimension min when FAISS {@code QT_8bit} residual ranges are set; null = use global. */
+        public final float[] minPerDim;
+        /** Per-dimension max when FAISS {@code QT_8bit} residual ranges are set; null = use global. */
+        public final float[] maxPerDim;
 
         public Params(int bits, int vectorDimensions, int sampleCount, float confidenceInterval, float minQuantile,
                 float maxQuantile, float alpha) {
+            this(bits, vectorDimensions, sampleCount, confidenceInterval, minQuantile, maxQuantile, alpha, null, null);
+        }
+
+        @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Optional per-dim residual SQ ranges")
+        public Params(int bits, int vectorDimensions, int sampleCount, float confidenceInterval, float minQuantile,
+                float maxQuantile, float alpha, float[] minPerDim, float[] maxPerDim) {
             this.bits = bits;
             this.vectorDimensions = vectorDimensions;
             this.sampleCount = sampleCount;
@@ -132,6 +143,14 @@ public final class OptimizedScalarQuantizationCodec {
             this.minQuantile = minQuantile;
             this.maxQuantile = maxQuantile;
             this.alpha = alpha;
+            this.minPerDim = minPerDim == null ? null : minPerDim.clone();
+            this.maxPerDim = maxPerDim == null ? null : maxPerDim.clone();
+        }
+
+        @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Optional per-dim residual SQ ranges")
+        public boolean hasPerDimRanges() {
+            return minPerDim != null && maxPerDim != null && minPerDim.length == vectorDimensions
+                    && maxPerDim.length == vectorDimensions;
         }
     }
 
@@ -165,18 +184,15 @@ public final class OptimizedScalarQuantizationCodec {
         }
 
         final int bits = params.bits;
-        final float minQ = params.minQuantile;
-        final float maxQ = params.maxQuantile;
-        final float alpha = params.alpha;
         final int levels = 1 << bits; // 2^bits
 
         Object quantizedBytes;
         if (bits <= 8) {
-            quantizedBytes = quantizeToByte(vector, minQ, maxQ, alpha, levels);
+            quantizedBytes = quantizeToByte(vector, params, levels);
         } else if (bits <= 16) {
-            quantizedBytes = quantizeToShort(vector, minQ, maxQ, alpha, levels);
+            quantizedBytes = quantizeToShort(vector, params, levels);
         } else if (bits <= 32) {
-            quantizedBytes = quantizeToInt(vector, minQ, maxQ, alpha, levels);
+            quantizedBytes = quantizeToInt(vector, params, levels);
         } else {
             throw new RuntimeDataException(ErrorCode.ILLEGAL_STATE,
                     "Unsupported quantization bit width " + bits + "; the maximum is 32");
@@ -250,6 +266,70 @@ public final class OptimizedScalarQuantizationCodec {
         return new Params(bits, vectorDimensions, totalCount, confidenceInterval, minQ, maxQ, alpha);
     }
 
+    /**
+     * FAISS {@code QT_8bit} {@code RS_minmax} ranges: one {@code [vmin, vmax]} per dimension from the
+     * training extrema, no confidence-interval drop. Global minQ/maxQ/alpha remain the envelope so
+     * callers that only read those scalars still have a defined codebook.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Per-dim residual minmax SQ params")
+    public static Params computeParamsFromPerDimMinMax(float[] minPerDim, float[] maxPerDim, int bits,
+            int vectorDimensions, int sampleCount, float confidenceInterval) throws HyracksDataException {
+        if (minPerDim == null || maxPerDim == null || minPerDim.length != vectorDimensions
+                || maxPerDim.length != vectorDimensions) {
+            throw new RuntimeDataException(ErrorCode.ILLEGAL_STATE,
+                    "Per-dimension residual ranges must match the vector dimension");
+        }
+        float[] mins = minPerDim.clone();
+        float[] maxs = maxPerDim.clone();
+        float envMin = Float.POSITIVE_INFINITY;
+        float envMax = Float.NEGATIVE_INFINITY;
+        double eps = 1e-12;
+        for (int i = 0; i < vectorDimensions; i++) {
+            if (maxs[i] <= mins[i] + eps) {
+                maxs[i] = mins[i] + 1e-6f;
+            }
+            envMin = Math.min(envMin, mins[i]);
+            envMax = Math.max(envMax, maxs[i]);
+        }
+        int levels = 1 << bits;
+        float alpha = (levels - 1) / (envMax - envMin);
+        return new Params(bits, vectorDimensions, sampleCount, confidenceInterval, envMin, envMax, alpha, mins, maxs);
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Build codec Params from persisted VTreeQuantizationParams")
+    public static Params fromVTreeParams(VTreeQuantizationParams params, int vectorDimensions) {
+        return new Params(params.bits(), vectorDimensions, params.sampleCount(), params.confidenceInterval(),
+                params.minQuantile(), params.maxQuantile(), params.alpha(), params.minPerDim(), params.maxPerDim());
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Per-dim or global SQ clamp bounds")
+    static float dimMin(Params params, int i) {
+        return params.hasPerDimRanges() ? params.minPerDim[i] : params.minQuantile;
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Per-dim or global SQ clamp bounds")
+    static float dimMax(Params params, int i) {
+        return params.hasPerDimRanges() ? params.maxPerDim[i] : params.maxQuantile;
+    }
+
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Per-dim or global SQ alpha")
+    static float dimAlpha(Params params, int i, int levels) {
+        if (!params.hasPerDimRanges()) {
+            return params.alpha;
+        }
+        float span = params.maxPerDim[i] - params.minPerDim[i];
+        if (span <= 1e-12f) {
+            span = 1e-6f;
+        }
+        return (levels - 1) / span;
+    }
+
+    private static long encodeScalar(double x, float minQ, float maxQ, float alpha, int levels) {
+        double value = Math.max(minQ, Math.min(maxQ, x));
+        long quantizedValue = Math.round((value - minQ) * alpha);
+        return Math.max(0, Math.min(levels - 1, quantizedValue));
+    }
+
     /*
      * Per-dimension scalar encode/decode contract (used by quantizeToByte, quantizeToShort, quantizeToInt).
      *
@@ -288,14 +368,11 @@ public final class OptimizedScalarQuantizationCodec {
      * @see #quantizeToShort
      * @see #quantizeToInt
      */
-    private static byte[] quantizeToByte(double[] vector, float minQ, float maxQ, float alpha, int levels) {
+    private static byte[] quantizeToByte(double[] vector, Params params, int levels) {
         byte[] quantized = new byte[vector.length];
         for (int i = 0; i < vector.length; i++) {
-            // clamp to global quantile range, then map to integer code in [0, levels - 1]
-            double value = Math.max(minQ, Math.min(maxQ, vector[i]));
-            long quantizedValue = Math.round((value - minQ) * alpha);
-            quantizedValue = Math.max(0, Math.min(levels - 1, quantizedValue));
-            quantized[i] = (byte) quantizedValue;
+            quantized[i] = (byte) encodeScalar(vector[i], dimMin(params, i), dimMax(params, i),
+                    dimAlpha(params, i, levels), levels);
         }
         return quantized;
     }
@@ -310,14 +387,11 @@ public final class OptimizedScalarQuantizationCodec {
      * @see #quantizeToByte
      * @see #quantizeToInt
      */
-    private static short[] quantizeToShort(double[] vector, float minQ, float maxQ, float alpha, int levels) {
+    private static short[] quantizeToShort(double[] vector, Params params, int levels) {
         short[] quantized = new short[vector.length];
         for (int i = 0; i < vector.length; i++) {
-            // clamp to global quantile range, then map to integer code in [0, levels - 1]
-            double value = Math.max(minQ, Math.min(maxQ, vector[i]));
-            long quantizedValue = Math.round((value - minQ) * alpha);
-            quantizedValue = Math.max(0, Math.min(levels - 1, quantizedValue));
-            quantized[i] = (short) quantizedValue;
+            quantized[i] = (short) encodeScalar(vector[i], dimMin(params, i), dimMax(params, i),
+                    dimAlpha(params, i, levels), levels);
         }
         return quantized;
     }
@@ -335,14 +409,11 @@ public final class OptimizedScalarQuantizationCodec {
      * @see #quantizeToByte
      * @see #quantizeToShort
      */
-    private static int[] quantizeToInt(double[] vector, float minQ, float maxQ, float alpha, int levels) {
+    private static int[] quantizeToInt(double[] vector, Params params, int levels) {
         int[] quantized = new int[vector.length];
         for (int i = 0; i < vector.length; i++) {
-            // clamp to global quantile range, then map to integer code in [0, levels - 1]
-            double value = Math.max(minQ, Math.min(maxQ, vector[i]));
-            long quantizedValue = Math.round((value - minQ) * alpha);
-            quantizedValue = Math.max(0, Math.min(levels - 1, quantizedValue));
-            quantized[i] = (int) quantizedValue;
+            quantized[i] = (int) encodeScalar(vector[i], dimMin(params, i), dimMax(params, i),
+                    dimAlpha(params, i, levels), levels);
         }
         return quantized;
     }
@@ -395,7 +466,7 @@ public final class OptimizedScalarQuantizationCodec {
                 throw new RuntimeDataException(ErrorCode.VECTOR_DIMENSION_MISMATCH, dims, bytes.length);
             }
             for (int i = 0; i < dims; i++) {
-                result[i] = ((double) (bytes[i] & 0xFF)) / params.alpha + params.minQuantile;
+                result[i] = ((double) (bytes[i] & 0xFF)) / dimAlpha(params, i, 1 << bits) + dimMin(params, i);
             }
         } else if (bits <= 16) {
             // short[] - treat as unsigned
@@ -408,7 +479,7 @@ public final class OptimizedScalarQuantizationCodec {
                 throw new RuntimeDataException(ErrorCode.VECTOR_DIMENSION_MISMATCH, dims, shorts.length);
             }
             for (int i = 0; i < dims; i++) {
-                result[i] = ((double) (shorts[i] & 0xFFFF)) / params.alpha + params.minQuantile;
+                result[i] = ((double) (shorts[i] & 0xFFFF)) / dimAlpha(params, i, 1 << bits) + dimMin(params, i);
             }
         } else if (bits <= 32) {
             // int[] - treat as unsigned
@@ -421,7 +492,7 @@ public final class OptimizedScalarQuantizationCodec {
                 throw new RuntimeDataException(ErrorCode.VECTOR_DIMENSION_MISMATCH, dims, ints.length);
             }
             for (int i = 0; i < dims; i++) {
-                result[i] = ((double) (ints[i] & 0xFFFFFFFFL)) / params.alpha + params.minQuantile;
+                result[i] = ((double) (ints[i] & 0xFFFFFFFFL)) / dimAlpha(params, i, 1 << bits) + dimMin(params, i);
             }
         } else {
             throw new RuntimeDataException(ErrorCode.ILLEGAL_STATE,

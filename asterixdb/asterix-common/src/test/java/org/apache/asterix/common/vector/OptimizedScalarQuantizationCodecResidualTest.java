@@ -102,6 +102,59 @@ public class OptimizedScalarQuantizationCodecResidualTest {
         Assert.assertEquals(100, params.sampleCount);
     }
 
+    @Test
+    public void perDimMinMaxKeepsIdentityCoordAndRanking() throws Exception {
+        double[] c = { 1.0, 0.0 };
+        double[] xa = unit(1.0, 0.04);
+        double[] xb = unit(1.0, 0.02);
+        double[] q = xa;
+        double[] ra = OptimizedScalarQuantizationCodec.subtract(xa, c);
+        double[] rb = OptimizedScalarQuantizationCodec.subtract(xb, c);
+
+        float minQ = -0.016f;
+        float maxQ = 0.018f;
+        OptimizedScalarQuantizationCodec.Params global =
+                new OptimizedScalarQuantizationCodec.Params(8, 2, 2, 0.99f, minQ, maxQ, 255f / (maxQ - minQ));
+
+        float[] mins = { (float) Math.min(ra[0], rb[0]), (float) Math.min(ra[1], rb[1]) };
+        float[] maxs = { (float) Math.max(ra[0], rb[0]), (float) Math.max(ra[1], rb[1]) };
+        OptimizedScalarQuantizationCodec.Params perDim =
+                OptimizedScalarQuantizationCodec.computeParamsFromPerDimMinMax(mins, maxs, 8, 2, 2, 0.99f);
+        Assert.assertTrue(perDim.hasPerDimRanges());
+        Assert.assertEquals(mins[1], perDim.minPerDim[1], 1e-6f);
+        Assert.assertEquals(maxs[1], perDim.maxPerDim[1], 1e-6f);
+
+        double globalDa = residualScore(q, c, xa, global);
+        double globalDb = residualScore(q, c, xb, global);
+        Assert.assertTrue("global 0.99 CI must flip the true NN behind xb", globalDa > globalDb);
+
+        double perDa = residualScore(q, c, xa, perDim);
+        double perDb = residualScore(q, c, xb, perDim);
+        Assert.assertTrue("per-dim minmax must keep xa ahead of xb", perDa < perDb);
+
+        double[] rHatA = dequantResidual(xa, c, perDim);
+        Assert.assertEquals(ra[1], rHatA[1], (maxs[1] - mins[1]) / 255.0 + 1e-6);
+        Assert.assertTrue("identity y must not collapse to the global maxQ", rHatA[1] > maxQ);
+    }
+
+    private static double[] unit(double x, double y) {
+        double n = Math.hypot(x, y);
+        return new double[] { x / n, y / n };
+    }
+
+    private static double residualScore(double[] q, double[] c, double[] x, OptimizedScalarQuantizationCodec.Params p)
+            throws Exception {
+        double[] rHat = dequantResidual(x, c, p);
+        return 1.0 - (dot(q, c) + dot(q, rHat));
+    }
+
+    private static double[] dequantResidual(double[] x, double[] c, OptimizedScalarQuantizationCodec.Params p)
+            throws Exception {
+        OptimizedScalarQuantizationCodec.QuantizedVector qv = OptimizedScalarQuantizationCodec.quantizeResidual(x, c, p,
+                OptimizedScalarQuantizationCodec.SimilarityFunction.DOT_PRODUCT);
+        return OptimizedScalarQuantizationCodec.dequantizeToDoubleArray(qv.quantizedBytes, p);
+    }
+
     private static double dot(double[] a, double[] b) {
         double s = 0;
         for (int i = 0; i < a.length; i++) {

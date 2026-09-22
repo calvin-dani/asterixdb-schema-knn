@@ -1151,9 +1151,10 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * DOT residual SQ needs minQ/maxQ on {@code x − c}, not the Job 1 raw-x quantiles.
+                 * DOT residual SQ needs per-dimension min/max on {@code x − c} (FAISS QT_8bit RS_minmax),
+                 * not the Job 1 raw-x quantiles and not a global 0.99 CI over flattened residual coords.
                  */
-                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual quantile retrain after leaf k-means")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT residual per-dim minmax after leaf k-means")
                 private boolean shouldComputeResidualQuantiles() {
                     return similarityMetric == VectorSimilarityMetric.DOT && indexHelperFactory != null;
                 }
@@ -1166,7 +1167,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     return taskPartition;
                 }
 
-                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Train-list residual quantiles written to LSMVTreeLocalResource before Job 3")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Train-list residual per-dim minmax written to LSMVTreeLocalResource before Job 3")
                 private void writeResidualQuantiles(IHyracksTaskContext ctx, GeneratedRunFileReader in,
                         FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int partition,
@@ -1183,17 +1184,19 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         if (vcResource == null || !vcResource.hasQuantizationParams()) {
                             return;
                         }
-                        List<Double> residualScalars = collectResidualScalars(ctx, in, fta, tuple, eval, inputVal,
+                        float[][] residualRanges = collectResidualMinMax(ctx, in, fta, tuple, eval, inputVal,
                                 listAccessorConstant, kMeansUtils, partition, leafResult);
-                        if (residualScalars.isEmpty()) {
+                        if (residualRanges == null) {
                             return;
                         }
                         OptimizedScalarQuantizationCodec.Params residualParams =
-                                OptimizedScalarQuantizationCodec.computeParamsFromScalars(residualScalars,
-                                        vcResource.getBits(), vectorDimension, vcResource.getConfidenceInterval());
-                        VTreeQuantizationParams vtreeParams = new VTreeQuantizationParams(residualParams.minQuantile,
-                                residualParams.maxQuantile, residualParams.alpha, residualParams.confidenceInterval,
-                                residualParams.bits, residualParams.sampleCount);
+                                OptimizedScalarQuantizationCodec.computeParamsFromPerDimMinMax(residualRanges[0],
+                                        residualRanges[1], vcResource.getBits(), vectorDimension,
+                                        leafResult.assignments.length, vcResource.getConfidenceInterval());
+                        VTreeQuantizationParams vtreeParams =
+                                new VTreeQuantizationParams(residualParams.minQuantile, residualParams.maxQuantile,
+                                        residualParams.alpha, residualParams.confidenceInterval, residualParams.bits,
+                                        residualParams.sampleCount, residualParams.minPerDim, residualParams.maxPerDim);
                         vcResource.setQuantizationParameters(vtreeParams);
                         helper.persistResource();
                         IIndex index = helper.getIndexInstance();
@@ -1205,11 +1208,16 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                     }
                 }
 
-                private List<Double> collectResidualScalars(IHyracksTaskContext ctx, GeneratedRunFileReader unused,
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Per-dim residual extrema, no 0.99 CI drop")
+                private float[][] collectResidualMinMax(IHyracksTaskContext ctx, GeneratedRunFileReader unused,
                         FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int partition,
                         ClusteringResult leafResult) throws HyracksDataException, IOException {
-                    List<Double> residualScalars = new ArrayList<>();
+                    float[] mins = new float[vectorDimension];
+                    float[] maxs = new float[vectorDimension];
+                    Arrays.fill(mins, Float.POSITIVE_INFINITY);
+                    Arrays.fill(maxs, Float.NEGATIVE_INFINITY);
+                    boolean any = false;
                     GeneratedRunFileReader reader = resetRunFileReader(ctx, sampleUUID, partition);
                     VSizeFrame frame = new VSizeFrame(ctx);
                     int currentIdx = 0;
@@ -1221,7 +1229,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                         int tupleCount = fta.getTupleCount();
                         for (int j = 0; j < tupleCount; j++) {
                             if (currentIdx >= assignments.length) {
-                                return residualScalars;
+                                return any ? new float[][] { mins, maxs } : null;
                             }
                             tuple.reset(fta, j);
                             eval.evaluate(tuple, inputVal);
@@ -1232,13 +1240,20 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                                 continue;
                             }
                             double[] centroid = centroids.get(centroidIdx);
-                            int dims = Math.min(point.length, centroid.length);
+                            int dims = Math.min(Math.min(point.length, centroid.length), vectorDimension);
                             for (int d = 0; d < dims; d++) {
-                                residualScalars.add(point[d] - centroid[d]);
+                                float r = (float) (point[d] - centroid[d]);
+                                if (r < mins[d]) {
+                                    mins[d] = r;
+                                }
+                                if (r > maxs[d]) {
+                                    maxs[d] = r;
+                                }
                             }
+                            any = true;
                         }
                     }
-                    return residualScalars;
+                    return any ? new float[][] { mins, maxs } : null;
                 }
 
                 private LSMVTreeLocalResource unwrapVTreeResource(LocalResource localResource) {
