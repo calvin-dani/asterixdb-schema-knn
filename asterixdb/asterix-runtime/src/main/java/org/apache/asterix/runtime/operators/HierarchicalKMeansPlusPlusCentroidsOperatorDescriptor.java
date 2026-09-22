@@ -1394,7 +1394,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * DOT tree-distance is 1-dot. When q·x > 1 this is still negative, so k-means++ /
+                 * DOT tree-distance is 1-cos(θ)‖a‖‖b‖. When q·x > 1 this is still negative, so k-means++ /
                  * k-means|| treat D(x) as a sampling weight only after a D-min D shift. Euclidean and
                  * cosine distance already are non-negative.
                  */
@@ -1425,7 +1425,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Identity for Euclidean/cosine (metric distance ~ 0). For DOT, 1-dot ~ 0 means
+                 * Identity for Euclidean/cosine (metric distance ~ 0). For DOT, 1-cos(θ)‖a‖‖b‖ ~ 0 means
                  * inner product ~ 1, not "same vector", so use L2.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
@@ -1458,7 +1458,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Lloyd stop. 1-dot of two similar centroids is not a mean-shift test; use L2 of the
+                 * Lloyd stop. 1-cos(θ)‖a‖‖b‖ of two similar centroids is not a mean-shift test; use L2 of the
                  * centroid delta for DOT.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
@@ -1471,7 +1471,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 /**
                  * Normalizes centroid in place to unit L2 norm for cosine and DOT (spherical k-means).
-                 * Without this, a mean of unit vectors has ||c|| &lt; 1 and min 1-dot prefers high-norm
+                 * Without this, a mean of unit vectors has ||c|| &lt; 1 and min 1-cos(θ)‖a‖‖b‖ prefers high-norm
                  * centroids over nearer directions. No-op for Euclidean.
                  */
                 private void maybeNormalizeCentroid(double[] centroid) {
@@ -1482,7 +1482,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                 /**
                  * Cosine and DOT both assign by inner product against the stored mean. Re-unit the mean
-                 * after Lloyd so ||c|| cannot steal partitions; then min 1-dot and cosine distance rank
+                 * after Lloyd so ||c|| cannot steal partitions; then min 1-cos(θ)‖a‖‖b‖ and cosine distance rank
                  * leaves the same way on unit data. Euclidean keeps the unnormalized Bregman mean.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT spherical k-means: L2-normalize centroids after Lloyd")

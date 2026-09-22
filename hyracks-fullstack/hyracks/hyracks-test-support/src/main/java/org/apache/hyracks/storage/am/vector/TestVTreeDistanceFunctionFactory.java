@@ -85,13 +85,22 @@ public class TestVTreeDistanceFunctionFactory implements IVTreeDistanceFunctionF
         return 1.0 - dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    /** 1 - dot(a, b), so smaller = more similar (MIPS convention, cosine-shaped epsilon window). */
+    /** 1 - cos(θ)‖a‖‖b‖, so smaller = more similar (MIPS convention, cosine-shaped epsilon window). */
     private static double oneMinusDot(double[] a, double[] b) {
         double dot = 0.0;
+        double normA = 0.0;
+        double normB = 0.0;
         for (int i = 0; i < a.length; i++) {
             dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
         }
-        return 1.0 - dot;
+        if (normA == 0.0 || normB == 0.0 || Double.isNaN(normA) || Double.isNaN(normB) || Double.isNaN(dot)) {
+            return Double.NaN;
+        }
+        double sqrtA = Math.sqrt(normA);
+        double sqrtB = Math.sqrt(normB);
+        return 1.0 - (dot / (sqrtA * sqrtB)) * sqrtA * sqrtB;
     }
 
     @Override

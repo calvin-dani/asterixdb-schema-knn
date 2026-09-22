@@ -24,7 +24,7 @@ import org.apache.hyracks.util.annotations.AiProvenance;
 
 /**
  * Distance function between two decoded vectors, injected into the VTree index by the Hyracks
- * application that creates it (e.g. Euclidean, cosine, 1 - inner product).
+ * application that creates it (e.g. Euclidean, cosine, 1 - cos(θ)‖a‖‖b‖).
  * <p>
  * Unlike {@link org.apache.hyracks.api.dataflow.value.IBinaryComparator}, which returns a
  * three-valued ordering (-1/0/+1) over raw field bytes, this returns a real-valued magnitude over

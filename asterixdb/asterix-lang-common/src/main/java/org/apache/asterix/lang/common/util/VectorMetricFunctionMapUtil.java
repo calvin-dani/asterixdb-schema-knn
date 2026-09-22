@@ -39,7 +39,7 @@ import org.apache.hyracks.util.annotations.AiProvenance;
  * query accepts.
  * <p>
  * {@code COSINE} and {@code DOT} resolve to distance semantics ({@code cosine-distance} = 1 - similarity,
- * {@code dot-distance} = 1 - inner product), not the public {@code cosine_similarity()} / {@code dot_product()} builtins.
+ * {@code dot-distance} = 1 - cos(θ)‖a‖‖b‖), not the public {@code cosine_similarity()} / {@code dot_product()} builtins.
  */
 @AiProvenance(agent = AiProvenance.Agent.GPT_5_3, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "Restrict to six canonical metric literals")
 public final class VectorMetricFunctionMapUtil {
