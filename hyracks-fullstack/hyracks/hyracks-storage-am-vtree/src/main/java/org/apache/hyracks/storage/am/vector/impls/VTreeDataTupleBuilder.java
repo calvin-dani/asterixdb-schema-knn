@@ -151,19 +151,18 @@ public class VTreeDataTupleBuilder implements IVTreeDataTupleBuilder {
             toQuantize = residualScratch;
         }
         if (quantizationParams != null) {
-            float minQ = quantizationParams.minQuantile();
-            float maxQ = quantizationParams.maxQuantile();
-            float alpha = quantizationParams.alpha();
             int bits = quantizationParams.bits();
-
             int levels = 1 << bits;
             if (quantizeScratch == null || quantizeScratch.length != toQuantize.length) {
                 quantizeScratch = new byte[toQuantize.length];
             }
             byte[] result = quantizeScratch;
             for (int i = 0; i < toQuantize.length; i++) {
+                float minQ = quantizationParams.dimMin(i);
+                float maxQ = quantizationParams.dimMax(i);
+                float dimAlpha = quantizationParams.dimAlpha(i);
                 double value = Math.max(minQ, Math.min(maxQ, toQuantize[i]));
-                int quantizedValue = Math.toIntExact(Math.round((value - minQ) * alpha));
+                int quantizedValue = Math.toIntExact(Math.round((value - minQ) * dimAlpha));
                 quantizedValue = Math.max(0, Math.min(levels - 1, quantizedValue));
                 result[i] = (byte) quantizedValue;
             }

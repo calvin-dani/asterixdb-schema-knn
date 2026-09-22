@@ -57,8 +57,7 @@ public class OptimizedScalarQuantizerFactory implements IVTreeQuantizerFactory {
         }
 
         OptimizedScalarQuantizationCodec.Params p =
-                new OptimizedScalarQuantizationCodec.Params(params.bits(), vectorDimensions, params.sampleCount(),
-                        params.confidenceInterval(), params.minQuantile(), params.maxQuantile(), params.alpha());
+                OptimizedScalarQuantizationCodec.fromVTreeParams(params, vectorDimensions);
 
         OptimizedScalarQuantizationCodec.SimilarityFunction sim =
                 OptimizedScalarQuantizationCodec.fromDistanceMetric(distanceMetric);

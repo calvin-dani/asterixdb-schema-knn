@@ -59,6 +59,22 @@ public class VTreeDataTupleBuilderResidualTest {
     }
 
     @Test
+    public void perDimRangesEncodeIdentityResidualInsteadOfGlobalClamp() throws Exception {
+        double[] c = { 1.0, 0.0 };
+        double[] xa = { 0.9992009587217893, 0.039968038348871575 };
+        float[] mins = { -0.0008f, 0.02f };
+        float[] maxs = { -0.0002f, 0.04f };
+        VTreeQuantizationParams params =
+                new VTreeQuantizationParams(-0.016f, 0.018f, 255f / 0.034f, 0.99f, 8, 2, mins, maxs);
+        ITupleReference original = pkTuple(new byte[] { 1 });
+        VTreeDataTupleBuilder builder = new VTreeDataTupleBuilder(0, true, params, true);
+        ITupleReference tuple = builder.buildDataTuple(xa, 0.0, 1, original, c);
+        byte[] codes = new VTreeDataTupleAccessor(true).getQuantizedEmbedding(tuple);
+        int yCode = codes[1] & 0xFF;
+        Assert.assertEquals("y residual 0.04 is dim-1 max, so SQ8 endpoint", 255, yCode);
+    }
+
+    @Test
     public void antimatterUsesTheSameResidualEncode() throws Exception {
         VTreeQuantizationParams params = new VTreeQuantizationParams(-1f, 1f, 127.5f, 0.99f, 8, 10);
         double[] x = { 0.5, -0.25, 0.1, 0.0 };
