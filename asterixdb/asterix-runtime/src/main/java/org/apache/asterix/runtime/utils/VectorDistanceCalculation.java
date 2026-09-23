@@ -128,6 +128,12 @@ public class VectorDistanceCalculation {
         public double decodeAndApply(double[] query, byte[] bytes, int offset, int length) throws HyracksDataException {
             return fusedDotDistance(query, bytes, offset, length, null);
         }
+
+        @Override
+        @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT epsilon window is 1+hop/|q| = 1-cosθ for unit centroids")
+        public double toEpsilonDistance(double hopDistance, double queryNorm) {
+            return dotHopToEpsilonDistance(hopDistance, queryNorm);
+        }
     }
 
     public static double euclidean(double[] a, double[] b) {
@@ -206,6 +212,19 @@ public class VectorDistanceCalculation {
     public static double dotDistance(double[] a, double[] b) {
         double dot = dotProduct(a, b);
         return Double.isNaN(dot) ? Double.NaN : -dot;
+    }
+
+    /**
+     * Cosine-shaped ε coordinate for a DOT hop {@code -q·c} when centroids are unit:
+     * {@code 1 + hop/|q| = 1 − cosθ}. Ranking stays {@code -dot}; only the ε window uses this.
+     * A vanishing or non-finite {@code |q|} keeps the hop unchanged (zero query has no angle).
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT hop -|q|cosθ to 1-cosθ for epsilon")
+    public static double dotHopToEpsilonDistance(double hopDistance, double queryNorm) {
+        if (queryNorm <= 1e-12 || !Double.isFinite(queryNorm) || !Double.isFinite(hopDistance)) {
+            return hopDistance;
+        }
+        return 1.0 + hopDistance / queryNorm;
     }
 
     /**
