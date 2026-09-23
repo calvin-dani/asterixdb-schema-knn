@@ -40,6 +40,7 @@ import org.apache.hyracks.storage.am.vector.impls.ClusterSearchResult;
 import org.apache.hyracks.storage.common.buffercache.IBufferCache;
 import org.apache.hyracks.storage.common.buffercache.ICachedPage;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
+import org.apache.hyracks.util.annotations.AiProvenance;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -532,26 +533,38 @@ public class VTreeNavigationUtils {
 
     /**
      * Multiplicative-epsilon distance threshold relative to {@code |closestDistance|}: yields
-     * {@code (1+epsilon)*d} for positive {@code d} and {@code (1-epsilon)*d} for negative {@code d}
-     * (negated dot product, where smaller is better). An additive {@code d+epsilon} form is a near
-     * no-op for euclidean_squared / high-dim L2 where distances are O(10)-O(10^3), which collapses the
-     * search to ~1 cluster regardless of nprobe/epsilon.
+     * {@code (1+epsilon)*d} for positive {@code d}. DOT hops are mapped with
+     * {@link IVTreeDistanceFunction#toEpsilonDistance} to {@code 1-cosθ} before this formula so the
+     * window matches cosine; cosine/L2 hops are already in that space.
      */
-    private static double epsilonThreshold(double closestDistance, double epsilon) {
+    static double epsilonThreshold(double closestDistance, double epsilon) {
         return closestDistance + Math.abs(closestDistance) * epsilon;
     }
 
     /**
+     * Whether {@code hopDistance} lies in the ε window of {@code closestHopDistance} after each hop
+     * is mapped through {@link IVTreeDistanceFunction#toEpsilonDistance}.
+     */
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT epsilon compares 1-cos hops, not -dot")
+    public static boolean isWithinEpsilonWindow(double hopDistance, double closestHopDistance, double epsilon,
+            IVTreeDistanceFunction distanceFunction, double queryNorm) {
+        if (epsilon <= 0.0) {
+            return true;
+        }
+        double closestEps = distanceFunction.toEpsilonDistance(closestHopDistance, queryNorm);
+        double hopEps = distanceFunction.toEpsilonDistance(hopDistance, queryNorm);
+        return hopEps <= epsilonThreshold(closestEps, epsilon);
+    }
+
+    /**
      * Find close centroids using level-by-level cross-pollination with global sorting.
-     * At each interior node, explores all children within closestDistance * (1 + epsilon)
-     * (for positive distances) / closestDistance * (1 - epsilon) (for negative distances
-     * such as negated dot product).
-     * At leaf level, collects ALL centroids, then sorts globally and filters by epsilon.
+     * Interior children and the final leaf shortlist use {@link #isWithinEpsilonWindow} so DOT
+     * windows match cosine ({@code 1-cosθ}) while hop ranking stays {@code -dot}.
      * <p>
      * 1. Traverse tree using epsilon threshold at interior levels
      * 2. Collect ALL reachable leaf centroids
-     * 3. Sort globally by distance to query
-     * 4. Filter by global closest distance + epsilon
+     * 3. Sort globally by hop distance to the query
+     * 4. Filter by the globally closest centroid's ε window
      *
      * @param bufferCache Buffer cache for page access
      * @param fileId File ID for page identification
@@ -560,10 +573,8 @@ public class VTreeNavigationUtils {
      * @param leafFrameFactory Factory for creating leaf frames
      * @param queryVector Query vector to find closest centroids for
      * @param distanceFunction Distance function to use
-     * @param epsilon Relative distance threshold (multiplicative). Threshold for level/global
-     *                pruning is computed as {@code closestDistance + |closestDistance| * epsilon},
-     *                i.e. (1+epsilon)*d for positive d and (1-epsilon)*d for negative d.
-     * @return List of ClusterSearchResult containing all qualifying centroids, sorted by distance
+     * @param epsilon Relative distance threshold (multiplicative) in {@code toEpsilonDistance} space
+     * @return List of ClusterSearchResult containing all qualifying centroids, sorted by hop distance
      * @throws HyracksDataException if any error occurs during traversal
      */
     public static List<ClusterSearchResult> findCloseCentroidsLevelWiseGlobalSort(IBufferCache bufferCache, int fileId,
@@ -587,6 +598,7 @@ public class VTreeNavigationUtils {
             double[] queryVector, IVTreeDistanceFunction distanceFunction, double epsilon,
             double[] quantizedQueryVector, IVTreeQuantizer quantizer) throws HyracksDataException {
 
+        double queryNorm = l2Norm(queryVector);
         List<ClusterSearchResult> allCentroids = new ArrayList<>();
         Set<Integer> visitedLeafPages = new HashSet<>();
         Queue<VTreeLevelNode> queue = new ArrayDeque<>();
@@ -639,7 +651,7 @@ public class VTreeNavigationUtils {
                         IVTreeInteriorFrame interiorFrame = (IVTreeInteriorFrame) interiorFrameFactory.createFrame();
                         interiorFrame.setPage(page);
                         queue.addAll(childrenWithinEpsilon(bufferCache, fileId, queryVector, node, interiorFrame,
-                                interiorFrameFactory, distanceFunction, epsilon));
+                                interiorFrameFactory, distanceFunction, epsilon, queryNorm));
                     }
 
                 } finally {
@@ -657,7 +669,7 @@ public class VTreeNavigationUtils {
         allCentroids.sort(Comparator.comparingDouble(r -> r.distance));
 
         // Phase 3: Apply epsilon threshold based on the globally closest centroid
-        return applyGlobalEpsilonFilter(allCentroids, epsilon);
+        return applyGlobalEpsilonFilter(allCentroids, epsilon, distanceFunction, queryNorm);
     }
 
     /**
@@ -669,45 +681,57 @@ public class VTreeNavigationUtils {
      */
     private static List<VTreeLevelNode> childrenWithinEpsilon(IBufferCache bufferCache, int fileId,
             double[] queryVector, VTreeLevelNode node, IVTreeInteriorFrame interiorFrame,
-            ITreeIndexFrameFactory interiorFrameFactory, IVTreeDistanceFunction distanceFunction, double epsilon)
-            throws HyracksDataException {
+            ITreeIndexFrameFactory interiorFrameFactory, IVTreeDistanceFunction distanceFunction, double epsilon,
+            double queryNorm) throws HyracksDataException {
         List<VTreeChildCentroid> sortedChildren = collectAllChildCentroids(bufferCache, fileId, queryVector,
                 node.pageId(), interiorFrame, interiorFrameFactory, distanceFunction);
         if (sortedChildren.isEmpty()) {
             return List.of();
         }
-        double localThreshold = epsilonThreshold(sortedChildren.get(0).distance(), epsilon);
+        double closestHop = sortedChildren.get(0).distance();
         List<VTreeLevelNode> nextLevel = new ArrayList<>();
         for (VTreeChildCentroid child : sortedChildren) {
-            if (child.distance() <= localThreshold) {
+            if (isWithinEpsilonWindow(child.distance(), closestHop, epsilon, distanceFunction, queryNorm)) {
                 nextLevel.add(new VTreeLevelNode(child.childPageId(), node.level() + 1));
             } else {
-                break; // Children are sorted, no more qualify
+                break; // hop-sorted; toEpsilonDistance is monotone in hop for DOT and identity metrics
             }
         }
         return nextLevel;
     }
 
     /**
-     * Phase 3 of level-wise search: given all collected centroids already sorted by distance ascending,
-     * keep only those within the epsilon window of the globally closest centroid. Returns the input list
-     * unchanged when {@code epsilon <= 0.0} (no filtering). Pure list operation — no page access.
+     * Phase 3 of level-wise search: given all collected centroids already sorted by hop distance
+     * ascending, keep only those within the ε window of the globally closest centroid. Returns the
+     * input list unchanged when {@code epsilon <= 0.0} (no filtering). Pure list operation — no page
+     * access.
      */
     private static List<ClusterSearchResult> applyGlobalEpsilonFilter(List<ClusterSearchResult> sortedCentroids,
-            double epsilon) {
+            double epsilon, IVTreeDistanceFunction distanceFunction, double queryNorm) {
         if (epsilon <= 0.0) {
             return sortedCentroids;
         }
-        double globalThreshold = epsilonThreshold(sortedCentroids.get(0).distance, epsilon);
+        double closestHop = sortedCentroids.get(0).distance;
         List<ClusterSearchResult> filteredCentroids = new ArrayList<>();
         for (ClusterSearchResult result : sortedCentroids) {
-            if (result.distance <= globalThreshold) {
+            if (isWithinEpsilonWindow(result.distance, closestHop, epsilon, distanceFunction, queryNorm)) {
                 filteredCentroids.add(result);
             } else {
-                break; // Centroids are sorted, so we can break early
+                break;
             }
         }
         return filteredCentroids;
+    }
+
+    private static double l2Norm(double[] queryVector) {
+        if (queryVector == null || queryVector.length == 0) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (double x : queryVector) {
+            sum += x * x;
+        }
+        return Math.sqrt(sum);
     }
 
 }
