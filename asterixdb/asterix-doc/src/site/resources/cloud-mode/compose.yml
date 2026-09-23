@@ -28,9 +28,9 @@ services:
     ports:
       - "${ASTERIX_QUERY_PORT:-19002}:19002"
       - "${ASTERIX_WEB_PORT:-19006}:19006"
-    configs:
-      - source: asterixdb.conf
-        target: /conf/asterixdb.conf
+    # podman-compose does not materialize Compose config objects, so the file is bind-mounted.
+    volumes:
+      - ./asterixdb.conf:/conf/asterixdb.conf:ro
     command: -config-file /conf/asterixdb.conf --nc -node-id 1 -cluster-address 127.0.0.1
     depends_on:
       storage:
@@ -81,27 +81,3 @@ services:
 
 volumes:
   s3mock-data:
-
-configs:
-  asterixdb.conf:
-    content: |
-      [nc/1]
-      nc.api.port=19004
-      iodevices=./io1,./io2,./io3
-      ncservice.port=-1
-
-      [cc]
-
-      [common]
-      default.dir=.
-      log.level=INFO
-      cloud.deployment=true
-      cloud.storage.scheme=s3
-      cloud.storage.force.path.style=true
-      cloud.storage.region=us-east-1
-      cloud.storage.endpoint=http://storage:9090
-      cloud.storage.bucket=asterixdb-test
-      cloud.storage.anonymous.auth=true
-      cloud.storage.cache.policy=selective
-      storage.partitioning=static
-      storage.partitions.count=128
