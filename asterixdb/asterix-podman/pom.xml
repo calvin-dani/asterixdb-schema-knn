@@ -223,7 +223,7 @@
                                         <resource>
                                             <directory>../asterix-server/target</directory>
                                             <includes>
-                                                <include>asterix-server-*-binary-assembly.tar.bz2/</include>
+                                                <include>asterix-server-*-binary-assembly.tar.bz2</include>
                                             </includes>
                                         </resource>
                                         <resource>
