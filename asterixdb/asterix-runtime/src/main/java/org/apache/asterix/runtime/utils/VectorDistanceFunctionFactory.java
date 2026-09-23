@@ -57,7 +57,7 @@ public class VectorDistanceFunctionFactory implements IVTreeDistanceFunctionFact
             case EUCLIDEAN_SQUARED -> VectorDistanceCalculation.EUCLIDEAN_SQUARED_FN;
             case COSINE -> VectorDistanceCalculation.COSINE_DISTANCE_FN;
             case DOT ->
-                // dotDistance returns -dot(a,b) so that minimizing "distance" equals maximizing dot product (MIPS).
+                // Tree hops are 1 - a·b / (|a||b|). SQL++ DOT_DISTANCE stays -dot.
                     VectorDistanceCalculation.DOT_DISTANCE_FN;
         };
     }

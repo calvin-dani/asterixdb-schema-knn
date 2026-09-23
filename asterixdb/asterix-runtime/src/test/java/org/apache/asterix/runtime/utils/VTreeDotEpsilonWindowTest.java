@@ -25,10 +25,10 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * DOT ε must keep the cosine neighborhood (only list A) for both unit and scaled queries. Raw
- * {@code -dot} ε keeps C as well.
+ * VTree DOT hops are {@code 1 - a·b / (|a||b|)}, so ε identity matches cosine for unit and scaled
+ * queries. SQL++ {@code dotDistance} stays {@code -dot}.
  */
-@AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT epsilon window A/B/C vs cosine")
+@AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT hops are cosine distance; SQL++ stays -dot")
 public class VTreeDotEpsilonWindowTest {
 
     private static final double EPS = 0.75;
@@ -36,28 +36,39 @@ public class VTreeDotEpsilonWindowTest {
     private static final IVTreeDistanceFunction COSINE = VectorDistanceCalculation.COSINE_DISTANCE_FN;
 
     @Test
-    public void unitQueryDotWindowMatchesCosineAndDropsFarList() {
-        // A 0.99, B 0.97, C 0.40 — hops are -IP for DOT and 1-IP for cosine.
-        double closestDot = -0.99;
-        Assert.assertTrue(VTreeNavigationUtils.isWithinEpsilonWindow(-0.99, closestDot, EPS, DOT, 1.0));
-        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(-0.97, closestDot, EPS, DOT, 1.0));
-        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(-0.40, closestDot, EPS, DOT, 1.0));
-
-        double closestCos = 0.01;
-        Assert.assertTrue(VTreeNavigationUtils.isWithinEpsilonWindow(0.01, closestCos, EPS, COSINE, 1.0));
-        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(0.03, closestCos, EPS, COSINE, 1.0));
-        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(0.60, closestCos, EPS, COSINE, 1.0));
+    public void treeDotHopIsCosineDistanceNotNegatedDot() throws Exception {
+        double[] a = { 3.0, 4.0 };
+        double[] b = { 0.0, 1.0 };
+        Assert.assertEquals(VectorDistanceCalculation.cosineDistance(a, b), DOT.apply(a, b), 0.0);
+        Assert.assertEquals(-4.0, VectorDistanceCalculation.dotDistance(a, b), 0.0);
     }
 
     @Test
-    public void scaledQueryDotWindowStillDropsFarList() {
-        // Same angles, |q|=2: hop = -|q|cosθ. Naive -dot ε would keep C; 1-cos ε does not.
-        double closestDot = -1.98;
-        Assert.assertEquals(0.01, VectorDistanceCalculation.dotHopToEpsilonDistance(-1.98, 2.0), 1e-12);
-        Assert.assertTrue(VTreeNavigationUtils.isWithinEpsilonWindow(-1.98, closestDot, EPS, DOT, 2.0));
-        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(-1.94, closestDot, EPS, DOT, 2.0));
-        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(-0.80, closestDot, EPS, DOT, 2.0));
-        Assert.assertTrue("raw -dot window must still contain C — that is the bug being fixed",
-                -0.80 <= closestDot + Math.abs(closestDot) * EPS);
+    public void unitAndScaledQueriesShareCosineHopsAndKeepOnlyA() throws Exception {
+        double[] cA = unit(0.99, Math.sqrt(1.0 - 0.99 * 0.99));
+        double[] cB = unit(0.97, Math.sqrt(1.0 - 0.97 * 0.97));
+        double[] cC = unit(0.40, Math.sqrt(1.0 - 0.40 * 0.40));
+        double[] q1 = { 1.0, 0.0 };
+        double[] q2 = { 2.0, 0.0 };
+
+        double dA1 = DOT.apply(q1, cA);
+        double dB1 = DOT.apply(q1, cB);
+        double dC1 = DOT.apply(q1, cC);
+        Assert.assertEquals(0.01, dA1, 1e-12);
+        Assert.assertEquals(dA1, DOT.apply(q2, cA), 1e-12);
+        Assert.assertEquals(dB1, DOT.apply(q2, cB), 1e-12);
+        Assert.assertEquals(dC1, DOT.apply(q2, cC), 1e-12);
+        Assert.assertEquals(dA1, COSINE.apply(q1, cA), 0.0);
+
+        Assert.assertTrue(VTreeNavigationUtils.isWithinEpsilonWindow(dA1, dA1, EPS, DOT, 1.0));
+        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(dB1, dA1, EPS, DOT, 1.0));
+        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(dC1, dA1, EPS, DOT, 1.0));
+        Assert.assertTrue(VTreeNavigationUtils.isWithinEpsilonWindow(dA1, dA1, EPS, DOT, 2.0));
+        Assert.assertFalse(VTreeNavigationUtils.isWithinEpsilonWindow(dC1, dA1, EPS, DOT, 2.0));
+    }
+
+    private static double[] unit(double x, double y) {
+        double n = Math.hypot(x, y);
+        return new double[] { x / n, y / n };
     }
 }

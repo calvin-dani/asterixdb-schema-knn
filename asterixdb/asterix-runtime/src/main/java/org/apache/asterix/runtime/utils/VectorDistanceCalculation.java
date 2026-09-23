@@ -50,7 +50,7 @@ public class VectorDistanceCalculation {
     /** Cosine distance (1 - cosine similarity) as an {@link IVTreeDistanceFunction}. */
     public static final IVTreeDistanceFunction COSINE_DISTANCE_FN = new CosineDistanceFunction();
 
-    /** Negated dot product as an {@link IVTreeDistanceFunction}, so that smaller still means nearer. */
+    /** VTree DOT hops: cosine distance {@code 1 - a·b / (|a||b|)}. SQL++ {@link #dotDistance} stays {@code -dot}. */
     public static final IVTreeDistanceFunction DOT_DISTANCE_FN = new DotDistanceFunction();
 
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_OPUS_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Fused decode+measure")
@@ -112,27 +112,22 @@ public class VectorDistanceCalculation {
     }
 
     @AiProvenance(agent = AiProvenance.Agent.CLAUDE_OPUS_5, tool = AiProvenance.Tool.CLAUDE_CODE_UI, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "Fused decode+measure")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT tree hops are 1-dot/(|a||b|); epsilon identity")
     private static final class DotDistanceFunction implements IVTreeDistanceFunction {
         @Override
         public double apply(double[] a, double[] b) {
-            return dotDistance(a, b);
+            return cosineDistance(a, b);
         }
 
         @Override
         public double decodeAndApply(double[] query, byte[] bytes, int offset, int length, double[] dst)
                 throws HyracksDataException {
-            return fusedDotDistance(query, bytes, offset, length, dst);
+            return fusedCosineDistance(query, bytes, offset, length, dst);
         }
 
         @Override
         public double decodeAndApply(double[] query, byte[] bytes, int offset, int length) throws HyracksDataException {
-            return fusedDotDistance(query, bytes, offset, length, null);
-        }
-
-        @Override
-        @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT epsilon window is 1+hop/|q| = 1-cosθ for unit centroids")
-        public double toEpsilonDistance(double hopDistance, double queryNorm) {
-            return dotHopToEpsilonDistance(hopDistance, queryNorm);
+            return fusedCosineDistance(query, bytes, offset, length, null);
         }
     }
 
@@ -208,23 +203,10 @@ public class VectorDistanceCalculation {
         return sum;
     }
 
-    // USED BY VECTOR INDEX WILL BE USED FOR DOT DISTANCE
+    // SQL++ vector_distance(DOT) / DOT_DISTANCE: -dot so min distance = max inner product.
     public static double dotDistance(double[] a, double[] b) {
         double dot = dotProduct(a, b);
         return Double.isNaN(dot) ? Double.NaN : -dot;
-    }
-
-    /**
-     * Cosine-shaped ε coordinate for a DOT hop {@code -q·c} when centroids are unit:
-     * {@code 1 + hop/|q| = 1 − cosθ}. Ranking stays {@code -dot}; only the ε window uses this.
-     * A vanishing or non-finite {@code |q|} keeps the hop unchanged (zero query has no angle).
-     */
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT hop -|q|cosθ to 1-cosθ for epsilon")
-    public static double dotHopToEpsilonDistance(double hopDistance, double queryNorm) {
-        if (queryNorm <= 1e-12 || !Double.isFinite(queryNorm) || !Double.isFinite(hopDistance)) {
-            return hopDistance;
-        }
-        return 1.0 + hopDistance / queryNorm;
     }
 
     /**
@@ -247,21 +229,6 @@ public class VectorDistanceCalculation {
             sum += diff * diff;
         }
         return sum;
-    }
-
-    private static double fusedDotDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)
-            throws HyracksDataException {
-        int len = checkedLength(bytes, offset, length, dst);
-        double sum = 0.0;
-        int pos = offset + Integer.BYTES;
-        for (int i = 0; i < len; i++, pos += Double.BYTES) {
-            double x = DoublePointable.getDouble(bytes, pos);
-            if (dst != null) {
-                dst[i] = x;
-            }
-            sum += query[i] * x;
-        }
-        return Double.isNaN(sum) ? Double.NaN : -sum;
     }
 
     private static double fusedCosineDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)

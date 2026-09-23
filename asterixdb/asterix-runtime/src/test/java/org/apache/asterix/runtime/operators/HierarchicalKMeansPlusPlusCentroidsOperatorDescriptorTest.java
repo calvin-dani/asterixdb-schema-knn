@@ -327,8 +327,8 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
     }
 
     /**
-     * DOT uses -dot as tree distance. After shifting D(x) by min D, k-means++ can seed two MIPS
-     * clusters instead of aborting when the summed tickets are non-positive.
+     * DOT tree hops are 1-cos (already non-negative), so k-means++ can seed two MIPS clusters
+     * without a D-min D ticket shift.
      */
     @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT k-means++ signed-distance seeding")
     @Test
@@ -356,7 +356,7 @@ public class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptorTest {
 
     /**
      * DOT L2-normalizes centroids after Lloyd (same spherical k-means path as cosine) so ||c||
-     * cannot steal min -dot partitions.
+     * cannot steal partitions by magnitude.
      */
     @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.TEST_GENERATED, notes = "DOT spherical k-means unit centroids")
     @Test

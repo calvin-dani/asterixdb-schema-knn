@@ -129,8 +129,8 @@ public class VTreeSearchPredicate implements ISearchPredicate {
 
     /**
      * Set the epsilon parameter (relative distance threshold for level-wise cross-pollination).
-     * Clusters within {@code closest + |closest|·epsilon} in {@code toEpsilonDistance} space are
-     * explored. Cosine/L2 use hop distance; DOT maps hops to {@code 1-cosθ} first.
+     * Clusters within {@code closest + |closest|·epsilon} of hop distance are explored. DOT hops
+     * are cosine distance, so that window matches cosine.
      */
     public void setEpsilon(double epsilon) {
         this.epsilon = epsilon;

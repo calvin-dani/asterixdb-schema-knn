@@ -97,11 +97,10 @@ public interface IVTreeDistanceFunction {
 
     /**
      * Map a hop distance into the space where {@code closest + |closest|·ε} is a cosine-sized window.
-     * Cosine and L2 hops are already in that space (identity). DOT hops are {@code -q·c}; with unit
-     * spherical centroids that is {@code -|q|cosθ}, so this becomes {@code 1 - cosθ} after dividing
-     * by {@code queryNorm = |q|}.
+     * Cosine, L2, and DOT hops are already in that space (identity). DOT tree hops are
+     * {@code 1 - a·b / (|a||b|)}; ranking and the ε window share that coordinate.
      */
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT epsilon window uses 1-cos, not hop -dot")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT hops are 1-cos; epsilon identity")
     default double toEpsilonDistance(double hopDistance, double queryNorm) {
         return hopDistance;
     }

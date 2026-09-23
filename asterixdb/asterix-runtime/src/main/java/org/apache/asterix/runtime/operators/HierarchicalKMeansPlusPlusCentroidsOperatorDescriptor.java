@@ -416,7 +416,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Implements   k-means|| algorithm with configurable parameters.
                  */
-                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means|| sampling uses D(x)-min D so signed -dot can seed")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means|| sampling uses 1-cos hops")
                 private ClusteringResult performKMeansParallel(IHyracksTaskContext ctx, GeneratedRunFileReader in,
                         FrameTupleAccessor fta, FrameTupleReference tuple, IScalarEvaluator eval, IPointable inputVal,
                         ListAccessor listAccessorConstant, KMeansUtils kMeansUtils, int k, Random rand,
@@ -452,8 +452,9 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
 
                     // Step 2: Multiple rounds of probabilistic sampling (k-means||)
                     for (int round = 0; round < numRounds; round++) {
-                        // PASS 1: Compute S = Σ_x D(x) by streaming (NO DISTANCE STORAGE). For DOT,
-                        // also track min D so pass 2 can shift tickets to D(x)-min D (>= 0).
+                        // PASS 1: Compute S = Σ_x D(x) by streaming (NO DISTANCE STORAGE). Signed
+                        // hops also track min D so pass 2 can shift tickets to D(x)-min D (>= 0);
+                        // DOT hops are 1-cos and skip that shift.
                         double totalDistance = 0.0;
                         double minD = Double.POSITIVE_INFINITY;
                         int sampledPointCount = 0;
@@ -778,7 +779,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                  * Perform weighted K-means++ on candidates to select exactly k centroids.
                  * Uses weights when computing probabilities and weighted averages.
                  */
-                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means++ sampling uses D(x)-min D so signed -dot can seed")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT k-means++ sampling uses 1-cos hops")
                 private List<double[]> performWeightedKMeansPlusPlusOnCandidates(List<double[]> candidates,
                         int[] weights, int k, Random rand, int maxIterations) throws HyracksDataException {
                     if (candidates.isEmpty() || k <= 0) {
@@ -1368,7 +1369,7 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 /**
                  * Perform scalable K-means++ on centroids (not raw data).
                  */
-                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT hierarchical k-means++ sampling uses D(x)-min D so signed -dot can seed")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT hierarchical k-means++ sampling uses 1-cos hops")
                 private ClusteringResult performScalableKMeansPlusPlusOnCentroids(List<double[]> centroids, int k,
                         Random rand, int maxIterations) throws HyracksDataException {
                     if (centroids.isEmpty() || k <= 0) {
@@ -1548,17 +1549,17 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * DOT tree-distance is -dot, which is typically negative. k-means++ / k-means|| treat D(x)
-                 * as a sampling weight, so it must be >= 0. Euclidean and cosine distance already are.
+                 * k-means++ / k-means|| treat D(x) as a sampling weight, so it must be >= 0.
+                 * DOT hops are 1-cos, already in [0, 2]; D-min D was only needed for signed -dot.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.REFACTORED, notes = "DOT hops are 1-cos; sampling no longer D-min D")
                 private boolean usesSignedDistance() {
-                    return similarityMetric == VectorSimilarityMetric.DOT;
+                    return false;
                 }
 
                 /**
                  * Lottery-ticket weight for k-means++: larger means farther from existing centers.
-                 * For DOT, shift by the round's min D so closest stays 0 and tickets stay non-negative.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
                 private double samplingWeight(double dist, double minDist) {
@@ -1578,12 +1579,13 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Identity for Euclidean/cosine (metric distance ~ 0). For DOT, -dot ~ 0 is not identity
-                 * — almost any pair with a positive inner product would look like a duplicate — so use L2.
+                 * Identity for Euclidean/cosine (metric distance ~ 0). For DOT, 1-cos ~ 0 is angular
+                 * identity, but Lloyd still uses L2 of the centroid delta so a mean shift is visible
+                 * before re-unit.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
                 private boolean centroidsNearDuplicate(double[] a, double[] b) throws HyracksDataException {
-                    if (usesSignedDistance()) {
+                    if (usesL2CentroidDelta()) {
                         return VectorDistanceCalculation.euclideanSquared(a, b) < 1e-10;
                     }
                     return distanceFunction.apply(a, b) < 1e-10;
@@ -1611,15 +1613,20 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Lloyd stop. -dot of two similar centroids is a large negative, so dist > 1e-4 would
-                 * declare convergence even when the mean jumped; use L2 of the centroid delta for DOT.
+                 * Lloyd stop. Use L2 of the centroid delta for DOT so re-unit after the mean does not
+                 * hide a move; cosine/Euclidean use the tree distance.
                  */
                 @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT k-means++ signed-distance sampling helpers")
                 private boolean centroidMoved(double[] previous, double[] updated) throws HyracksDataException {
-                    if (usesSignedDistance()) {
+                    if (usesL2CentroidDelta()) {
                         return VectorDistanceCalculation.euclidean(previous, updated) > 1e-4;
                     }
                     return distanceFunction.apply(previous, updated) > 1e-4;
+                }
+
+                @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT Lloyd stop and duplicate skip stay L2")
+                private boolean usesL2CentroidDelta() {
+                    return similarityMetric == VectorSimilarityMetric.DOT;
                 }
 
                 /**

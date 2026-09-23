@@ -533,9 +533,8 @@ public class VTreeNavigationUtils {
 
     /**
      * Multiplicative-epsilon distance threshold relative to {@code |closestDistance|}: yields
-     * {@code (1+epsilon)*d} for positive {@code d}. DOT hops are mapped with
-     * {@link IVTreeDistanceFunction#toEpsilonDistance} to {@code 1-cosθ} before this formula so the
-     * window matches cosine; cosine/L2 hops are already in that space.
+     * {@code (1+epsilon)*d} for positive {@code d}. Cosine, L2, and DOT hops are already in that
+     * space ({@code 1-cosθ} for DOT tree hops).
      */
     static double epsilonThreshold(double closestDistance, double epsilon) {
         return closestDistance + Math.abs(closestDistance) * epsilon;
@@ -543,9 +542,9 @@ public class VTreeNavigationUtils {
 
     /**
      * Whether {@code hopDistance} lies in the ε window of {@code closestHopDistance} after each hop
-     * is mapped through {@link IVTreeDistanceFunction#toEpsilonDistance}.
+     * is mapped through {@link IVTreeDistanceFunction#toEpsilonDistance} (identity for current metrics).
      */
-    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "DOT epsilon compares 1-cos hops, not -dot")
+    @AiProvenance(agent = AiProvenance.Agent.GROK_4_6, tool = AiProvenance.Tool.CURSOR, contributionKind = AiProvenance.ContributionKind.GENERATED, notes = "epsilon window on hop distance; DOT hops are 1-cos")
     public static boolean isWithinEpsilonWindow(double hopDistance, double closestHopDistance, double epsilon,
             IVTreeDistanceFunction distanceFunction, double queryNorm) {
         if (epsilon <= 0.0) {
@@ -558,8 +557,8 @@ public class VTreeNavigationUtils {
 
     /**
      * Find close centroids using level-by-level cross-pollination with global sorting.
-     * Interior children and the final leaf shortlist use {@link #isWithinEpsilonWindow} so DOT
-     * windows match cosine ({@code 1-cosθ}) while hop ranking stays {@code -dot}.
+     * Interior children and the final leaf shortlist use {@link #isWithinEpsilonWindow}. DOT hops
+     * are cosine distance, so ranking and the ε window share {@code 1-cosθ}.
      * <p>
      * 1. Traverse tree using epsilon threshold at interior levels
      * 2. Collect ALL reachable leaf centroids
