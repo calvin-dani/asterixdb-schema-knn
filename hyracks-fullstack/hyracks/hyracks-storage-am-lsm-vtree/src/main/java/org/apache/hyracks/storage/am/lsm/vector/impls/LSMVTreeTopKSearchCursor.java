@@ -125,6 +125,7 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
     private int candidateLimit;
     private double epsilon;
     private double[] queryVector;
+    private double queryNorm;
     private IVTreeDistanceFunction distanceFunction;
 
     // Vector accessor for extracting vectors from tuples
@@ -279,14 +280,15 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
                 throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
                         "A query vector is required for the vector index blocked search");
             }
+            this.queryNorm = l2Norm(queryVector);
 
-            // computeApproximateDistance() dequantizes every candidate with these two, and they arrive
-            // independently of the USE_TOPK_SEARCH flag that selected this cursor (from a quantizer factory
-            // or instance in the index access parameters). Fail here rather than NPE per candidate.
-            if (this.quantizer == null || this.quantizedQueryVector == null) {
+            // Leaf scoring dequantizes stored codes and dots them with the original float query
+            // (asymmetric SQ). The quantizer is required for that decode; quantizedQueryVector is
+            // still used for optional quantized centroid metadata, not for D(q, x̂).
+            if (this.quantizer == null) {
                 throw HyracksDataException.create(ErrorCode.ILLEGAL_STATE,
-                        "LSMVTreeTopKSearchCursor requires a quantizer and a quantized query vector; none was supplied "
-                                + "through the index access parameters");
+                        "LSMVTreeTopKSearchCursor requires a quantizer; none was supplied through the index access "
+                                + "parameters");
             }
 
             // Initialize strategy with first component's tree (candidateLimit so we collect 2*K for reranking)
@@ -669,14 +671,27 @@ public class LSMVTreeTopKSearchCursor extends EnforcedIndexCursor implements IVe
      *   Field 0: distance_to_centroid, Field 1: centroidId,
      *   Field 2: quantized_distance, Field 3: quantized_embedding, Field 4+: key and value fields
      *
-     * Dequantizes the stored embedding bytes (field 3) and computes distance
-     * against the quantized query vector.
+     * Dequantizes the stored embedding bytes (field 3) and measures against the original
+     * float query. That is asymmetric SQ: {@code y · x̂} with {@code x̂_i = q_i/alpha + minQ},
+     * which is the same linear map {@code (1/alpha) Σ(y_i q_i) + minQ Σ y_i}. The query is
+     * not re-quantized (symmetric {@code ŷ · x̂} was extra error on tight inner-product gaps).
+     *
+     * The result is the user-facing distance (e.g. {@code -q·x̂} for dot product), because the index-only plan
+     * reports it as the query's distance; mapping it is monotone, so the top-K order is unchanged.
      */
     private double computeApproximateDistance(ITupleReference tuple) throws HyracksDataException {
         // Quantized embedding content bytes (field 3, ByteArrayPointable prefix stripped) → dequantize.
         byte[] qBytes = dataAccessor.getQuantizedEmbedding(tuple);
         double[] dequantized = quantizer.dequantize(qBytes);
-        return distanceFunction.apply(quantizedQueryVector, dequantized);
+        return distanceFunction.toQueryDistance(distanceFunction.apply(queryVector, dequantized), queryNorm);
+    }
+
+    private static double l2Norm(double[] vector) {
+        double sum = 0.0;
+        for (double x : vector) {
+            sum += x * x;
+        }
+        return Math.sqrt(sum);
     }
 
     // ==================== IIndexCursor Interface (EnforcedIndexCursor template methods) ====================

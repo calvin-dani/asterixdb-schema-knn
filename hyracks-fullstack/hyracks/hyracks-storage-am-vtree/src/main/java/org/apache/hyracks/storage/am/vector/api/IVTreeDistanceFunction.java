@@ -23,7 +23,7 @@ import org.apache.hyracks.dataflow.common.data.marshalling.DoubleArraySerializer
 
 /**
  * Distance function between two decoded vectors, injected into the VTree index by the Hyracks
- * application that creates it (e.g. Euclidean, cosine, negated dot product).
+ * application that creates it (e.g. Euclidean, cosine, query-normalized dot product).
  * <p>
  * Unlike {@link org.apache.hyracks.api.dataflow.value.IBinaryComparator}, which returns a
  * three-valued ordering (-1/0/+1) over raw field bytes, this returns a real-valued magnitude over
@@ -90,5 +90,18 @@ public interface IVTreeDistanceFunction {
      */
     default double decodeAndApply(double[] query, byte[] bytes, int offset, int length) throws HyracksDataException {
         return apply(query, DoubleArraySerializerDeserializer.read(bytes, offset, length));
+    }
+
+    /**
+     * Maps a distance this function returned for a query into the value reported to the user as that
+     * query's distance. Identity unless the index ranks by a monotone transform of the user-facing
+     * distance, as dot product does.
+     *
+     * @param distance  a value returned by {@link #apply} with the query as its first argument
+     * @param queryNorm the L2 norm of that query
+     * @return the user-facing distance; ordering is preserved for a fixed query
+     */
+    default double toQueryDistance(double distance, double queryNorm) {
+        return distance;
     }
 }
