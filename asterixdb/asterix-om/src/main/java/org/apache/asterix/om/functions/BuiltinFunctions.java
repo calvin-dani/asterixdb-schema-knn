@@ -1973,16 +1973,16 @@ public class BuiltinFunctions {
         addFunction(SCALAR_SQL_KURTOSIS_DISTINCT, NullableDoubleTypeComputer.INSTANCE, true);
 
         // Vector functions
-        addFunction(EUCLIDEAN_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(EUCLIDEAN_SQUARED_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(COSINE_SIMILARITY, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(DOT_PRODUCT, ADoubleTypeComputer.INSTANCE, true);
-        addPrivateFunction(COSINE_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
-        addPrivateFunction(DOT_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
-        addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(EUCLIDEAN_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(EUCLIDEAN_SQUARED_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(COSINE_SIMILARITY, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(DOT_PRODUCT, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addPrivateFunction(COSINE_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addPrivateFunction(DOT_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
 
         // Ann functions
-        addFunction(ANN_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(ANN_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
 
         addPrivateFunction(NEAREST_CENTROID, AInt32TypeComputer.INSTANCE_NULLABLE, true);
         // Window functions
