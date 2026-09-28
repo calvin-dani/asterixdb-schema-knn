@@ -49,7 +49,12 @@ public class VectorDistanceCalculation {
     /** Cosine distance (1 - cosine similarity) as an {@link IVTreeDistanceFunction}. */
     public static final IVTreeDistanceFunction COSINE_DISTANCE_FN = new CosineDistanceFunction();
 
-    /** Negated dot product as an {@link IVTreeDistanceFunction}, so that smaller still means nearer. */
+    /**
+     * Dot-product index distance {@code 1 - q·v/|q|}, so that smaller still means nearer. Ranking is the same as
+     * {@code -q·v} for a fixed query, and against a unit (spherical k-means) centroid it is {@code 1 - cosθ}, so
+     * the multiplicative epsilon window behaves as it does for cosine. Candidates are scored and reported as
+     * {@code -q·v} by {@link IVTreeDistanceFunction#queryDistance}.
+     */
     public static final IVTreeDistanceFunction DOT_DISTANCE_FN = new DotDistanceFunction();
 
     private static final class EuclideanSquaredFunction implements IVTreeDistanceFunction {
@@ -110,18 +115,23 @@ public class VectorDistanceCalculation {
     private static final class DotDistanceFunction implements IVTreeDistanceFunction {
         @Override
         public double apply(double[] a, double[] b) {
-            return dotDistance(a, b);
+            return queryNormalizedDotDistance(a, b);
         }
 
         @Override
         public double decodeAndApply(double[] query, byte[] bytes, int offset, int length, double[] dst)
                 throws HyracksDataException {
-            return fusedDotDistance(query, bytes, offset, length, dst);
+            return fusedQueryNormalizedDotDistance(query, bytes, offset, length, dst);
         }
 
         @Override
         public double decodeAndApply(double[] query, byte[] bytes, int offset, int length) throws HyracksDataException {
-            return fusedDotDistance(query, bytes, offset, length, null);
+            return fusedQueryNormalizedDotDistance(query, bytes, offset, length, null);
+        }
+
+        @Override
+        public double queryDistance(double[] query, double[] vector) {
+            return dotDistance(query, vector);
         }
     }
 
@@ -196,10 +206,28 @@ public class VectorDistanceCalculation {
         return sum;
     }
 
-    // USED BY VECTOR INDEX WILL BE USED FOR DOT DISTANCE
     public static double dotDistance(double[] a, double[] b) {
         double dot = dotProduct(a, b);
         return Double.isNaN(dot) ? Double.NaN : -dot;
+    }
+
+    /**
+     * {@code 1 - a·b/|a|}: the dot-product index distance, with {@code a} the query (or the point being
+     * assigned). Normalizing by {@code |a|} only keeps the ranking over {@code b} identical to {@code -a·b}.
+     *
+     * @return {@code NaN} when {@code |a|} is zero or either input is NaN, as {@link #cosineDistance} does
+     */
+    public static double queryNormalizedDotDistance(double[] a, double[] b) {
+        double dot = 0.0;
+        double normA = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+        }
+        if (normA == 0.0 || Double.isNaN(normA) || Double.isNaN(dot)) {
+            return Double.NaN;
+        }
+        return 1.0 - dot / Math.sqrt(normA);
     }
 
     /**
@@ -224,19 +252,25 @@ public class VectorDistanceCalculation {
         return sum;
     }
 
-    private static double fusedDotDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)
-            throws HyracksDataException {
+    private static double fusedQueryNormalizedDotDistance(double[] query, byte[] bytes, int offset, int length,
+            double[] dst) throws HyracksDataException {
         int len = checkedLength(bytes, offset, length, dst);
-        double sum = 0.0;
+        // Same accumulators, same order, as queryNormalizedDotDistance(), so the fused and unfused forms agree.
+        double dot = 0.0;
+        double normQuery = 0.0;
         int pos = offset + Integer.BYTES;
         for (int i = 0; i < len; i++, pos += Double.BYTES) {
             double x = DoublePointable.getDouble(bytes, pos);
             if (dst != null) {
                 dst[i] = x;
             }
-            sum += query[i] * x;
+            dot += query[i] * x;
+            normQuery += query[i] * query[i];
         }
-        return Double.isNaN(sum) ? Double.NaN : -sum;
+        if (normQuery == 0.0 || Double.isNaN(normQuery) || Double.isNaN(dot)) {
+            return Double.NaN;
+        }
+        return 1.0 - dot / Math.sqrt(normQuery);
     }
 
     private static double fusedCosineDistance(double[] query, byte[] bytes, int offset, int length, double[] dst)

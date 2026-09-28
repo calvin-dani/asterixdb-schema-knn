@@ -1374,9 +1374,8 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Normalizes centroid in place to unit L2 norm when using cosine similarity (spherical
-                 * k-means), so that centroid semantics match FAISS/Spark. Dot product is not normalized.
-                 * No-op for other metrics.
+                 * Normalizes centroid in place to unit L2 norm for cosine and dot product (spherical
+                 * k-means), so that centroid semantics match FAISS/Spark. No-op for other metrics.
                  */
                 private void maybeNormalizeCentroid(double[] centroid) {
                     if (centroid != null && requiresNormalizedCentroids()) {
@@ -1385,17 +1384,23 @@ public final class HierarchicalKMeansPlusPlusCentroidsOperatorDescriptor extends
                 }
 
                 /**
-                 * Whether the current distance function requires centroids to be L2-normalized after each
-                 * Lloyd update. Normalization is required only for cosine (spherical k-means); aligns with
-                 * FAISS spherical k-means and Spark's CosineDistanceMeasure. Dot product (MIPS) uses raw
-                 * centroids and does not require normalization.
+                 * Whether centroids are L2-normalized after each Lloyd update. Cosine and dot product both
+                 * use spherical k-means; aligns with FAISS spherical k-means and Spark's
+                 * CosineDistanceMeasure.
                  */
                 private boolean requiresNormalizedCentroids() {
-                    return similarityMetric == VectorSimilarityMetric.COSINE;
+                    return similarityMetric == VectorSimilarityMetric.COSINE
+                            || similarityMetric == VectorSimilarityMetric.DOT;
                 }
 
                 private static IVTreeDistanceFunction distanceFunctionFor(VectorSimilarityMetric metric) {
-                    return new VectorDistanceFunctionFactory(metric).createDistanceFunction();
+                    // With unit centroids, argmin (1 - cos(x, c)) = argmax x·c for a fixed x, so spherical
+                    // DOT k-means is cosine k-means. Cosine distance is also non-negative (a valid k-means++
+                    // weight), ~0 for duplicates, and scale-invariant, so the Lloyd stop test is not fooled by
+                    // comparing a unit centroid against the raw mean.
+                    VectorSimilarityMetric clusteringMetric =
+                            metric == VectorSimilarityMetric.DOT ? VectorSimilarityMetric.COSINE : metric;
+                    return new VectorDistanceFunctionFactory(clusteringMetric).createDistanceFunction();
                 }
             };
         }
