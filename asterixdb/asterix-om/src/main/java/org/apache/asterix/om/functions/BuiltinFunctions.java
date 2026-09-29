@@ -1977,8 +1977,8 @@ public class BuiltinFunctions {
         addFunction(EUCLIDEAN_SQUARED_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
         addFunction(COSINE_SIMILARITY, ADoubleTypeComputer.INSTANCE, true);
         addFunction(DOT_PRODUCT, ADoubleTypeComputer.INSTANCE, true);
-        addPrivateFunction(COSINE_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
-        addPrivateFunction(DOT_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
+        addFunction(COSINE_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
+        addFunction(DOT_DISTANCE, ADoubleTypeComputer.INSTANCE_NULLABLE, true);
         addFunction(VECTOR_DISTANCE, ADoubleTypeComputer.INSTANCE, true);
 
         // Ann functions
