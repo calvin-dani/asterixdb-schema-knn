@@ -65,6 +65,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunLengthIntArray());
         }
+        setNullable(input.readBoolean());
         int numberOfChildren = input.readInt();
 
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
@@ -163,6 +164,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
     @Override
     public void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.OBJECT.serialize());
+        output.writeBoolean(isNullable());
         output.writeInt(children.size());
         for (Int2IntMap.Entry fieldNameIndexChildIndex : fieldNameIndexToChildIndexMap.int2IntEntrySet()) {
             int fieldNameIndex = fieldNameIndexChildIndex.getIntKey();
@@ -183,6 +185,7 @@ public final class ObjectSchemaNode extends AbstractSchemaNestedNode {
             definitionLevels.put(this, new RunLengthIntArray());
         }
 
+        setNullable(input.readBoolean());
         int numberOfChildren = input.readInt();
 
         fieldNameIndexToChildIndexMap.clear();

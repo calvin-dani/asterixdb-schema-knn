@@ -125,6 +125,10 @@ public class NoWriteColumnTransformer
                  * before injecting a union between the parent and the original node).
                  */
                 AbstractSchemaNode actualNode = unionNode.getOriginalType();
+                if (childTypeTag == ATypeTag.NULL) {
+                    unionNode.setNullable(true);
+                    actualNode.setNullable(true);
+                }
                 acceptActualNode(pointable, actualNode);
             } else {
                 AbstractSchemaNode actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), columnMetadata);
@@ -133,8 +137,12 @@ public class NoWriteColumnTransformer
 
             currentParent = previousParent;
         } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
+            node.setNullable(true);
             columnMetadata.addNestedNull(currentParent, (AbstractSchemaNestedNode) node);
         } else {
+            if (pointable.getTypeTag() == ATypeTag.NULL) {
+                node.setNullable(true);
+            }
             pointable.accept(this, node);
         }
     }

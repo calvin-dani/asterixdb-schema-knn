@@ -56,6 +56,8 @@ public class GenericListSchemaNode extends AbstractSchemaNestedNode {
             this.flat = (PrimitiveSchemaNode) objectRowSchemaNode;
         }
         current = type;
+        // Preserve nullability from the wrapped schema node for merge transforms.
+        setNullable(objectRowSchemaNode.isNullable());
     }
 
     @Override

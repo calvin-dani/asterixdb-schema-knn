@@ -195,6 +195,7 @@ public final class RowMetadata extends AbstractRowMetadata {
         if (child != null) {
             if (child.getTypeTag() == ATypeTag.NULL) {
                 createdChild = createChild(normalizedTypeTag, optional);
+                createdChild.setNullable(true);
             } else {
                 //Different type. Make union
                 createdChild = new UnionRowSchemaNode(child, createChild(normalizedTypeTag, optional));

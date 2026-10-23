@@ -57,10 +57,11 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
         child2.setFieldName(null);
         putChild(child1);
         putChild(child2);
+        setNullable(child1.isNullable() || child2.isNullable());
     }
 
     UnionRowSchemaNode(DataInput input) throws IOException {
-
+        setNullable(input.readBoolean());
         ATypeTag originalTypeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
 
         int numberOfChildren = input.readInt();
@@ -148,6 +149,7 @@ public final class UnionRowSchemaNode extends AbstractRowSchemaNestedNode {
     @Override
     public void serialize(DataOutput output) throws IOException {
         output.write(ATypeTag.UNION.serialize());
+        output.writeBoolean(isNullable());
         output.writeByte(originalType.getTypeTag().serialize());
         output.writeInt(children.size());
         for (AbstractRowSchemaNode child : children.values()) {

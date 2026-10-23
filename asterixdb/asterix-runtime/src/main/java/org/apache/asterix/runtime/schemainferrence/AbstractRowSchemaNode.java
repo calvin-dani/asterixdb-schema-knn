@@ -36,6 +36,7 @@ public abstract class AbstractRowSchemaNode {
     private int counter;
 
     public boolean optional = true;
+    private boolean nullable;
 
     public abstract ATypeTag getTypeTag();
 
@@ -61,6 +62,19 @@ public abstract class AbstractRowSchemaNode {
 
     public final int getCounter() {
         return counter;
+    }
+
+    public final boolean isNullable() {
+        return nullable;
+    }
+
+    /**
+     * Sticky: once null has been observed for this node, nullability is retained.
+     */
+    public final void setNullable(boolean nullable) {
+        if (nullable) {
+            this.nullable = true;
+        }
     }
 
     public abstract <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;

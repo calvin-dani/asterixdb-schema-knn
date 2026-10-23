@@ -45,6 +45,7 @@ public class PrimitiveSchemaNode extends AbstractSchemaNode {
         this.typeTag = typeTag;
         columnIndex = input.readInt();
         primaryKey = input.readBoolean();
+        setNullable(input.readBoolean());
     }
 
     public final int getColumnIndex() {
@@ -100,6 +101,7 @@ public class PrimitiveSchemaNode extends AbstractSchemaNode {
         output.write(typeTag.serialize());
         output.writeInt(columnIndex);
         output.writeBoolean(primaryKey);
+        output.writeBoolean(isNullable());
         pathInfoSerializer.writePathInfo(typeTag, columnIndex, primaryKey);
     }
 

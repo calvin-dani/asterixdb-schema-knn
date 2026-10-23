@@ -47,6 +47,7 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
         originalType = child1;
         putChild(child1);
         putChild(child2);
+        setNullable(child1.isNullable() || child2.isNullable());
     }
 
     UnionSchemaNode(DataInput input, Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels)
@@ -54,6 +55,7 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunLengthIntArray());
         }
+        setNullable(input.readBoolean());
         ATypeTag originalTypeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
         int numberOfChildren = input.readInt();
         children = new EnumMap<>(ATypeTag.class);
@@ -129,6 +131,7 @@ public final class UnionSchemaNode extends AbstractSchemaNestedNode {
     @Override
     public void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException {
         output.write(ATypeTag.UNION.serialize());
+        output.writeBoolean(isNullable());
         output.writeByte(originalType.getTypeTag().serialize());
         output.writeInt(children.size());
         pathInfoSerializer.enter(this);

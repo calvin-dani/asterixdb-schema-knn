@@ -549,6 +549,7 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
                 //Add the column index to be garbage collected
                 nullWriterIndexes.add(columnIndex);
                 createdChild = createChild(normalizedTypeTag);
+                createdChild.setNullable(true);
                 int mask = ColumnValuesUtil.getNullMask(level);
                 flushDefinitionLevels(mask, mask, defLevels, createdChild);
             } else {

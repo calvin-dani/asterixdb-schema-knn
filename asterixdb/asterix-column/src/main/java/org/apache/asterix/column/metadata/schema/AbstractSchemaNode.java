@@ -36,6 +36,7 @@ import org.apache.hyracks.data.std.api.IValueReference;
 
 public abstract class AbstractSchemaNode {
     private int counter;
+    private boolean nullable;
 
     public abstract ATypeTag getTypeTag();
 
@@ -55,6 +56,19 @@ public abstract class AbstractSchemaNode {
 
     public final int getCounter() {
         return counter;
+    }
+
+    public final boolean isNullable() {
+        return nullable;
+    }
+
+    /**
+     * Sticky: once null has been observed for this node, nullability is retained.
+     */
+    public final void setNullable(boolean nullable) {
+        if (nullable) {
+            this.nullable = true;
+        }
     }
 
     // TODO : CALVIN DANI Check field name logic for all schema inference transformations

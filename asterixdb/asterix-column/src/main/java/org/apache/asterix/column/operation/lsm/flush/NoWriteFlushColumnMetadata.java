@@ -151,6 +151,7 @@ public final class NoWriteFlushColumnMetadata extends FlushColumnMetadata {
                 int columnIndex = ((PrimitiveSchemaNode) child).getColumnIndex();
                 nullWriterIndexes.add(columnIndex);
                 createdChild = createChild(normalizedTypeTag);
+                createdChild.setNullable(true);
             } else {
                 createdChild = addDefinitionLevelsAndGet(new UnionSchemaNode(child, createChild(normalizedTypeTag)));
             }
