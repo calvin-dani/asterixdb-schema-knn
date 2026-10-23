@@ -19,7 +19,7 @@
 
 use test;
 
-insert into Person ([{"id": 1, "name": "n1", "address": {"zip": "z1"}}]);
+insert into Person ([{"id": 1, "name": "n1", "address": {"city": "c1"}}]);
 insert into Person ([{"id": 2, "name": null, "address": null}]);
 insert into Person ([{"id": 3, "name": "n3", "address": {"city": "c3"}}]);
 insert into Person ([{"id": 4, "name": null, "address": null}]);
