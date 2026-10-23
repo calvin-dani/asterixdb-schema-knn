@@ -73,6 +73,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     ObjectRowSchemaNode(DataInput input) throws IOException {
         this.optional = input.readBoolean();
+        setNullable(input.readBoolean());
         int numberOfChildren = input.readInt();
 
         fieldNameIndexToChildIndexMap = new Int2IntOpenHashMap();
@@ -143,6 +144,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
     public void serialize(DataOutput output) throws IOException {
         output.write(ATypeTag.OBJECT.serialize());
         output.writeBoolean(optional);
+        output.writeBoolean(isNullable());
         output.writeInt(children.size());
         for (Entry fieldNameIndexChildIndex : fieldNameIndexToChildIndexMap.int2IntEntrySet()) {
             output.writeInt(fieldNameIndexChildIndex.getIntKey());
@@ -155,6 +157,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     public void abort(DataInputStream input) throws IOException {
         this.optional = input.readBoolean();
+        restoreNullable(input.readBoolean());
         int numberOfChildren = input.readInt();
 
         fieldNameIndexToChildIndexMap.clear();

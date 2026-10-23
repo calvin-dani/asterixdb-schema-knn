@@ -155,6 +155,9 @@ public class JSONRowSchemaADMRecordBuilderVisitor
             child.accept(this, childRecordBuilder);
 
             childRecordBuilder.write(childOut.getDataOutput(), true);
+            if (shouldWrapNullable(child)) {
+                childOut = wrapWithNullOneOf(childOut);
+            }
             addKeyValue(fieldName, childOut, recordBuilder);
         }
 
@@ -264,6 +267,15 @@ public class JSONRowSchemaADMRecordBuilderVisitor
             oneOfListBuilder.addItem(out);
             out.reset();
         }
+        if (unionNode.isNullable()) {
+            RecordBuilder nullRb = new RecordBuilder();
+            nullRb.reset(null);
+            addKeyValue("type", "null", nullRb);
+            out.reset();
+            nullRb.write(out.getDataOutput(), true);
+            oneOfListBuilder.addItem(out);
+            out.reset();
+        }
         out.reset();
         oneOfListBuilder.write(out.getDataOutput(), true);
         addKeyValue("oneOf", out, parentRB);
@@ -286,6 +298,35 @@ public class JSONRowSchemaADMRecordBuilderVisitor
         if (node.getTypeTag() != ATypeTag.UNION) {
             addKeyValue("type", writeSchemaType(getNormalizedTypeTag(node.getTypeTag())), childRecordBuilder);
         }
+    }
+
+    private static boolean shouldWrapNullable(AbstractRowSchemaNode node) {
+        return node.isNullable() && node.getTypeTag() != ATypeTag.UNION && node.getTypeTag() != ATypeTag.NULL
+                && node.getTypeTag() != ATypeTag.MISSING;
+    }
+
+    private ArrayBackedValueStorage wrapWithNullOneOf(ArrayBackedValueStorage typedSchema) throws HyracksDataException {
+        OrderedListBuilder oneOfListBuilder = new OrderedListBuilder();
+        oneOfListBuilder.reset(AOrderedListType.FULL_OPEN_ORDEREDLIST_TYPE);
+        oneOfListBuilder.addItem(typedSchema);
+
+        ArrayBackedValueStorage nullOut = new ArrayBackedValueStorage();
+        RecordBuilder nullRb = new RecordBuilder();
+        nullRb.reset(null);
+        addKeyValue("type", "null", nullRb);
+        nullRb.write(nullOut.getDataOutput(), true);
+        oneOfListBuilder.addItem(nullOut);
+
+        ArrayBackedValueStorage oneOfOut = new ArrayBackedValueStorage();
+        oneOfListBuilder.write(oneOfOut.getDataOutput(), true);
+
+        RecordBuilder wrapper = new RecordBuilder();
+        wrapper.reset(null);
+        addKeyValue("oneOf", oneOfOut, wrapper);
+
+        ArrayBackedValueStorage result = new ArrayBackedValueStorage();
+        wrapper.write(result.getDataOutput(), true);
+        return result;
     }
 
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {

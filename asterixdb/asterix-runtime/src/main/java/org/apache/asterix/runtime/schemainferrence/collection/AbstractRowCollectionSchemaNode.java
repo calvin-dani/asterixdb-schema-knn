@@ -57,6 +57,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
 
     AbstractRowCollectionSchemaNode(DataInput input) throws IOException {
         setOptional(input.readBoolean());
+        setNullable(input.readBoolean());
         item = AbstractRowSchemaNestedNode.deserialize(input);
     }
 
@@ -97,6 +98,7 @@ public abstract class AbstractRowCollectionSchemaNode extends AbstractRowSchemaN
     public final void serialize(DataOutput output) throws IOException {
         output.write(getTypeTag().serialize());
         output.writeBoolean(isOptional());
+        output.writeBoolean(isNullable());
         item.serialize(output);
     }
 

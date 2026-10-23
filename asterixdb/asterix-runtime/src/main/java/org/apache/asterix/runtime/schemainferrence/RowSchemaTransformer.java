@@ -90,6 +90,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 //Only write actual field values (including NULL) but ignore MISSING fields
                 AbstractRowSchemaNode childNode =
                         objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata, child.isOptional());
+                rowMetadata.markNullable(childNode, child.isNullable());
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
             }
         }
@@ -213,6 +214,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
 
     private void acceptActualNode(AbstractRowSchemaNode nodeToAdd, AbstractRowSchemaNode node)
             throws HyracksDataException {
+        rowMetadata.markNullable(node, nodeToAdd.isNullable());
         if (node.getTypeTag() == ATypeTag.UNION) {
             rowMetadata.enterNode(currentParent, node);
             AbstractRowSchemaNestedNode previousParent = currentParent;
@@ -224,8 +226,13 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             AbstractRowSchemaNode actualNode;
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
+                if (childTypeTag == ATypeTag.NULL || nodeToAdd.isNullable()) {
+                    rowMetadata.markNullable(unionNode, true);
+                    rowMetadata.markNullable(actualNode, true);
+                }
             } else {
                 actualNode = unionNode.getOrCreateChild(childTypeTag, rowMetadata, nodeToAdd.isOptional());
+                rowMetadata.markNullable(actualNode, nodeToAdd.isNullable());
             }
             nodeToAdd.accept(this, actualNode);
 

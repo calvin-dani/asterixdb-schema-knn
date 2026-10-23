@@ -104,7 +104,8 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
             int index = fieldNameIndexes.getInt(i);
             String fieldName = index < 0 ? "<empty>" : fieldNames.get(index);
             AbstractSchemaNode child = children.get(i);
-            append(fieldName, index, child);
+            boolean wrapNullable = shouldWrapNullable(child);
+            append(fieldName, index, child, wrapNullable);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 if (child.isNested()) {
                     builder.append(", ");
@@ -113,15 +114,7 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
                 }
             }
             child.accept(this, null);
-            if (i != children.size() - 1 && child.getTypeTag() != ATypeTag.UNION) {
-                builder.append("  }, ");
-            } else if (i != children.size() - 1 && child.isNested()) {
-                builder.append(" , ");
-            } else if (child.getTypeTag() != ATypeTag.UNION) {
-                builder.append(" } ");
-            } else {
-                builder.append(" ");
-            }
+            closePropertyValue(child, wrapNullable, i != children.size() - 1);
         }
 
         builder.append(" } ");
@@ -150,6 +143,15 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         }
 
         itemNode.accept(this, null);
+        if (itemNode.getTypeTag() != ATypeTag.UNION && itemNode.isNested()) {
+            builder.append(" } ");
+        }
+        if (shouldWrapNullable(itemNode) || (itemNode.getTypeTag() == ATypeTag.UNION && itemNode.isNullable())) {
+            // union visitor already appends null when nullable; only add for non-union items
+            if (itemNode.getTypeTag() != ATypeTag.UNION) {
+                builder.append(", { \"type\": \"null\" } ");
+            }
+        }
         builder.append("] ").append(" } ");
         level--;
         indent--;
@@ -163,7 +165,6 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         List<AbstractSchemaNode> unionChildren = new ArrayList<AbstractSchemaNode>(unionNode.getChildren().values());
         for (int i = 0; i < unionChildren.size(); i++) {
             AbstractSchemaNode child = unionChildren.get(i);
-            //            append(child.getTypeTag().toString(), child);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 builder.append("{  \"type\":");
                 writeSchemaType(getNormalizedTypeTag(child.getTypeTag()));
@@ -178,8 +179,10 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
                 builder.append(" } ");
             }
         }
+        if (unionNode.isNullable()) {
+            builder.append(", { \"type\": \"null\" } ");
+        }
         builder.append("]  }");
-        //        builder.append("] ");
         indent--;
         return null;
     }
@@ -189,21 +192,42 @@ public class SchemaStringBuilderVisitor implements ISchemaNodeVisitor<Void, Void
         return null;
     }
 
-    private void appendDecor() {
-        builder.append("|    ".repeat(Math.max(0, indent - 1)));
-        builder.append("|-- ");
-    }
-
-    private void append(String key, AbstractSchemaNode node) throws HyracksDataException {
-        append(key, -1, node);
-    }
-
-    private void append(String key, int index, AbstractSchemaNode node) throws HyracksDataException {
+    private void append(String key, int index, AbstractSchemaNode node, boolean wrapNullable)
+            throws HyracksDataException {
         builder.append("\"").append(key).append("\"").append(": ");
         if (node.getTypeTag() != ATypeTag.UNION) {
+            if (wrapNullable) {
+                builder.append("{ \"oneOf\": [ ");
+            }
             builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(node.getTypeTag()));
         }
+    }
+
+    private void closePropertyValue(AbstractSchemaNode child, boolean wrapNullable, boolean moreSiblings) {
+        if (child.getTypeTag() == ATypeTag.UNION) {
+            if (moreSiblings) {
+                builder.append(", ");
+            } else {
+                builder.append(" ");
+            }
+            return;
+        }
+        // Close the typed schema object opened in append()
+        builder.append(" } ");
+        if (wrapNullable) {
+            builder.append(", { \"type\": \"null\" } ] } ");
+        }
+        if (moreSiblings) {
+            builder.append(", ");
+        } else {
+            builder.append(" ");
+        }
+    }
+
+    private static boolean shouldWrapNullable(AbstractSchemaNode node) {
+        return node.isNullable() && node.getTypeTag() != ATypeTag.UNION && node.getTypeTag() != ATypeTag.NULL
+                && node.getTypeTag() != ATypeTag.MISSING;
     }
 
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {

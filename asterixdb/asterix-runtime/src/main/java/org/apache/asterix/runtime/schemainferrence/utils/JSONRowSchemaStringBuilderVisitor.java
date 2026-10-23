@@ -99,10 +99,7 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         IntList fieldNameIndexes = objectNode.getChildrenFieldNameIndexes();
         level++;
         indent++;
-        //        recordBuilder.reset(null);
-        // Prop open
         builder.append("\"properties\": {  ");
-        //        recordBuilder.addField( UTF8StringPointable.generateUTF8Pointable("properties"), UTF8StringPointable.generateUTF8Pointable("object"));
 
         for (int i = 0; i < children.size(); i++) {
 
@@ -112,7 +109,8 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             if (!child.isOptional()) {
                 requiredFieldNames.add(fieldName);
             }
-            append(fieldName, index, child);
+            boolean wrapNullable = shouldWrapNullable(child);
+            append(fieldName, index, child, wrapNullable);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 if (child.isNested()) {
                     builder.append(", ");
@@ -121,18 +119,9 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
                 }
             }
             child.accept(this, null);
-            if (i != children.size() - 1 && child.getTypeTag() != ATypeTag.UNION) {
-                builder.append(" }, ");
-            } else if (i != children.size() - 1 && child.isNested()) {
-                builder.append(" , ");
-            } else if (child.getTypeTag() != ATypeTag.UNION) {
-                builder.append(" } ");
-            } else {
-                builder.append(" ");
-            }
+            closePropertyValue(child, wrapNullable, i != children.size() - 1);
         }
 
-        // Prop close
         builder.append(" } ");
         if (!requiredFieldNames.isEmpty()) {
             builder.append(", ");
@@ -145,7 +134,6 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
             }
             builder.append(" ]");
         }
-        //        recordBuilder.write(out,true);
 
         level--;
         indent--;
@@ -172,18 +160,14 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         }
 
         itemNode.accept(this, null);
-        if (itemNode.isNested()) {
+        if (itemNode.isNested() && itemNode.getTypeTag() != ATypeTag.UNION) {
             builder.append("} ");
 
         }
-        //        if (!itemNode.isNested()) {
-        //        builder.append(" } ");
-        //        } else {
-        //            builder.append(" ");
-        //        }
-        //        builder.append("} ");
+        if (shouldWrapNullable(itemNode)) {
+            builder.append(", { \"type\": \"null\" } ");
+        }
         builder.append("] ").append(" } ");
-        //        appendPostDecor();
         level--;
         indent--;
         return null;
@@ -195,10 +179,8 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         builder.append("{ \"oneOf\": [ ");
         List<AbstractRowSchemaNode> unionChildren =
                 new ArrayList<AbstractRowSchemaNode>(unionNode.getChildren().values());
-        //        for (AbstractRowSchemaNode child : unionNode.getChildren().values()) {
         for (int i = 0; i < unionChildren.size(); i++) {
             AbstractRowSchemaNode child = unionChildren.get(i);
-            //            append(child.getTypeTag().toString(), child);
             if (child.getTypeTag() != ATypeTag.UNION) {
                 builder.append("{  \"type\":");
                 writeSchemaType(getNormalizedTypeTag(child.getTypeTag()));
@@ -213,8 +195,10 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
                 builder.append(" } ");
             }
         }
+        if (unionNode.isNullable()) {
+            builder.append(", { \"type\": \"null\" } ");
+        }
         builder.append("]  }");
-        //        builder.append("] ");
         indent--;
         return null;
     }
@@ -224,32 +208,41 @@ public class JSONRowSchemaStringBuilderVisitor implements IRowSchemaNodeVisitor<
         return null;
     }
 
-    private void appendDecor() {
-        builder.append("'properties':".repeat(Math.max(0, indent - 1)));
-        builder.append("{ ");
-    }
-
-    private void appendPostDecor() {
-        //        builder.append("|    ".repeat(Math.max(0, indent - 1)));
-        builder.append("} ");
-    }
-
-    private void append(String key, AbstractRowSchemaNode node) throws HyracksDataException {
-        append(key, -1, node);
-    }
-
-    private void append(String key, int index, AbstractRowSchemaNode node) throws HyracksDataException {
-        //        appendDecor();
-
+    private void append(String key, int index, AbstractRowSchemaNode node, boolean wrapNullable)
+            throws HyracksDataException {
         builder.append("\"").append(key).append("\"").append(": ");
-        //        if (!node.isNested()) {
-        //            final PrimitiveRowSchemaNode primitiveNode = (PrimitiveRowSchemaNode) node;
         if (node.getTypeTag() != ATypeTag.UNION) {
+            if (wrapNullable) {
+                builder.append("{ \"oneOf\": [ ");
+            }
             builder.append("{  \"type\":");
             writeSchemaType(getNormalizedTypeTag(node.getTypeTag()));
         }
-        //        }
-        //        builder.append(" ");
+    }
+
+    private void closePropertyValue(AbstractRowSchemaNode child, boolean wrapNullable, boolean moreSiblings) {
+        if (child.getTypeTag() == ATypeTag.UNION) {
+            if (moreSiblings) {
+                builder.append(", ");
+            } else {
+                builder.append(" ");
+            }
+            return;
+        }
+        builder.append(" } ");
+        if (wrapNullable) {
+            builder.append(", { \"type\": \"null\" } ] } ");
+        }
+        if (moreSiblings) {
+            builder.append(", ");
+        } else {
+            builder.append(" ");
+        }
+    }
+
+    private static boolean shouldWrapNullable(AbstractRowSchemaNode node) {
+        return node.isNullable() && node.getTypeTag() != ATypeTag.UNION && node.getTypeTag() != ATypeTag.NULL
+                && node.getTypeTag() != ATypeTag.MISSING;
     }
 
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {

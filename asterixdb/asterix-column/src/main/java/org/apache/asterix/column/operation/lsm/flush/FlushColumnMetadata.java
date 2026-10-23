@@ -373,6 +373,17 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
         return columnWriters.size();
     }
 
+    /**
+     * Marks {@code node} nullable when {@code nullable} is set. Observing a NULL for an existing field reuses that
+     * field's node, so the schema must be flagged as changed here or the new nullability is never serialized.
+     */
+    public void markNullable(AbstractSchemaNode node, boolean nullable) {
+        if (nullable && !node.isNullable()) {
+            node.setNullable(true);
+            changed = true;
+        }
+    }
+
     public AbstractSchemaNode getOrCreateChild(AbstractSchemaNode child, ATypeTag childTypeTag)
             throws HyracksDataException {
         AbstractSchemaNode currentChild = child;
@@ -549,6 +560,7 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
                 //Add the column index to be garbage collected
                 nullWriterIndexes.add(columnIndex);
                 createdChild = createChild(normalizedTypeTag);
+                createdChild.setNullable(true);
                 int mask = ColumnValuesUtil.getNullMask(level);
                 flushDefinitionLevels(mask, mask, defLevels, createdChild);
             } else {

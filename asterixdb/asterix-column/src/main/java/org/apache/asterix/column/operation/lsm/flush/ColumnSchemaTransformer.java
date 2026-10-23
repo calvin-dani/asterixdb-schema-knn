@@ -102,6 +102,7 @@ public class ColumnSchemaTransformer
             } else if (childTypeTag != ATypeTag.MISSING) {
                 //Only write actual field values (including NULL) but ignore MISSING fields
                 AbstractSchemaNode childNode = objectNode.getOrCreateChild(fieldName, childTypeTag, colMetadata);
+                colMetadata.markNullable(childNode, child.isNullable());
                 acceptActualNode(new GenericListSchemaNode(childTypeTag, child), childNode);
             }
         }
@@ -221,6 +222,7 @@ public class ColumnSchemaTransformer
     }
 
     private void acceptActualNode(AbstractSchemaNode nodeToAdd, AbstractSchemaNode node) throws HyracksDataException {
+        colMetadata.markNullable(node, nodeToAdd.isNullable());
         if (node.getTypeTag() == ATypeTag.UNION) {
             colMetadata.enterNode(currentParent, node);
             AbstractSchemaNestedNode previousParent = currentParent;
@@ -232,8 +234,13 @@ public class ColumnSchemaTransformer
             AbstractSchemaNode actualNode;
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
+                if (childTypeTag == ATypeTag.NULL || nodeToAdd.isNullable()) {
+                    colMetadata.markNullable(unionNode, true);
+                    colMetadata.markNullable(actualNode, true);
+                }
             } else {
                 actualNode = unionNode.getOrCreateChild(childTypeTag, colMetadata);
+                colMetadata.markNullable(actualNode, nodeToAdd.isNullable());
             }
             nodeToAdd.accept(this, actualNode);
 

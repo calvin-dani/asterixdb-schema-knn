@@ -97,7 +97,7 @@ public class PrimitiveSchemaNode extends AbstractSchemaNode {
 
     @Override
     public void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException {
-        output.write(typeTag.serialize());
+        writeTypeTag(output, typeTag);
         output.writeInt(columnIndex);
         output.writeBoolean(primaryKey);
         pathInfoSerializer.writePathInfo(typeTag, columnIndex, primaryKey);

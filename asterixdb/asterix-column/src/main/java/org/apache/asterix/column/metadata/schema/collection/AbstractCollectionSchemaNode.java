@@ -81,7 +81,7 @@ public abstract class AbstractCollectionSchemaNode extends AbstractSchemaNestedN
 
     @Override
     public final void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException {
-        output.write(getTypeTag().serialize());
+        writeTypeTag(output, getTypeTag());
         pathInfoSerializer.enter(this);
         item.serialize(output, pathInfoSerializer);
         pathInfoSerializer.exit(this);

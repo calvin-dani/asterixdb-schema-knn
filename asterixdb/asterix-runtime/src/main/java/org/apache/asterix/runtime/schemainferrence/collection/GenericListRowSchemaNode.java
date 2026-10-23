@@ -57,6 +57,9 @@ public class GenericListRowSchemaNode extends AbstractRowSchemaNestedNode {
             this.flat = (PrimitiveRowSchemaNode) objectRowSchemaNode;
         }
         current = type;
+        // Preserve nullability from the wrapped schema node for merge transforms.
+        setNullable(objectRowSchemaNode.isNullable());
+        setOptional(objectRowSchemaNode.isOptional());
     }
 
     @Override
@@ -76,7 +79,21 @@ public class GenericListRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     @Override
     public boolean isOptional() {
-        return false;
+        AbstractRowSchemaNode wrapped = getWrapped();
+        return wrapped != null ? wrapped.isOptional() : false;
+    }
+
+    private AbstractRowSchemaNode getWrapped() {
+        switch (current) {
+            case OBJECT:
+                return objectRowSchemaNode;
+            case ARRAY:
+                return arrayRowSchemaNode;
+            case MULTISET:
+                return multisetRowSchemaNode;
+            default:
+                return flat;
+        }
     }
 
     @Override

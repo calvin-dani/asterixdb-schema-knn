@@ -36,6 +36,7 @@ public abstract class AbstractRowSchemaNode {
     private int counter;
 
     public boolean optional = true;
+    private boolean nullable;
 
     public abstract ATypeTag getTypeTag();
 
@@ -61,6 +62,26 @@ public abstract class AbstractRowSchemaNode {
 
     public final int getCounter() {
         return counter;
+    }
+
+    public final boolean isNullable() {
+        return nullable;
+    }
+
+    /**
+     * Sticky: once null has been observed for this node, nullability is retained.
+     */
+    public final void setNullable(boolean nullable) {
+        if (nullable) {
+            this.nullable = true;
+        }
+    }
+
+    /**
+     * Overwrites nullability, including clearing it, when a node is re-read from its serialized form.
+     */
+    final void restoreNullable(boolean nullable) {
+        this.nullable = nullable;
     }
 
     public abstract <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
@@ -90,32 +111,6 @@ public abstract class AbstractRowSchemaNode {
             case STRING:
             case UUID:
                 return new PrimitiveRowSchemaNode(typeTag, input);
-            default:
-                throw new UnsupportedEncodingException(typeTag + " is not supported");
-        }
-    }
-
-    public static AbstractRowSchemaNode deserializeFromColumnar(DataInput input) throws IOException {
-        ATypeTag typeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
-        switch (typeTag) {
-            case SYSTEM_NULL:
-                return MissingRowFieldSchemaNode.INSTANCE;
-            case OBJECT:
-                return new ObjectRowSchemaNode(input);
-            case ARRAY:
-                return new ArrayRowSchemaNode(input);
-            case MULTISET:
-                return new MultisetRowSchemaNode(input);
-            case UNION:
-                return new UnionRowSchemaNode(input);
-            case NULL:
-            case MISSING:
-            case BOOLEAN:
-            case BIGINT:
-            case DOUBLE:
-            case STRING:
-            case UUID:
-                return new PrimitiveRowSchemaNode(typeTag, input, true);
             default:
                 throw new UnsupportedEncodingException(typeTag + " is not supported");
         }
