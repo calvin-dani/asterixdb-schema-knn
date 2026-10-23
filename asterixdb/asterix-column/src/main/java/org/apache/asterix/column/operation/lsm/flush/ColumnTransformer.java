@@ -163,7 +163,7 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
         if (valueTypeTag == ATypeTag.MISSING) {
             writer.writeLevel(columnMetadata.getLevel());
         } else if (valueTypeTag == ATypeTag.NULL) {
-            node.setNullable(true);
+            columnMetadata.markNullable(node, true);
             writer.writeNull(columnMetadata.getLevel());
         } else if (pointable.isTagged()) {
             //Remove type tag
@@ -199,8 +199,8 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
                  */
                 AbstractSchemaNode actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    columnMetadata.markNullable(unionNode, true);
+                    columnMetadata.markNullable(actualNode, true);
                 }
                 acceptActualNode(pointable, actualNode);
             } else {
@@ -211,7 +211,7 @@ public class ColumnTransformer implements ILazyVisitablePointableVisitor<Abstrac
             currentParent = previousParent;
             columnMetadata.exitNode(node);
         } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.setNullable(true);
+            columnMetadata.markNullable(node, true);
             columnMetadata.addNestedNull(currentParent, (AbstractSchemaNestedNode) node);
         } else {
             pointable.accept(this, node);

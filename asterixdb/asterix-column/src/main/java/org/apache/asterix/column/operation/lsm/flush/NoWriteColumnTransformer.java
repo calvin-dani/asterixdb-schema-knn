@@ -126,8 +126,8 @@ public class NoWriteColumnTransformer
                  */
                 AbstractSchemaNode actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    columnMetadata.markNullable(unionNode, true);
+                    columnMetadata.markNullable(actualNode, true);
                 }
                 acceptActualNode(pointable, actualNode);
             } else {
@@ -137,11 +137,11 @@ public class NoWriteColumnTransformer
 
             currentParent = previousParent;
         } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.setNullable(true);
+            columnMetadata.markNullable(node, true);
             columnMetadata.addNestedNull(currentParent, (AbstractSchemaNestedNode) node);
         } else {
             if (pointable.getTypeTag() == ATypeTag.NULL) {
-                node.setNullable(true);
+                columnMetadata.markNullable(node, true);
             }
             pointable.accept(this, node);
         }

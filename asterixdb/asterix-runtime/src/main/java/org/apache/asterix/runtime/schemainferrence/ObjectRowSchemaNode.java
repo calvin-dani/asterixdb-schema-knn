@@ -157,7 +157,7 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     public void abort(DataInputStream input) throws IOException {
         this.optional = input.readBoolean();
-        setNullable(input.readBoolean());
+        restoreNullable(input.readBoolean());
         int numberOfChildren = input.readInt();
 
         fieldNameIndexToChildIndexMap.clear();

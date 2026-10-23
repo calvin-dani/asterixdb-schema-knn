@@ -77,6 +77,13 @@ public abstract class AbstractRowSchemaNode {
         }
     }
 
+    /**
+     * Overwrites nullability, including clearing it, when a node is re-read from its serialized form.
+     */
+    final void restoreNullable(boolean nullable) {
+        this.nullable = nullable;
+    }
+
     public abstract <R, T> R accept(IRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
 
     public abstract <R, T> R accept(IObjectRowSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException;
@@ -104,32 +111,6 @@ public abstract class AbstractRowSchemaNode {
             case STRING:
             case UUID:
                 return new PrimitiveRowSchemaNode(typeTag, input);
-            default:
-                throw new UnsupportedEncodingException(typeTag + " is not supported");
-        }
-    }
-
-    public static AbstractRowSchemaNode deserializeFromColumnar(DataInput input) throws IOException {
-        ATypeTag typeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
-        switch (typeTag) {
-            case SYSTEM_NULL:
-                return MissingRowFieldSchemaNode.INSTANCE;
-            case OBJECT:
-                return new ObjectRowSchemaNode(input);
-            case ARRAY:
-                return new ArrayRowSchemaNode(input);
-            case MULTISET:
-                return new MultisetRowSchemaNode(input);
-            case UNION:
-                return new UnionRowSchemaNode(input);
-            case NULL:
-            case MISSING:
-            case BOOLEAN:
-            case BIGINT:
-            case DOUBLE:
-            case STRING:
-            case UUID:
-                return new PrimitiveRowSchemaNode(typeTag, input, true);
             default:
                 throw new UnsupportedEncodingException(typeTag + " is not supported");
         }

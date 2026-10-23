@@ -90,7 +90,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
                 //Only write actual field values (including NULL) but ignore MISSING fields
                 AbstractRowSchemaNode childNode =
                         objectNode.getOrCreateChild(fieldName, childTypeTag, rowMetadata, child.isOptional());
-                childNode.setNullable(child.isNullable());
+                rowMetadata.markNullable(childNode, child.isNullable());
                 acceptActualNode(new GenericListRowSchemaNode(childTypeTag, child), childNode);
             }
         }
@@ -214,7 +214,7 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
 
     private void acceptActualNode(AbstractRowSchemaNode nodeToAdd, AbstractRowSchemaNode node)
             throws HyracksDataException {
-        node.setNullable(nodeToAdd.isNullable());
+        rowMetadata.markNullable(node, nodeToAdd.isNullable());
         if (node.getTypeTag() == ATypeTag.UNION) {
             rowMetadata.enterNode(currentParent, node);
             AbstractRowSchemaNestedNode previousParent = currentParent;
@@ -227,12 +227,12 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL || nodeToAdd.isNullable()) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    rowMetadata.markNullable(unionNode, true);
+                    rowMetadata.markNullable(actualNode, true);
                 }
             } else {
                 actualNode = unionNode.getOrCreateChild(childTypeTag, rowMetadata, nodeToAdd.isOptional());
-                actualNode.setNullable(nodeToAdd.isNullable());
+                rowMetadata.markNullable(actualNode, nodeToAdd.isNullable());
             }
             nodeToAdd.accept(this, actualNode);
 

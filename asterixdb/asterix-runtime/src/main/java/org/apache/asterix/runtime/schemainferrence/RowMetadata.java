@@ -147,6 +147,17 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     // Create schema node
+    /**
+     * Marks {@code node} nullable when {@code nullable} is set. Observing a NULL for an existing field reuses that
+     * field's node, so the schema must be flagged as changed here or the new nullability is never serialized.
+     */
+    public void markNullable(AbstractRowSchemaNode node, boolean nullable) {
+        if (nullable && !node.isNullable()) {
+            node.setNullable(true);
+            changed = true;
+        }
+    }
+
     public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag, boolean optional)
             throws HyracksDataException {
         AbstractRowSchemaNode currentChild = child;

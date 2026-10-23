@@ -44,7 +44,6 @@ public abstract class AbstractCollectionSchemaNode extends AbstractSchemaNestedN
         if (definitionLevels != null) {
             definitionLevels.put(this, new RunLengthIntArray());
         }
-        setNullable(input.readBoolean());
         item = AbstractSchemaNode.deserialize(input, definitionLevels);
     }
 
@@ -82,8 +81,7 @@ public abstract class AbstractCollectionSchemaNode extends AbstractSchemaNestedN
 
     @Override
     public final void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException {
-        output.write(getTypeTag().serialize());
-        output.writeBoolean(isNullable());
+        writeTypeTag(output, getTypeTag());
         pathInfoSerializer.enter(this);
         item.serialize(output, pathInfoSerializer);
         pathInfoSerializer.exit(this);

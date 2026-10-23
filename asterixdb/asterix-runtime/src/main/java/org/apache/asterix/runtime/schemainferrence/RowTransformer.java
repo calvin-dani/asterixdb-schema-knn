@@ -238,8 +238,8 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    rowMetadata.markNullable(unionNode, true);
+                    rowMetadata.markNullable(actualNode, true);
                 }
             } else {
                 actualNode = unionNode.getOrCreateChild(pointable.getTypeTag(), rowMetadata, false);
@@ -249,11 +249,11 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             currentParent = previousParent;
             rowMetadata.exitNode(node);
         } else if (pointable.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.setNullable(true);
+            rowMetadata.markNullable(node, true);
             rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
         } else {
             if (pointable.getTypeTag() == ATypeTag.NULL) {
-                node.setNullable(true);
+                rowMetadata.markNullable(node, true);
             }
             pointable.accept(this, node);
         }
@@ -272,8 +272,8 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    rowMetadata.markNullable(unionNode, true);
+                    rowMetadata.markNullable(actualNode, true);
                 }
             } else {
                 //TODO : CALVIN DANI check if the optional flag is correct
@@ -284,11 +284,11 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             currentParent = previousParent;
             rowMetadata.exitNode(node);
         } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.setNullable(true);
+            rowMetadata.markNullable(node, true);
             rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
         } else {
             if (recType.getTypeTag() == ATypeTag.NULL) {
-                node.setNullable(true);
+                rowMetadata.markNullable(node, true);
             }
             recType.accept(this, node);
         }
@@ -307,8 +307,8 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    rowMetadata.markNullable(unionNode, true);
+                    rowMetadata.markNullable(actualNode, true);
                 }
             } else {
                 actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, false);
@@ -318,11 +318,11 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             currentParent = previousParent;
             rowMetadata.exitNode(node);
         } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.setNullable(true);
+            rowMetadata.markNullable(node, true);
             rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
         } else {
             if (recType.getTypeTag() == ATypeTag.NULL) {
-                node.setNullable(true);
+                rowMetadata.markNullable(node, true);
             }
             recType.accept(this, node);
         }
@@ -341,8 +341,8 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
                 actualNode = unionNode.getOriginalType();
                 if (childTypeTag == ATypeTag.NULL) {
-                    unionNode.setNullable(true);
-                    actualNode.setNullable(true);
+                    rowMetadata.markNullable(unionNode, true);
+                    rowMetadata.markNullable(actualNode, true);
                 }
             } else {
                 actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, false);
@@ -352,11 +352,11 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
             currentParent = previousParent;
             rowMetadata.exitNode(node);
         } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            node.setNullable(true);
+            rowMetadata.markNullable(node, true);
             rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
         } else {
             if (recType.getTypeTag() == ATypeTag.NULL) {
-                node.setNullable(true);
+                rowMetadata.markNullable(node, true);
             }
             recType.accept(this, node);
         }

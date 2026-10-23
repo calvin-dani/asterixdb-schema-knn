@@ -35,6 +35,11 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 
 public abstract class AbstractSchemaNode {
+    /**
+     * Carried in the high bit of a node's serialized type tag rather than as a separate field, so that column
+     * metadata persisted before nullability was tracked still deserializes (as non-nullable).
+     */
+    private static final int NULLABLE_BIT = 0x80;
     private int counter;
     private boolean nullable;
 
@@ -71,6 +76,21 @@ public abstract class AbstractSchemaNode {
         }
     }
 
+    /**
+     * Overwrites nullability, including clearing it, when a node is re-read from its serialized form.
+     */
+    final void restoreNullable(boolean nullable) {
+        this.nullable = nullable;
+    }
+
+    protected final void writeTypeTag(DataOutput output, ATypeTag typeTag) throws IOException {
+        output.writeByte(nullable ? typeTag.serialize() | NULLABLE_BIT : typeTag.serialize());
+    }
+
+    static boolean isNullableTag(byte serializedTag) {
+        return (serializedTag & NULLABLE_BIT) != 0;
+    }
+
     // TODO : CALVIN DANI Check field name logic for all schema inference transformations
     public abstract IValueReference getFieldName();
 
@@ -84,7 +104,17 @@ public abstract class AbstractSchemaNode {
 
     public static AbstractSchemaNode deserialize(DataInput input,
             Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels) throws IOException {
-        ATypeTag typeTag = ATypeTag.VALUE_TYPE_MAPPING[input.readByte()];
+        byte serializedTag = input.readByte();
+        ATypeTag typeTag = ATypeTag.VALUE_TYPE_MAPPING[serializedTag & ~NULLABLE_BIT & 0xFF];
+        AbstractSchemaNode node = deserialize(typeTag, input, definitionLevels);
+        if (node != MissingFieldSchemaNode.INSTANCE) {
+            node.restoreNullable(isNullableTag(serializedTag));
+        }
+        return node;
+    }
+
+    private static AbstractSchemaNode deserialize(ATypeTag typeTag, DataInput input,
+            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels) throws IOException {
         switch (typeTag) {
             case SYSTEM_NULL:
                 return MissingFieldSchemaNode.INSTANCE;
