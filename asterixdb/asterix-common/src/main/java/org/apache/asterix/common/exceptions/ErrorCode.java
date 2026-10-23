@@ -499,6 +499,7 @@ public enum ErrorCode implements IError {
     // Avro error
     UNSUPPORTED_TYPE_FOR_AVRO(3123),
     EXTERNAL_COLLECTION_NOT_SUPPORTED(3124),
+    NO_SAMPLE_INDEX(3125),
 
     // Lifecycle management errors
     DUPLICATE_PARTITION_ID(4000),

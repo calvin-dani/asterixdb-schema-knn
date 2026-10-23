@@ -160,7 +160,7 @@ import org.apache.hyracks.algebricks.core.algebra.functions.IFunctionInfo;
 import org.apache.hyracks.algebricks.core.algebra.properties.UnpartitionedPropertyComputer;
 
 public class BuiltinFunctions {
-
+    //TODO : CALVIN DANI CHECK WITH ALI ON BUILTIN FUNCTIONS.
     private static final Map<FunctionIdentifier, BuiltinFunctionInfo> registeredFunctions = new HashMap<>();
     private static final Map<FunctionIdentifier, Set<? extends BuiltinFunctionProperty>> builtinFunctionProperties =
             new HashMap<>();
@@ -452,6 +452,10 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-intermediate-centroid", 1);
     public static final FunctionIdentifier LOCAL_CENTROID = FunctionConstants.newAsterix("agg-local-centroid", 1);
     public static final FunctionIdentifier MEDIAN = FunctionConstants.newAsterix("agg-median", 1);
+    public static final FunctionIdentifier LOCAL_SCHEMA = FunctionConstants.newAsterix("agg-local-schema", 1);
+    public static final FunctionIdentifier GLOBAL_SCHEMA = FunctionConstants.newAsterix("agg-global-schema", 1);
+    public static final FunctionIdentifier INTERMEDIATE_SCHEMA =
+            FunctionConstants.newAsterix("agg-intermediate-schema", 1);
     public static final FunctionIdentifier FIRST_ELEMENT = FunctionConstants.newAsterix("agg-first-element", 1);
     public static final FunctionIdentifier LOCAL_FIRST_ELEMENT =
             FunctionConstants.newAsterix("agg-local-first-element", 1);
@@ -626,6 +630,9 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier SQL_AVG = FunctionConstants.newAsterix("agg-sql-avg", 1);
     public static final FunctionIdentifier INTERMEDIATE_SQL_AVG =
             FunctionConstants.newAsterix("intermediate-agg-sql-avg", 1);
+    public static final FunctionIdentifier SQL_SCHEMA = FunctionConstants.newAsterix("agg-sql-schema", 1);
+    public static final FunctionIdentifier INTERMEDIATE_SQL_SCHEMA =
+            FunctionConstants.newAsterix("intermediate-agg-sql-schema", 1);
     public static final FunctionIdentifier SQL_COUNT = FunctionConstants.newAsterix("agg-sql-count", 1);
     public static final FunctionIdentifier SQL_COUNTN = FunctionConstants.newAsterix("agg-sql-countn", 1);
     public static final FunctionIdentifier SQL_SUM = FunctionConstants.newAsterix("agg-sql-sum", 1);
@@ -651,6 +658,8 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-intermediate-sql-median", 1);
     public static final FunctionIdentifier GLOBAL_SQL_MEDIAN = FunctionConstants.newAsterix("agg-global-sql-median", 1);
     public static final FunctionIdentifier SQL_STDDEV_SAMP = FunctionConstants.newAsterix("agg-sql-stddev_samp", 1);
+    public static final FunctionIdentifier LOCAL_SQL_SCHEMA = FunctionConstants.newAsterix("agg-local-sql-schema", 1);
+    public static final FunctionIdentifier GLOBAL_SQL_SCHEMA = FunctionConstants.newAsterix("agg-global-sql-schema", 1);
     public static final FunctionIdentifier INTERMEDIATE_SQL_STDDEV_SAMP =
             FunctionConstants.newAsterix("intermediate-agg-sql-stddev_samp", 1);
     public static final FunctionIdentifier GLOBAL_SQL_STDDEV_SAMP =
@@ -708,6 +717,7 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier SCALAR_SQL_MEDIAN = FunctionConstants.newAsterix("sql-median", 1);
     public static final FunctionIdentifier SCALAR_SQL_STDDEV_SAMP = FunctionConstants.newAsterix("sql-stddev_samp", 1);
     public static final FunctionIdentifier SCALAR_SQL_STDDEV_POP = FunctionConstants.newAsterix("sql-stddev_pop", 1);
+    public static final FunctionIdentifier SCALAR_SQL_SCHEMA = FunctionConstants.newAsterix("sql-schema", 1);
     public static final FunctionIdentifier SCALAR_SQL_VAR_SAMP = FunctionConstants.newAsterix("sql-var_samp", 1);
     public static final FunctionIdentifier SCALAR_SQL_VAR_POP = FunctionConstants.newAsterix("sql-var_pop", 1);
     public static final FunctionIdentifier SCALAR_SQL_SKEWNESS = FunctionConstants.newAsterix("sql-skewness", 1);
@@ -1815,6 +1825,9 @@ public class BuiltinFunctions {
         addPrivateFunction(GLOBAL_SQL_AVG, NullableDoubleTypeComputer.INSTANCE, true);
         addPrivateFunction(LOCAL_SQL_AVG, LocalAvgTypeComputer.INSTANCE, true);
         addPrivateFunction(INTERMEDIATE_SQL_AVG, LocalAvgTypeComputer.INSTANCE, true);
+        addFunction(SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addPrivateFunction(LOCAL_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addPrivateFunction(GLOBAL_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addFunction(SQL_COUNT, AInt64TypeComputer.INSTANCE, true);
         addFunction(SQL_COUNT_DISTINCT_HASH, AInt64TypeComputer.INSTANCE, true);
         addFunction(SQL_COUNTN, CountNTypeComputer.INSTANCE, true);
@@ -1827,6 +1840,7 @@ public class BuiltinFunctions {
         addPrivateFunction(INTERMEDIATE_SQL_MIN, MinMaxAggTypeComputer.INSTANCE, true);
         addPrivateFunction(GLOBAL_SQL_MIN, MinMaxAggTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_AVG, NullableDoubleTypeComputer.INSTANCE, true);
+        addFunction(SCALAR_SQL_SCHEMA, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_COUNT, AInt64TypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_COUNTN, CountNTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_MAX, scalarMinMaxTypeComputer, true);
@@ -2745,6 +2759,18 @@ public class BuiltinFunctions {
         addIntermediateAgg(SERIAL_LOCAL_SQL_AVG, SERIAL_INTERMEDIATE_SQL_AVG);
         addIntermediateAgg(SERIAL_GLOBAL_SQL_AVG, SERIAL_INTERMEDIATE_SQL_AVG);
         addGlobalAgg(SERIAL_SQL_AVG, SERIAL_GLOBAL_SQL_AVG);
+
+        // SQL SCHEMA_INF
+        addAgg(SQL_SCHEMA);
+        addAgg(LOCAL_SQL_SCHEMA);
+        addAgg(GLOBAL_SQL_SCHEMA);
+        //
+        addLocalAgg(SQL_SCHEMA, LOCAL_SQL_SCHEMA);
+        addIntermediateAgg(SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
+        addIntermediateAgg(LOCAL_SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
+        addIntermediateAgg(GLOBAL_SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
+        addGlobalAgg(SQL_SCHEMA, GLOBAL_SQL_SCHEMA);
+        addScalarAgg(SQL_SCHEMA, SCALAR_SQL_SCHEMA);
 
         // SQL STDDEV_SAMP
 
