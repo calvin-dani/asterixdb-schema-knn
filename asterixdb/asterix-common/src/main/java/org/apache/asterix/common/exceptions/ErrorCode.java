@@ -444,6 +444,7 @@ public enum ErrorCode implements IError {
     INVALID_QUOTE(3124),
     INVALID_FORCE_QUOTE(3125),
     INVALID_ESCAPE(3126),
+    NO_SAMPLE_INDEX(3127),
 
     // Lifecycle management errors
     DUPLICATE_PARTITION_ID(4000),

@@ -61,6 +61,7 @@ import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMMemoryComponent;
 import org.apache.hyracks.util.LogRedactionUtil;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -80,6 +81,7 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
     private final IColumnValuesWriterFactory columnWriterFactory;
     protected final List<IColumnValuesWriter> columnWriters;
     private final ArrayBackedValueStorage serializedMetadata;
+    private final ArrayBackedValueStorage serializedFieldNamesDictionary;
     private final PathInfoSerializer pathInfoSerializer;
     protected final IntArrayList nullWriterIndexes;
     private final boolean metaContainsKeys;
@@ -120,6 +122,7 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
         }
 
         serializedMetadata = new ArrayBackedValueStorage();
+        serializedFieldNamesDictionary = new ArrayBackedValueStorage();
         changed = true;
         serializeColumnsMetadata();
     }
@@ -146,7 +149,36 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
         //Add definition levels for the root
         addDefinitionLevelsAndGet(root);
         this.serializedMetadata = serializedMetadata;
+        serializedFieldNamesDictionary = new ArrayBackedValueStorage();
         changed = false;
+    }
+
+    public FlushColumnMetadata(Mutable<IColumnWriteMultiPageOp> multiPageOpRef, ObjectSchemaNode root,
+            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels,
+            IFieldNamesDictionary fieldNamesDictionary, IColumnValuesWriterFactory columnWriterFactory) {
+        //        super(datasetType, metaType, primaryKeys.size());
+        super(null, null, 0);
+        this.multiPageOpRef = multiPageOpRef;
+        this.columnWriterFactory = columnWriterFactory;
+        this.definitionLevels = definitionLevels;
+        this.columnWriters = new ArrayList<>();
+        level = -1;
+        repeated = 0;
+        if (fieldNamesDictionary == null) {
+            this.fieldNamesDictionary = AbstractFieldNamesDictionary.create();
+        } else {
+            this.fieldNamesDictionary = fieldNamesDictionary;
+        }
+        this.root = root;
+        this.metaRoot = null;
+        this.metaContainsKeys = false;
+        pathInfoSerializer = new PathInfoSerializer();
+        nullWriterIndexes = new IntArrayList();
+        //Add definition levels for the root
+        addDefinitionLevelsAndGet(root);
+        serializedMetadata = new ArrayBackedValueStorage();
+        serializedFieldNamesDictionary = new ArrayBackedValueStorage();
+        changed = true;
     }
 
     public IFieldNamesDictionary getFieldNamesDictionary() {
@@ -317,7 +349,6 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
      */
     public void init(IColumnWriteMultiPageOp multiPageOp) throws HyracksDataException {
         multiPageOpRef.setValue(multiPageOp);
-
         //Reset writer for the first write
         for (int i = 0; i < columnWriters.size(); i++) {
             columnWriters.get(i).reset();
@@ -589,10 +620,10 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
         // This should be a low frequency object creation
         SchemaJSONBuilderVisitor schemaBuilder = new SchemaJSONBuilderVisitor(fieldNamesDictionary);
         String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));
-        LOGGER.debug("Schema for {} has changed: {}", RECORD_SCHEMA, recordSchema);
+        LOGGER.log(Level.INFO, "Schema for {} has changed: {}", RECORD_SCHEMA, recordSchema);
         if (metaRoot != null) {
             String metaRecordSchema = LogRedactionUtil.userData(schemaBuilder.build(metaRoot));
-            LOGGER.debug("Schema for {} has changed: {}", META_RECORD_SCHEMA, metaRecordSchema);
+            LOGGER.log(Level.INFO, "Schema for {} has changed: {}", META_RECORD_SCHEMA, metaRecordSchema);
         }
     }
 

@@ -24,9 +24,11 @@ import java.io.IOException;
 
 import org.apache.asterix.column.metadata.PathInfoSerializer;
 import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
+import org.apache.asterix.column.metadata.schema.IObjectSchemaNodeVisitor;
 import org.apache.asterix.column.metadata.schema.ISchemaNodeVisitor;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 
 public class PrimitiveSchemaNode extends AbstractSchemaNode {
     private final int columnIndex;
@@ -69,6 +71,16 @@ public class PrimitiveSchemaNode extends AbstractSchemaNode {
         return false;
     }
 
+    @Override
+    public IValueReference getFieldName() {
+        return null;
+    }
+
+    @Override
+    public void setFieldName(IValueReference newFieldName) {
+
+    }
+
     public final boolean isPrimaryKey() {
         return primaryKey;
     }
@@ -79,10 +91,25 @@ public class PrimitiveSchemaNode extends AbstractSchemaNode {
     }
 
     @Override
+    public <R, T> R accept(IObjectSchemaNodeVisitor<R, T> visitor, T arg) throws HyracksDataException {
+        return null;
+    }
+
+    @Override
     public void serialize(DataOutput output, PathInfoSerializer pathInfoSerializer) throws IOException {
         output.write(typeTag.serialize());
         output.writeInt(columnIndex);
         output.writeBoolean(primaryKey);
         pathInfoSerializer.writePathInfo(typeTag, columnIndex, primaryKey);
+    }
+
+    @Override
+    public AbstractSchemaNode getChild(int i) {
+        return null;
+    }
+
+    @Override
+    public int getNumberOfChildren() {
+        return 0;
     }
 }
