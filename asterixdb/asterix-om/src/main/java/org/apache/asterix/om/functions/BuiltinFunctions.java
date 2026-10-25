@@ -160,7 +160,6 @@ import org.apache.hyracks.algebricks.core.algebra.functions.IFunctionInfo;
 import org.apache.hyracks.algebricks.core.algebra.properties.UnpartitionedPropertyComputer;
 
 public class BuiltinFunctions {
-    //TODO : CALVIN DANI CHECK WITH ALI ON BUILTIN FUNCTIONS.
     private static final Map<FunctionIdentifier, BuiltinFunctionInfo> registeredFunctions = new HashMap<>();
     private static final Map<FunctionIdentifier, Set<? extends BuiltinFunctionProperty>> builtinFunctionProperties =
             new HashMap<>();

@@ -75,7 +75,6 @@ public abstract class AbstractSchemaNode {
         return counter;
     }
 
-    // TODO : CALVIN DANI Check field name logic for all schema inference transformations
     public abstract IValueReference getFieldName();
 
     public abstract void setFieldName(IValueReference newFieldName);

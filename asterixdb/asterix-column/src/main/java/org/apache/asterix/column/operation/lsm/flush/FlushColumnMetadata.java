@@ -170,7 +170,6 @@ public class FlushColumnMetadata extends AbstractColumnMetadata {
     public FlushColumnMetadata(Mutable<IColumnWriteMultiPageOp> multiPageOpRef, ObjectSchemaNode root,
             Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels,
             IFieldNamesDictionary fieldNamesDictionary, IColumnValuesWriterFactory columnWriterFactory) {
-        //        super(datasetType, metaType, primaryKeys.size());
         super(null, null, 0);
         this.multiPageOpRef = multiPageOpRef;
         this.columnWriterFactory = columnWriterFactory;

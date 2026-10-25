@@ -25,7 +25,6 @@ import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollect
 import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.GenericListRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
-// import org.
 import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
@@ -179,7 +178,6 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
 
         ObjectRowSchemaNode objectNode = (ObjectRowSchemaNode) mainRoot;
         currentParent = objectNode;
-        //
         ArrayList<AbstractRowSchemaNode> unionChildren = toMergeRoot.getChildrenList();
 
         for (AbstractRowSchemaNode unionChildNode : unionChildren) {
@@ -192,7 +190,6 @@ public class RowSchemaTransformer implements IObjectRowSchemaNodeVisitor<Abstrac
             }
         }
 
-        //        rowMetadata.printRootSchema(objectNode, rowMetadata.getFieldNamesDictionary());
         rowMetadata.exitNode(mainRoot);
         currentParent = previousParent;
         return null;

@@ -53,7 +53,7 @@ import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
  */
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
     // Offset of the field-names pointer in the serialized RowMetadata header
-    private static final int FIELD_NAMES_POINTER = Integer.BYTES;
+    private static final int FIELD_NAMES_POINTER = 0;
 
     private final IScalarEvaluator eval;
     private final IPointable inputVal = new VoidPointable();

@@ -32,16 +32,13 @@ import org.apache.asterix.om.types.IATypeVisitor;
 import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.data.std.primitive.VoidPointable;
 
 public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode>,
         IATypeVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode> {
 
     private final RowMetadata rowMetadata;
-    private final VoidPointable nonTaggedValue;
     private final ObjectRowSchemaNode root;
     private AbstractRowSchemaNestedNode currentParent;
-    private int primaryKeysLength;
     private boolean optional;
 
     public ObjectRowSchemaNode getRoot() {
@@ -51,37 +48,23 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
     public RowTransformer(RowMetadata rowMetadata, ObjectRowSchemaNode root) {
         this.rowMetadata = rowMetadata;
         this.root = root;
-        nonTaggedValue = new VoidPointable();
         optional = true;
     }
 
     /**
+     * Seeds the tree from a declared type.
      *
-     * @param recType record recType
-     * @return the estimated size (possibly overestimated) of the primary key(s) columns
+     * @param optional whether the declared fields are optional; false makes every non-optional declared field
+     *                 required in the inferred schema
      */
-    public int transform(ARecordType recType, boolean optional) throws HyracksDataException {
+    public void transform(ARecordType recType, boolean optional) throws HyracksDataException {
         this.optional = optional;
-        transform(recType);
-        this.optional = true;
-        return 0;
-    }
-
-    /**
-     *
-     * @param pointable record pointable
-     * @return the estimated size (possibly overestimated) of the primary key(s) columns
-     */
-    public int transform(RecordLazyVisitablePointable pointable) throws HyracksDataException {
-        primaryKeysLength = 0;
-        pointable.accept(this, root);
-        return primaryKeysLength;
-    }
-
-    public int transform(ARecordType recType) throws HyracksDataException {
-        primaryKeysLength = 0;
         recType.accept(this, root);
-        return primaryKeysLength;
+        this.optional = true;
+    }
+
+    public void transform(RecordLazyVisitablePointable pointable) throws HyracksDataException {
+        pointable.accept(this, root);
     }
 
     public AbstractRowSchemaNode visit(ARecordType recType, AbstractRowSchemaNode arg) {
@@ -169,7 +152,6 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
                 acceptActualNode(pointable.getChildVisitablePointable(), childNode);
             }
         }
-        //        rowMetadata.printRootSchema(objectNode, rowMetadata.getFieldNamesDictionary());
         rowMetadata.exitNode(arg);
         currentParent = previousParent;
         return null;

@@ -25,7 +25,6 @@ import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.AbstractRowMetadata;
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -34,27 +33,22 @@ import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 /**
- * The schema here is mutable and can change according to the flushed records
+ * A row schema tree and its field-name dictionary. The serialized form ({@link #serializeRowMetadata()}) is what a
+ * local schema aggregate passes to the global one: a field-names offset, the dictionary, then the root node.
  */
-public final class RowMetadata extends AbstractRowMetadata {
+public final class RowMetadata {
 
     public final RowFieldNamesDictionary fieldNamesDictionary;
     private final ObjectRowSchemaNode root;
-    private final ObjectRowSchemaNode metaRoot;
 
     private final ArrayBackedValueStorage serializedMetadata;
     private boolean changed;
     private int level;
 
     public RowMetadata() throws HyracksDataException {
-        super();
-
         level = -1;
         fieldNamesDictionary = new RowFieldNamesDictionary();
-        //        ArrayBackedValueStorage initFieldName = new ArrayBackedValueStorage(1);
         root = new ObjectRowSchemaNode(false);
-        metaRoot = null;
-        //Add definition levels for the root
         serializedMetadata = new ArrayBackedValueStorage();
         changed = true;
         serializeRowMetadata();
@@ -68,8 +62,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         return root;
     }
 
-    // Convert Schema to byte array (IValueReference)
-    @Override
     public IValueReference serializeRowMetadata() throws HyracksDataException {
         if (changed) {
             try {
@@ -82,35 +74,13 @@ public final class RowMetadata extends AbstractRowMetadata {
         return serializedMetadata;
     }
 
-    // Structure of writing the metadata of schema to the byte Array
     private void serializeChanges() throws IOException {
         serializedMetadata.reset();
         DataOutput output = serializedMetadata.getDataOutput();
-
-        int writersOffsetPointer = reserveInt(output);//0
-        int fieldNamesOffsetPointer = reserveInt(output);//4
-        int schemaOffsetPointer = reserveInt(output);//12
-        int metaSchemaOffsetPointer = reserveInt(output);
-        int pathInfoOffsetPointer = reserveInt(output);
-        int lengthDataOffsetPointer = reserveInt(output);
-
-        //FieldNames
+        int fieldNamesOffsetPointer = reserveInt(output);
         setOffset(fieldNamesOffsetPointer);
         fieldNamesDictionary.serialize(output);
-
-        //Schema
-        setOffset(schemaOffsetPointer);
         root.serialize(output);
-        if (metaRoot != null) {
-            //Meta schema
-            setOffset(metaSchemaOffsetPointer);
-            metaRoot.serialize(output);
-        }
-
-        //Path info
-        setOffset(pathInfoOffsetPointer);
-        // Length info
-        setOffset(lengthDataOffsetPointer);
     }
 
     private int reserveInt(DataOutput output) throws IOException {
@@ -124,66 +94,49 @@ public final class RowMetadata extends AbstractRowMetadata {
         IntegerPointable.setInteger(serializedMetadata.getByteArray(), pointer, offset);
     }
 
-    /* ********************************************************
-     * Schema related methods
-     * ********************************************************
-     */
-
     public int getLevel() {
         return level;
     }
 
-    // Create schema node
     public AbstractRowSchemaNode getOrCreateChild(AbstractRowSchemaNode child, ATypeTag childTypeTag, boolean optional)
             throws HyracksDataException {
         AbstractRowSchemaNode currentChild = child;
         ATypeTag normalizedTypeTag = getNormalizedTypeTag(childTypeTag);
         if (currentChild == null || normalizedTypeTag != ATypeTag.MISSING && normalizedTypeTag != ATypeTag.NULL
                 && currentChild.getTypeTag() != ATypeTag.UNION && currentChild.getTypeTag() != normalizedTypeTag) {
-            //Create a new child or union type if required type is different from the current child type
             currentChild = createChild(child, normalizedTypeTag, optional);
-            //Flag that the schema has changed
             changed = true;
         }
         return currentChild;
     }
 
-    // Update schema level by incrementing
     public void enterNode(AbstractRowSchemaNode parent, AbstractRowSchemaNode node) throws HyracksDataException {
-        //Flush all definition levels from parent to child
         if (node.isObjectOrCollection()) {
-            //Enter one more level for object, array, and multiset
             level++;
         }
     }
 
-    // Update schema level by decrementing
     public void exitNode(AbstractRowSchemaNode node) {
-        if (node.isNested()) {
-            //Add the nested node's level for all missing children (i.e., not entered for a record)
-            if (node.isObjectOrCollection()) {
-                //Union nodes should not change the level as they are logical nodes
-                level--;
-            }
+        // A union is a logical node and does not add a nesting level
+        if (node.isNested() && node.isObjectOrCollection()) {
+            level--;
         }
         node.incrementCounter();
     }
 
-    // Collection node level updated and set
     public void exitCollectionNode(AbstractRowCollectionSchemaNode collectionNode, int numberOfItems) {
         level--;
         collectionNode.incrementCounter();
     }
 
-    // Create union and primitive, object, array and Multiset  node
     private AbstractRowSchemaNode createChild(AbstractRowSchemaNode child, ATypeTag normalizedTypeTag, boolean optional)
             throws HyracksDataException {
         AbstractRowSchemaNode createdChild;
         if (child != null) {
             if (child.getTypeTag() == ATypeTag.NULL) {
+                // A field seen only as null so far takes the first concrete type it is seen with
                 createdChild = createChild(normalizedTypeTag, optional);
             } else {
-                //Different type. Make union
                 createdChild = new UnionRowSchemaNode(child, createChild(normalizedTypeTag, optional));
             }
         } else {
@@ -192,7 +145,6 @@ public final class RowMetadata extends AbstractRowMetadata {
         return createdChild;
     }
 
-    // Create object , array , multiset and primitive node
     private AbstractRowSchemaNode createChild(ATypeTag normalizedTypeTag, boolean optional) {
         switch (normalizedTypeTag) {
             case OBJECT:
@@ -211,11 +163,9 @@ public final class RowMetadata extends AbstractRowMetadata {
                 return new PrimitiveRowSchemaNode(normalizedTypeTag, false, optional);
             default:
                 throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
-
         }
     }
 
-    // Normalize field record type
     public static ATypeTag getNormalizedTypeTag(ATypeTag typeTag) {
         switch (typeTag) {
             case TINYINT:
@@ -230,7 +180,6 @@ public final class RowMetadata extends AbstractRowMetadata {
     }
 
     public void addNestedNull(AbstractRowSchemaNestedNode node) {
-        //Add null value (+2) to say that both the parent and the child are present
         node.incrementCounter();
     }
 }

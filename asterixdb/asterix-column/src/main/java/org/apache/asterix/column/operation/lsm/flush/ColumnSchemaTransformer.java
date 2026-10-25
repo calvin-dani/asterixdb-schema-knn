@@ -191,7 +191,6 @@ public class ColumnSchemaTransformer
 
         ObjectSchemaNode objectNode = (ObjectSchemaNode) mainRoot;
         currentParent = objectNode;
-        //
         ArrayList<AbstractSchemaNode> unionChildren = toMergeRoot.getChildrenList();
 
         for (AbstractSchemaNode unionChildNode : unionChildren) {
