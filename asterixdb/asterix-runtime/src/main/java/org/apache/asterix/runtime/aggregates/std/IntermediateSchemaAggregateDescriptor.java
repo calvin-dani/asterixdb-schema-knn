@@ -21,6 +21,7 @@ package org.apache.asterix.runtime.aggregates.std;
 
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.functions.IFunctionDescriptorFactory;
+import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.aggregates.base.AbstractAggregateFunctionDynamicDescriptor;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IAggregateEvaluator;
@@ -35,10 +36,11 @@ public class IntermediateSchemaAggregateDescriptor extends AbstractAggregateFunc
 
     public static final IFunctionDescriptorFactory FACTORY =
             AbstractAggregateFunctionDynamicDescriptor.createFactory(IntermediateSchemaAggregateDescriptor::new);
+    private IAType aggFieldState;
 
     @Override
     public FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.INTERMEDIATE_SCHEMA;
+        return BuiltinFunctions.INTERMEDIATE_SQL_SCHEMA;
     }
 
     @Override
@@ -49,9 +51,13 @@ public class IntermediateSchemaAggregateDescriptor extends AbstractAggregateFunc
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new IntermediateAvgAggregateFunction(args, ctx, sourceLoc);
+                return new IntermediateSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
             }
         };
     }
 
+    @Override
+    public void setImmutableStates(Object... states) {
+        aggFieldState = (IAType) states[0];
+    }
 }

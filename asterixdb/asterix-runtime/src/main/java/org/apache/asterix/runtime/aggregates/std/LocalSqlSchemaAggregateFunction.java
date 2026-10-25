@@ -19,8 +19,6 @@
 
 package org.apache.asterix.runtime.aggregates.std;
 
-import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
-import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.api.context.IEvaluatorContext;
@@ -31,15 +29,9 @@ import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
 public class LocalSqlSchemaAggregateFunction extends AbstractSchemaAggregateFunction {
 
-    private final ARecordType recType;
-    private RecordLazyVisitablePointable inputVal;
-
     public LocalSqlSchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context,
             SourceLocation sourceLoc, IAType aggFieldState) throws HyracksDataException {
         super(args, context, sourceLoc, aggFieldState);
-        recType = (ARecordType) aggFieldState;
-        // CREATE BASE SIS TREE
-        super.transformer.transform(recType, false);
     }
 
     @Override
@@ -55,10 +47,6 @@ public class LocalSqlSchemaAggregateFunction extends AbstractSchemaAggregateFunc
     @Override
     public void finishPartial(IPointable result) throws HyracksDataException {
         finish(result);
-    }
-
-    @Override
-    protected void processNull() {
     }
 
 }

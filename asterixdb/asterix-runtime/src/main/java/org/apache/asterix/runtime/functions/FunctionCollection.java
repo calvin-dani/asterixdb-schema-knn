@@ -164,7 +164,6 @@ import org.apache.asterix.runtime.aggregates.std.GlobalCentroidAggregateDescript
 import org.apache.asterix.runtime.aggregates.std.GlobalKurtosisAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.GlobalMaxAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.GlobalMinAggregateDescriptor;
-import org.apache.asterix.runtime.aggregates.std.GlobalSchemaAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.GlobalSkewnessAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.GlobalSqlAvgAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.GlobalSqlKurtosisAggregateDescriptor;
@@ -217,7 +216,6 @@ import org.apache.asterix.runtime.aggregates.std.LocalKurtosisAggregateDescripto
 import org.apache.asterix.runtime.aggregates.std.LocalMaxAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalMinAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalSamplingAggregateDescriptor;
-import org.apache.asterix.runtime.aggregates.std.LocalSchemaAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalSkewnessAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalSqlAvgAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.LocalSqlKurtosisAggregateDescriptor;
@@ -241,7 +239,6 @@ import org.apache.asterix.runtime.aggregates.std.LocalVarPopAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.MaxAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.MinAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.RangeMapAggregateDescriptor;
-import org.apache.asterix.runtime.aggregates.std.SchemaAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SkewnessAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SqlAvgAggregateDescriptor;
 import org.apache.asterix.runtime.aggregates.std.SqlCountAggregateDescriptor;
@@ -876,9 +873,6 @@ public final class FunctionCollection implements IFunctionCollection {
         fc.add(GlobalSqlSchemaAggregateDescriptor.FACTORY);
         fc.add(SqlSchemaAggregateDescriptor.FACTORY);
         fc.add(LocalSqlSchemaAggregateDescriptor.FACTORY);
-        fc.add(SchemaAggregateDescriptor.FACTORY);
-        fc.add(LocalSchemaAggregateDescriptor.FACTORY);
-        fc.add(GlobalSchemaAggregateDescriptor.FACTORY);
         fc.add(IntermediateSchemaAggregateDescriptor.FACTORY);
         fc.add(GlobalSqlAvgAggregateDescriptor.FACTORY);
         fc.add(SqlSumAggregateDescriptor.FACTORY);

@@ -1,4 +1,3 @@
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -24,20 +23,12 @@ import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
 
-import org.apache.asterix.formats.nontagged.SerializerDeserializerProvider;
-import org.apache.asterix.om.base.AString;
-import org.apache.asterix.om.exceptions.ExceptionUtil;
-import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
 import org.apache.asterix.om.lazy.TypedRecordLazyVisitablePointable;
-import org.apache.asterix.om.pointables.ARecordVisitablePointable;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.om.types.BuiltinType;
-import org.apache.asterix.om.types.EnumDeserializer;
+import org.apache.asterix.om.types.AUnionType;
 import org.apache.asterix.om.types.IAType;
-import org.apache.asterix.om.types.hierachy.ATypeHierarchy;
-import org.apache.asterix.runtime.aggregates.serializable.std.BufferSerDeUtil;
 import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.RowMetadata;
@@ -45,59 +36,54 @@ import org.apache.asterix.runtime.schemainferrence.RowSchemaTransformer;
 import org.apache.asterix.runtime.schemainferrence.RowTransformer;
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaADMRecordBuilderVisitor;
-import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluator;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.api.context.IEvaluatorContext;
-import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.exceptions.SourceLocation;
 import org.apache.hyracks.data.std.api.IPointable;
-import org.apache.hyracks.data.std.api.IValueReference;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.data.std.primitive.VoidPointable;
 import org.apache.hyracks.dataflow.common.data.accessors.IFrameTupleReference;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
+/**
+ * Infers a schema from the records its argument evaluates to. Local steps build a schema tree from records and
+ * emit it serialized (see {@link RowMetadata#serializeRowMetadata()}); global steps merge those trees and emit the
+ * final JSON Schema record.
+ */
 public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateFunction {
+    // Offset of the field-names pointer in the serialized RowMetadata header
+    private static final int FIELD_NAMES_POINTER = Integer.BYTES;
 
-    private final IEvaluatorContext context;
+    private final IScalarEvaluator eval;
+    private final IPointable inputVal = new VoidPointable();
+    // Null when the argument's static type is not a record, so there is no declared type to seed from
+    private final ARecordType declaredType;
+    private final RecordLazyVisitablePointable recordVal;
 
-    // Warning flag to warn only once in case of non-numeric data
-    private boolean isWarned;
-
-    private final ARecordType recType;
-
-    private ArrayBackedValueStorage resultStorage = new ArrayBackedValueStorage();
-    private RecordLazyVisitablePointable inputVal;
-    private ARecordVisitablePointable recPointable;
-    private IScalarEvaluator eval;
-    protected ATypeTag aggType;
-    protected RowTransformer transformer;
-    protected RowSchemaTransformer schemaTransformer;
-    RowMetadata rowMetaData;
-
-    @SuppressWarnings("unchecked")
-    private ISerializerDeserializer<AString> stringSerde =
-            SerializerDeserializerProvider.INSTANCE.getSerializerDeserializer(BuiltinType.ASTRING);
+    private RowMetadata rowMetaData;
+    private RowTransformer transformer;
+    private RowSchemaTransformer schemaTransformer;
 
     public AbstractSchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context,
-            SourceLocation sourceLoc, IAType aggFieldState) throws HyracksDataException {
+            SourceLocation sourceLoc, IAType argType) throws HyracksDataException {
         super(sourceLoc);
-        this.context = context;
         eval = args[0].createScalarEvaluator(context);
-        recType = (ARecordType) aggFieldState;
-        inputVal = new TypedRecordLazyVisitablePointable(recType);
-        recPointable = new ARecordVisitablePointable(recType);
-        rowMetaData = new RowMetadata();
-        transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
-        schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
+        declaredType = getDeclaredRecordType(argType);
+        recordVal = declaredType != null ? new TypedRecordLazyVisitablePointable(declaredType)
+                : new RecordLazyVisitablePointable(true);
     }
 
     @Override
     public void init() throws HyracksDataException {
-        aggType = ATypeTag.SYSTEM_NULL;
-        isWarned = false;
+        // The evaluator is reused for every group, so each group must start from an empty tree
+        rowMetaData = new RowMetadata();
+        transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
+        schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
+        if (declaredType != null) {
+            // Declared fields are what makes a field required, so every variant seeds them, split or not
+            transformer.transform(declaredType, false);
+        }
     }
 
     @Override
@@ -109,126 +95,50 @@ public abstract class AbstractSchemaAggregateFunction extends AbstractAggregateF
     @Override
     public abstract void finishPartial(IPointable result) throws HyracksDataException;
 
-    protected abstract void processNull();
-
     protected void processDataValues(IFrameTupleReference tuple) throws HyracksDataException {
-        if (skipStep()) {
-            return;
-        }
-        int recordFieldId = rowMetaData.getRecordFieldIndex();
-        inputVal.set(tuple.getFieldData(recordFieldId), tuple.getFieldStart(recordFieldId),
-                tuple.getFieldLength(recordFieldId));
-        // RECORD SIS TREE
-        transformer.transform(inputVal);
+        eval.evaluate(tuple, inputVal);
         byte[] data = inputVal.getByteArray();
-        int offset = inputVal.getStartOffset();
-
-        ATypeTag typeTag = EnumDeserializer.ATYPETAGDESERIALIZER.deserialize(data[offset]);
-        ATypeTag aggTypeTag = aggType;
-        if (typeTag == ATypeTag.MISSING || typeTag == ATypeTag.NULL) {
-            processNull();
+        int start = inputVal.getStartOffset();
+        // Null, missing and non-object values carry no fields to infer from
+        if (data[start] != ATypeTag.SERIALIZED_RECORD_TYPE_TAG) {
             return;
-        } else if (aggTypeTag == ATypeTag.SYSTEM_NULL) {
-            aggTypeTag = typeTag;
-        } else if (typeTag != ATypeTag.SYSTEM_NULL && !ATypeHierarchy.isCompatible(typeTag, aggTypeTag)) {
-            // Issue warning only once and treat current tuple as null
-            if (!isWarned) {
-                isWarned = true;
-                ExceptionUtil.warnUnsupportedType(context, sourceLoc, getIdentifier().getName(), typeTag);
-            }
-            processNull();
-            return;
-        } else if (ATypeHierarchy.canPromote(aggTypeTag, typeTag)) {
-            aggTypeTag = typeTag;
         }
-        aggType = aggTypeTag;
-
-    }
-
-    protected void finishPartialResults(IPointable result) throws HyracksDataException {
-
-        resultStorage.reset();
-        try {
-            if (rowMetaData != null) {
-                IValueReference serSchema = rowMetaData.serializeRowMetadata();
-                result.set(serSchema);
-            } // Double check that count 0 is accounted
-            else if (aggType == ATypeTag.SYSTEM_NULL) {
-                resultStorage.getDataOutput().writeByte(ATypeTag.SERIALIZED_SYSTEM_NULL_TYPE_TAG);
-                result.set(resultStorage);
-            } else if (aggType == ATypeTag.NULL) {
-                resultStorage.getDataOutput().writeByte(ATypeTag.SERIALIZED_NULL_TYPE_TAG);
-                result.set(resultStorage);
-            }
-        } catch (IOException e) {
-            throw HyracksDataException.create(e);
-        }
+        recordVal.set(data, start, inputVal.getLength());
+        transformer.transform(recordVal);
     }
 
     protected void processPartialResults(IFrameTupleReference tuple) throws HyracksDataException {
-        if (skipStep()) {
-            return;
-        }
-
-        byte[] serBytes = tuple.getFrameTupleAccessor().getBuffer().array();
-        // TODO CALVIN DANI: Check all unsafeutil and replace with inbuilt serialiser deserialser.
-        int offset = 9;
-        int fieldNamesStart = offset + BufferSerDeUtil.getInt(serBytes, offset + 4);
-        int metaRootStart = BufferSerDeUtil.getInt(serBytes, offset + 12);
-        int length = BufferSerDeUtil.getInt(serBytes, offset + 20);
-        int metaRootSize = metaRootStart < 0 ? 0 : BufferSerDeUtil.getInt(serBytes, offset + 16) - metaRootStart;
-
-        DataInput input = new DataInputStream(new ByteArrayInputStream(serBytes, fieldNamesStart, length));
-
+        eval.evaluate(tuple, inputVal);
+        byte[] data = inputVal.getByteArray();
+        int start = inputVal.getStartOffset();
+        int fieldNamesStart = start + IntegerPointable.getInteger(data, start + FIELD_NAMES_POINTER);
+        int length = inputVal.getLength() - (fieldNamesStart - start);
+        DataInput input = new DataInputStream(new ByteArrayInputStream(data, fieldNamesStart, length));
         try {
-            //FieldNames
             RowFieldNamesDictionary fieldNamesDictionary = RowFieldNamesDictionary.deserialize(input);
             schemaTransformer.setToMergeFieldNamesDictionary(fieldNamesDictionary);
-            //Schema
             ObjectRowSchemaNode root = (ObjectRowSchemaNode) AbstractRowSchemaNode.deserialize(input);
             schemaTransformer.transform(root);
-        } catch (Exception e) {
-            System.out.println(e.getMessage());
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
         }
+    }
+
+    protected void finishPartialResults(IPointable result) throws HyracksDataException {
+        result.set(rowMetaData.serializeRowMetadata());
     }
 
     protected void finishFinalResults(IPointable result) throws HyracksDataException {
-        resultStorage.reset();
-        try {
-            ObjectRowSchemaNode root = schemaTransformer.getRoot();
-            String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
-            ObjectMapper objectMapper = new ObjectMapper();
-
-            JSONRowSchemaADMRecordBuilderVisitor schemaADMBuilder =
-                    new JSONRowSchemaADMRecordBuilderVisitor(rowMetaData.getFieldNamesDictionary());
-            ArrayBackedValueStorage admResult = schemaADMBuilder.build(root);
-
-            //            String jsonString = objectMapper.writeValueAsString(jsonNode);
-            if (root == null) {
-                throw new HyracksDataException("Cannot compute Schema on empty root.");
-            } else {
-                resultStorage.getDataOutput().write(admResult.getByteArray());
-            }
-
-        } catch (IOException e) {
-            throw HyracksDataException.create(e);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
         JSONRowSchemaADMRecordBuilderVisitor schemaADMBuilder =
                 new JSONRowSchemaADMRecordBuilderVisitor(rowMetaData.getFieldNamesDictionary());
-
-        ArrayBackedValueStorage out = schemaADMBuilder.build(rowMetaData.getRoot());
-        result.set(out);
+        result.set(schemaADMBuilder.build(rowMetaData.getRoot()));
     }
 
-    protected boolean skipStep() {
-        return false;
-    }
-
-    // Function identifier
-    private FunctionIdentifier getIdentifier() {
-        return BuiltinFunctions.SQL_SCHEMA;
+    private static ARecordType getDeclaredRecordType(IAType argType) {
+        IAType type = argType;
+        if (type != null && type.getTypeTag() == ATypeTag.UNION) {
+            type = ((AUnionType) type).getActualType();
+        }
+        return type != null && type.getTypeTag() == ATypeTag.OBJECT ? (ARecordType) type : null;
     }
 }

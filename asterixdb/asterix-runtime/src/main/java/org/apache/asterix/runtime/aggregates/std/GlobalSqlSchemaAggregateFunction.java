@@ -34,9 +34,6 @@ public class GlobalSqlSchemaAggregateFunction extends AbstractSchemaAggregateFun
         super(args, context, sourceLoc, aggFieldState);
     }
 
-    //    public void step(IValueReference val) throws HyracksDataException {
-    //        processPartialResults(val);
-    //    }
     @Override
     public void step(IFrameTupleReference tuple) throws HyracksDataException {
         processPartialResults(tuple);
@@ -53,7 +50,4 @@ public class GlobalSqlSchemaAggregateFunction extends AbstractSchemaAggregateFun
         finishPartialResults(result);
     }
 
-    @Override
-    protected void processNull() {
-    }
 }

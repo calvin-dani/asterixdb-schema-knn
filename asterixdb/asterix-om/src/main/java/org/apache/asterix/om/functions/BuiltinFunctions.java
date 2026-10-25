@@ -452,10 +452,6 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-intermediate-centroid", 1);
     public static final FunctionIdentifier LOCAL_CENTROID = FunctionConstants.newAsterix("agg-local-centroid", 1);
     public static final FunctionIdentifier MEDIAN = FunctionConstants.newAsterix("agg-median", 1);
-    public static final FunctionIdentifier LOCAL_SCHEMA = FunctionConstants.newAsterix("agg-local-schema", 1);
-    public static final FunctionIdentifier GLOBAL_SCHEMA = FunctionConstants.newAsterix("agg-global-schema", 1);
-    public static final FunctionIdentifier INTERMEDIATE_SCHEMA =
-            FunctionConstants.newAsterix("agg-intermediate-schema", 1);
     public static final FunctionIdentifier FIRST_ELEMENT = FunctionConstants.newAsterix("agg-first-element", 1);
     public static final FunctionIdentifier LOCAL_FIRST_ELEMENT =
             FunctionConstants.newAsterix("agg-local-first-element", 1);
@@ -1828,6 +1824,7 @@ public class BuiltinFunctions {
         addFunction(SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addPrivateFunction(LOCAL_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addPrivateFunction(GLOBAL_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addPrivateFunction(INTERMEDIATE_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addFunction(SQL_COUNT, AInt64TypeComputer.INSTANCE, true);
         addFunction(SQL_COUNT_DISTINCT_HASH, AInt64TypeComputer.INSTANCE, true);
         addFunction(SQL_COUNTN, CountNTypeComputer.INSTANCE, true);
@@ -1840,7 +1837,7 @@ public class BuiltinFunctions {
         addPrivateFunction(INTERMEDIATE_SQL_MIN, MinMaxAggTypeComputer.INSTANCE, true);
         addPrivateFunction(GLOBAL_SQL_MIN, MinMaxAggTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_AVG, NullableDoubleTypeComputer.INSTANCE, true);
-        addFunction(SCALAR_SQL_SCHEMA, NullableDoubleTypeComputer.INSTANCE, true);
+        addFunction(SCALAR_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_COUNT, AInt64TypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_COUNTN, CountNTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_MAX, scalarMinMaxTypeComputer, true);
@@ -2760,11 +2757,10 @@ public class BuiltinFunctions {
         addIntermediateAgg(SERIAL_GLOBAL_SQL_AVG, SERIAL_INTERMEDIATE_SQL_AVG);
         addGlobalAgg(SERIAL_SQL_AVG, SERIAL_GLOBAL_SQL_AVG);
 
-        // SQL SCHEMA_INF
+        // SQL SCHEMA
         addAgg(SQL_SCHEMA);
         addAgg(LOCAL_SQL_SCHEMA);
         addAgg(GLOBAL_SQL_SCHEMA);
-        //
         addLocalAgg(SQL_SCHEMA, LOCAL_SQL_SCHEMA);
         addIntermediateAgg(SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);
         addIntermediateAgg(LOCAL_SQL_SCHEMA, INTERMEDIATE_SQL_SCHEMA);

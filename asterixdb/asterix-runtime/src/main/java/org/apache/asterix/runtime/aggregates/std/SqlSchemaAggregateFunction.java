@@ -49,7 +49,4 @@ public class SqlSchemaAggregateFunction extends AbstractSchemaAggregateFunction 
         finishPartialResults(result);
     }
 
-    @Override
-    protected void processNull() {
-    }
 }

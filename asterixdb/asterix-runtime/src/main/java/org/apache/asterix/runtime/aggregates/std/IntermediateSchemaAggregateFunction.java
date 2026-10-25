@@ -19,7 +19,6 @@
 
 package org.apache.asterix.runtime.aggregates.std;
 
-import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.IAType;
 import org.apache.hyracks.algebricks.runtime.base.IScalarEvaluatorFactory;
 import org.apache.hyracks.api.context.IEvaluatorContext;
@@ -48,16 +47,6 @@ public class IntermediateSchemaAggregateFunction extends AbstractSchemaAggregate
     @Override
     public void finishPartial(IPointable result) throws HyracksDataException {
         finishPartialResults(result);
-    }
-
-    @Override
-    protected void processNull() {
-        aggType = ATypeTag.NULL;
-    }
-
-    @Override
-    protected boolean skipStep() {
-        return aggType == ATypeTag.NULL;
     }
 
 }
