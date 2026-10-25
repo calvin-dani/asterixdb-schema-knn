@@ -16,18 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence;
+package org.apache.asterix.runtime.schemainference.primitive;
 
-import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
-import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.runtime.schemainference.AbstractRowSchemaNode;
 
-public interface IRowSchemaNodeVisitor<R, T> {
-    R visit(ObjectRowSchemaNode objectNode, T arg) throws HyracksDataException;
+/**
+ * A special schema node a non-existing object or union field
+ */
+public final class MissingRowFieldSchemaNode extends PrimitiveRowSchemaNode {
+    public static final AbstractRowSchemaNode INSTANCE = new MissingRowFieldSchemaNode(false);
 
-    R visit(AbstractRowCollectionSchemaNode collectionNode, T arg) throws HyracksDataException;
-
-    R visit(UnionRowSchemaNode unionNode, T arg) throws HyracksDataException;
-
-    R visit(PrimitiveRowSchemaNode primitiveNode, T arg) throws HyracksDataException;
+    private MissingRowFieldSchemaNode(boolean optional) {
+        super(ATypeTag.MISSING, false, optional);
+    }
 }

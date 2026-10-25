@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence.utils;
+package org.apache.asterix.runtime.schemainference.utils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -34,13 +34,13 @@ import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.BuiltinType;
 import org.apache.asterix.om.utils.JsonSchemaUtil;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.IRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.UnionRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
-import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.AbstractRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.IRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainference.ObjectRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.UnionRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainference.lazy.metadata.RowFieldNamesDictionary;
+import org.apache.asterix.runtime.schemainference.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;

@@ -16,18 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence.primitive;
+package org.apache.asterix.runtime.schemainference;
 
-import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
-
-/**
- * A special schema node a non-existing object or union field
- */
-public final class MissingRowFieldSchemaNode extends PrimitiveRowSchemaNode {
-    public static final AbstractRowSchemaNode INSTANCE = new MissingRowFieldSchemaNode(false);
-
-    private MissingRowFieldSchemaNode(boolean optional) {
-        super(ATypeTag.MISSING, false, optional);
+public abstract class AbstractRowSchemaNestedNode extends AbstractRowSchemaNode {
+    @Override
+    public final boolean isNested() {
+        return true;
     }
 }

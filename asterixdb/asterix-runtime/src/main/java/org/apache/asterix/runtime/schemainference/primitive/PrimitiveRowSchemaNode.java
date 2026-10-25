@@ -16,16 +16,16 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence.primitive;
+package org.apache.asterix.runtime.schemainference.primitive;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.IRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainference.AbstractRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.IRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainference.lazy.IObjectRowSchemaNodeVisitor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 

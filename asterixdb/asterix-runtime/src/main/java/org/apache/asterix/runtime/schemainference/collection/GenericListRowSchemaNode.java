@@ -18,18 +18,18 @@
  * under the License.
  */
 
-package org.apache.asterix.runtime.schemainferrence.collection;
+package org.apache.asterix.runtime.schemainference.collection;
 
 import java.io.DataOutput;
 import java.io.IOException;
 
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNestedNode;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.IRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.AbstractRowSchemaNestedNode;
+import org.apache.asterix.runtime.schemainference.AbstractRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.IRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainference.ObjectRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainference.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 

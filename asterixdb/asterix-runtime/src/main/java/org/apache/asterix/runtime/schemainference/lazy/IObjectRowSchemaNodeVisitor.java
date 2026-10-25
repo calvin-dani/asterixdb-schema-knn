@@ -16,18 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence.lazy;
+package org.apache.asterix.runtime.schemainference.lazy;
 
 import org.apache.asterix.om.lazy.AbstractLazyNestedVisitablePointable;
 import org.apache.asterix.om.lazy.AbstractLazyVisitablePointable;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
 import org.apache.asterix.om.lazy.TypedRecordLazyVisitablePointable;
-import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.UnionRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.ObjectRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.UnionRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.ArrayRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.MultisetRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 /**

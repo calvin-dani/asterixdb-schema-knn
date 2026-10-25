@@ -16,11 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence;
+package org.apache.asterix.runtime.schemainference;
 
-public abstract class AbstractRowSchemaNestedNode extends AbstractRowSchemaNode {
-    @Override
-    public final boolean isNested() {
-        return true;
-    }
+import org.apache.asterix.runtime.schemainference.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainference.primitive.PrimitiveRowSchemaNode;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
+
+public interface IRowSchemaNodeVisitor<R, T> {
+    R visit(ObjectRowSchemaNode objectNode, T arg) throws HyracksDataException;
+
+    R visit(AbstractRowCollectionSchemaNode collectionNode, T arg) throws HyracksDataException;
+
+    R visit(UnionRowSchemaNode unionNode, T arg) throws HyracksDataException;
+
+    R visit(PrimitiveRowSchemaNode primitiveNode, T arg) throws HyracksDataException;
 }

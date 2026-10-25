@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence;
+package org.apache.asterix.runtime.schemainference;
 
 import org.apache.asterix.om.lazy.AbstractLazyVisitablePointable;
 import org.apache.asterix.om.lazy.AbstractListLazyVisitablePointable;
@@ -29,7 +29,7 @@ import org.apache.asterix.om.types.AUnionType;
 import org.apache.asterix.om.types.AbstractCollectionType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.IATypeVisitor;
-import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.AbstractRowCollectionSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 

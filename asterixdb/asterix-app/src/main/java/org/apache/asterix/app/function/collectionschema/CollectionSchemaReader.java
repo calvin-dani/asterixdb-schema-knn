@@ -24,8 +24,8 @@ import java.io.IOException;
 import org.apache.asterix.app.function.FunctionReader;
 import org.apache.asterix.external.api.IRawRecord;
 import org.apache.asterix.external.input.record.CharArrayRecord;
-import org.apache.asterix.runtime.schemainferrence.RowMetadata;
-import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaADMRecordBuilderVisitor;
+import org.apache.asterix.runtime.schemainference.RowMetadata;
+import org.apache.asterix.runtime.schemainference.utils.JSONRowSchemaADMRecordBuilderVisitor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 public class CollectionSchemaReader extends FunctionReader {

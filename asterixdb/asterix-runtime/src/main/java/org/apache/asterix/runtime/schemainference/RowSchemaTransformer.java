@@ -16,18 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence;
+package org.apache.asterix.runtime.schemainference;
 
 import java.util.ArrayList;
 
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollectionSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.ArrayRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.GenericListRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.lazy.IObjectRowSchemaNodeVisitor;
-import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
-import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.AbstractRowCollectionSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.ArrayRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.GenericListRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.collection.MultisetRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.lazy.IObjectRowSchemaNodeVisitor;
+import org.apache.asterix.runtime.schemainference.lazy.metadata.RowFieldNamesDictionary;
+import org.apache.asterix.runtime.schemainference.primitive.PrimitiveRowSchemaNode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 

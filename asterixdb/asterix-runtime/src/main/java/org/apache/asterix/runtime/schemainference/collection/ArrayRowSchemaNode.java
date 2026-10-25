@@ -16,34 +16,34 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence.collection;
+package org.apache.asterix.runtime.schemainference.collection;
 
 import java.io.DataInput;
 import java.io.IOException;
 
 import org.apache.asterix.om.types.ATypeTag;
-import org.apache.asterix.runtime.schemainferrence.AbstractRowSchemaNode;
+import org.apache.asterix.runtime.schemainference.AbstractRowSchemaNode;
 import org.apache.hyracks.data.std.api.IValueReference;
 
 /*
-Schema node for Multiset types.
+Schema node for Array types.
 */
 
-public final class MultisetRowSchemaNode extends AbstractRowCollectionSchemaNode {
+public final class ArrayRowSchemaNode extends AbstractRowCollectionSchemaNode {
     private IValueReference fieldName;
 
-    public MultisetRowSchemaNode(boolean optional) {
+    public ArrayRowSchemaNode(boolean optional) {
         super(optional);
     }
 
-    public MultisetRowSchemaNode(DataInput input) throws IOException {
+    public ArrayRowSchemaNode(DataInput input) throws IOException {
         super(input);
         this.fieldName = super.getFieldName();
     }
 
     @Override
     public ATypeTag getTypeTag() {
-        return ATypeTag.MULTISET;
+        return ATypeTag.ARRAY;
     }
 
     @Override

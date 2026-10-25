@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.asterix.runtime.schemainferrence.lazy.metadata;
+package org.apache.asterix.runtime.schemainference.lazy.metadata;
 
 import java.io.DataInput;
 import java.io.DataInputStream;
