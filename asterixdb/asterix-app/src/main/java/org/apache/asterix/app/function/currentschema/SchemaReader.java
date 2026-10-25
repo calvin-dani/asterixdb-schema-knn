@@ -23,38 +23,24 @@ import java.io.IOException;
 
 import org.apache.asterix.app.function.FunctionReader;
 import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
-import org.apache.asterix.column.util.SchemaStringBuilderVisitor;
+import org.apache.asterix.column.util.JsonSchemaBuilderVisitor;
 import org.apache.asterix.external.api.IRawRecord;
 import org.apache.asterix.external.input.record.CharArrayRecord;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.util.LogRedactionUtil;
-
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class SchemaReader extends FunctionReader {
     private final FlushColumnMetadata colMetaData;
     private final CharArrayRecord record;
     private boolean hasNext = true;
-    String jsonString = "";
+    private final String jsonString;
 
-    SchemaReader(FlushColumnMetadata colMetaData) throws HyracksDataException, JsonProcessingException {
+    SchemaReader(FlushColumnMetadata colMetaData) throws HyracksDataException {
         if (colMetaData == null) {
             throw new HyracksDataException("Column metadata is null");
         }
         this.colMetaData = colMetaData;
         record = new CharArrayRecord();
-
-        SchemaStringBuilderVisitor schemaBuilderJson =
-                new SchemaStringBuilderVisitor(colMetaData.getFieldNamesDictionary());
-
-        String recordSchema = LogRedactionUtil.userData(schemaBuilderJson.build(colMetaData.getRoot()));
-
-        ObjectMapper objectMapper = new ObjectMapper();
-        JsonNode jsonNode = objectMapper.readTree(recordSchema);
-        this.jsonString = objectMapper.writeValueAsString(jsonNode);
-
+        jsonString = new JsonSchemaBuilderVisitor(colMetaData.getFieldNamesDictionary()).build(colMetaData.getRoot());
     }
 
     @Override

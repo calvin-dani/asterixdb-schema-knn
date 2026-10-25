@@ -84,5 +84,10 @@
         <expected-error>ASX3126</expected-error>
       </compilation-unit>
     </test-case>
+    <test-case FilePath="schema-inference">
+      <compilation-unit name="schema-inference-14">
+        <output-dir compare="Text">schema-inference-14</output-dir>
+      </compilation-unit>
+    </test-case>
   </test-group>
 </test-suite>

@@ -19,31 +19,21 @@
 
 package org.apache.asterix.app.function.collectionschema;
 
-import java.io.DataInputStream;
 import java.io.IOException;
 
 import org.apache.asterix.app.function.FunctionReader;
 import org.apache.asterix.external.api.IRawRecord;
 import org.apache.asterix.external.input.record.CharArrayRecord;
-import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.RowMetadata;
-import org.apache.asterix.runtime.schemainferrence.RowSchemaTransformer;
+import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaADMRecordBuilderVisitor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.dataflow.common.comm.util.ByteBufferInputStream;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class CollectionSchemaReader extends FunctionReader {
     private final RowMetadata rowMetaData;
     private final CharArrayRecord record;
     private boolean hasNext = true;
 
-    private final ByteBufferInputStream bbis = new ByteBufferInputStream();
-    private final DataInputStream dis = new DataInputStream(bbis);
-
     CollectionSchemaReader(RowMetadata rowMetaData) throws HyracksDataException {
-
         this.rowMetaData = rowMetaData;
         record = new CharArrayRecord();
     }
@@ -55,21 +45,13 @@ public class CollectionSchemaReader extends FunctionReader {
 
     @Override
     public IRawRecord<char[]> next() throws IOException {
-
         record.reset();
-        RowSchemaTransformer schemaTransformer = new RowSchemaTransformer(rowMetaData, rowMetaData.getRoot());
-        ObjectRowSchemaNode root = schemaTransformer.getRoot();
-        String res = rowMetaData.printRootSchema(root, rowMetaData.getFieldNamesDictionary());
-
-        ObjectMapper objectMapper = new ObjectMapper();
-        JsonNode jsonNode = objectMapper.readTree(res);
-        String jsonString = objectMapper.writeValueAsString(jsonNode);
-        hasNext = false;
+        String jsonString = new JSONRowSchemaADMRecordBuilderVisitor(rowMetaData.getFieldNamesDictionary())
+                .buildString(rowMetaData.getRoot());
         String result = "{\"Schema\":" + jsonString + "}";
         record.append(result.toCharArray());
         record.endRecord();
         hasNext = false;
         return record;
     }
-
 }

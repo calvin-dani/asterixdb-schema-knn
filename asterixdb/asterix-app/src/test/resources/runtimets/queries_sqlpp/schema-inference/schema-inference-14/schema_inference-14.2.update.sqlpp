@@ -1,0 +1,44 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use test;
+
+-- Enough records that every node holds some: sample-schema reads one node's sample partitions
+insert into Person ([{"id": 1, "quote\"d": "q1", "back\\slash": 1, "tags": {{"t1"}}, "u": uuid("00000001-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 2, "quote\"d": "q2", "back\\slash": 2, "tags": {{"t2"}}, "u": uuid("00000002-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 3, "quote\"d": "q3", "back\\slash": 3, "tags": {{"t3"}}, "u": uuid("00000003-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 4, "quote\"d": "q4", "back\\slash": 4, "tags": {{"t4"}}, "u": uuid("00000004-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 5, "quote\"d": "q5", "back\\slash": 5, "tags": {{"t5"}}, "u": uuid("00000005-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 6, "quote\"d": "q6", "back\\slash": 6, "tags": {{"t6"}}, "u": uuid("00000006-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 7, "quote\"d": "q7", "back\\slash": 7, "tags": {{"t7"}}, "u": uuid("00000007-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 8, "quote\"d": "q8", "back\\slash": 8, "tags": {{"t8"}}, "u": uuid("00000008-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 9, "quote\"d": "q9", "back\\slash": 9, "tags": {{"t9"}}, "u": uuid("00000009-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 10, "quote\"d": "q10", "back\\slash": 10, "tags": {{"t10"}}, "u": uuid("00000010-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 11, "quote\"d": "q11", "back\\slash": 11, "tags": {{"t11"}}, "u": uuid("00000011-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 12, "quote\"d": "q12", "back\\slash": 12, "tags": {{"t12"}}, "u": uuid("00000012-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 13, "quote\"d": "q13", "back\\slash": 13, "tags": {{"t13"}}, "u": uuid("00000013-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 14, "quote\"d": "q14", "back\\slash": 14, "tags": {{"t14"}}, "u": uuid("00000014-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 15, "quote\"d": "q15", "back\\slash": 15, "tags": {{"t15"}}, "u": uuid("00000015-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 16, "quote\"d": "q16", "back\\slash": 16, "tags": {{"t16"}}, "u": uuid("00000016-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 17, "quote\"d": "q17", "back\\slash": 17, "tags": {{"t17"}}, "u": uuid("00000017-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 18, "quote\"d": "q18", "back\\slash": 18, "tags": {{"t18"}}, "u": uuid("00000018-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 19, "quote\"d": "q19", "back\\slash": 19, "tags": {{"t19"}}, "u": uuid("00000019-6b6a-498f-8452-8847a2957421")}]);
+insert into Person ([{"id": 20, "quote\"d": "q20", "back\\slash": 20, "tags": {{"t20"}}, "u": uuid("00000020-6b6a-498f-8452-8847a2957421")}]);
+
+analyze dataset Person;

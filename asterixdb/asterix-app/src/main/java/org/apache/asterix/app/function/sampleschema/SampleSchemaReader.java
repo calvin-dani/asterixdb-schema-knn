@@ -26,9 +26,9 @@ import org.apache.asterix.external.api.IRawRecord;
 import org.apache.asterix.external.input.record.CharArrayRecord;
 import org.apache.asterix.om.lazy.TypedRecordLazyVisitablePointable;
 import org.apache.asterix.om.types.ARecordType;
-import org.apache.asterix.runtime.schemainferrence.ObjectRowSchemaNode;
 import org.apache.asterix.runtime.schemainferrence.RowMetadata;
 import org.apache.asterix.runtime.schemainferrence.RowTransformer;
+import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaADMRecordBuilderVisitor;
 import org.apache.hyracks.api.dataflow.value.IBinaryComparatorFactory;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.CleanupUtils;
@@ -40,8 +40,6 @@ import org.apache.hyracks.storage.am.common.util.ResourceReleaseUtils;
 import org.apache.hyracks.storage.common.IIndexAccessor;
 import org.apache.hyracks.storage.common.IIndexCursor;
 import org.apache.hyracks.storage.common.MultiComparator;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class SampleSchemaReader extends FunctionReader {
 
@@ -89,10 +87,8 @@ public class SampleSchemaReader extends FunctionReader {
                 }
             }
 
-            ObjectRowSchemaNode root = rowMetadata.getRoot();
-            String rawSchema = rowMetadata.printRootSchema(root, rowMetadata.getFieldNamesDictionary());
-            ObjectMapper objectMapper = new ObjectMapper();
-            this.schemaJson = objectMapper.writeValueAsString(objectMapper.readTree(rawSchema));
+            this.schemaJson = new JSONRowSchemaADMRecordBuilderVisitor(rowMetadata.getFieldNamesDictionary())
+                    .buildString(rowMetadata.getRoot());
         } catch (Exception e) {
             Throwable failure = releaseResources();
             if (failure != null) {

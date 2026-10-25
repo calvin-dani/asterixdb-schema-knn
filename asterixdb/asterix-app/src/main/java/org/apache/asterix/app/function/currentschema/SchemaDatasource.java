@@ -24,6 +24,8 @@ import java.util.Objects;
 import org.apache.asterix.common.cluster.IClusterStateManager;
 import org.apache.asterix.common.functions.FunctionSignature;
 import org.apache.asterix.common.metadata.DataverseName;
+import org.apache.asterix.external.api.IDataParserFactory;
+import org.apache.asterix.external.parser.factory.JSONDataParserFactory;
 import org.apache.asterix.metadata.api.IDatasourceFunction;
 import org.apache.asterix.metadata.declared.DataSourceId;
 import org.apache.asterix.metadata.declared.FunctionDataSource;
@@ -101,4 +103,14 @@ public class SchemaDatasource extends FunctionDataSource {
         return Objects.equals(this.database, that.getDatabase()) && Objects.equals(this.dataverse, that.getDataverse())
                 && Objects.equals(this.collection, that.getCollection()) && Objects.equals(this.index, that.getIndex());
     }
+
+    /**
+     * The schema is emitted as JSON text, and the default ADM parser does not unescape field names, so a field name
+     * containing a quote or backslash would come back with its escape characters.
+     */
+    @Override
+    protected IDataParserFactory createDataParserFactory() {
+        return new JSONDataParserFactory();
+    }
+
 }

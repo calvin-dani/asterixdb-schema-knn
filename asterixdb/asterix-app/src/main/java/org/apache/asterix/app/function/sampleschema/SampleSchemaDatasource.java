@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.asterix.common.cluster.IClusterStateManager;
+import org.apache.asterix.external.api.IDataParserFactory;
+import org.apache.asterix.external.parser.factory.JSONDataParserFactory;
 import org.apache.asterix.metadata.api.IDatasourceFunction;
 import org.apache.asterix.metadata.declared.FunctionDataSource;
 import org.apache.asterix.metadata.declared.MetadataProvider;
@@ -85,4 +87,14 @@ public class SampleSchemaDatasource extends FunctionDataSource {
     protected boolean sameFunctionDatasource(FunctionDataSource other) {
         return false;
     }
+
+    /**
+     * The schema is emitted as JSON text, and the default ADM parser does not unescape field names, so a field name
+     * containing a quote or backslash would come back with its escape characters.
+     */
+    @Override
+    protected IDataParserFactory createDataParserFactory() {
+        return new JSONDataParserFactory();
+    }
+
 }

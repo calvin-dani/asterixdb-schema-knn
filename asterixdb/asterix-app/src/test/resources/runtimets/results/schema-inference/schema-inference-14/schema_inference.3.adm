@@ -1,0 +1,1 @@
+{ "Schema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": { "id": { "type": "integer" }, "quote\"d": { "type": "string" }, "back\\slash": { "type": "integer" }, "tags": { "type": "array", "x-asterix-type": "multiset", "items": { "type": "string" } }, "u": { "type": "string", "format": "uuid" } }, "required": [ "id" ] } }

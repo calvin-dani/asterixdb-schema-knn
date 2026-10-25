@@ -70,7 +70,7 @@ public class CollectionSchemaFunction extends AbstractDatasourceFunction {
 
             RowMetadata rowMetaData = new RowMetadata();
             RowTransformer transformer = new RowTransformer(rowMetaData, rowMetaData.getRoot());
-            transformer.transform((ARecordType) type);
+            transformer.transform((ARecordType) type, false);
 
             return new CollectionSchemaReader(rowMetaData);
         } catch (Exception e) {

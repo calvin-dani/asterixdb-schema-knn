@@ -28,22 +28,15 @@ import org.apache.asterix.runtime.schemainferrence.collection.MultisetRowSchemaN
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.AbstractRowMetadata;
 import org.apache.asterix.runtime.schemainferrence.lazy.metadata.RowFieldNamesDictionary;
 import org.apache.asterix.runtime.schemainferrence.primitive.PrimitiveRowSchemaNode;
-import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaADMRecordBuilderVisitor;
-import org.apache.asterix.runtime.schemainferrence.utils.JSONRowSchemaStringBuilderVisitor;
-import org.apache.asterix.runtime.schemainferrence.utils.RowSchemaStringBuilderVisitor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
-import org.apache.hyracks.util.LogRedactionUtil;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 /**
  * The schema here is mutable and can change according to the flushed records
  */
 public final class RowMetadata extends AbstractRowMetadata {
-    private static final Logger LOGGER = LogManager.getLogger();
 
     public final RowFieldNamesDictionary fieldNamesDictionary;
     private final ObjectRowSchemaNode root;
@@ -87,12 +80,6 @@ public final class RowMetadata extends AbstractRowMetadata {
             }
         }
         return serializedMetadata;
-    }
-
-    // Print the schema structure to the console  for debugging purposes
-    public String printRootSchema(ObjectRowSchemaNode rot, RowFieldNamesDictionary fieldNmDic)
-            throws HyracksDataException {
-        return logSchema(rot, metaRoot, fieldNmDic);
     }
 
     // Structure of writing the metadata of schema to the byte Array
@@ -226,24 +213,6 @@ public final class RowMetadata extends AbstractRowMetadata {
                 throw new IllegalStateException("Unsupported type " + normalizedTypeTag);
 
         }
-    }
-
-    // Schema structure logger
-    private static String logSchema(ObjectRowSchemaNode root, ObjectRowSchemaNode metaRoot,
-            RowFieldNamesDictionary fieldNamesDictionary) throws HyracksDataException {
-
-        JSONRowSchemaStringBuilderVisitor schemaBuilder = new JSONRowSchemaStringBuilderVisitor(fieldNamesDictionary);
-        JSONRowSchemaADMRecordBuilderVisitor schemaADMBuilder =
-                new JSONRowSchemaADMRecordBuilderVisitor(fieldNamesDictionary);
-
-        String recordSchema = LogRedactionUtil.userData(schemaBuilder.build(root));
-
-        if (metaRoot != null) {
-            String metaRecordSchema = LogRedactionUtil.userData(schemaBuilder.build(metaRoot));
-            LOGGER.debug("Schema for {} has changed: \n {}", RowSchemaStringBuilderVisitor.META_RECORD_SCHEMA,
-                    metaRecordSchema);
-        }
-        return recordSchema;
     }
 
     // Normalize field record type
