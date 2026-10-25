@@ -25,11 +25,11 @@ import java.util.List;
 
 import org.apache.asterix.app.function.FunctionRewriter;
 import org.apache.asterix.common.cluster.PartitioningProperties;
-import org.apache.asterix.common.config.DatasetConfig;
 import org.apache.asterix.common.exceptions.CompilationException;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.functions.FunctionConstants;
 import org.apache.asterix.common.metadata.DataverseName;
+import org.apache.asterix.common.metadata.MetadataUtil;
 import org.apache.asterix.metadata.MetadataManager;
 import org.apache.asterix.metadata.declared.FunctionDataSource;
 import org.apache.asterix.metadata.declared.MetadataProvider;
@@ -39,6 +39,7 @@ import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.exceptions.ExceptionUtil;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.ConstantExpressionUtil;
+import org.apache.asterix.utils.SchemaUtil;
 import org.apache.commons.lang3.mutable.Mutable;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
@@ -78,7 +79,6 @@ public class SchemaRewriter extends FunctionRewriter {
         ILogicalExpression databaseExpr = function.getArguments().get(0).getValue();
         ILogicalExpression scopeExpr = function.getArguments().get(1).getValue();
         ILogicalExpression collectionExpr = function.getArguments().get(2).getValue();
-        //        ILogicalExpression toFlushExpr = function.getArguments().get(3).getValue();
         ILogicalExpression indexExpr = null;
         if (function.getArguments().size() == 4) {
             indexExpr = function.getArguments().get(3).getValue();
@@ -90,11 +90,11 @@ public class SchemaRewriter extends FunctionRewriter {
                 DataverseName.createSinglePartName(ConstantExpressionUtil.getStringConstant(scopeExpr));
         String collection = ConstantExpressionUtil.getStringConstant(collectionExpr);
         Dataset dataset = metadataProvider.findDataset(database, dataverse, collection);
-        //        boolean toFlush = Boolean.TRUE.equals(ConstantExpressionUtil.getBooleanConstant(toFlushExpr));
-        if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.ROW) {
-            throw new CompilationException(ErrorCode.CONFIGURATION_PARAMETER_INVALID_TYPE, dataset.getDatasetName(),
-                    "DATASET should be in storage format : COLUMNAR");
+        if (dataset == null) {
+            throw new CompilationException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, collection,
+                    MetadataUtil.dataverseName(database, dataverse, metadataProvider.isUsingDatabase()));
         }
+        SchemaUtil.ensureColumnar(dataset);
         Index primaryIndex =
                 MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), dataset.getDatabaseName(),
                         dataset.getDataverseName(), dataset.getDatasetName(), dataset.getDatasetName());

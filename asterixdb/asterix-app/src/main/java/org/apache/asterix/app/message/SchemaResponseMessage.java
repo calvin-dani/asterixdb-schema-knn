@@ -18,59 +18,34 @@
  */
 package org.apache.asterix.app.message;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInput;
-import java.io.DataInputStream;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-
-import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
-import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
-import org.apache.asterix.column.metadata.schema.ObjectSchemaNode;
 import org.apache.asterix.column.operation.lsm.flush.ColumnSchemaTransformer;
 import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
-import org.apache.asterix.column.util.RunLengthIntArray;
-import org.apache.asterix.column.values.IColumnValuesWriterFactory;
-import org.apache.asterix.column.values.writer.ColumnValuesWriterFactory;
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
 import org.apache.asterix.common.messaging.api.ICCMessageBroker;
 import org.apache.asterix.common.messaging.api.ICCMessageBroker.ResponseState;
 import org.apache.asterix.common.messaging.api.ICcAddressedMessage;
 import org.apache.asterix.common.messaging.api.INcResponse;
-import org.apache.asterix.om.dictionary.AbstractFieldNamesDictionary;
-import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
-import org.apache.commons.lang3.mutable.Mutable;
-import org.apache.commons.lang3.mutable.MutableObject;
+import org.apache.asterix.utils.SchemaUtil;
 import org.apache.commons.lang3.tuple.MutablePair;
-import org.apache.hyracks.data.std.primitive.IntegerPointable;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
-import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
+/**
+ * One node's schema for a columnar dataset; responses are merged as they arrive.
+ */
 public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
 
     private static final long serialVersionUID = 1L;
-    private static final Logger LOGGER = LogManager.getLogger();
     private final long reqId;
-    SerializableArrayBackedValueStorage serializedColumnMetaData;
+    // Null when the node has no flushed data for the dataset
+    private final SerializableArrayBackedValueStorage serializedColumnMetaData;
     private final Throwable failure;
-
-    protected static final int WRITERS_POINTER = 0;
-    protected static final int FIELD_NAMES_POINTER = WRITERS_POINTER + Integer.BYTES;
-    protected static final int SCHEMA_POINTER = FIELD_NAMES_POINTER + Integer.BYTES;
-    protected static final int META_SCHEMA_POINTER = SCHEMA_POINTER + Integer.BYTES;
-    protected static final int PATH_INFO_POINTER = META_SCHEMA_POINTER + Integer.BYTES;
-    protected static final int OFFSETS_SIZE = PATH_INFO_POINTER + Integer.BYTES;
 
     public SchemaResponseMessage(long reqId, SerializableArrayBackedValueStorage columnMetaData, Throwable failure) {
         this.reqId = reqId;
         this.serializedColumnMetaData = columnMetaData;
         this.failure = failure;
-
     }
 
     @Override
@@ -86,70 +61,37 @@ public class SchemaResponseMessage implements ICcAddressedMessage, INcResponse {
             result.setRight(failure);
             return;
         }
+        if (result.getKey() == ResponseState.UNINITIALIZED) {
+            result.setLeft(ResponseState.SUCCESS);
+            result.setRight(serializedColumnMetaData);
+            return;
+        }
+        SerializableArrayBackedValueStorage current = (SerializableArrayBackedValueStorage) result.getRight();
+        if (serializedColumnMetaData == null) {
+            return;
+        }
+        if (current == null) {
+            result.setRight(serializedColumnMetaData);
+            return;
+        }
         try {
-            if (result == null) {
-                result = new MutablePair<>(ResponseState.UNINITIALIZED, null);
-            }
-            setResponse(result);
-        } catch (Exception e) {
-            LOGGER.log(Level.ERROR, "Error in SchemaResponseMessage.setResult: " + e.getMessage());
+            result.setRight(merge(current, serializedColumnMetaData));
+        } catch (HyracksDataException e) {
+            result.setLeft(ResponseState.FAILURE);
+            result.setRight(e);
         }
     }
 
-    private void setResponse(MutablePair<ResponseState, Object> result) throws IOException {
-        switch (result.getKey()) {
-            case SUCCESS:
-                SerializableArrayBackedValueStorage currentSerColumnMetaData =
-                        (SerializableArrayBackedValueStorage) result.getValue();
-                FlushColumnMetadata newColumnMetadata = deserializeColumnMetadata(serializedColumnMetaData);
-                ColumnSchemaTransformer schemaTransformer =
-                        initSchemaTransformer(deserializeColumnMetadata(currentSerColumnMetaData));
-
-                schemaTransformer.setToMergeFieldNamesDictionary(newColumnMetadata.getFieldNamesDictionary());
-                schemaTransformer.transform(newColumnMetadata.getRoot());
-                result.setValue(new SerializableArrayBackedValueStorage(
-                        (ArrayBackedValueStorage) schemaTransformer.getColMetadata().serializeColumnsMetadata()));
-                break;
-            case UNINITIALIZED:
-                result.setLeft(ResponseState.SUCCESS);
-                result.setValue(serializedColumnMetaData);
-                break;
-            default:
-                break;
-        }
-    }
-
-    public FlushColumnMetadata deserializeColumnMetadata(SerializableArrayBackedValueStorage serColumnMetaData) {
-        try {
-            ArrayBackedValueStorage storage = serColumnMetaData.getStorage();
-            int offset = storage.getStartOffset();
-            int length = storage.getLength();
-            int fieldNamesStart =
-                    offset + IntegerPointable.getInteger(storage.getByteArray(), offset + FIELD_NAMES_POINTER);
-            int metaRootStart = IntegerPointable.getInteger(storage.getByteArray(), offset + META_SCHEMA_POINTER);
-            int metaRootSize = metaRootStart < 0 ? 0
-                    : IntegerPointable.getInteger(storage.getByteArray(), offset + PATH_INFO_POINTER) - metaRootStart;
-            DataInput input =
-                    new DataInputStream(new ByteArrayInputStream(storage.getByteArray(), fieldNamesStart, length));
-            IFieldNamesDictionary fieldNamesDictionary = AbstractFieldNamesDictionary.deserialize(input);
-            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
-            ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
-            Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
-            IColumnValuesWriterFactory factory = new ColumnValuesWriterFactory(multiPageOpRef);
-            FlushColumnMetadata rowMetaData =
-                    new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary, factory);
-            return rowMetaData;
-        } catch (IOException e) {
-            LOGGER.log(Level.ERROR, "Error in deserialiseColumnMetadata: " + e.getMessage());
-            return null;
-        }
-
-    }
-
-    public ColumnSchemaTransformer initSchemaTransformer(FlushColumnMetadata rowMetaData) {
-        ColumnSchemaTransformer schemaTransformer = new ColumnSchemaTransformer(rowMetaData, rowMetaData.getRoot());
-        schemaTransformer.setToMergeFieldNamesDictionary(rowMetaData.getFieldNamesDictionary());
-        return schemaTransformer;
+    private static SerializableArrayBackedValueStorage merge(SerializableArrayBackedValueStorage target,
+            SerializableArrayBackedValueStorage toMerge) throws HyracksDataException {
+        FlushColumnMetadata targetMetadata = SchemaUtil.deserializeColumnMetadata(target.getStorage());
+        FlushColumnMetadata toMergeMetadata = SchemaUtil.deserializeColumnMetadata(toMerge.getStorage());
+        ColumnSchemaTransformer schemaTransformer =
+                new ColumnSchemaTransformer(targetMetadata, targetMetadata.getRoot());
+        schemaTransformer.setToMergeFieldNamesDictionary(toMergeMetadata.getFieldNamesDictionary());
+        schemaTransformer.transform(toMergeMetadata.getRoot());
+        return new SerializableArrayBackedValueStorage(
+                (ArrayBackedValueStorage) schemaTransformer.getColMetadata().serializeColumnsMetadata());
     }
 
     @Override

@@ -18,140 +18,128 @@
  */
 package org.apache.asterix.app.message;
 
-import java.util.function.Predicate;
+import java.util.List;
 
 import org.apache.asterix.column.operation.lsm.flush.ColumnSchemaTransformer;
 import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
 import org.apache.asterix.common.api.INcApplicationContext;
-import org.apache.asterix.common.config.DatasetConfig;
-import org.apache.asterix.common.context.DatasetInfo;
 import org.apache.asterix.common.messaging.CcIdentifiedMessage;
 import org.apache.asterix.common.messaging.api.INcAddressedMessage;
-import org.apache.asterix.common.storage.ResourceReference;
 import org.apache.asterix.common.utils.Partitions;
 import org.apache.asterix.messaging.NCMessageBroker;
 import org.apache.asterix.metadata.entities.Dataset;
+import org.apache.asterix.utils.SchemaUtil;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
 import org.apache.hyracks.storage.am.common.api.IIndexDataflowHelper;
 import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
+import org.apache.hyracks.storage.am.common.util.ResourceReleaseUtils;
 import org.apache.hyracks.storage.am.lsm.btree.column.impls.lsm.LSMColumnBTree;
+import org.apache.hyracks.storage.am.lsm.btree.column.utils.ColumnUtil;
+import org.apache.hyracks.storage.am.lsm.common.api.ILSMDiskComponent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import it.unimi.dsi.fastutil.ints.IntIterator;
 
+/**
+ * Asks one node for the merged schema of its partitions of a columnar dataset.
+ */
 public class SchemaRequestMessage extends CcIdentifiedMessage implements INcAddressedMessage {
 
     private static final Logger LOGGER = LogManager.getLogger();
     private static final long serialVersionUID = 1L;
     private final long reqId;
-    private final String database;
-    private final String dataverse;
-    private final String collection;
-    private final String index;
     private final Dataset dataset;
-    FlushColumnMetadata columnMetadata;
-    ArrayBackedValueStorage serializedColumnMetadata;
     private final IFileSplitProvider splitProvider;
 
-    public SchemaRequestMessage(long reqId, String database, String dataverse, String collection, String index,
-            Dataset dataset, IFileSplitProvider splitProvider) {
-
+    public SchemaRequestMessage(long reqId, Dataset dataset, IFileSplitProvider splitProvider) {
         this.reqId = reqId;
-        this.database = database;
-        this.dataverse = dataverse;
-        this.collection = collection;
-        this.index = index;
         this.dataset = dataset;
         this.splitProvider = splitProvider;
     }
 
     @Override
     public void handle(INcApplicationContext appCtx) throws HyracksDataException {
-
-        // TODO: Remove the isOpen check and let it fail if flush is requested for a dataset that is closed
+        SchemaResponseMessage response;
         try {
-            Partitions partSet =
-                    appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
-            int[] part = new int[partSet.size()];
-            IntIterator partIter = partSet.iterator();
-            for (int i = 0; i < part.length; i++) {
-                part[i] = partIter.nextInt();
-            }
-            IndexDataflowHelperFactory indexDataflowHelperFactory = new IndexDataflowHelperFactory(
-                    appCtx.getStorageComponentProvider().getStorageManager(), splitProvider);
-            final IIndexDataflowHelper[] indexDataflowHelpers = new IIndexDataflowHelper[part.length];
-            for (int i = 0; i < part.length; i++) {
-                indexDataflowHelpers[i] = indexDataflowHelperFactory.create(appCtx.getServiceContext(), part[i]);
-                indexDataflowHelpers[i].open();
-            }
-
-            DatasetInfo dsInfo = appCtx.getDatasetLifecycleManager().getDatasetInfo(this.dataset.getDatasetId());
-            if (dsInfo == null) {
-                throw HyracksDataException.create(new Exception("Dataset does not exist on this node"));
-            }
-            //            if (dsInfo.isOpen() && toFlush) {
-            //                appCtx.getDatasetLifecycleManager().flushDataset(this.dataset.getDatasetId(), false);
-            //            }
-
-            final ColumnSchemaTransformer[] columnSchemaTransformer = { null };
-
-            dsInfo.getIndexes().forEach((indexId, indexInfo) -> {
-                if (dataset.getDatasetFormatInfo().getFormat() == DatasetConfig.DatasetFormat.COLUMN) {
-                    if (indexInfo.getIndex() instanceof LSMColumnBTree) {
-                        LSMColumnBTree lsmColumnBTree = (LSMColumnBTree) indexInfo.getIndex();
-                        this.columnMetadata = (FlushColumnMetadata) lsmColumnBTree.getPublicColumnMetadata();
-                        if (columnSchemaTransformer[0] == null) {
-                            columnSchemaTransformer[0] =
-                                    new ColumnSchemaTransformer(this.columnMetadata, this.columnMetadata.getRoot());
-                            columnSchemaTransformer[0]
-                                    .setToMergeFieldNamesDictionary(this.columnMetadata.getFieldNamesDictionary());
-                        } else {
-                            try {
-                                columnSchemaTransformer[0]
-                                        .setToMergeFieldNamesDictionary(this.columnMetadata.getFieldNamesDictionary());
-                                columnSchemaTransformer[0].transform(this.columnMetadata.getRoot());
-                            } catch (HyracksDataException e) {
-                                throw new RuntimeException(e);
-                            }
-                        }
-                    }
-                }
-            });
-
-            this.serializedColumnMetadata =
-                    (ArrayBackedValueStorage) columnSchemaTransformer[0].getColMetadata().serializeColumnsMetadata();
-            SchemaResponseMessage response = new SchemaResponseMessage(reqId,
-                    new SerializableArrayBackedValueStorage(serializedColumnMetadata), null);
-            respond(appCtx, response);
-
+            response = new SchemaResponseMessage(reqId, collectSchema(appCtx), null);
         } catch (Exception e) {
-            LOGGER.info("failed to get schema", e);
-            SchemaResponseMessage response = new SchemaResponseMessage(reqId, null, e);
-            respond(appCtx, response);
+            LOGGER.info("failed to get schema of {}", dataset.getDatasetName(), e);
+            response = new SchemaResponseMessage(reqId, null, e);
         }
+        respond(appCtx, response);
     }
 
-    private Predicate<String> getPredicate() {
-        return path -> {
-            ResourceReference resourceReference = ResourceReference.of(path);
-            if (resourceReference.getDatabase().equals(database)
-                    && resourceReference.getDataverse().getCanonicalForm().equals(dataverse)
-                    && resourceReference.getDataset().equals(collection)) {
-                if (index != null) {
-                    return resourceReference.getIndex().equals(index);
+    /**
+     * Merges the schema stored with each partition's newest flushed component. The running index's own metadata is
+     * never touched: even serializing it changes state that its next flush relies on. Records not yet flushed are
+     * therefore not reflected.
+     *
+     * @return the merged schema, or null if no partition on this node has flushed any data
+     */
+    private SerializableArrayBackedValueStorage collectSchema(INcApplicationContext appCtx)
+            throws HyracksDataException {
+        Partitions nodePartitions =
+                appCtx.getMetadataProperties().getNodePartitions(appCtx.getServiceContext().getNodeId());
+        IndexDataflowHelperFactory helperFactory =
+                new IndexDataflowHelperFactory(appCtx.getStorageComponentProvider().getStorageManager(), splitProvider);
+        IIndexDataflowHelper[] helpers = new IIndexDataflowHelper[nodePartitions.size()];
+        ColumnSchemaTransformer merged = null;
+        SerializableArrayBackedValueStorage result = null;
+        Throwable failure = null;
+        try {
+            IntIterator partitions = nodePartitions.iterator();
+            for (int i = 0; i < helpers.length; i++) {
+                helpers[i] = helperFactory.create(appCtx.getServiceContext(), partitions.nextInt());
+                helpers[i].open();
+                IValueReference stored = getNewestFlushedSchema(helpers[i]);
+                if (stored == null) {
+                    continue;
                 }
-                return true;
+                FlushColumnMetadata partitionSchema = SchemaUtil.deserializeColumnMetadata(stored);
+                if (merged == null) {
+                    merged = new ColumnSchemaTransformer(partitionSchema, partitionSchema.getRoot());
+                } else {
+                    merged.setToMergeFieldNamesDictionary(partitionSchema.getFieldNamesDictionary());
+                    merged.transform(partitionSchema.getRoot());
+                }
             }
-            return false;
-        };
+            if (merged != null) {
+                result = new SerializableArrayBackedValueStorage(
+                        (ArrayBackedValueStorage) merged.getColMetadata().serializeColumnsMetadata());
+            }
+        } catch (Throwable th) {
+            failure = th;
+        } finally {
+            for (IIndexDataflowHelper helper : helpers) {
+                if (helper != null) {
+                    failure = ResourceReleaseUtils.close(helper, failure);
+                }
+            }
+        }
+        if (failure != null) {
+            throw HyracksDataException.create(failure);
+        }
+        return result;
+    }
+
+    private static IValueReference getNewestFlushedSchema(IIndexDataflowHelper helper) throws HyracksDataException {
+        if (!(helper.getIndexInstance() instanceof LSMColumnBTree)) {
+            return null;
+        }
+        // Disk components are ordered newest first, and the newest carries the most recent schema
+        List<ILSMDiskComponent> diskComponents = ((LSMColumnBTree) helper.getIndexInstance()).getDiskComponents();
+        if (diskComponents.isEmpty()) {
+            return null;
+        }
+        return ColumnUtil.getColumnMetadataCopy(diskComponents.get(0).getMetadata());
     }
 
     private void respond(INcApplicationContext appCtx, SchemaResponseMessage response) throws HyracksDataException {
-
         NCMessageBroker messageBroker = (NCMessageBroker) appCtx.getServiceContext().getMessageBroker();
         try {
             messageBroker.sendMessageToPrimaryCC(response);

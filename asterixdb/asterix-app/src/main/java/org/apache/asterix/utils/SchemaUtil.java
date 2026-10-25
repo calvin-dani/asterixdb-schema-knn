@@ -22,12 +22,23 @@ import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.
 import static org.apache.asterix.common.api.IClusterManagementWork.ClusterState.REBALANCE_REQUIRED;
 import static org.apache.asterix.common.exceptions.ErrorCode.REJECT_BAD_CLUSTER_STATE;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInput;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.asterix.app.message.SchemaRequestMessage;
+import org.apache.asterix.column.metadata.schema.AbstractSchemaNestedNode;
+import org.apache.asterix.column.metadata.schema.AbstractSchemaNode;
+import org.apache.asterix.column.metadata.schema.ObjectSchemaNode;
+import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
+import org.apache.asterix.column.util.RunLengthIntArray;
+import org.apache.asterix.column.values.writer.ColumnValuesWriterFactory;
 import org.apache.asterix.common.api.IClusterManagementWork;
 import org.apache.asterix.common.api.IMetadataLockManager;
 import org.apache.asterix.common.config.DatasetConfig;
@@ -43,23 +54,36 @@ import org.apache.asterix.metadata.MetadataManager;
 import org.apache.asterix.metadata.MetadataTransactionContext;
 import org.apache.asterix.metadata.declared.MetadataProvider;
 import org.apache.asterix.metadata.entities.Dataset;
-import org.apache.asterix.metadata.entities.Index;
+import org.apache.asterix.om.dictionary.AbstractFieldNamesDictionary;
+import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
+import org.apache.commons.lang3.mutable.Mutable;
+import org.apache.commons.lang3.mutable.MutableObject;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.util.InvokeUtil;
+import org.apache.hyracks.data.std.api.IValueReference;
+import org.apache.hyracks.data.std.primitive.IntegerPointable;
 import org.apache.hyracks.data.std.util.SerializableArrayBackedValueStorage;
 import org.apache.hyracks.dataflow.std.file.IFileSplitProvider;
+import org.apache.hyracks.storage.am.lsm.btree.column.api.IColumnWriteMultiPageOp;
 
 public class SchemaUtil {
+    public static final String CURRENT_SCHEMA = "current-schema";
 
-    protected static final int WRITERS_POINTER = 0;
-    protected static final int FIELD_NAMES_POINTER = WRITERS_POINTER + Integer.BYTES;
-    protected static final int SCHEMA_POINTER = FIELD_NAMES_POINTER + Integer.BYTES;
-    protected static final int META_SCHEMA_POINTER = SCHEMA_POINTER + Integer.BYTES;
-    protected static final int PATH_INFO_POINTER = META_SCHEMA_POINTER + Integer.BYTES;
-    protected static final int OFFSETS_SIZE = PATH_INFO_POINTER + Integer.BYTES;
+    // Offset of the field-names pointer in the serialized column metadata header (see FlushColumnMetadata)
+    private static final int FIELD_NAMES_POINTER = Integer.BYTES;
+    private static final long SCHEMA_REQUEST_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(60);
 
+    private SchemaUtil() {
+    }
+
+    /**
+     * Collects the schema of a columnar dataset from every node and merges it.
+     *
+     * @return the merged column metadata, serialized
+     * @throws RuntimeDataException with {@link ErrorCode#NO_FLUSHED_SCHEMA} if no node has flushed any data
+     */
     public static SerializableArrayBackedValueStorage getDatasetInfo(ICcApplicationContext appCtx, String database,
-            DataverseName dataverse, String collection, String index, IFileSplitProvider splitProvider)
-            throws IOException, Exception {
+            DataverseName dataverse, String collection, IFileSplitProvider splitProvider) throws Exception {
         IClusterManagementWork.ClusterState state = appCtx.getClusterStateManager().getState();
         if (!(state == ACTIVE || state == REBALANCE_REQUIRED)) {
             throw new RuntimeDataException(REJECT_BAD_CLUSTER_STATE, state);
@@ -78,44 +102,58 @@ public class SchemaUtil {
             lockManager.acquireDataverseReadLock(metadataProvider.getLocks(), database, dataverse);
             lockManager.acquireDatasetReadLock(metadataProvider.getLocks(), database, dataverse, collection);
             Dataset dataset = metadataProvider.findDataset(database, dataverse, collection);
-
             if (dataset == null) {
                 throw new CompilationException(ErrorCode.UNKNOWN_DATASET_IN_DATAVERSE, collection,
                         MetadataUtil.dataverseName(database, dataverse, metadataProvider.isUsingDatabase()));
             }
-            List<Index> listIndex = MetadataManager.INSTANCE.getDatasetIndexes(mdTxnCtx, dataset.getDatabaseName(),
-                    dataset.getDataverseName(), dataset.getDatasetName());
-            index = listIndex.get(0).getIndexName();
-            if (dataset.getDatasetType() != DatasetConfig.DatasetType.INTERNAL) {
-                throw new CompilationException(ErrorCode.STORAGE_SIZE_NOT_APPLICABLE_TO_TYPE, dataset.getDatasetType());
-            }
+            ensureColumnar(dataset);
 
-            if (index != null) {
-                Index idx = MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), database,
-                        dataverse, collection, index);
-                metadataProvider.getPartitioningProperties(dataset, idx.getIndexName());
-                if (idx == null) {
-                    throw new CompilationException(ErrorCode.UNKNOWN_INDEX, index);
-                }
-            }
-
-            final List<String> ncs = new ArrayList<>(appCtx.getClusterStateManager().getParticipantNodes());
+            List<String> ncs = new ArrayList<>(appCtx.getClusterStateManager().getParticipantNodes());
             CCMessageBroker messageBroker = (CCMessageBroker) appCtx.getServiceContext().getMessageBroker();
-
             long reqId = messageBroker.newRequestId();
             List<SchemaRequestMessage> requests = new ArrayList<>();
             for (int i = 0; i < ncs.size(); i++) {
-                requests.add(new SchemaRequestMessage(reqId, database, dataverse.getCanonicalForm(), collection, index,
-                        dataset, splitProvider));
+                requests.add(new SchemaRequestMessage(reqId, dataset, splitProvider));
             }
-            return (SerializableArrayBackedValueStorage) messageBroker.sendSyncRequestToNCs(reqId, ncs, requests,
-                    TimeUnit.SECONDS.toMillis(60000), true);
-        } catch (IOException e) {
-            throw e;
+            SerializableArrayBackedValueStorage merged = (SerializableArrayBackedValueStorage) messageBroker
+                    .sendSyncRequestToNCs(reqId, ncs, requests, SCHEMA_REQUEST_TIMEOUT_MILLIS, true);
+            if (merged == null) {
+                throw new RuntimeDataException(ErrorCode.NO_FLUSHED_SCHEMA, collection);
+            }
+            return merged;
         } finally {
             InvokeUtil.tryWithCleanups(() -> MetadataManager.INSTANCE.commitTransaction(mdTxnCtx),
                     () -> metadataProvider.getLocks().unlock());
         }
     }
 
+    public static void ensureColumnar(Dataset dataset) throws CompilationException {
+        if (dataset.getDatasetType() != DatasetConfig.DatasetType.INTERNAL
+                || dataset.getDatasetFormatInfo().getFormat() != DatasetConfig.DatasetFormat.COLUMN) {
+            throw new CompilationException(ErrorCode.COLUMN_FORMAT_REQUIRED, CURRENT_SCHEMA, dataset.getDatasetName());
+        }
+    }
+
+    /**
+     * Rebuilds a standalone {@link FlushColumnMetadata} from serialized column metadata. The result shares no state
+     * with any index, so it can be merged into freely.
+     */
+    public static FlushColumnMetadata deserializeColumnMetadata(IValueReference serialized)
+            throws HyracksDataException {
+        byte[] bytes = serialized.getByteArray();
+        int start = serialized.getStartOffset();
+        int fieldNamesStart = start + IntegerPointable.getInteger(bytes, start + FIELD_NAMES_POINTER);
+        int length = serialized.getLength() - (fieldNamesStart - start);
+        DataInput input = new DataInputStream(new ByteArrayInputStream(bytes, fieldNamesStart, length));
+        try {
+            IFieldNamesDictionary fieldNamesDictionary = AbstractFieldNamesDictionary.deserialize(input);
+            Map<AbstractSchemaNestedNode, RunLengthIntArray> definitionLevels = new HashMap<>();
+            ObjectSchemaNode root = (ObjectSchemaNode) AbstractSchemaNode.deserialize(input, definitionLevels);
+            Mutable<IColumnWriteMultiPageOp> multiPageOpRef = new MutableObject<>();
+            return new FlushColumnMetadata(multiPageOpRef, root, definitionLevels, fieldNamesDictionary,
+                    new ColumnValuesWriterFactory(multiPageOpRef));
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
 }

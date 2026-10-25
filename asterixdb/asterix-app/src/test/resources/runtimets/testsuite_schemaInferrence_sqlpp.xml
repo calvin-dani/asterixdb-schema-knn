@@ -78,5 +78,11 @@
         <output-dir compare="Text">schema-inference-12</output-dir>
       </compilation-unit>
     </test-case>
+    <test-case FilePath="schema-inference">
+      <compilation-unit name="schema-inference-13">
+        <output-dir compare="Text">schema-inference-13</output-dir>
+        <expected-error>ASX3126</expected-error>
+      </compilation-unit>
+    </test-case>
   </test-group>
 </test-suite>

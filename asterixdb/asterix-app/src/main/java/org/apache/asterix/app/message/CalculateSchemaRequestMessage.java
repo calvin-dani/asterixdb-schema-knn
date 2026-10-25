@@ -64,7 +64,7 @@ public class CalculateSchemaRequestMessage implements ICcAddressedMessage {
         try {
 
             SerializableArrayBackedValueStorage serColumnMetaData =
-                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, index, splitProvider);
+                    SchemaUtil.getDatasetInfo(appCtx, database, dataverse, collection, splitProvider);
             CalculateSchemaResponseMessage response =
                     new CalculateSchemaResponseMessage(this.reqId, serColumnMetaData, null);
             messageBroker.sendApplicationMessageToNC(response, nodeId);
