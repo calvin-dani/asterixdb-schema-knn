@@ -84,8 +84,23 @@ public final class ObjectRowSchemaNode extends AbstractRowSchemaNestedNode {
 
     public AbstractRowSchemaNode getOrCreateChild(IValueReference fieldName, ATypeTag childTypeTag,
             RowMetadata rowMetadata, boolean optional) throws HyracksDataException {
-        int numberOfChildren = children.size();
         int fieldNameIndex = rowMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
+        return getOrCreateChild(fieldNameIndex, childTypeTag, rowMetadata, optional);
+    }
+
+    /**
+     * For declared field names: the dictionary serializes the name the same way record values carry it, so a
+     * declared field and the same field read from a record resolve to one entry.
+     */
+    public AbstractRowSchemaNode getOrCreateChild(String fieldName, ATypeTag childTypeTag, RowMetadata rowMetadata,
+            boolean optional) throws HyracksDataException {
+        int fieldNameIndex = rowMetadata.getFieldNamesDictionary().getOrCreateFieldNameIndex(fieldName);
+        return getOrCreateChild(fieldNameIndex, childTypeTag, rowMetadata, optional);
+    }
+
+    private AbstractRowSchemaNode getOrCreateChild(int fieldNameIndex, ATypeTag childTypeTag, RowMetadata rowMetadata,
+            boolean optional) throws HyracksDataException {
+        int numberOfChildren = children.size();
         int childIndex = fieldNameIndexToChildIndexMap.getOrDefault(fieldNameIndex, numberOfChildren);
         AbstractRowSchemaNode currentChild = childIndex == numberOfChildren ? null : children.get(childIndex);
 

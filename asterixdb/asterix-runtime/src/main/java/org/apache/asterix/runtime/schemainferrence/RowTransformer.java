@@ -18,18 +18,14 @@
  */
 package org.apache.asterix.runtime.schemainferrence;
 
-import java.io.IOException;
-
 import org.apache.asterix.om.lazy.AbstractLazyVisitablePointable;
 import org.apache.asterix.om.lazy.AbstractListLazyVisitablePointable;
 import org.apache.asterix.om.lazy.FlatLazyVisitablePointable;
 import org.apache.asterix.om.lazy.ILazyVisitablePointableVisitor;
 import org.apache.asterix.om.lazy.RecordLazyVisitablePointable;
-import org.apache.asterix.om.types.AOrderedListType;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.types.AUnionType;
-import org.apache.asterix.om.types.AUnorderedListType;
 import org.apache.asterix.om.types.AbstractCollectionType;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.IATypeVisitor;
@@ -37,7 +33,6 @@ import org.apache.asterix.runtime.schemainferrence.collection.AbstractRowCollect
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.primitive.VoidPointable;
-import org.apache.hyracks.data.std.util.ArrayBackedValueStorage;
 
 public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode>,
         IATypeVisitor<AbstractRowSchemaNode, AbstractRowSchemaNode> {
@@ -92,42 +87,23 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
     public AbstractRowSchemaNode visit(ARecordType recType, AbstractRowSchemaNode arg) {
         try {
             rowMetadata.enterNode(currentParent, arg);
-
             AbstractRowSchemaNestedNode previousParent = currentParent;
-
             ObjectRowSchemaNode objectNode = (ObjectRowSchemaNode) arg;
             currentParent = objectNode;
 
-            for (int i = 0; i < recType.getFieldNames().length; i++) {
-                String fieldName = recType.getFieldNames()[i];
-                boolean optional = false;
-                IAType fieldType = recType.getFieldType(fieldName);
-                ATypeTag childTypeTag = fieldType.getTypeTag();
+            String[] fieldNames = recType.getFieldNames();
+            IAType[] fieldTypes = recType.getFieldTypes();
+            for (int i = 0; i < fieldNames.length; i++) {
+                IAType fieldType = fieldTypes[i];
+                boolean declaredOptional = false;
                 if (fieldType.getTypeTag() == ATypeTag.UNION) {
                     fieldType = ((AUnionType) fieldType).getActualType();
-                    childTypeTag = fieldType.getTypeTag();
-                    optional = true;
+                    declaredOptional = true;
                 }
-                if (childTypeTag != ATypeTag.MISSING) {
-                    ArrayBackedValueStorage storage = new ArrayBackedValueStorage();
-                    try {
-                        storage.getDataOutput().writeByte(fieldName.length());
-                        storage.getDataOutput().writeBytes(fieldName);
-                    } catch (IOException e) {
-                        throw HyracksDataException.create(e);
-                    }
-                    // Only write actual field values (including NULL) but ignore MISSING fields
-                    AbstractRowSchemaNode childNode =
-                            objectNode.getOrCreateChild(storage, childTypeTag, rowMetadata, this.optional);
-                    if (fieldType.getTypeTag() == ATypeTag.OBJECT) {
-                        acceptActualNode((ARecordType) fieldType, childNode);
-                    } else if (fieldType.getTypeTag() == ATypeTag.MULTISET) {
-                        acceptActualNode((AUnorderedListType) fieldType, childNode);
-                    } else if (fieldType.getTypeTag() == ATypeTag.ARRAY) {
-                        acceptActualNode((AOrderedListType) fieldType, childNode);
-                    } else {
-                        acceptActualNode(fieldType, childNode);
-                    }
+                if (isDeclarable(fieldType)) {
+                    AbstractRowSchemaNode childNode = objectNode.getOrCreateChild(fieldNames[i], fieldType.getTypeTag(),
+                            rowMetadata, optional || declaredOptional);
+                    acceptDeclaredType(fieldType, childNode);
                 }
             }
             rowMetadata.exitNode(arg);
@@ -143,20 +119,23 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
         try {
             rowMetadata.enterNode(currentParent, arg);
             AbstractRowSchemaNestedNode previousParent = currentParent;
-
             AbstractRowCollectionSchemaNode collectionNode = (AbstractRowCollectionSchemaNode) arg;
-
             currentParent = collectionNode;
-            ATypeTag childTypeTag = collectionType.getItemType().getTypeTag();
-            AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(childTypeTag, rowMetadata);
-            acceptActualNode(collectionType.getItemType(), childNode);
+
+            IAType itemType = collectionType.getItemType();
+            if (itemType.getTypeTag() == ATypeTag.UNION) {
+                itemType = ((AUnionType) itemType).getActualType();
+            }
+            if (isDeclarable(itemType)) {
+                AbstractRowSchemaNode childNode = collectionNode.getOrCreateItem(itemType.getTypeTag(), rowMetadata);
+                acceptDeclaredType(itemType, childNode);
+            }
 
             rowMetadata.exitCollectionNode(collectionNode, 1);
             currentParent = previousParent;
         } catch (HyracksDataException e) {
             throw new IllegalStateException(e);
         }
-
         return null;
     }
 
@@ -251,86 +230,40 @@ public class RowTransformer implements ILazyVisitablePointableVisitor<AbstractRo
         }
     }
 
-    private void acceptActualNode(ARecordType recType, AbstractRowSchemaNode node) throws HyracksDataException {
+    private void acceptDeclaredType(IAType type, AbstractRowSchemaNode node) throws HyracksDataException {
         if (node.getTypeTag() == ATypeTag.UNION) {
             rowMetadata.enterNode(currentParent, node);
             AbstractRowSchemaNestedNode previousParent = currentParent;
-
             UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
             currentParent = unionNode;
-
-            ATypeTag childTypeTag = recType.getTypeTag();
-            AbstractRowSchemaNode actualNode;
-            if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
-                actualNode = unionNode.getOriginalType();
-            } else {
-                //TODO : CALVIN DANI check if the optional flag is correct
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, this.optional);
-            }
-            recType.accept(this, actualNode);
-
+            visitDeclaredType(type, unionNode.getOrCreateChild(type.getTypeTag(), rowMetadata, optional));
             currentParent = previousParent;
             rowMetadata.exitNode(node);
-        } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
         } else {
-            recType.accept(this, node);
+            visitDeclaredType(type, node);
         }
     }
 
-    private void acceptActualNode(AUnorderedListType recType, AbstractRowSchemaNode node) throws HyracksDataException {
-        if (node.getTypeTag() == ATypeTag.UNION) {
-            rowMetadata.enterNode(currentParent, node);
-            AbstractRowSchemaNestedNode previousParent = currentParent;
-
-            UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
-            currentParent = unionNode;
-
-            ATypeTag childTypeTag = recType.getTypeTag();
-            AbstractRowSchemaNode actualNode;
-            if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
-                actualNode = unionNode.getOriginalType();
-            } else {
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, false);
-            }
-            recType.accept(this, actualNode);
-
-            currentParent = previousParent;
-            rowMetadata.exitNode(node);
-        } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
-        } else {
-            recType.accept(this, node);
+    private void visitDeclaredType(IAType type, AbstractRowSchemaNode node) {
+        switch (type.getTypeTag()) {
+            case OBJECT:
+            case ARRAY:
+            case MULTISET:
+                type.accept(this, node);
+                break;
+            default:
+                // A primitive node is complete once created
+                break;
         }
     }
 
-    private void acceptActualNode(AOrderedListType recType, AbstractRowSchemaNode node) throws HyracksDataException {
-        if (node.getTypeTag() == ATypeTag.UNION) {
-            rowMetadata.enterNode(currentParent, node);
-            AbstractRowSchemaNestedNode previousParent = currentParent;
-
-            UnionRowSchemaNode unionNode = (UnionRowSchemaNode) node;
-            currentParent = unionNode;
-
-            ATypeTag childTypeTag = recType.getTypeTag();
-            AbstractRowSchemaNode actualNode;
-            if (childTypeTag == ATypeTag.NULL || childTypeTag == ATypeTag.MISSING) {
-                actualNode = unionNode.getOriginalType();
-            } else {
-                actualNode = unionNode.getOrCreateChild(recType.getTypeTag(), rowMetadata, false);
-            }
-            recType.accept(this, actualNode);
-
-            currentParent = previousParent;
-            rowMetadata.exitNode(node);
-        } else if (recType.getTypeTag() == ATypeTag.NULL && node.isNested()) {
-            rowMetadata.addNestedNull((AbstractRowSchemaNestedNode) node);
-        } else {
-            recType.accept(this, node);
-        }
-    }
-
-    public void acceptActualNode(IAType flatType, AbstractRowSchemaNode arg) {
+    /**
+     * A declared type contributes a node only if it names a concrete type: MISSING is never stored, and ANY
+     * (e.g. a computed field of a query result) carries nothing to declare, so its values are inferred from data.
+     */
+    private static boolean isDeclarable(IAType type) {
+        ATypeTag tag = type.getTypeTag();
+        return tag != ATypeTag.MISSING && tag != ATypeTag.ANY;
     }
 
 }

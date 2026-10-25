@@ -1,0 +1,1 @@
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": { "id": { "type": "number" }, "name": { "type": "string" }, "tags": { "type": "array", "items": { "oneOf": [ { "type": "string" } ] } }, "ñombre": { "type": "string" } }, "required": [ "id", "tags", "ñombre" ] }
