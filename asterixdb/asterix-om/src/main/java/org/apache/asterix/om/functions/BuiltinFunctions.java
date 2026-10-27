@@ -626,8 +626,10 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier INTERMEDIATE_SQL_AVG =
             FunctionConstants.newAsterix("intermediate-agg-sql-avg", 1);
     public static final FunctionIdentifier SQL_SCHEMA = FunctionConstants.newAsterix("agg-sql-schema", 1);
+    public static final FunctionIdentifier LOCAL_SQL_SCHEMA = FunctionConstants.newAsterix("agg-local-sql-schema", 1);
     public static final FunctionIdentifier INTERMEDIATE_SQL_SCHEMA =
-            FunctionConstants.newAsterix("intermediate-agg-sql-schema", 1);
+            FunctionConstants.newAsterix("agg-intermediate-sql-schema", 1);
+    public static final FunctionIdentifier GLOBAL_SQL_SCHEMA = FunctionConstants.newAsterix("agg-global-sql-schema", 1);
     public static final FunctionIdentifier SQL_COUNT = FunctionConstants.newAsterix("agg-sql-count", 1);
     public static final FunctionIdentifier SQL_COUNTN = FunctionConstants.newAsterix("agg-sql-countn", 1);
     public static final FunctionIdentifier SQL_SUM = FunctionConstants.newAsterix("agg-sql-sum", 1);
@@ -653,8 +655,6 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-intermediate-sql-median", 1);
     public static final FunctionIdentifier GLOBAL_SQL_MEDIAN = FunctionConstants.newAsterix("agg-global-sql-median", 1);
     public static final FunctionIdentifier SQL_STDDEV_SAMP = FunctionConstants.newAsterix("agg-sql-stddev_samp", 1);
-    public static final FunctionIdentifier LOCAL_SQL_SCHEMA = FunctionConstants.newAsterix("agg-local-sql-schema", 1);
-    public static final FunctionIdentifier GLOBAL_SQL_SCHEMA = FunctionConstants.newAsterix("agg-global-sql-schema", 1);
     public static final FunctionIdentifier INTERMEDIATE_SQL_STDDEV_SAMP =
             FunctionConstants.newAsterix("intermediate-agg-sql-stddev_samp", 1);
     public static final FunctionIdentifier GLOBAL_SQL_STDDEV_SAMP =
