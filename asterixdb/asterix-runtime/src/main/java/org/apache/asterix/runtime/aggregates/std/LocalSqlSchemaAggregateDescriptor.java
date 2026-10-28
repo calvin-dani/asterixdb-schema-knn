@@ -50,7 +50,7 @@ public class LocalSqlSchemaAggregateDescriptor extends AbstractAggregateFunction
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new LocalSqlSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
+                return new LocalSqlSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState, false);
             }
         };
     }

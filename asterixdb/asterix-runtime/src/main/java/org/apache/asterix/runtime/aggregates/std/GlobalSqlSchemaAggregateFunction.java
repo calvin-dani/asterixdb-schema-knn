@@ -31,7 +31,7 @@ public class GlobalSqlSchemaAggregateFunction extends AbstractSchemaAggregateFun
 
     public GlobalSqlSchemaAggregateFunction(IScalarEvaluatorFactory[] args, IEvaluatorContext context,
             SourceLocation sourceLoc, IAType aggFieldState) throws HyracksDataException {
-        super(args, context, sourceLoc, aggFieldState);
+        super(args, context, sourceLoc, aggFieldState, false);
     }
 
     @Override

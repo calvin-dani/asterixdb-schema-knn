@@ -451,6 +451,11 @@ public class BuiltinFunctions {
             FunctionConstants.newAsterix("agg-intermediate-centroid", 1);
     public static final FunctionIdentifier LOCAL_CENTROID = FunctionConstants.newAsterix("agg-local-centroid", 1);
     public static final FunctionIdentifier MEDIAN = FunctionConstants.newAsterix("agg-median", 1);
+    public static final FunctionIdentifier SCHEMA = FunctionConstants.newAsterix("agg-schema", 1);
+    public static final FunctionIdentifier LOCAL_SCHEMA = FunctionConstants.newAsterix("agg-local-schema", 1);
+    public static final FunctionIdentifier INTERMEDIATE_SCHEMA =
+            FunctionConstants.newAsterix("agg-intermediate-schema", 1);
+    public static final FunctionIdentifier GLOBAL_SCHEMA = FunctionConstants.newAsterix("agg-global-schema", 1);
     public static final FunctionIdentifier FIRST_ELEMENT = FunctionConstants.newAsterix("agg-first-element", 1);
     public static final FunctionIdentifier LOCAL_FIRST_ELEMENT =
             FunctionConstants.newAsterix("agg-local-first-element", 1);
@@ -509,6 +514,7 @@ public class BuiltinFunctions {
     public static final FunctionIdentifier SCALAR_MAX = FunctionConstants.newAsterix("max", 1);
     public static final FunctionIdentifier SCALAR_MIN = FunctionConstants.newAsterix("min", 1);
     public static final FunctionIdentifier SCALAR_MEDIAN = FunctionConstants.newAsterix("median", 1);
+    public static final FunctionIdentifier SCALAR_SCHEMA = FunctionConstants.newAsterix("schema", 1);
     public static final FunctionIdentifier SCALAR_FIRST_ELEMENT = FunctionConstants.newAsterix("first-element", 1);
     public static final FunctionIdentifier SCALAR_LOCAL_FIRST_ELEMENT =
             FunctionConstants.newAsterix("local-first-element", 1);
@@ -1824,6 +1830,10 @@ public class BuiltinFunctions {
         addPrivateFunction(LOCAL_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addPrivateFunction(GLOBAL_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addPrivateFunction(INTERMEDIATE_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addFunction(SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addPrivateFunction(LOCAL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addPrivateFunction(INTERMEDIATE_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addPrivateFunction(GLOBAL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addFunction(SQL_COUNT, AInt64TypeComputer.INSTANCE, true);
         addFunction(SQL_COUNT_DISTINCT_HASH, AInt64TypeComputer.INSTANCE, true);
         addFunction(SQL_COUNTN, CountNTypeComputer.INSTANCE, true);
@@ -1837,6 +1847,7 @@ public class BuiltinFunctions {
         addPrivateFunction(GLOBAL_SQL_MIN, MinMaxAggTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_AVG, NullableDoubleTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
+        addFunction(SCALAR_SCHEMA, OpenARecordTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_COUNT, AInt64TypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_COUNTN, CountNTypeComputer.INSTANCE, true);
         addFunction(SCALAR_SQL_MAX, scalarMinMaxTypeComputer, true);
@@ -2755,6 +2766,17 @@ public class BuiltinFunctions {
         addIntermediateAgg(SERIAL_LOCAL_SQL_AVG, SERIAL_INTERMEDIATE_SQL_AVG);
         addIntermediateAgg(SERIAL_GLOBAL_SQL_AVG, SERIAL_INTERMEDIATE_SQL_AVG);
         addGlobalAgg(SERIAL_SQL_AVG, SERIAL_GLOBAL_SQL_AVG);
+
+        // SCHEMA
+        addAgg(SCHEMA);
+        addAgg(LOCAL_SCHEMA);
+        addAgg(GLOBAL_SCHEMA);
+        addLocalAgg(SCHEMA, LOCAL_SCHEMA);
+        addIntermediateAgg(SCHEMA, INTERMEDIATE_SCHEMA);
+        addIntermediateAgg(LOCAL_SCHEMA, INTERMEDIATE_SCHEMA);
+        addIntermediateAgg(GLOBAL_SCHEMA, INTERMEDIATE_SCHEMA);
+        addGlobalAgg(SCHEMA, GLOBAL_SCHEMA);
+        addScalarAgg(SCHEMA, SCALAR_SCHEMA);
 
         // SQL SCHEMA
         addAgg(SQL_SCHEMA);

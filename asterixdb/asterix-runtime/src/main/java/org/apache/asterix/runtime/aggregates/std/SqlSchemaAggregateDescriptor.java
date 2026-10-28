@@ -50,7 +50,7 @@ public class SqlSchemaAggregateDescriptor extends AbstractAggregateFunctionDynam
             @Override
             public IAggregateEvaluator createAggregateEvaluator(final IEvaluatorContext ctx)
                     throws HyracksDataException {
-                return new SqlSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState);
+                return new SqlSchemaAggregateFunction(args, ctx, sourceLoc, aggFieldState, false);
             }
         };
     }

@@ -102,5 +102,10 @@
         <output-dir compare="Text">schema-inference-16</output-dir>
       </compilation-unit>
     </test-case>
+    <test-case FilePath="schema-inference">
+      <compilation-unit name="schema-inference-17">
+        <output-dir compare="Text">schema-inference-17</output-dir>
+      </compilation-unit>
+    </test-case>
   </test-group>
 </test-suite>
