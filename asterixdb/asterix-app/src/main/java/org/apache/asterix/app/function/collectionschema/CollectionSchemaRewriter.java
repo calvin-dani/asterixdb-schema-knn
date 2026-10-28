@@ -26,7 +26,6 @@ import java.util.List;
 import org.apache.asterix.app.function.FunctionRewriter;
 import org.apache.asterix.common.cluster.PartitioningProperties;
 import org.apache.asterix.common.exceptions.CompilationException;
-import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.functions.FunctionConstants;
 import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.metadata.MetadataManager;
@@ -67,11 +66,6 @@ public class CollectionSchemaRewriter extends FunctionRewriter {
     @Override
     protected FunctionDataSource toDatasource(IOptimizationContext context, AbstractFunctionCallExpression function)
             throws AlgebricksException {
-
-        if (function.getArguments().size() != 3) {
-            throw new CompilationException(ErrorCode.COMPILATION_INVALID_NUM_OF_ARGS, COLLECTION_SCHEMA.getName());
-        }
-
         verifyArgs(function.getArguments());
         ILogicalExpression databaseExpr = function.getArguments().get(0).getValue();
         ILogicalExpression scopeExpr = function.getArguments().get(1).getValue();
@@ -105,6 +99,11 @@ public class CollectionSchemaRewriter extends FunctionRewriter {
                 (AlgebricksAbsolutePartitionConstraint) partitioningProperties.getConstraints();
         return new CollectionSchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection,
                 index, type, partitionMap, secondaryPartitionConstraint);
+    }
+
+    @Override
+    protected boolean invalidArgs(List<Mutable<ILogicalExpression>> args) {
+        return args.size() != 3;
     }
 
     private void verifyArgs(List<Mutable<ILogicalExpression>> args) throws CompilationException {

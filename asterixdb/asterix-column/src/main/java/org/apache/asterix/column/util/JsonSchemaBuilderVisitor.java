@@ -29,8 +29,13 @@ import org.apache.asterix.column.metadata.schema.collection.AbstractCollectionSc
 import org.apache.asterix.column.metadata.schema.primitive.PrimitiveSchemaNode;
 import org.apache.asterix.dataflow.data.nontagged.serde.AStringSerializerDeserializer;
 import org.apache.asterix.om.dictionary.IFieldNamesDictionary;
+import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
+import org.apache.asterix.om.types.AUnionType;
+import org.apache.asterix.om.types.AbstractCollectionType;
+import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.utils.JsonSchemaUtil;
+import org.apache.asterix.om.utils.NonTaggedFormatUtil;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.data.std.api.IValueReference;
 import org.apache.hyracks.data.std.util.ByteArrayAccessibleDataInputStream;
@@ -53,6 +58,8 @@ public class JsonSchemaBuilderVisitor implements ISchemaNodeVisitor<Void, Object
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String EMPTY_FIELD_NAME = "<empty>";
     private final List<String> fieldNames;
+    // The declared type of the node being written, or null where the dataset type declares nothing
+    private IAType declaredType;
 
     public JsonSchemaBuilderVisitor(IFieldNamesDictionary dictionary) throws HyracksDataException {
         fieldNames = new ArrayList<>();
@@ -66,10 +73,15 @@ public class JsonSchemaBuilderVisitor implements ISchemaNodeVisitor<Void, Object
         }
     }
 
-    public String build(ObjectSchemaNode root) throws HyracksDataException {
+    /**
+     * @param root     the root of the column schema tree
+     * @param itemType the dataset's declared item type; its non-optional fields are reported as required
+     * @return the schema as JSON text
+     */
+    public String build(ObjectSchemaNode root, ARecordType itemType) throws HyracksDataException {
         ObjectNode schema = MAPPER.createObjectNode();
         schema.put("$schema", JsonSchemaUtil.SCHEMA_URI);
-        writeNode(root, schema);
+        writeNode(root, schema, itemType);
         try {
             return MAPPER.writeValueAsString(schema);
         } catch (JsonProcessingException e) {
@@ -81,27 +93,42 @@ public class JsonSchemaBuilderVisitor implements ISchemaNodeVisitor<Void, Object
     public Void visit(ObjectSchemaNode objectNode, ObjectNode schema) throws HyracksDataException {
         List<AbstractSchemaNode> children = objectNode.getChildren();
         IntList fieldNameIndexes = objectNode.getChildrenFieldNameIndexes();
+        ARecordType recordType = declaredType instanceof ARecordType ? (ARecordType) declaredType : null;
         ObjectNode properties = schema.putObject("properties");
+        List<String> requiredFieldNames = new ArrayList<>();
         for (int i = 0; i < children.size(); i++) {
             int index = fieldNameIndexes.getInt(i);
             // A negative index is the placeholder child of an object that has no fields yet
             String fieldName = index < 0 ? EMPTY_FIELD_NAME : fieldNames.get(index);
-            writeNode(children.get(i), properties.putObject(fieldName));
+            IAType fieldType = recordType != null && index >= 0 ? recordType.getFieldType(fieldName) : null;
+            if (fieldType != null && !NonTaggedFormatUtil.isOptional(fieldType)) {
+                requiredFieldNames.add(fieldName);
+            }
+            writeNode(children.get(i), properties.putObject(fieldName), fieldType);
+        }
+        if (!requiredFieldNames.isEmpty()) {
+            ArrayNode required = schema.putArray("required");
+            requiredFieldNames.forEach(required::add);
         }
         return null;
     }
 
     @Override
     public Void visit(AbstractCollectionSchemaNode collectionNode, ObjectNode schema) throws HyracksDataException {
-        writeNode(collectionNode.getItemNode(), schema.putObject("items"));
+        IAType itemType = declaredType instanceof AbstractCollectionType
+                ? ((AbstractCollectionType) declaredType).getItemType() : null;
+        writeNode(collectionNode.getItemNode(), schema.putObject("items"), itemType);
         return null;
     }
 
     @Override
     public Void visit(UnionSchemaNode unionNode, ObjectNode schema) throws HyracksDataException {
+        IAType unionDeclaredType = declaredType;
         ArrayNode oneOf = schema.putArray("oneOf");
         for (AbstractSchemaNode child : unionNode.getChildren().values()) {
-            writeNode(child, oneOf.addObject());
+            // Only the alternative of the declared kind follows the declared type; the others were never declared
+            boolean declared = unionDeclaredType != null && unionDeclaredType.getTypeTag() == child.getTypeTag();
+            writeNode(child, oneOf.addObject(), declared ? unionDeclaredType : null);
         }
         return null;
     }
@@ -111,7 +138,8 @@ public class JsonSchemaBuilderVisitor implements ISchemaNodeVisitor<Void, Object
         return null;
     }
 
-    private void writeNode(AbstractSchemaNode node, ObjectNode schema) throws HyracksDataException {
+    private void writeNode(AbstractSchemaNode node, ObjectNode schema, IAType nodeDeclaredType)
+            throws HyracksDataException {
         ATypeTag typeTag = node.getTypeTag();
         // A union has no single type: its alternatives are listed under oneOf by the union visitor
         if (typeTag != ATypeTag.UNION) {
@@ -125,6 +153,10 @@ public class JsonSchemaBuilderVisitor implements ISchemaNodeVisitor<Void, Object
                 schema.put(JsonSchemaUtil.ASTERIX_TYPE_KEYWORD, asterixType);
             }
         }
+        IAType parentDeclaredType = declaredType;
+        declaredType = nodeDeclaredType != null && nodeDeclaredType.getTypeTag() == ATypeTag.UNION
+                ? ((AUnionType) nodeDeclaredType).getActualType() : nodeDeclaredType;
         node.accept(this, schema);
+        declaredType = parentDeclaredType;
     }
 }

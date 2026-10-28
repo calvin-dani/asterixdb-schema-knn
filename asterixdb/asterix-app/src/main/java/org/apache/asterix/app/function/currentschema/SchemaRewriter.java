@@ -37,6 +37,7 @@ import org.apache.asterix.metadata.entities.Dataset;
 import org.apache.asterix.metadata.entities.Index;
 import org.apache.asterix.om.constants.AsterixConstantValue;
 import org.apache.asterix.om.exceptions.ExceptionUtil;
+import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
 import org.apache.asterix.om.utils.ConstantExpressionUtil;
 import org.apache.asterix.utils.SchemaUtil;
@@ -70,11 +71,6 @@ public class SchemaRewriter extends FunctionRewriter {
     @Override
     protected FunctionDataSource toDatasource(IOptimizationContext context, AbstractFunctionCallExpression function)
             throws AlgebricksException {
-
-        if (function.getArguments().size() != 3) {
-            throw new CompilationException(ErrorCode.COMPILATION_INVALID_NUM_OF_ARGS, INDEX_SCHEMA.getName());
-        }
-
         verifyArgs(function.getArguments());
         ILogicalExpression databaseExpr = function.getArguments().get(0).getValue();
         ILogicalExpression scopeExpr = function.getArguments().get(1).getValue();
@@ -95,6 +91,8 @@ public class SchemaRewriter extends FunctionRewriter {
                     MetadataUtil.dataverseName(database, dataverse, metadataProvider.isUsingDatabase()));
         }
         SchemaUtil.ensureColumnar(dataset);
+        ARecordType itemType = (ARecordType) metadataProvider.findType(dataset.getItemTypeDatabaseName(),
+                dataset.getItemTypeDataverseName(), dataset.getItemTypeName());
         Index primaryIndex =
                 MetadataManager.INSTANCE.getIndex(metadataProvider.getMetadataTxnContext(), dataset.getDatabaseName(),
                         dataset.getDataverseName(), dataset.getDatasetName(), dataset.getDatasetName());
@@ -110,7 +108,12 @@ public class SchemaRewriter extends FunctionRewriter {
 
         return new SchemaDatasource(context.getComputationNodeDomain(), database, dataverse, collection, index,
                 partitioningProperties.getSplitsProvider(), indexDataflowHelperFactory, partitionMap,
-                secondaryPartitionConstraint);
+                secondaryPartitionConstraint, itemType);
+    }
+
+    @Override
+    protected boolean invalidArgs(List<Mutable<ILogicalExpression>> args) {
+        return args.size() != 3;
     }
 
     private void verifyArgs(List<Mutable<ILogicalExpression>> args) throws CompilationException {

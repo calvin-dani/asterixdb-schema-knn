@@ -26,6 +26,7 @@ import org.apache.asterix.column.operation.lsm.flush.FlushColumnMetadata;
 import org.apache.asterix.column.util.JsonSchemaBuilderVisitor;
 import org.apache.asterix.external.api.IRawRecord;
 import org.apache.asterix.external.input.record.CharArrayRecord;
+import org.apache.asterix.om.types.ARecordType;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 public class SchemaReader extends FunctionReader {
@@ -34,13 +35,14 @@ public class SchemaReader extends FunctionReader {
     private boolean hasNext = true;
     private final String jsonString;
 
-    SchemaReader(FlushColumnMetadata colMetaData) throws HyracksDataException {
+    SchemaReader(FlushColumnMetadata colMetaData, ARecordType itemType) throws HyracksDataException {
         if (colMetaData == null) {
             throw new HyracksDataException("Column metadata is null");
         }
         this.colMetaData = colMetaData;
         record = new CharArrayRecord();
-        jsonString = new JsonSchemaBuilderVisitor(colMetaData.getFieldNamesDictionary()).build(colMetaData.getRoot());
+        jsonString = new JsonSchemaBuilderVisitor(colMetaData.getFieldNamesDictionary()).build(colMetaData.getRoot(),
+                itemType);
     }
 
     @Override

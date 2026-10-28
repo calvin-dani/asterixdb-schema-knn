@@ -30,6 +30,7 @@ import org.apache.asterix.metadata.api.IDatasourceFunction;
 import org.apache.asterix.metadata.declared.DataSourceId;
 import org.apache.asterix.metadata.declared.FunctionDataSource;
 import org.apache.asterix.metadata.declared.MetadataProvider;
+import org.apache.asterix.om.types.ARecordType;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.core.algebra.properties.INodeDomain;
@@ -49,10 +50,11 @@ public class SchemaDatasource extends FunctionDataSource {
     private final IndexDataflowHelperFactory indexDataflowHelperFactory;
     private final int[][] partition;
     private final AlgebricksAbsolutePartitionConstraint constraint;
+    private final ARecordType itemType;
 
     SchemaDatasource(INodeDomain domain, String database, DataverseName dataverse, String collection, String index,
             IFileSplitProvider splitProvider, IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition,
-            AlgebricksAbsolutePartitionConstraint constraint) throws AlgebricksException {
+            AlgebricksAbsolutePartitionConstraint constraint, ARecordType itemType) throws AlgebricksException {
         super(STORAGE_SIZE_DATASOURCE_ID, SchemaRewriter.INDEX_SCHEMA, domain);
         this.database = database;
         this.dataverse = dataverse;
@@ -62,6 +64,7 @@ public class SchemaDatasource extends FunctionDataSource {
         this.indexDataflowHelperFactory = indexDataflowHelperFactory;
         this.partition = partition;
         this.constraint = constraint;
+        this.itemType = itemType;
     }
 
     public String getDatabase() {
@@ -90,7 +93,7 @@ public class SchemaDatasource extends FunctionDataSource {
             AlgebricksAbsolutePartitionConstraint locations) {
 
         return new SchemaFunction(AlgebricksAbsolutePartitionConstraint.randomLocation(locations.getLocations()),
-                database, dataverse, collection, index, splitProvider, indexDataflowHelperFactory, partition);
+                database, dataverse, collection, index, splitProvider, indexDataflowHelperFactory, partition, itemType);
     }
 
     @Override

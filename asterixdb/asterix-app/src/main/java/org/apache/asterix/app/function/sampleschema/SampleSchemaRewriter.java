@@ -66,11 +66,6 @@ public class SampleSchemaRewriter extends FunctionRewriter {
     @Override
     protected FunctionDataSource toDatasource(IOptimizationContext context, AbstractFunctionCallExpression function)
             throws AlgebricksException {
-
-        if (function.getArguments().size() != 3) {
-            throw new CompilationException(ErrorCode.COMPILATION_INVALID_NUM_OF_ARGS, SAMPLE_SCHEMA.getName());
-        }
-
         verifyArgs(function.getArguments());
         ILogicalExpression databaseExpr = function.getArguments().get(0).getValue();
         ILogicalExpression scopeExpr = function.getArguments().get(1).getValue();
@@ -111,6 +106,11 @@ public class SampleSchemaRewriter extends FunctionRewriter {
         return new SampleSchemaDatasource(context.getComputationNodeDomain(), indexDataflowHelperFactory,
                 sampleHelper.getSecondaryComparatorFactories(), partitionConstraint,
                 partitioningProperties.getComputeStorageMap(), numPrimaryKeys, (ARecordType) type);
+    }
+
+    @Override
+    protected boolean invalidArgs(List<Mutable<ILogicalExpression>> args) {
+        return args.size() != 3;
     }
 
     private void verifyArgs(List<Mutable<ILogicalExpression>> args) throws CompilationException {

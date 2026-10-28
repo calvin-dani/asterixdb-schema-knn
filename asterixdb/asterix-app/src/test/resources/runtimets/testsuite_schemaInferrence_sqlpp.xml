@@ -89,5 +89,13 @@
         <output-dir compare="Text">schema-inference-14</output-dir>
       </compilation-unit>
     </test-case>
+    <test-case FilePath="schema-inference">
+      <compilation-unit name="schema-inference-15">
+        <output-dir compare="Text">schema-inference-15</output-dir>
+        <expected-error>ASX1087: Invalid number of arguments for function current-schema</expected-error>
+        <expected-error>ASX1087: Invalid number of arguments for function collection-schema</expected-error>
+        <expected-error>ASX1087: Invalid number of arguments for function sample-schema</expected-error>
+      </compilation-unit>
+    </test-case>
   </test-group>
 </test-suite>

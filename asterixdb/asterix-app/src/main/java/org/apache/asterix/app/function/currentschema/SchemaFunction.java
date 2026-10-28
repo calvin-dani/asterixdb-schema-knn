@@ -31,6 +31,7 @@ import org.apache.asterix.common.messaging.api.MessageFuture;
 import org.apache.asterix.common.metadata.DataverseName;
 import org.apache.asterix.external.api.IRecordReader;
 import org.apache.asterix.metadata.declared.AbstractDatasourceFunction;
+import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.utils.SchemaUtil;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.api.application.INCServiceContext;
@@ -52,10 +53,11 @@ public class SchemaFunction extends AbstractDatasourceFunction {
     private final IFileSplitProvider splitProvider;
     private final IndexDataflowHelperFactory indexDataflowHelperFactory;
     private final int[][] partition;
+    private final ARecordType itemType;
 
     SchemaFunction(AlgebricksAbsolutePartitionConstraint locations, String database, DataverseName dataverse,
             String collection, String index, IFileSplitProvider splitProvider,
-            IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition) {
+            IndexDataflowHelperFactory indexDataflowHelperFactory, int[][] partition, ARecordType itemType) {
         super(locations);
 
         this.database = database;
@@ -65,6 +67,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
         this.splitProvider = splitProvider;
         this.indexDataflowHelperFactory = indexDataflowHelperFactory;
         this.partition = partition;
+        this.itemType = itemType;
     }
 
     @Override
@@ -86,7 +89,7 @@ public class SchemaFunction extends AbstractDatasourceFunction {
 
             FlushColumnMetadata columnMetadata =
                     SchemaUtil.deserializeColumnMetadata(response.getSerSchema().getStorage());
-            return new SchemaReader(columnMetadata);
+            return new SchemaReader(columnMetadata, itemType);
         } catch (Exception e) {
             LOGGER.info("Could not fetch schema", e);
             throw HyracksDataException.create(e);
