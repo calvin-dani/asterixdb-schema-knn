@@ -20,6 +20,7 @@ package org.apache.asterix.runtime.aggregates.scalar;
 
 import org.apache.asterix.om.functions.BuiltinFunctions;
 import org.apache.asterix.om.functions.IFunctionDescriptorFactory;
+import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.runtime.aggregates.std.SqlSchemaAggregateDescriptor;
 import org.apache.hyracks.algebricks.core.algebra.functions.FunctionIdentifier;
 
@@ -29,7 +30,8 @@ public class ScalarSqlSchemaAggregateDescriptor extends AbstractScalarAggregateD
 
     public static final FunctionIdentifier FID = BuiltinFunctions.SCALAR_SQL_SCHEMA;
 
-    public static final IFunctionDescriptorFactory FACTORY = ScalarSqlSchemaAggregateDescriptor::new;
+    public static final IFunctionDescriptorFactory FACTORY =
+            createDescriptorFactory(ScalarSqlSchemaAggregateDescriptor::new);
 
     private ScalarSqlSchemaAggregateDescriptor() {
         super(SqlSchemaAggregateDescriptor.FACTORY);
@@ -38,5 +40,11 @@ public class ScalarSqlSchemaAggregateDescriptor extends AbstractScalarAggregateD
     @Override
     public FunctionIdentifier getIdentifier() {
         return FID;
+    }
+
+    @Override
+    public void setImmutableStates(Object... states) {
+        super.setImmutableStates(states);
+        aggFuncDesc.setImmutableStates(getItemType((IAType) states[0]));
     }
 }
